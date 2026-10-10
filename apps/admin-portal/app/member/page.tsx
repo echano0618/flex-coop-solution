@@ -21,10 +21,66 @@ import {
   Landmark,
   Printer,
   BookOpen,
+  Users,
+  Clock,
+  UserCheck,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function MemberPortalPage() {
-  const [activeTab, setActiveTab] = useState<'home' | 'apply' | 'pay' | 'documents' | 'profile'>('home');
+  // Member Persona Switcher (Maria = Borrower, Juan = Co-Maker)
+  const [currentPersona, setCurrentPersona] = useState<'maria' | 'juan'>('maria');
+
+  const currentMember = currentPersona === 'maria'
+    ? {
+        id: 'mem_1',
+        memberNumber: 'MEM-2026-0001',
+        name: 'Maria Clara Santos',
+        initials: 'MS',
+        type: 'Regular Member',
+        paidUpCapital: 15000,
+        sharesCount: 150,
+        savingsBalance: 5000,
+        idType: 'PhilSys National ID (Encrypted SPI)',
+      }
+    : {
+        id: 'mem_2',
+        memberNumber: 'MEM-2026-0002',
+        name: 'Juan Perez Dela Cruz',
+        initials: 'JD',
+        type: 'Regular Member',
+        paidUpCapital: 10000,
+        sharesCount: 100,
+        savingsBalance: 2000,
+        idType: "Driver's License (Encrypted SPI)",
+      };
+
+  const [activeTab, setActiveTab] = useState<'home' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile'>('home');
+
+  // Co-Maker Endorsement Requests State
+  const [endorsementRequests, setEndorsementRequests] = useState([
+    {
+      id: 'req_001',
+      loanId: 'loan_maria_001',
+      loanNumber: 'LN-2026-00001',
+      borrowerName: 'Maria Clara Santos',
+      borrowerMemberNumber: 'MEM-2026-0001',
+      designatedCoMakerMemberNumber: 'MEM-2026-0002',
+      productName: 'Regular Member Loan',
+      principalAmount: 50000,
+      termMonths: 12,
+      monthlyInstallment: 4442.44,
+      status: 'PENDING' as 'PENDING' | 'ACCEPTED' | 'DECLINED',
+      requestedAt: '2026-10-10 09:30 AM',
+      respondedAt: null as string | null,
+    },
+  ]);
+
+  // Designated Co-Maker Member ID input when applying
+  const [coMakerMemberIdInput, setCoMakerMemberIdInput] = useState<string>('MEM-2026-0002');
+  const [coMakerError, setCoMakerError] = useState<string>('');
+  const [solidaryAgreed, setSolidaryAgreed] = useState<boolean>(false);
+  const [endorsementSuccessMsg, setEndorsementSuccessMsg] = useState<string>('');
 
   // Member Loan Application State
   const [loanProduct, setLoanProduct] = useState<'REGULAR' | 'EMERGENCY'>('REGULAR');
@@ -116,13 +172,51 @@ export default function MemberPortalPage() {
               <ExternalLink className="w-3.5 h-3.5" />
             </Link>
 
+            {/* Persona Switcher Pill */}
+            <div className="hidden sm:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+              <span className="text-slate-500 font-semibold px-2">Account:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPersona('maria');
+                  setEndorsementSuccessMsg('');
+                }}
+                className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                  currentPersona === 'maria'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                Maria Clara (Borrower)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPersona('juan');
+                  setEndorsementSuccessMsg('');
+                }}
+                className={`px-2.5 py-1 rounded-lg font-semibold transition-all relative ${
+                  currentPersona === 'juan'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                Juan Dela Cruz (Co-Maker)
+                {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === 'MEM-2026-0002' && r.status === 'PENDING') && (
+                  <span className="ml-1.5 bg-amber-400 text-amber-950 font-black text-[10px] px-1.5 py-0.2 rounded-full">
+                    1
+                  </span>
+                )}
+              </button>
+            </div>
+
             <div className="flex items-center space-x-2 pl-3 border-l border-slate-200">
               <div className="w-8 h-8 rounded-full bg-emerald-700 text-white font-bold text-xs flex items-center justify-center">
-                MS
+                {currentMember.initials}
               </div>
               <div className="hidden sm:block text-left">
-                <div className="text-xs font-bold text-slate-900 leading-tight">Maria Clara Santos</div>
-                <div className="text-[11px] text-slate-500">MEM-2026-0001 • Regular</div>
+                <div className="text-xs font-bold text-slate-900 leading-tight">{currentMember.name}</div>
+                <div className="text-[11px] text-slate-500">{currentMember.memberNumber} • Regular</div>
               </div>
               <Link
                 href="/member/login"
@@ -141,11 +235,30 @@ export default function MemberPortalPage() {
         {/* Navigation Tabs */}
         <div className="flex space-x-2 border-b border-slate-200 pb-4 mb-6 overflow-x-auto">
           {[
-            { id: 'home', label: 'My Portfolio', icon: Wallet },
-            { id: 'apply', label: 'Apply for Loan', icon: CreditCard },
-            { id: 'pay', label: 'Pay via QR Ph', icon: QrCode },
-            { id: 'documents', label: 'Truth in Lending & Promissory Note', icon: FileText },
-            { id: 'profile', label: 'eKYC & Privacy (NPC)', icon: ShieldCheck },
+            { id: 'home', label: 'My Portfolio', icon: Wallet, highlight: false },
+            { id: 'apply', label: 'Apply for Loan', icon: CreditCard, highlight: false },
+            {
+              id: 'comaker',
+              label: `Co-Maker Endorsements ${
+                endorsementRequests.filter(
+                  (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
+                ).length > 0
+                  ? `(${
+                      endorsementRequests.filter(
+                        (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
+                      ).length
+                    })`
+                  : ''
+              }`,
+              icon: Users,
+              highlight:
+                endorsementRequests.filter(
+                  (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
+                ).length > 0,
+            },
+            { id: 'pay', label: 'Pay via QR Ph', icon: QrCode, highlight: false },
+            { id: 'documents', label: 'Truth in Lending & Promissory Note', icon: FileText, highlight: false },
+            { id: 'profile', label: 'eKYC & Privacy (NPC)', icon: ShieldCheck, highlight: false },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -153,9 +266,11 @@ export default function MemberPortalPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shrink-0 ${
                   isActive
                     ? 'bg-emerald-600 text-white shadow-sm'
+                    : tab.highlight
+                    ? 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold'
                     : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                 }`}
               >
@@ -169,6 +284,30 @@ export default function MemberPortalPage() {
         {/* TAB 1: MY PORTFOLIO */}
         {activeTab === 'home' && (
           <div className="space-y-6">
+            {/* Pending Co-Maker Notice Banner */}
+            {endorsementRequests.some(
+              (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
+            ) && (
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <span className="font-bold text-amber-950 text-sm">You have a Pending Co-Maker Endorsement Request!</span>
+                    <p className="text-amber-800 mt-0.5">
+                      Maria Clara Santos designated your Member ID (MEM-2026-0002) as loan co-maker. Your joint solidary acceptance is required before her loan is reviewed.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('comaker')}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3.5 py-2 rounded-lg text-xs transition-colors shadow-sm shrink-0"
+                >
+                  Review Request & Sign
+                </button>
+              </div>
+            )}
+
             {/* Member Greeting & eKYC Verified Banner */}
             <div className="bg-gradient-to-r from-emerald-700 to-emerald-900 text-white rounded-2xl p-6 shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
@@ -178,9 +317,9 @@ export default function MemberPortalPage() {
                     CDA Good Standing
                   </span>
                 </div>
-                <h1 className="text-2xl font-black">Welcome, Maria Clara!</h1>
+                <h1 className="text-2xl font-black">Welcome, {currentMember.name.split(' ')[0]}!</h1>
                 <p className="text-xs text-emerald-100/90 mt-1">
-                  Member Number: <strong className="text-white">MEM-2026-0001</strong> • Verified Identity: <strong className="text-white">PhilSys National ID</strong>
+                  Member Number: <strong className="text-white">{currentMember.memberNumber}</strong> • Verified Identity: <strong className="text-white">{currentMember.idType}</strong>
                 </p>
               </div>
 
@@ -312,17 +451,32 @@ export default function MemberPortalPage() {
 
             {applicationSubmitted ? (
               <div className="p-8 text-center bg-emerald-50 border border-emerald-200 rounded-2xl space-y-4">
-                <div className="w-16 h-16 bg-emerald-600 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
-                  <CheckCircle2 className="w-8 h-8" />
+                <div className="w-16 h-16 bg-amber-500 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
+                  <Clock className="w-8 h-8" />
                 </div>
-                <h3 className="text-lg font-bold text-emerald-950">Loan Application Submitted!</h3>
-                <p className="text-xs text-emerald-800 max-w-md mx-auto">
-                  Your application for <strong>₱{loanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong> has been submitted. It is now in the <strong>Loan Officer Review</strong> queue of the approval matrix.
+                <h3 className="text-lg font-bold text-slate-900">Application Awaiting Co-Maker Endorsement</h3>
+                <p className="text-xs text-slate-600 max-w-md mx-auto">
+                  Your application for <strong>₱{loanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong> has been created with status:{' '}
+                  <span className="font-mono bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-bold">
+                    PENDING_CO_MAKER_ACCEPTANCE
+                  </span>.
+                  <br /><br />
+                  Co-maker <strong>Juan Perez Dela Cruz ({coMakerMemberIdInput})</strong> must log into their own account and accept the Joint & Solidary Liability Undertaking before this application can be pushed to the Loan Officer review pipeline.
                 </p>
-                <div className="pt-2 flex justify-center gap-3">
+                <div className="pt-2 flex flex-col sm:flex-row justify-center gap-3">
+                  <button
+                    onClick={() => {
+                      setCurrentPersona('juan');
+                      setActiveTab('comaker');
+                      setApplicationSubmitted(false);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <UserCheck className="w-4 h-4" /> Switch to Juan Dela Cruz (Endorse Now)
+                  </button>
                   <button
                     onClick={() => setActiveTab('documents')}
-                    className="bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-emerald-800"
+                    className="bg-white text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-slate-50"
                   >
                     View RA 3765 Disclosure Statement
                   </button>
@@ -414,13 +568,34 @@ export default function MemberPortalPage() {
 
                   {loanProduct === 'REGULAR' && (
                     <div>
-                      <label className="text-xs font-bold text-slate-700 block mb-1">4. Designated Co-Maker (Regular Member)</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-bold text-slate-700 block">4. Designated Co-Maker Member ID</label>
+                        <span className="text-[11px] text-amber-700 font-semibold">Mandatory Joint Solidary Rule</span>
+                      </div>
                       <input
                         type="text"
-                        value={coMaker}
-                        onChange={(e) => setCoMaker(e.target.value)}
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="e.g. MEM-2026-0002"
+                        value={coMakerMemberIdInput}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCoMakerMemberIdInput(val);
+                          if (val.trim().toUpperCase() === currentMember.memberNumber.toUpperCase()) {
+                            setCoMakerError('❌ You cannot designate yourself as your own co-maker. Please key in another member ID.');
+                          } else {
+                            setCoMakerError('');
+                          }
+                        }}
+                        className={`w-full border rounded-lg px-3 py-2 text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 outline-none ${
+                          coMakerError ? 'border-rose-400 bg-rose-50' : 'border-slate-300'
+                        }`}
                       />
+                      {coMakerError ? (
+                        <p className="text-[11px] text-rose-600 mt-1 font-medium">{coMakerError}</p>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Key in the Co-Maker&apos;s Member ID (e.g. <strong>MEM-2026-0002</strong>). The co-maker must accept on their own account before your loan proceeds to underwriting.
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -440,8 +615,20 @@ export default function MemberPortalPage() {
 
                   <button
                     type="button"
-                    disabled={!agreedToTerms}
-                    onClick={() => setApplicationSubmitted(true)}
+                    disabled={!agreedToTerms || Boolean(coMakerError)}
+                    onClick={() => {
+                      if (loanProduct === 'REGULAR') {
+                        if (!coMakerMemberIdInput.trim()) {
+                          setCoMakerError('Co-maker Member ID is required.');
+                          return;
+                        }
+                        if (coMakerMemberIdInput.trim().toUpperCase() === currentMember.memberNumber.toUpperCase()) {
+                          setCoMakerError('You cannot designate yourself as your own co-maker.');
+                          return;
+                        }
+                      }
+                      setApplicationSubmitted(true);
+                    }}
                     className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 rounded-xl shadow-sm transition-colors"
                   >
                     Submit Loan Application
@@ -502,6 +689,206 @@ export default function MemberPortalPage() {
                     💡 <strong>CDA Compliance:</strong> Every deduction is accounted for under standard CDA account codes and issued an electronic official sales invoice with 12% Output VAT breakdown.
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: CO-MAKER ENDORSEMENTS */}
+        {activeTab === 'comaker' && (
+          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Co-Maker Endorsements & Solidary Guarantees</h2>
+                <p className="text-xs text-slate-500">
+                  Review and execute legally binding Joint and Solidary Liability Undertakings (RA 3765 & RA 9520) for fellow cooperative members.
+                </p>
+              </div>
+              <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-lg text-xs font-mono font-semibold">
+                Viewing as: {currentMember.memberNumber}
+              </span>
+            </div>
+
+            {endorsementSuccessMsg && (
+              <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs text-emerald-900 font-semibold">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{endorsementSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* List of Requests for Currently Logged-in Member */}
+            {endorsementRequests.filter((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber).length === 0 ? (
+              <div className="p-12 text-center bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <Users className="w-12 h-12 text-slate-400 mx-auto" />
+                <h3 className="font-bold text-base text-slate-700">No Co-Maker Requests for {currentMember.name}</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  You currently have no pending endorsement requests designating your Member ID (<strong>{currentMember.memberNumber}</strong>).
+                </p>
+                {currentPersona === 'maria' && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCurrentPersona('juan');
+                        setEndorsementSuccessMsg('');
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition-colors"
+                    >
+                      Switch to Juan Dela Cruz (MEM-2026-0002) Account
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {endorsementRequests
+                  .filter((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber)
+                  .map((req) => (
+                    <div
+                      key={req.id}
+                      className={`p-6 border rounded-2xl space-y-4 ${
+                        req.status === 'ACCEPTED'
+                          ? 'border-emerald-300 bg-emerald-50/40'
+                          : req.status === 'DECLINED'
+                          ? 'border-rose-300 bg-rose-50/40'
+                          : 'border-amber-300 bg-amber-50/30'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-3">
+                        <div>
+                          <div className="text-[11px] font-mono text-slate-500">Application Reference: {req.loanNumber}</div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            Principal Borrower: {req.borrowerName} ({req.borrowerMemberNumber})
+                          </h3>
+                          <div className="text-xs text-slate-600">
+                            Loan Product: {req.productName} • Term: {req.termMonths} Months
+                          </div>
+                        </div>
+
+                        <div className="sm:text-right">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-bold ${
+                              req.status === 'ACCEPTED'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : req.status === 'DECLINED'
+                                ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                : 'bg-amber-100 text-amber-800 border border-amber-300'
+                            }`}
+                          >
+                            {req.status === 'ACCEPTED'
+                              ? '✓ ENDORSED & BOUND'
+                              : req.status === 'DECLINED'
+                              ? 'DECLINED'
+                              : 'PENDING YOUR ACCEPTANCE'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Loan Amortization Figures */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white p-4 rounded-xl border border-slate-200 text-xs">
+                        <div>
+                          <div className="text-slate-400 font-medium">Principal Amount</div>
+                          <div className="text-sm font-black text-slate-900">
+                            ₱{req.principalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-400 font-medium">Monthly Installment</div>
+                          <div className="text-sm font-black text-emerald-700">
+                            ₱{req.monthlyInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-400 font-medium">Requested On</div>
+                          <div className="font-semibold text-slate-700">{req.requestedAt}</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-400 font-medium">Your Legal Undertaking</div>
+                          <div className="font-semibold text-amber-800">Joint & Solidary Co-Maker</div>
+                        </div>
+                      </div>
+
+                      {/* Legal Statutory Statement */}
+                      <div className="p-4 bg-white border border-slate-300 rounded-xl text-xs space-y-2">
+                        <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                          Statutory Undertaking (RA 3765 & Article 58, RA 9520)
+                        </div>
+                        <p className="text-slate-600 leading-relaxed text-[11px]">
+                          &ldquo;I hereby unconditionally bind myself JOINTLY AND SOLIDARILY with the principal borrower for the prompt payment of all loan principal, interest, and penalties when due. In the event of default or non-payment, the cooperative is authorized to apply my share capital and savings deposits to the satisfaction of this debt without prior court proceeding.&rdquo;
+                        </p>
+                      </div>
+
+                      {/* Decision Controls */}
+                      {req.status === 'PENDING' ? (
+                        <div className="pt-2 space-y-3">
+                          <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={solidaryAgreed}
+                              onChange={(e) => setSolidaryAgreed(e.target.checked)}
+                              className="accent-emerald-600 mt-0.5"
+                            />
+                            <span>
+                              I have read and voluntarily accept <strong>Joint & Solidary Liability</strong> for this loan application.
+                            </span>
+                          </label>
+
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              disabled={!solidaryAgreed}
+                              onClick={() => {
+                                setEndorsementRequests((prev) =>
+                                  prev.map((item) =>
+                                    item.id === req.id
+                                      ? { ...item, status: 'ACCEPTED', respondedAt: new Date().toLocaleTimeString() }
+                                      : item
+                                  )
+                                );
+                                setEndorsementSuccessMsg(
+                                  `Co-maker endorsement executed successfully! Application ${req.loanNumber} has been advanced to the Loan Officer review pipeline.`
+                                );
+                              }}
+                              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs px-5 py-2.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Accept & Endorse (Push to Next Process)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEndorsementRequests((prev) =>
+                                  prev.map((item) =>
+                                    item.id === req.id
+                                      ? { ...item, status: 'DECLINED', respondedAt: new Date().toLocaleTimeString() }
+                                      : item
+                                  )
+                                );
+                                setEndorsementSuccessMsg(
+                                  `You declined co-maker endorsement for Application ${req.loanNumber}. The borrower will be notified.`
+                                );
+                              }}
+                              className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-semibold text-xs px-4 py-2.5 rounded-lg transition-colors"
+                            >
+                              Decline Request
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs font-semibold text-slate-600 pt-1 flex items-center gap-1.5">
+                          {req.status === 'ACCEPTED' ? (
+                            <span className="text-emerald-700 flex items-center gap-1">
+                              <CheckCircle2 className="w-4 h-4" /> Solidary Undertaking confirmed and registered on your account. Application pushed to Loan Officer.
+                            </span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1">
+                              <AlertTriangle className="w-4 h-4" /> Request was declined.
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
               </div>
             )}
           </div>

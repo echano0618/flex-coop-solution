@@ -14,7 +14,7 @@ import { AuthService, UserRole } from './core/auth';
 import { FirestoreCoopService } from './core/firestore.service';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
-import { Loan, Member, PaymentTransaction, Tenant } from '@flexcoop/shared-types';
+import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant } from '@flexcoop/shared-types';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -587,7 +587,7 @@ app.post('/api/v1/savings/deposit', (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 5. LOAN ORIGINATION & CALCULATOR
+// 5. LOAN PRODUCTS & ORIGINATION
 // ==========================================
 app.get('/api/v1/loan-products', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
@@ -595,10 +595,98 @@ app.get('/api/v1/loan-products', (req: Request, res: Response) => {
   res.json({ success: true, count: products.length, data: products });
 });
 
+app.post('/api/v1/loan-products', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const {
+    name,
+    code,
+    type,
+    minAmount,
+    maxAmount,
+    annualInterestRate,
+    minTermMonths,
+    maxTermMonths,
+    amortizationMethod,
+    serviceFeeRate,
+    finesRateMonthly,
+    requiresCoMaker,
+    minCoMakers,
+    coMakerRuleDescription,
+    requiresCollateral,
+  } = req.body;
+
+  if (!name || !code || !minAmount || !maxAmount || annualInterestRate === undefined) {
+    return res.status(400).json({ success: false, error: 'name, code, minAmount, maxAmount, and annualInterestRate are required.' });
+  }
+
+  const products = dbStore.loanProducts.get(tenantId) || [];
+  const newProduct: LoanProduct = {
+    id: `prod_${code.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`,
+    name,
+    code: code.toUpperCase(),
+    type: type || 'REGULAR',
+    minAmount: Number(minAmount),
+    maxAmount: Number(maxAmount),
+    annualInterestRate: Number(annualInterestRate),
+    minTermMonths: minTermMonths ? Number(minTermMonths) : 1,
+    maxTermMonths: Number(maxTermMonths || 12),
+    amortizationMethod: amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    serviceFeeRate: serviceFeeRate !== undefined ? Number(serviceFeeRate) : 0.015,
+    finesRateMonthly: finesRateMonthly !== undefined ? Number(finesRateMonthly) : 0.03,
+    requiresCoMaker: requiresCoMaker !== undefined ? Boolean(requiresCoMaker) : true,
+    minCoMakers: minCoMakers ? Number(minCoMakers) : (requiresCoMaker ? 1 : 0),
+    coMakerRuleDescription: coMakerRuleDescription || (requiresCoMaker ? 'Must be an active member in good standing with updated share capital' : undefined),
+    requiresCollateral: Boolean(requiresCollateral),
+    isActive: true,
+  };
+
+  products.push(newProduct);
+  dbStore.loanProducts.set(tenantId, products);
+
+  res.status(201).json({
+    success: true,
+    message: `Loan product '${name}' (${code}) configured successfully.`,
+    data: newProduct,
+  });
+});
+
+app.put('/api/v1/loan-products/:id', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const productId = req.params.id;
+  const products = dbStore.loanProducts.get(tenantId) || [];
+  const product = products.find((p) => p.id === productId);
+
+  if (!product) {
+    return res.status(404).json({ success: false, error: 'Loan product not found' });
+  }
+
+  const updates = req.body;
+  if (updates.name !== undefined) product.name = updates.name;
+  if (updates.minAmount !== undefined) product.minAmount = Number(updates.minAmount);
+  if (updates.maxAmount !== undefined) product.maxAmount = Number(updates.maxAmount);
+  if (updates.annualInterestRate !== undefined) product.annualInterestRate = Number(updates.annualInterestRate);
+  if (updates.minTermMonths !== undefined) product.minTermMonths = Number(updates.minTermMonths);
+  if (updates.maxTermMonths !== undefined) product.maxTermMonths = Number(updates.maxTermMonths);
+  if (updates.amortizationMethod !== undefined) product.amortizationMethod = updates.amortizationMethod;
+  if (updates.serviceFeeRate !== undefined) product.serviceFeeRate = Number(updates.serviceFeeRate);
+  if (updates.finesRateMonthly !== undefined) product.finesRateMonthly = Number(updates.finesRateMonthly);
+  if (updates.requiresCoMaker !== undefined) product.requiresCoMaker = Boolean(updates.requiresCoMaker);
+  if (updates.minCoMakers !== undefined) product.minCoMakers = Number(updates.minCoMakers);
+  if (updates.coMakerRuleDescription !== undefined) product.coMakerRuleDescription = updates.coMakerRuleDescription;
+  if (updates.requiresCollateral !== undefined) product.requiresCollateral = Boolean(updates.requiresCollateral);
+  if (updates.isActive !== undefined) product.isActive = Boolean(updates.isActive);
+
+  res.json({
+    success: true,
+    message: `Loan product '${product.name}' parameters updated successfully.`,
+    data: product,
+  });
+});
+
 app.post('/api/v1/loans/apply', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const tenant = dbStore.tenants.get(tenantId);
-  const { memberId, productId, principalAmount, termMonths, paymentFrequency } = req.body;
+  const { memberId, productId, principalAmount, termMonths, paymentFrequency, coMakerMemberId } = req.body;
 
   if (!memberId || !productId || !principalAmount) {
     return res.status(400).json({ success: false, error: 'memberId, productId, and principalAmount are required.' });
@@ -611,9 +699,43 @@ app.post('/api/v1/loans/apply', (req: Request, res: Response) => {
   }
 
   const members = dbStore.members.get(tenantId) || [];
-  const member = members.find((m) => m.id === memberId);
-  if (!member) {
-    return res.status(404).json({ success: false, error: 'Member not found.' });
+  const borrower = members.find((m) => m.id === memberId || m.memberNumber === memberId);
+  if (!borrower) {
+    return res.status(404).json({ success: false, error: 'Borrower member not found.' });
+  }
+
+  // Co-Maker Requirement & Member ID Validation
+  let coMakerEndorsement: any = undefined;
+  if (product.requiresCoMaker) {
+    if (!coMakerMemberId) {
+      return res.status(400).json({
+        success: false,
+        error: `Loan product '${product.name}' requires designating at least ${product.minCoMakers || 1} co-maker by Member ID.`,
+      });
+    }
+
+    const coMaker = members.find((m) => m.id === coMakerMemberId || m.memberNumber === coMakerMemberId);
+    if (!coMaker) {
+      return res.status(404).json({
+        success: false,
+        error: `Designated co-maker Member ID '${coMakerMemberId}' does not exist in this cooperative.`,
+      });
+    }
+
+    if (coMaker.id === borrower.id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Statutory violation: Borrower cannot designate themselves as their own co-maker.',
+      });
+    }
+
+    coMakerEndorsement = {
+      coMakerMemberId: coMaker.id,
+      coMakerMemberNumber: coMaker.memberNumber,
+      coMakerName: `${coMaker.firstName} ${coMaker.lastName}`,
+      status: 'PENDING',
+      jointSolidaryAgreementAccepted: false,
+    };
   }
 
   const term = Number(termMonths || 12);
@@ -633,17 +755,19 @@ app.post('/api/v1/loans/apply', (req: Request, res: Response) => {
   const loanId = `loan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const loanNumber = `LN-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
 
+  const initialStatus: LoanStatus = product.requiresCoMaker ? 'PENDING_CO_MAKER_ACCEPTANCE' : 'SUBMITTED';
+
   const newLoan: Loan = {
     id: loanId,
     loanNumber,
-    memberId,
+    memberId: borrower.id,
     productId,
     principalAmount: Number(principalAmount),
     interestRateAnnual: product.annualInterestRate,
     termMonths: term,
     paymentFrequency: paymentFrequency || 'MONTHLY',
     amortizationMethod: product.amortizationMethod,
-    status: 'SUBMITTED',
+    status: initialStatus,
     platformFee: feeCalc.grossFee,
     coopServiceFee,
     netProceedsDisbursed: netProceeds,
@@ -651,6 +775,7 @@ app.post('/api/v1/loans/apply', (req: Request, res: Response) => {
     totalPayable: scheduleData.totalPayable,
     balanceRemaining: Number(principalAmount),
     schedule: scheduleData.schedule,
+    coMaker: coMakerEndorsement,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -659,11 +784,127 @@ app.post('/api/v1/loans/apply', (req: Request, res: Response) => {
   loans.push(newLoan);
   dbStore.loans.set(tenantId, loans);
 
+  const statusMsg =
+    initialStatus === 'PENDING_CO_MAKER_ACCEPTANCE'
+      ? `Application created. Awaiting Co-Maker (${coMakerEndorsement.coMakerName}) acceptance via their account before loan triage.`
+      : `Loan application ${loanNumber} submitted successfully. Pending Loan Officer review.`;
+
   res.status(201).json({
     success: true,
-    message: `Loan application ${loanNumber} submitted successfully. Pending Loan Officer review.`,
+    message: statusMsg,
     data: newLoan,
   });
+});
+
+// ==========================================
+// 6. CO-MAKER ENDORSEMENT WORKFLOW
+// ==========================================
+app.get('/api/v1/co-maker/pending/:memberId', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const memberId = req.params.memberId;
+  const loans = dbStore.loans.get(tenantId) || [];
+  const members = dbStore.members.get(tenantId) || [];
+
+  const pendingRequests = loans
+    .filter(
+      (l) =>
+        l.coMaker &&
+        (l.coMaker.coMakerMemberId === memberId || l.coMaker.coMakerMemberNumber === memberId) &&
+        l.status === 'PENDING_CO_MAKER_ACCEPTANCE'
+    )
+    .map((l) => {
+      const borrower = members.find((m) => m.id === l.memberId);
+      return {
+        loanId: l.id,
+        loanNumber: l.loanNumber,
+        borrowerName: borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Coop Member',
+        borrowerMemberNumber: borrower?.memberNumber,
+        principalAmount: l.principalAmount,
+        termMonths: l.termMonths,
+        monthlyInstallment: l.schedule[0]?.totalInstallment || 0,
+        coMakerStatus: l.coMaker?.status,
+        createdAt: l.createdAt,
+      };
+    });
+
+  res.json({ success: true, count: pendingRequests.length, data: pendingRequests });
+});
+
+app.post('/api/v1/co-maker/endorse', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { loanId, coMakerMemberId, decision, decisionNotes, agreedToJointLiability } = req.body;
+
+  if (!loanId || !coMakerMemberId || !decision) {
+    return res.status(400).json({ success: false, error: 'loanId, coMakerMemberId, and decision (ACCEPT/DECLINE) are required.' });
+  }
+
+  const loans = dbStore.loans.get(tenantId) || [];
+  const loan = loans.find((l) => l.id === loanId);
+
+  if (!loan) {
+    return res.status(404).json({ success: false, error: 'Loan not found.' });
+  }
+
+  if (loan.status !== 'PENDING_CO_MAKER_ACCEPTANCE') {
+    return res.status(400).json({
+      success: false,
+      error: `Cannot endorse loan with status '${loan.status}'. Co-maker action is only valid when PENDING_CO_MAKER_ACCEPTANCE.`,
+    });
+  }
+
+  if (!loan.coMaker) {
+    return res.status(400).json({
+      success: false,
+      error: 'Loan has no designated co-maker.',
+    });
+  }
+
+  if (
+    loan.coMaker.coMakerMemberId !== coMakerMemberId &&
+    loan.coMaker.coMakerMemberNumber !== coMakerMemberId
+  ) {
+    return res.status(403).json({
+      success: false,
+      error: 'Unauthorized: You are not the designated co-maker for this loan application.',
+    });
+  }
+
+  if (decision === 'ACCEPT') {
+    if (!agreedToJointLiability) {
+      return res.status(400).json({
+        success: false,
+        error: 'Co-maker must explicitly accept joint and solidary liability pursuant to RA 3765 and coop credit policy.',
+      });
+    }
+
+    loan.coMaker.status = 'ACCEPTED';
+    loan.coMaker.acceptedAt = new Date().toISOString();
+    loan.coMaker.jointSolidaryAgreementAccepted = true;
+    loan.coMaker.decisionNotes = decisionNotes || 'Endorsed and accepted by co-maker.';
+
+    // PUSH TO NEXT PROCESS: Advance status to SUBMITTED so Loan Officer can triage!
+    loan.status = 'SUBMITTED';
+    loan.updatedAt = new Date().toISOString();
+
+    res.json({
+      success: true,
+      message: `Co-maker successfully accepted joint solidary liability for Loan ${loan.loanNumber}. Loan application pushed to Loan Officer triage pipeline!`,
+      data: loan,
+    });
+  } else if (decision === 'DECLINE') {
+    loan.coMaker.status = 'DECLINED';
+    loan.coMaker.decisionNotes = decisionNotes || 'Co-maker declined request.';
+    loan.status = 'CO_MAKER_DECLINED';
+    loan.updatedAt = new Date().toISOString();
+
+    res.json({
+      success: true,
+      message: `Co-maker endorsement declined for Loan ${loan.loanNumber}. Application returned to borrower.`,
+      data: loan,
+    });
+  } else {
+    res.status(400).json({ success: false, error: "Invalid decision. Must be 'ACCEPT' or 'DECLINE'." });
+  }
 });
 
 app.post('/api/v1/loans/:id/review', (req: Request, res: Response) => {

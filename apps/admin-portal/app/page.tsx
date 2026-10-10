@@ -24,6 +24,10 @@ import {
   UserCheck,
   Printer,
   X,
+  Sliders,
+  Plus,
+  Clock,
+  CheckCircle,
 } from 'lucide-react';
 
 interface StaffAccount {
@@ -34,7 +38,7 @@ interface StaffAccount {
   initials: string;
   color: string;
   description: string;
-  allowedTabs: Array<'overview' | 'members' | 'los' | 'calculator' | 'cashier' | 'accounting' | 'invoices' | 'reports'>;
+  allowedTabs: Array<'overview' | 'members' | 'products' | 'los' | 'calculator' | 'cashier' | 'accounting' | 'invoices' | 'reports'>;
 }
 
 const STAFF_ACCOUNTS: StaffAccount[] = [
@@ -46,7 +50,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'RD',
     color: 'bg-indigo-600',
     description: 'Full statutory administrative & override access across all cooperative modules.',
-    allowedTabs: ['overview', 'members', 'los', 'calculator', 'cashier', 'accounting', 'invoices', 'reports'],
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'cashier', 'accounting', 'invoices', 'reports'],
   },
   {
     id: 'usr_lo_01',
@@ -56,7 +60,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'GV',
     color: 'bg-blue-600',
     description: 'Underwrites member applications, verifies credit & co-makers, calculates amortizations.',
-    allowedTabs: ['overview', 'members', 'los', 'calculator'],
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator'],
   },
   {
     id: 'usr_crecom_01',
@@ -66,7 +70,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'MR',
     color: 'bg-amber-600',
     description: 'Reviews loan appraisals, verifies collateral, endorses to Board.',
-    allowedTabs: ['overview', 'los', 'calculator'],
+    allowedTabs: ['overview', 'products', 'los', 'calculator'],
   },
   {
     id: 'usr_bod_01',
@@ -76,7 +80,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CA',
     color: 'bg-purple-600',
     description: 'Authorizes credit facilities requiring Board policy resolutions.',
-    allowedTabs: ['overview', 'los', 'calculator', 'reports'],
+    allowedTabs: ['overview', 'products', 'los', 'calculator', 'reports'],
   },
   {
     id: 'usr_cashier_01',
@@ -96,7 +100,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'FS',
     color: 'bg-teal-600',
     description: 'Manages CDA Standard Chart of Accounts, General Ledger, and BIR Tax Invoices.',
-    allowedTabs: ['overview', 'accounting', 'invoices', 'reports', 'calculator'],
+    allowedTabs: ['overview', 'products', 'accounting', 'invoices', 'reports', 'calculator'],
   },
   {
     id: 'usr_dpo_01',
@@ -111,7 +115,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
 ];
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'los' | 'calculator' | 'cashier' | 'accounting' | 'invoices' | 'reports'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'products' | 'los' | 'calculator' | 'cashier' | 'accounting' | 'invoices' | 'reports'>('overview');
   const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
@@ -125,8 +129,112 @@ export default function AdminDashboard() {
   };
 
   // LOS Workflow Simulation State
-  const [loanStatus, setLoanStatus] = useState<string>('SUBMITTED');
+  const [loanStatus, setLoanStatus] = useState<string>('PENDING_CO_MAKER_ACCEPTANCE');
   const [showDisclosureModal, setShowDisclosureModal] = useState<boolean>(false);
+
+  // Cooperative Loan Products Catalog State
+  const [loanProducts, setLoanProducts] = useState([
+    {
+      id: 'prod_regular',
+      code: 'REGULAR_LOAN',
+      name: 'Regular Member Loan',
+      type: 'REGULAR',
+      minAmount: 10000,
+      maxAmount: 100000,
+      annualInterestRate: 0.12,
+      minTermMonths: 6,
+      maxTermMonths: 24,
+      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      serviceFeeRate: 0.015,
+      finesRateMonthly: 0.03,
+      requiresCoMaker: true,
+      minCoMakers: 1,
+      coMakerRuleDescription: 'Requires 1 active co-maker in good standing with min ₱5,000 paid-up share capital. Co-maker must key in Member ID and sign solidary undertaking.',
+      requiresCollateral: false,
+      isActive: true,
+    },
+    {
+      id: 'prod_emergency',
+      code: 'EMERGENCY_PLUS',
+      name: 'Emergency Relief Loan Plus',
+      type: 'EMERGENCY',
+      minAmount: 5000,
+      maxAmount: 50000,
+      annualInterestRate: 0.06,
+      minTermMonths: 3,
+      maxTermMonths: 12,
+      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      serviceFeeRate: 0.005,
+      finesRateMonthly: 0.02,
+      requiresCoMaker: true,
+      minCoMakers: 1,
+      coMakerRuleDescription: 'Requires 1 co-maker who has completed PMES and has active cooperative savings.',
+      requiresCollateral: false,
+      isActive: true,
+    },
+    {
+      id: 'prod_educational',
+      code: 'EDUCATIONAL_LOAN',
+      name: 'Educational Assistance Loan',
+      type: 'EDUCATIONAL',
+      minAmount: 10000,
+      maxAmount: 50000,
+      annualInterestRate: 0.08,
+      minTermMonths: 6,
+      maxTermMonths: 18,
+      amortizationMethod: 'STRAIGHT_LINE',
+      serviceFeeRate: 0.01,
+      finesRateMonthly: 0.02,
+      requiresCoMaker: false,
+      minCoMakers: 0,
+      coMakerRuleDescription: 'Co-maker optional; borrower must submit certificate of school matriculation.',
+      requiresCollateral: false,
+      isActive: true,
+    },
+  ]);
+
+  // Modal / Form state for configuring new loan product
+  const [showProductModal, setShowProductModal] = useState<boolean>(false);
+  const [newProductName, setNewProductName] = useState<string>('SME Livelihood Expansion Loan');
+  const [newProductCode, setNewProductCode] = useState<string>('LIVELIHOOD-2026');
+  const [newProductType, setNewProductType] = useState<string>('LIVELIHOOD');
+  const [newProductMinAmount, setNewProductMinAmount] = useState<number>(10000);
+  const [newProductMaxAmount, setNewProductMaxAmount] = useState<number>(150000);
+  const [newProductRate, setNewProductRate] = useState<number>(10); // 10% p.a.
+  const [newProductMinTerm, setNewProductMinTerm] = useState<number>(6);
+  const [newProductMaxTerm, setNewProductMaxTerm] = useState<number>(36);
+  const [newProductMethod, setNewProductMethod] = useState<string>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
+  const [newProductRequiresCoMaker, setNewProductRequiresCoMaker] = useState<boolean>(true);
+  const [newProductMinCoMakers, setNewProductMinCoMakers] = useState<number>(1);
+  const [newProductCoMakerRule, setNewProductCoMakerRule] = useState<string>('Borrower must designate co-maker by Member ID. Co-maker must accept joint & solidary liability on their account.');
+  const [newProductRequiresCollateral, setNewProductRequiresCollateral] = useState<boolean>(false);
+  const [newProductServiceFeeRate, setNewProductServiceFeeRate] = useState<number>(1.5);
+  const [newProductFinesRate, setNewProductFinesRate] = useState<number>(3.0);
+
+  const handleAddLoanProduct = (e: React.FormEvent) => {
+    e.preventDefault();
+    const createdProduct = {
+      id: `prod_${Date.now()}`,
+      code: newProductCode.toUpperCase().replace(/\s+/g, '_'),
+      name: newProductName,
+      type: newProductType as any,
+      minAmount: Number(newProductMinAmount),
+      maxAmount: Number(newProductMaxAmount),
+      annualInterestRate: Number(newProductRate) / 100,
+      minTermMonths: Number(newProductMinTerm),
+      maxTermMonths: Number(newProductMaxTerm),
+      amortizationMethod: newProductMethod as any,
+      serviceFeeRate: Number(newProductServiceFeeRate) / 100,
+      finesRateMonthly: Number(newProductFinesRate) / 100,
+      requiresCoMaker: newProductRequiresCoMaker,
+      minCoMakers: newProductRequiresCoMaker ? Number(newProductMinCoMakers) : 0,
+      coMakerRuleDescription: newProductCoMakerRule,
+      requiresCollateral: newProductRequiresCollateral,
+      isActive: true,
+    };
+    setLoanProducts((prev) => [createdProduct, ...prev]);
+    setShowProductModal(false);
+  };
 
   // Members Simulation State
   const [members, setMembers] = useState([
@@ -360,6 +468,7 @@ export default function AdminDashboard() {
           {[
             { id: 'overview', label: 'Executive Dashboard', icon: Landmark },
             { id: 'members', label: 'Members & eKYC', icon: Users },
+            { id: 'products', label: 'Loan Products & Offers', icon: Sliders },
             { id: 'los', label: 'LOS Approval Matrix', icon: CreditCard },
             { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator },
             { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode },
@@ -594,13 +703,299 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* TAB: LOAN PRODUCTS & OFFERS */}
+        {activeTab === 'products' && (
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Cooperative Loan Products & Credit Facilities</h2>
+                <p className="text-xs text-slate-500">
+                  Configure custom interest rates, repayment tenure terms, amortization formulas, and co-maker solidary underwriting rules.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProductModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> Configure New Loan Product
+              </button>
+            </div>
+
+            {/* Product Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {loanProducts.map((p) => (
+                <div key={p.id} className="border border-slate-200 rounded-xl p-5 bg-slate-50/60 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-4">
+                  <div>
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        {p.type}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                        {p.code}
+                      </span>
+                    </div>
+
+                    <h3 className="font-bold text-base text-slate-900">{p.name}</h3>
+                    <p className="text-xs text-slate-600 mt-1 line-clamp-2">
+                      {p.coMakerRuleDescription}
+                    </p>
+
+                    <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Principal Range:</span>
+                        <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Annual Interest:</span>
+                        <span className="font-semibold text-emerald-700">{(p.annualInterestRate * 100).toFixed(1)}% p.a.</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Repayment Term:</span>
+                        <span className="font-semibold text-slate-900">{p.minTermMonths} - {p.maxTermMonths} Months</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Amortization Engine:</span>
+                        <span className="font-medium text-slate-700 text-[11px] text-right">
+                          {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-slate-500">Co-Maker Rule:</span>
+                        {p.requiresCoMaker ? (
+                          <span className="bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                            ✓ {p.minCoMakers} Co-Maker Req.
+                          </span>
+                        ) : (
+                          <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[11px]">
+                            Optional
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Service Fee: {(p.serviceFeeRate * 100).toFixed(1)}%</span>
+                    <span>Penalty: {(p.finesRateMonthly * 100).toFixed(1)}%/mo</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Product Configuration Modal */}
+            {showProductModal && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+                  <div className="flex justify-between items-center pb-4 border-b border-slate-200 mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Configure Cooperative Loan Product / Offer</h3>
+                      <p className="text-xs text-slate-500">Establish statutory credit parameters, terms, interest, and co-maker requirements.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowProductModal(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleAddLoanProduct} className="space-y-4 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Product Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={newProductName}
+                          onChange={(e) => setNewProductName(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Product Code</label>
+                        <input
+                          type="text"
+                          required
+                          value={newProductCode}
+                          onChange={(e) => setNewProductCode(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Loan Category</label>
+                        <select
+                          value={newProductType}
+                          onChange={(e) => setNewProductType(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                        >
+                          <option value="REGULAR">REGULAR</option>
+                          <option value="EMERGENCY">EMERGENCY</option>
+                          <option value="EDUCATIONAL">EDUCATIONAL</option>
+                          <option value="LIVELIHOOD">LIVELIHOOD</option>
+                          <option value="MICROFINANCE">MICROFINANCE</option>
+                          <option value="APPLIANCE">APPLIANCE</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Min Principal (₱)</label>
+                        <input
+                          type="number"
+                          required
+                          min={1000}
+                          value={newProductMinAmount}
+                          onChange={(e) => setNewProductMinAmount(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Max Principal (₱)</label>
+                        <input
+                          type="number"
+                          required
+                          min={5000}
+                          value={newProductMaxAmount}
+                          onChange={(e) => setNewProductMaxAmount(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Annual Interest Rate (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          required
+                          value={newProductRate}
+                          onChange={(e) => setNewProductRate(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Min Term (Months)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={newProductMinTerm}
+                          onChange={(e) => setNewProductMinTerm(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Max Term (Months)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={newProductMaxTerm}
+                          onChange={(e) => setNewProductMaxTerm(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Amortization Engine</label>
+                      <select
+                        value={newProductMethod}
+                        onChange={(e) => setNewProductMethod(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                      >
+                        <option value="DIMINISHING_BALANCE_EQUAL_INSTALLMENT">Diminishing Balance (Equal Monthly Installment)</option>
+                        <option value="STRAIGHT_LINE">Straight-Line Simple Amortization</option>
+                      </select>
+                    </div>
+
+                    <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-amber-950">Require Co-Maker Endorsement</span>
+                          <p className="text-[11px] text-amber-800">Borrower must key in Co-Maker's Member ID. Co-maker must accept on their account before triage.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={newProductRequiresCoMaker}
+                          onChange={(e) => setNewProductRequiresCoMaker(e.target.checked)}
+                          className="w-4 h-4 text-emerald-600 rounded"
+                        />
+                      </div>
+
+                      {newProductRequiresCoMaker && (
+                        <div className="space-y-2 pt-2 border-t border-amber-200">
+                          <div>
+                            <label className="block font-semibold text-amber-900 mb-1">Co-Maker Eligibility Rule Description</label>
+                            <input
+                              type="text"
+                              required
+                              value={newProductCoMakerRule}
+                              onChange={(e) => setNewProductCoMakerRule(e.target.value)}
+                              placeholder="e.g. Must be regular member with at least ₱5,000 paid-up capital"
+                              className="w-full border border-amber-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Coop Service Fee (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={newProductServiceFeeRate}
+                          onChange={(e) => setNewProductServiceFeeRate(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Monthly Overdue Fine (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={newProductFinesRate}
+                          onChange={(e) => setNewProductFinesRate(Number(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowProductModal(false)}
+                        className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors shadow-sm"
+                      >
+                        Save & Launch Product
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TAB: LOS APPROVAL MATRIX */}
         {activeTab === 'los' && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
             <div className="flex justify-between items-start">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Loan Origination System (LOS) - Multi-Tier Approval Matrix</h2>
-                <p className="text-xs text-slate-500">Pipeline: Loan Officer Triage $\rightarrow$ Credit Committee $\rightarrow$ Board of Directors $\rightarrow$ Net Proceeds Disbursement.</p>
+                <p className="text-xs text-slate-500">Pipeline: Co-Maker Endorsement $\rightarrow$ Loan Officer Triage $\rightarrow$ Credit Committee $\rightarrow$ Board of Directors $\rightarrow$ Net Proceeds Disbursement.</p>
               </div>
 
               <button
@@ -612,6 +1007,75 @@ export default function AdminDashboard() {
               </button>
             </div>
 
+            {/* Live Co-Maker Status Banner & Simulator Controller */}
+            {loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <div className="font-bold text-amber-900 flex items-center gap-1.5 text-sm">
+                    <Clock className="w-4 h-4 text-amber-600" />
+                    Awaiting Co-Maker Endorsement (Designated: Juan Perez Dela Cruz • MEM-2026-0002)
+                  </div>
+                  <p className="text-amber-800 mt-0.5">
+                    Cooperative credit policy enforces mandatory co-maker verification. Loan Officer triage is locked until the co-maker logs in and executes the digital joint & solidary undertaking.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setLoanStatus('SUBMITTED')}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors shadow-sm flex items-center gap-1"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" /> Simulate Co-Maker Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoanStatus('CO_MAKER_DECLINED')}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-semibold px-3 py-1.5 rounded-lg text-xs transition-colors"
+                  >
+                    Simulate Decline
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {loanStatus === 'CO_MAKER_DECLINED' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex items-center justify-between text-xs">
+                <div>
+                  <div className="font-bold text-rose-900 flex items-center gap-1.5 text-sm">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    Co-Maker Declined Joint Solidary Liability
+                  </div>
+                  <p className="text-rose-800 mt-0.5">
+                    Designated co-maker Juan Dela Cruz declined endorsement. Application returned to borrower and locked from underwriting.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLoanStatus('PENDING_CO_MAKER_ACCEPTANCE')}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-3 py-1.5 rounded-lg text-xs transition-colors"
+                >
+                  Reset to Pending
+                </button>
+              </div>
+            )}
+
+            {['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) && (
+              <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs">
+                <div>
+                  <div className="font-bold text-emerald-900 flex items-center gap-1.5 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Co-Maker Endorsed & Legally Bound (RA 3765 Undertaking Signed)
+                  </div>
+                  <p className="text-emerald-800 mt-0.5">
+                    Juan Perez Dela Cruz (MEM-2026-0002) agreed to joint & solidary liability. Loan application pushed to Loan Officer triage.
+                  </p>
+                </div>
+                <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold text-[11px] border border-emerald-200">
+                  Ready for Underwriting
+                </span>
+              </div>
+            )}
+
             {/* Application Card */}
             <div className="p-5 border border-slate-200 rounded-xl bg-slate-50 space-y-4">
               <div className="flex justify-between items-start border-b border-slate-200 pb-3">
@@ -619,6 +1083,10 @@ export default function AdminDashboard() {
                   <div className="text-xs font-mono text-slate-500">Application: LN-2026-00001</div>
                   <div className="text-base font-bold text-slate-900">Maria Clara Santos (Regular Member)</div>
                   <div className="text-xs text-slate-600">Product: Regular Member Loan • 12% p.a. • 12 Months term</div>
+                  <div className="text-xs text-amber-900 mt-1 font-semibold flex items-center gap-1">
+                    <span>Designated Co-Maker:</span>
+                    <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">Juan Perez Dela Cruz (MEM-2026-0002)</span>
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-xs uppercase text-slate-500 font-semibold">Principal Requested</div>
@@ -626,8 +1094,36 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Stepper Pipeline with Granular RBAC Guards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              {/* Stepper Pipeline with 5 Steps: Co-Maker -> LO -> CreCom -> BOD -> Disbursement */}
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                {/* Step 0: Co-Maker Endorsement */}
+                <div className={`p-4 rounded-lg border ${
+                  ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
+                    ? 'border-emerald-300 bg-emerald-50/60'
+                    : loanStatus === 'CO_MAKER_DECLINED'
+                    ? 'border-rose-300 bg-rose-50/60'
+                    : 'border-amber-300 bg-amber-50/60'
+                }`}>
+                  <div className="flex items-center justify-between text-xs font-bold mb-2">
+                    <span className="text-slate-700">0. Co-Maker</span>
+                    {['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
+                      <span className="text-emerald-700 flex items-center gap-1">✓ Endorsed</span>
+                    ) : loanStatus === 'CO_MAKER_DECLINED' ? (
+                      <span className="text-rose-600">Declined</span>
+                    ) : (
+                      <span className="text-amber-600">Pending</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3">Juan Dela Cruz (MEM-2026-0002) digital endorsement.</p>
+                  <div className="text-[10px] font-mono text-slate-600 bg-white p-1.5 rounded border border-slate-200">
+                    {['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
+                      ? 'Solidary Undertaking Confirmed'
+                      : loanStatus === 'CO_MAKER_DECLINED'
+                      ? 'Request Declined'
+                      : 'Awaiting Member Action'}
+                  </div>
+                </div>
+
                 {/* Step 1: Loan Officer */}
                 <div className={`p-4 rounded-lg border ${
                   ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
@@ -639,10 +1135,28 @@ export default function AdminDashboard() {
                     {['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
                       <span className="text-emerald-700 flex items-center gap-1">✓ Endorsed</span>
                     ) : (
-                      <span className="text-amber-600">Pending Review</span>
+                      <span className="text-slate-500">Triage Queue</span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 mb-3">Credit scoring & co-maker capability verified.</p>
+                  <p className="text-[11px] text-slate-500 mb-3">Credit scoring & financial capacity verified.</p>
+                  {loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full bg-slate-100 text-slate-400 text-[10px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-200"
+                    >
+                      Awaiting Co-Maker
+                    </button>
+                  )}
+                  {loanStatus === 'CO_MAKER_DECLINED' && (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full bg-rose-100 text-rose-500 text-[10px] font-medium py-1.5 rounded cursor-not-allowed border border-rose-200"
+                    >
+                      Co-Maker Declined
+                    </button>
+                  )}
                   {loanStatus === 'SUBMITTED' && (
                     <div>
                       {currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER' ? (

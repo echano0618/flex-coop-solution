@@ -156,6 +156,8 @@ export type AmortizationMethod = 'STRAIGHT_LINE' | 'DIMINISHING_BALANCE_EQUAL_IN
 export type PaymentFrequency = 'WEEKLY' | 'BI_WEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY';
 export type LoanStatus =
   | 'DRAFT'
+  | 'PENDING_CO_MAKER_ACCEPTANCE'
+  | 'CO_MAKER_DECLINED'
   | 'SUBMITTED'
   | 'UNDER_CREDIT_REVIEW'
   | 'COMMITTEE_APPROVAL'
@@ -169,20 +171,35 @@ export type LoanStatus =
 
 export type DisbursementMethod = 'IN_PERSON_CASH' | 'EXTERNAL_BANK_TRANSFER' | 'PLATFORM_ESCROW';
 
+export interface CoMakerEndorsement {
+  coMakerMemberId: string;
+  coMakerMemberNumber?: string;
+  coMakerName?: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED';
+  requestedAt?: string;
+  decisionNotes?: string;
+  acceptedAt?: string;
+  ipAddress?: string;
+  jointSolidaryAgreementAccepted: boolean;
+}
+
 export interface LoanProduct {
   id: string;
+  tenantId?: string;
   name: string;
   code: string;
   type: LoanType;
   minAmount: number;
   maxAmount: number;
   annualInterestRate: number;
+  minTermMonths?: number;
   maxTermMonths: number;
   amortizationMethod: AmortizationMethod;
   serviceFeeRate: number; // Coop's own filing/service fee
   finesRateMonthly: number; // Penalty for overdue
   requiresCoMaker: boolean;
   minCoMakers: number;
+  coMakerRuleDescription?: string;
   requiresCollateral: boolean;
   isActive: boolean;
 }
@@ -214,9 +231,11 @@ export interface AmortizationScheduleItem {
 
 export interface Loan {
   id: string;
+  tenantId?: string;
   loanNumber: string;
   memberId: string;
   productId: string;
+  productName?: string;
   principalAmount: number;
   interestRateAnnual: number;
   termMonths: number;
@@ -234,6 +253,7 @@ export interface Loan {
   totalPayable: number;
   balanceRemaining: number;
   schedule: AmortizationScheduleItem[];
+  coMaker?: CoMakerEndorsement;
   createdAt: string;
   updatedAt: string;
 }

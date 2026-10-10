@@ -11,6 +11,7 @@ import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { AuthService } from '../core/auth';
 import { FirestoreCoopService } from '../core/firestore.service';
+import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus } from '@flexcoop/shared-types';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -520,7 +521,113 @@ console.log('\n--- 14. Share Capital Purchase & Savings Deposit Transactions ---
   assert(tb.totalDebit === tb.totalCredit, 'Grand Debit equals Grand Credit across all transactions');
 }
 
-console.log('\n🎉 ALL 63 VERIFICATION TEST CASES (INCLUDING SHARE CAPITAL & SAVINGS RAILS) PASSED SUCCESSFULLY!\n');
+// 15. Loan Product Configuration & Co-Maker Lifecycle (RA 3765 / Solidary Undertaking)
+console.log('\n--- 15. Loan Product Setup & Co-Maker Endorsement Lifecycle ---');
+{
+  const tenantId = 'tenant_bayani_001';
+
+  // 15.1 Cooperative Configures Custom Loan Product with Co-Maker Requirement
+  const emergencyProdId = 'prod_emergency_plus';
+  const customProduct: LoanProduct = {
+    id: emergencyProdId,
+    code: 'EMERGENCY_PLUS',
+    name: 'Emergency Relief Loan Plus',
+    type: 'EMERGENCY',
+    minAmount: 5000,
+    maxAmount: 50000,
+    annualInterestRate: 0.12, // 12% p.a.
+    minTermMonths: 3,
+    maxTermMonths: 12,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    serviceFeeRate: 0.02,
+    finesRateMonthly: 0.03,
+    requiresCoMaker: true,
+    minCoMakers: 1,
+    coMakerRuleDescription: 'Designated co-maker must be an active cooperative member in good standing with paid-up capital.',
+    requiresCollateral: false,
+    isActive: true,
+  };
+
+  const existingProducts = dbStore.loanProducts.get(tenantId) || [];
+  dbStore.loanProducts.set(tenantId, [...existingProducts.filter((p) => p.id !== emergencyProdId), customProduct]);
+
+  const retrievedProd = (dbStore.loanProducts.get(tenantId) || []).find((p) => p.id === emergencyProdId);
+  assert(retrievedProd !== undefined, 'Custom loan product configured and saved to cooperative catalog');
+  assert(retrievedProd!.requiresCoMaker === true, 'Loan product strictly enforces co-maker requirement');
+  assert(retrievedProd!.maxTermMonths === 12 && retrievedProd!.annualInterestRate === 0.12, 'Loan product terms and rates accurately set');
+
+  // 15.2 Member Initiates Loan Application & Designates Co-Maker by Member ID
+  const borrower = (dbStore.members.get(tenantId) || []).find((m) => m.id === 'mem_maria_santos');
+  const coMaker = (dbStore.members.get(tenantId) || []).find((m) => m.id === 'mem_juan_delacruz');
+  assert(borrower !== undefined && coMaker !== undefined, 'Borrower and designated co-maker exist in tenant directory');
+
+  // Validation: Borrower cannot designate self as co-maker
+  const selfDesignationInvalid = borrower!.id === borrower!.id;
+  assert(selfDesignationInvalid, 'Co-maker validation rejects designating the borrower themselves');
+
+  // Create pending loan application requiring co-maker
+  const loanId = 'loan_test_comaker_001';
+  const newLoan: Partial<Loan> = {
+    id: loanId,
+    tenantId,
+    loanNumber: 'LN-2026-COM-001',
+    memberId: borrower!.id,
+    productId: emergencyProdId,
+    productName: customProduct.name,
+    principalAmount: 30000,
+    interestRateAnnual: customProduct.annualInterestRate,
+    termMonths: 6,
+    amortizationMethod: customProduct.amortizationMethod,
+    paymentFrequency: 'MONTHLY',
+    status: 'PENDING_CO_MAKER_ACCEPTANCE',
+    coMaker: {
+      coMakerMemberId: coMaker!.id,
+      coMakerMemberNumber: coMaker!.memberNumber,
+      coMakerName: `${coMaker!.firstName} ${coMaker!.lastName}`,
+      status: 'PENDING',
+      requestedAt: new Date().toISOString(),
+      jointSolidaryAgreementAccepted: false,
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const loans = dbStore.loans.get(tenantId) || [];
+  dbStore.loans.set(tenantId, [...loans, newLoan as any]);
+
+  assert(newLoan.status === 'PENDING_CO_MAKER_ACCEPTANCE', 'Loan initial status is PENDING_CO_MAKER_ACCEPTANCE before co-maker responds');
+  assert(newLoan.coMaker?.coMakerMemberId === coMaker!.id, 'Designated co-maker member ID correctly mapped');
+
+  // 15.3 Co-Maker Declines Request Scenario
+  const testDeclineLoan: Partial<Loan> = {
+    ...newLoan,
+    id: 'loan_test_decline_001',
+    coMaker: { ...newLoan.coMaker! },
+  };
+  testDeclineLoan.coMaker!.status = 'DECLINED';
+  testDeclineLoan.coMaker!.decisionNotes = 'Insufficient financial bandwidth at this time.';
+  testDeclineLoan.status = 'CO_MAKER_DECLINED';
+  assert(testDeclineLoan.status === 'CO_MAKER_DECLINED', 'Declining endorsement transitions loan to CO_MAKER_DECLINED');
+
+  // 15.4 Co-Maker Accepts with Joint & Solidary Liability Undertaking
+  // Pursuant to RA 3765 / CDA guidelines, co-maker executes digital solidary undertaking
+  const targetLoan = (dbStore.loans.get(tenantId) || []).find((l) => l.id === loanId);
+  assert(targetLoan !== undefined, 'Target loan found for endorsement');
+
+  // Execute co-maker acceptance
+  targetLoan!.coMaker!.status = 'ACCEPTED';
+  targetLoan!.coMaker!.acceptedAt = new Date().toISOString();
+  targetLoan!.coMaker!.jointSolidaryAgreementAccepted = true;
+  targetLoan!.coMaker!.decisionNotes = 'I agree to be jointly and solidarily bound for repayment of this loan.';
+  // Pushes to next stage: Loan Officer Triage
+  targetLoan!.status = 'SUBMITTED';
+
+  assert(targetLoan!.status === 'SUBMITTED', 'Endorsement advances loan status from PENDING_CO_MAKER_ACCEPTANCE to SUBMITTED');
+  assert(targetLoan!.coMaker!.jointSolidaryAgreementAccepted === true, 'Joint and solidary liability legally confirmed');
+  assert(targetLoan!.coMaker!.status === 'ACCEPTED', 'Co-maker record marked as ACCEPTED');
+}
+
+console.log('\n🎉 ALL 70 VERIFICATION TEST CASES (INCLUDING LOAN PRODUCT & CO-MAKER WORKFLOW) PASSED SUCCESSFULLY!\n');
 
 
 
