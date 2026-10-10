@@ -82,4 +82,47 @@ export class MonetizationService {
       issuedAt: new Date().toISOString(),
     };
   }
+
+  /**
+   * Calculates the platform fee charged to the cooperative per approved member (₱15.00).
+   * BIR Output VAT decomposition:
+   * Gross = ₱15.00
+   * Net Platform Base = ₱15.00 / 1.12 = ₱13.39
+   * 12% Output VAT = ₱1.61
+   */
+  static calculateMemberOnboardingFee(): { grossFee: number; vatAmount: number; netPlatformRevenue: number } {
+    const grossFee = 15.0;
+    const netPlatformRevenue = Math.round((grossFee / 1.12) * 100) / 100;
+    const vatAmount = Math.round((grossFee - netPlatformRevenue) * 100) / 100;
+    return { grossFee, vatAmount, netPlatformRevenue };
+  }
+
+  /**
+   * Generates a BIR electronic invoice for member onboarding billed to the cooperative
+   */
+  static generateMemberOnboardingInvoice(params: {
+    tenantId: string;
+    memberId: string;
+    memberNumber: string;
+    memberName: string;
+    tenantTin: string;
+  }) {
+    const fee = this.calculateMemberOnboardingFee();
+    const invoiceNumber = `INV-ONB-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    return {
+      id: `inv_onb_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      tenantId: params.tenantId,
+      invoiceNumber,
+      memberId: params.memberId,
+      memberNumber: params.memberNumber,
+      memberName: params.memberName,
+      grossFeeAmount: fee.grossFee,
+      vatAmount: fee.vatAmount,
+      netRevenue: fee.netPlatformRevenue,
+      birTin: params.tenantTin,
+      status: 'BILLED_TO_COOP',
+      issuedAt: new Date().toISOString(),
+    };
+  }
 }

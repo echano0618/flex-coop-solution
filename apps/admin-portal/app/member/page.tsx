@@ -1719,7 +1719,7 @@ export default function MemberPortalPage() {
                   {/* Summary & Execution */}
                   {(() => {
                     const principal = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
-                    const passOn = depositChannel === 'PAYMONGO_QRPH' ? Math.max(15, Math.round(principal * 0.015 * 100) / 100) : 0;
+                    const passOn = depositChannel === 'PAYMONGO_QRPH' ? Math.round(principal * 0.015 * 100) / 100 : 0;
                     const total = principal + passOn;
 
                     return (
@@ -1730,7 +1730,7 @@ export default function MemberPortalPage() {
                         </div>
                         {depositChannel === 'PAYMONGO_QRPH' && (
                           <div className="flex justify-between text-amber-700">
-                            <span>Pass-On Gateway Convenience Fee:</span>
+                            <span>Gateway Convenience Fee (1.5%):</span>
                             <span className="font-mono font-semibold">+ ₱{passOn.toFixed(2)}</span>
                           </div>
                         )}
@@ -1738,6 +1738,11 @@ export default function MemberPortalPage() {
                           <span>Total Amount to Pay:</span>
                           <span className="text-emerald-700 font-mono text-base">₱{total.toFixed(2)}</span>
                         </div>
+                        {depositChannel === 'PAYMONGO_QRPH' && depositModalType === 'SHARES' && (
+                          <div className="text-[10px] text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-200">
+                            Share Capital paid via QR Ph is credited directly to the Cooperative&apos;s Platform Escrow account (`1-01-05`).
+                          </div>
+                        )}
 
                         {depositChannel === 'PAYMONGO_QRPH' ? (
                           <button

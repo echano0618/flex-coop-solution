@@ -40,6 +40,13 @@ import {
   Eye,
   Award,
   Menu,
+  Camera,
+  Scan,
+  Receipt,
+  Wallet,
+  CheckSquare,
+  Square,
+  User,
 } from 'lucide-react';
 
 type TabType = 'overview' | 'members' | 'products' | 'los' | 'calculator' | 'collateral' | 'cashier' | 'accounting' | 'surplus' | 'invoices' | 'reports';
@@ -551,8 +558,12 @@ export default function AdminDashboard() {
     classification: 'REGULAR' | 'ASSOCIATE' | string;
     kycStatus: 'VERIFIED' | 'PENDING_REVIEW' | 'INACTIVE' | string;
     idType: string;
+    idNumber?: string;
     paidUpShares: number;
     sharesCount: number;
+    subscribedShares?: number;
+    initialPledge?: number;
+    sharePaymentStatus?: 'UNPAID' | 'PAID_OTC' | 'PAID_QRPH' | string;
     savingsBalance: number;
     loanBalance: number;
     npcConsent: string;
@@ -579,8 +590,12 @@ export default function AdminDashboard() {
       classification: 'REGULAR',
       kycStatus: 'VERIFIED',
       idType: 'PhilSys National ID (Encrypted SPI)',
+      idNumber: '1234-5678-9012-3456',
       paidUpShares: 15000,
       sharesCount: 150,
+      subscribedShares: 150,
+      initialPledge: 15000,
+      sharePaymentStatus: 'PAID_OTC',
       savingsBalance: 5000,
       loanBalance: 47000,
       npcConsent: 'Agreed (IP: 120.29.74.12)',
@@ -601,8 +616,12 @@ export default function AdminDashboard() {
       classification: 'REGULAR',
       kycStatus: 'VERIFIED',
       idType: 'Driver\'s License (Encrypted SPI)',
+      idNumber: 'N01-18-994120',
       paidUpShares: 10000,
       sharesCount: 100,
+      subscribedShares: 100,
+      initialPledge: 10000,
+      sharePaymentStatus: 'PAID_QRPH',
       savingsBalance: 2000,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 180.191.22.45)',
@@ -623,8 +642,12 @@ export default function AdminDashboard() {
       classification: 'ASSOCIATE',
       kycStatus: 'VERIFIED',
       idType: 'PhilHealth ID (Encrypted SPI)',
+      idNumber: '09-123456789-1',
       paidUpShares: 5000,
       sharesCount: 50,
+      subscribedShares: 50,
+      initialPledge: 5000,
+      sharePaymentStatus: 'PAID_OTC',
       savingsBalance: 1200,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 112.198.88.21)',
@@ -645,9 +668,13 @@ export default function AdminDashboard() {
       classification: 'REGULAR',
       kycStatus: 'PENDING_REVIEW',
       idType: 'Passport (SPI Biometric Review)',
-      paidUpShares: 3000,
-      sharesCount: 30,
-      savingsBalance: 500,
+      idNumber: 'P8942109B',
+      paidUpShares: 0, // Requirement: Do not require members to pay Share Capital until reviewed!
+      sharesCount: 0,
+      subscribedShares: 30,
+      initialPledge: 3000,
+      sharePaymentStatus: 'UNPAID',
+      savingsBalance: 0,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 49.144.120.89)',
       pmesStatus: 'COMPLETED',
@@ -667,8 +694,12 @@ export default function AdminDashboard() {
       classification: 'ASSOCIATE',
       kycStatus: 'INACTIVE',
       idType: 'UMID Card (Encrypted SPI)',
+      idNumber: 'CRN-0111-9482019-3',
       paidUpShares: 2000,
       sharesCount: 20,
+      subscribedShares: 20,
+      initialPledge: 2000,
+      sharePaymentStatus: 'PAID_OTC',
       savingsBalance: 100,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 124.106.18.99)',
@@ -708,38 +739,126 @@ export default function AdminDashboard() {
     notes: string;
   } | null>(null);
 
+  // Manual Review Checklist State for Reviewer
+  const [reviewChecks, setReviewChecks] = useState({
+    pmes: false,
+    ekyc: false,
+    amla: false,
+    capitalBuild: false,
+  });
+
+  // Track Platform Onboarding Fees charged to Coop (₱15 per approved member)
+  const [coopOnboardingFeesTotal, setCoopOnboardingFeesTotal] = useState<number>(0);
+  const [onboardingInvoices, setOnboardingInvoices] = useState<any[]>([]);
+
+  // Platform Escrow Balance for Coop
+  const [coopPlatformEscrowBalance, setCoopPlatformEscrowBalance] = useState<number>(1000); // initial ₱1,000 float
+
+  // Share Capital Settlement Modal State
+  const [showSharePaymentModal, setShowSharePaymentModal] = useState<boolean>(false);
+  const [sharePaymentMember, setSharePaymentMember] = useState<any | null>(null);
+  const [sharePaymentMethod, setSharePaymentMethod] = useState<'OTC' | 'QRPH'>('QRPH');
+
   const handleExecuteMemberDecision = () => {
     if (!memberConfirmModal) return;
     const { action, member, notes } = memberConfirmModal;
-    const newStatus = action === 'APPROVE' ? 'VERIFIED' : 'INACTIVE';
+
+    if (action === 'APPROVE') {
+      // Requirement: Charge the coop ₱15 for every approved member!
+      const onboardingFee = 15.00;
+      const vatOnboarding = Math.round((onboardingFee - (onboardingFee / 1.12)) * 100) / 100;
+      const netOnboarding = Math.round((onboardingFee - vatOnboarding) * 100) / 100;
+
+      const newInvoice = {
+        id: `INV-ONB-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        memberNo: member.memberNo,
+        memberName: member.name,
+        description: `Member Onboarding Platform Fee (CDA MC 2015-06 Review Cleared: ${member.name})`,
+        feeAmount: onboardingFee,
+        vatAmount: vatOnboarding,
+        netAmount: netOnboarding,
+        date: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+        status: 'BILLED_TO_COOP',
+      };
+
+      setCoopOnboardingFeesTotal((prev) => prev + onboardingFee);
+      setOnboardingInvoices((prev) => [newInvoice, ...prev]);
+
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === member.id
+            ? {
+                ...m,
+                kycStatus: 'VERIFIED',
+                sharePaymentStatus: 'UNPAID', // Unpaid until member pays via OTC or QR
+                reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+                reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+                reviewNotes: notes || 'PMES, eKYC, AMLA, and Capital Build manually verified. Application approved.',
+              }
+            : m
+        )
+      );
+
+      setMemberActionNotification(
+        `Member ${member.memberNo} (${member.name}) APPROVED! Coop charged ₱15.00 onboarding fee to Bayani Cooperative (Invoice ${newInvoice.id}). Member can now pay initial Share Capital (₱${(member.initialPledge || 3000).toLocaleString()}) via OTC (₱0 fee) or QR Ph (1.5% fee).`
+      );
+    } else {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === member.id
+            ? {
+                ...m,
+                kycStatus: 'INACTIVE',
+                reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+                reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+                reviewNotes: notes || 'Declined / Requires document re-submission.',
+              }
+            : m
+        )
+      );
+      setMemberActionNotification(
+        `Member ${member.memberNo} (${member.name}) application set to INACTIVE / Returned for correction.`
+      );
+    }
+
+    setTimeout(() => setMemberActionNotification(null), 6000);
+    setMemberConfirmModal(null);
+    setSelectedMemberForReview(null);
+  };
+
+  const handleExecuteShareCapitalPayment = () => {
+    if (!sharePaymentMember) return;
+    const pledge = sharePaymentMember.initialPledge || 3000;
+    const convenienceFee = sharePaymentMethod === 'QRPH' ? Math.round(pledge * 0.015 * 100) / 100 : 0;
 
     setMembers((prev) =>
       prev.map((m) =>
-        m.id === member.id
+        m.id === sharePaymentMember.id
           ? {
               ...m,
-              kycStatus: newStatus,
-              reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
-              reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
-              reviewNotes: notes || (action === 'APPROVE' ? 'Approved & Certified by Committee.' : 'Declined / Requires document re-submission.'),
+              paidUpShares: pledge,
+              sharesCount: Math.floor(pledge / 100),
+              sharePaymentStatus: sharePaymentMethod === 'QRPH' ? 'PAID_QRPH' : 'PAID_OTC',
             }
           : m
       )
     );
 
-    if (action === 'APPROVE') {
+    if (sharePaymentMethod === 'QRPH') {
+      // Requirement: Share Capital paid via QR payment must be added in Coops Platform Escrow
+      setCoopPlatformEscrowBalance((prev) => prev + pledge);
       setMemberActionNotification(
-        `Member ${member.memberNo} (${member.name}) successfully approved and activated under CDA RA 9520 rules!`
+        `Share Capital ₱${pledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} paid via PayMongo QR Ph (1.5% fee: ₱${convenienceFee.toFixed(2)})! ₱${pledge.toLocaleString()} added to Coop's Platform Escrow.`
       );
     } else {
       setMemberActionNotification(
-        `Member ${member.memberNo} (${member.name}) application set to INACTIVE / Returned for correction.`
+        `Share Capital ₱${pledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} paid Over-The-Counter (₱0 fee). Official Receipt generated!`
       );
     }
-    setTimeout(() => setMemberActionNotification(null), 5000);
 
-    setMemberConfirmModal(null);
-    setSelectedMemberForReview(null);
+    setTimeout(() => setMemberActionNotification(null), 6000);
+    setShowSharePaymentModal(false);
+    setSharePaymentMember(null);
   };
 
   // Collateral Registry Search State
@@ -1357,6 +1476,60 @@ export default function AdminDashboard() {
               </button>
             </div>
 
+            {/* Top Statutory & Financial Escrow KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-slate-700" /> Total Members
+                </div>
+                <div className="text-xl font-black text-slate-900">{members.length}</div>
+                <div className="text-[10px] text-slate-500">Regular & Associate</div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+                <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Active Verified
+                </div>
+                <div className="text-xl font-black text-emerald-800">
+                  {members.filter((m) => m.kycStatus === 'VERIFIED').length}
+                </div>
+                <div className="text-[10px] text-emerald-700">Underwritten & good standing</div>
+              </div>
+
+              <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3.5 space-y-1">
+                <div className="text-[10px] font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" /> Pending Review
+                </div>
+                <div className="text-xl font-black text-amber-900 flex items-center gap-1.5">
+                  {members.filter((m) => m.kycStatus === 'PENDING_REVIEW').length}
+                  {members.filter((m) => m.kycStatus === 'PENDING_REVIEW').length > 0 && (
+                    <span className="text-[10px] font-bold bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded">Action Req</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-amber-700">Requires 4-item manual check</div>
+              </div>
+
+              <div className="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3.5 space-y-1">
+                <div className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Wallet className="w-3.5 h-3.5 text-indigo-600" /> Platform Escrow
+                </div>
+                <div className="text-xl font-black text-indigo-950 font-mono">
+                  ₱{coopPlatformEscrowBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-indigo-700">Coop Float (GL 1-01-05)</div>
+              </div>
+
+              <div className="bg-rose-50/60 border border-rose-200 rounded-xl p-3.5 space-y-1">
+                <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5 text-rose-600" /> Billed Onboarding
+                </div>
+                <div className="text-xl font-black text-rose-950 font-mono">
+                  ₱{coopOnboardingFeesTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-rose-700">₱15.00 billed per approved member</div>
+              </div>
+            </div>
+
             {/* Member Action Notification Toast */}
             {memberActionNotification && (
               <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-center justify-between shadow-sm animate-fade-in">
@@ -1529,8 +1702,30 @@ export default function AdminDashboard() {
                             <span className="truncate max-w-[200px]" title={m.idType}>{m.idType}</span>
                           </div>
                         </td>
-                        <td className="p-3 text-right font-medium text-slate-900">
-                          ₱{m.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        <td className="p-3 text-right">
+                          {m.sharePaymentStatus === 'UNPAID' ? (
+                            <div>
+                              <div className="font-semibold text-amber-700 font-mono">₱0.00</div>
+                              <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-200 font-bold px-1.5 py-0.5 rounded inline-block mt-0.5">
+                                UNPAID (₱{(m.initialPledge || 3000).toLocaleString()} Pledged)
+                              </span>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="font-semibold text-slate-900 font-mono">
+                                ₱{m.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </div>
+                              <div className="text-[10px] mt-0.5">
+                                {m.sharePaymentStatus === 'PAID_QRPH' ? (
+                                  <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+                                    <QrCode className="w-3 h-3 text-emerald-600" /> Paid via QR Ph
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500 font-medium">Paid via OTC</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </td>
                         <td className="p-3 text-slate-500 font-mono text-[11px]">{m.npcConsent}</td>
                         <td className="p-3 text-center">
@@ -1551,34 +1746,53 @@ export default function AdminDashboard() {
                           )}
                         </td>
                         <td className="p-3 text-right whitespace-nowrap">
-                          {m.kycStatus === 'PENDING_REVIEW' ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedMemberForReview(m);
-                                setMemberReviewNotes(
-                                  m.reviewNotes ||
-                                    'PMES attendance certificate verified and eKYC biometrics cleared. Eligible for membership admission under RA 9520.'
-                                );
-                              }}
-                              className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1.5 shadow-sm transition"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              Review & Approve
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedMemberForReview(m);
-                                setMemberReviewNotes(m.reviewNotes || '');
-                              }}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-slate-200 transition"
-                            >
-                              <Eye className="w-3.5 h-3.5 text-slate-500" />
-                              View Dossier
-                            </button>
-                          )}
+                          <div className="flex items-center justify-end gap-1.5">
+                            {m.kycStatus === 'PENDING_REVIEW' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedMemberForReview(m);
+                                  setReviewChecks({ pmes: false, ekyc: false, amla: false, capitalBuild: false });
+                                  setMemberReviewNotes(
+                                    m.reviewNotes ||
+                                      'PMES attendance certificate verified and eKYC biometrics cleared. Eligible for membership admission under RA 9520.'
+                                  );
+                                }}
+                                className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1.5 shadow-sm transition"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Review & Underwrite
+                              </button>
+                            ) : (
+                              <>
+                                {m.kycStatus === 'VERIFIED' && m.sharePaymentStatus === 'UNPAID' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSharePaymentMember(m);
+                                      setShowSharePaymentModal(true);
+                                    }}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 shadow-sm transition"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5" />
+                                    Collect Share Capital
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedMemberForReview(m);
+                                    setReviewChecks({ pmes: true, ekyc: true, amla: true, capitalBuild: true });
+                                    setMemberReviewNotes(m.reviewNotes || '');
+                                  }}
+                                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-slate-200 transition"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-slate-500" />
+                                  View Dossier
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1642,8 +1856,111 @@ export default function AdminDashboard() {
                         <p className="text-amber-800 text-[11px] mt-0.5">
                           Membership review mandates statutory verification of: <strong>(1) PMES attendance certificate</strong> (Art. 26), 
                           <strong>(2) eKYC identity & biometrics</strong> (AMLA RA 9160), <strong>(3) AMLC / PEP watchlist clearance</strong>, and 
-                          <strong>(4) Minimum Share Capital subscription (CBU)</strong> prior to activation.
+                          <strong>(4) Capital Build-Up (CBU) subscription pledge</strong>. Under cooperative regulations, 
+                          <strong> Share Capital payment is deferred</strong> until committee approval is granted.
                         </p>
+                      </div>
+                    </div>
+
+                    {/* Visual Inspection Panel: Submitted Government ID & Live Facial Selfie */}
+                    <div className="bg-slate-900 text-white p-4 rounded-xl border border-slate-700 space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <Camera className="w-4 h-4 text-emerald-400" />
+                          <span className="font-bold text-xs uppercase tracking-wider text-slate-200">
+                            Manual Biometric Inspection: Submitted ID vs. Live Facial Selfie
+                          </span>
+                        </div>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold px-2 py-0.5 rounded">
+                          Biometric Match: {selectedMemberForReview.biometricScore || 98.4}% Confidence
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Visual Card 1: Submitted Government ID Document */}
+                        <div className="bg-gradient-to-br from-slate-800 to-slate-950 p-3.5 rounded-lg border border-slate-700 space-y-2.5 relative overflow-hidden">
+                          <div className="flex items-center justify-between border-b border-slate-700/80 pb-2">
+                            <div className="flex items-center gap-2">
+                              <CreditCard className="w-4 h-4 text-indigo-400" />
+                              <span className="font-bold text-xs text-white">Submitted Government ID</span>
+                            </div>
+                            <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/70 border border-indigo-700/50 px-1.5 py-0.5 rounded">
+                              MRZ / OCR Validated
+                            </span>
+                          </div>
+
+                          {/* Mock Graphic of ID Document Card */}
+                          <div className="bg-slate-800/90 border border-slate-600 rounded-lg p-3 flex gap-3 items-center">
+                            <div className="w-16 h-20 bg-slate-700 rounded-md border border-slate-500 flex flex-col items-center justify-center shrink-0 relative overflow-hidden shadow-inner">
+                              <User className="w-8 h-8 text-slate-300" />
+                              <span className="text-[8px] text-slate-300 font-bold mt-1">PHOTO</span>
+                              <div className="absolute bottom-0 inset-x-0 bg-indigo-600/80 text-[7px] text-center font-mono py-0.5 text-white">
+                                GOV ID
+                              </div>
+                            </div>
+                            <div className="space-y-1 text-[11px] flex-1">
+                              <div className="text-white font-bold text-xs">{selectedMemberForReview.name}</div>
+                              <div className="text-slate-300 text-[10px] flex justify-between">
+                                <span className="text-slate-400">ID Document:</span>
+                                <span className="font-medium text-slate-200">{selectedMemberForReview.idType}</span>
+                              </div>
+                              <div className="text-slate-300 text-[10px] flex justify-between">
+                                <span className="text-slate-400">ID Serial No:</span>
+                                <span className="font-mono text-emerald-300 font-semibold">{selectedMemberForReview.idNumber || 'P8942109B'}</span>
+                              </div>
+                              <div className="text-slate-300 text-[10px] flex justify-between">
+                                <span className="text-slate-400">Issuing State:</span>
+                                <span className="text-slate-300">Republic of the Philippines</span>
+                              </div>
+                              <div className="text-[9px] font-mono text-slate-400 truncate pt-0.5 border-t border-slate-700">
+                                MRZ: P&lt;PHL{selectedMemberForReview.name.replace(/\s+/g, '&lt;').toUpperCase()}&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Visual Card 2: Live Facial Liveness Selfie */}
+                        <div className="bg-gradient-to-br from-slate-800 to-slate-950 p-3.5 rounded-lg border border-slate-700 space-y-2.5 relative overflow-hidden">
+                          <div className="flex items-center justify-between border-b border-slate-700/80 pb-2">
+                            <div className="flex items-center gap-2">
+                              <Camera className="w-4 h-4 text-emerald-400" />
+                              <span className="font-bold text-xs text-white">Live Facial Liveness Capture</span>
+                            </div>
+                            <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/70 border border-emerald-700/50 px-1.5 py-0.5 rounded">
+                              3D Depth Verified
+                            </span>
+                          </div>
+
+                          {/* Mock Graphic of Live Selfie */}
+                          <div className="bg-slate-800/90 border border-slate-600 rounded-lg p-3 flex gap-3 items-center">
+                            <div className="w-16 h-20 bg-emerald-950/80 rounded-md border-2 border-emerald-500/70 flex flex-col items-center justify-center shrink-0 relative overflow-hidden shadow-inner">
+                              <User className="w-8 h-8 text-emerald-300" />
+                              <span className="text-[8px] text-emerald-300 font-bold mt-1">SELFIE</span>
+                              <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                              <div className="absolute bottom-0 inset-x-0 bg-emerald-700/90 text-[7px] text-center font-mono py-0.5 text-white">
+                                LIVE 3D
+                              </div>
+                            </div>
+                            <div className="space-y-1 text-[11px] flex-1">
+                              <div className="text-white font-bold text-xs">{selectedMemberForReview.name}</div>
+                              <div className="text-slate-300 text-[10px] flex justify-between">
+                                <span className="text-slate-400">Match Vector:</span>
+                                <span className="font-bold text-emerald-300">{selectedMemberForReview.biometricScore || 98.4}% (High)</span>
+                              </div>
+                              <div className="text-slate-300 text-[10px] flex justify-between">
+                                <span className="text-slate-400">Anti-Spoofing:</span>
+                                <span className="text-slate-200">Blink & Texture Passed</span>
+                              </div>
+                              <div className="text-slate-300 text-[10px] flex justify-between">
+                                <span className="text-slate-400">Captured At:</span>
+                                <span className="font-mono text-slate-300 text-[9px]">{selectedMemberForReview.pmesDate || 'Oct 08, 2026'} 10:14 AM</span>
+                              </div>
+                              <div className="text-[9px] text-emerald-400 pt-0.5 border-t border-slate-700 flex items-center gap-1 font-semibold">
+                                <CheckCircle2 className="w-3 h-3" /> Real human biometrics cleared
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1741,27 +2058,141 @@ export default function AdminDashboard() {
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-900 flex items-center gap-1.5">
                             <CreditCard className="w-4 h-4 text-amber-600" />
-                            4. Capital Build-Up (CBU)
+                            4. Capital Build-Up (CBU) Pledge
                           </span>
-                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> MET MINIMUM
+                          <span className={`font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                            selectedMemberForReview.sharePaymentStatus === 'UNPAID'
+                              ? 'bg-amber-100 text-amber-900 border-amber-200'
+                              : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                          }`}>
+                            <CheckCircle2 className="w-3 h-3" />
+                            {selectedMemberForReview.sharePaymentStatus === 'UNPAID' ? 'DEFERRED (POST-REVIEW)' : 'CAPITAL PAID'}
                           </span>
                         </div>
                         <div className="space-y-1 text-[11px] text-slate-600 pt-1">
                           <div className="flex justify-between">
                             <span className="text-slate-500">Subscribed Shares:</span>
-                            <span className="font-semibold text-slate-800">{selectedMemberForReview.sharesCount} Shares (@ ₱100/par)</span>
+                            <span className="font-semibold text-slate-800">
+                              {selectedMemberForReview.subscribedShares || selectedMemberForReview.sharesCount || 30} Shares (@ ₱100/par)
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Initial Pledge:</span>
+                            <span className="font-bold text-slate-900">
+                              ₱{(selectedMemberForReview.initialPledge || 3000).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-slate-500">Paid-Up Capital:</span>
-                            <span className="font-bold text-slate-900">₱{selectedMemberForReview.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            <span className={`font-mono font-bold ${selectedMemberForReview.paidUpShares > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              ₱{selectedMemberForReview.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Initial Savings Deposit:</span>
-                            <span className="font-semibold text-slate-800">₱{selectedMemberForReview.savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          <div className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-200">
+                            * Share capital payment is deferred until review passes. Payable via OTC (₱0 fee) or QR Ph (1.5% fee).
                           </div>
                         </div>
                       </div>
+                    </div>
+
+                    {/* Interactive Manual Checklist: 4 Mandatory Statutory Review Items */}
+                    <div className="bg-indigo-50/70 border-2 border-indigo-200 rounded-xl p-4 space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-indigo-700" />
+                          <span className="font-bold text-xs text-indigo-950 uppercase tracking-wider">
+                            Statutory Review Checklist (Reviewer Must Manually Confirm Each Item)
+                          </span>
+                        </div>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
+                          reviewChecks.pmes && reviewChecks.ekyc && reviewChecks.amla && reviewChecks.capitalBuild
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : 'bg-amber-100 text-amber-900 border border-amber-300'
+                        }`}>
+                          {[reviewChecks.pmes, reviewChecks.ekyc, reviewChecks.amla, reviewChecks.capitalBuild].filter(Boolean).length}/4 Confirmed
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        {/* Check 1: PMES */}
+                        <label className={`p-3 rounded-lg border flex items-start gap-2.5 cursor-pointer transition ${
+                          reviewChecks.pmes ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={reviewChecks.pmes}
+                            onChange={(e) => setReviewChecks((prev) => ({ ...prev, pmes: e.target.checked }))}
+                            className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                          />
+                          <div className="space-y-0.5">
+                            <div className="font-bold">1. Confirm PMES Certification</div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              Verified Pre-Membership Education Seminar certificate (RA 9520 Art. 26).
+                            </div>
+                          </div>
+                        </label>
+
+                        {/* Check 2: eKYC */}
+                        <label className={`p-3 rounded-lg border flex items-start gap-2.5 cursor-pointer transition ${
+                          reviewChecks.ekyc ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={reviewChecks.ekyc}
+                            onChange={(e) => setReviewChecks((prev) => ({ ...prev, ekyc: e.target.checked }))}
+                            className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                          />
+                          <div className="space-y-0.5">
+                            <div className="font-bold">2. Confirm eKYC & Biometrics</div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              Manually inspected submitted ID document against live selfie capture.
+                            </div>
+                          </div>
+                        </label>
+
+                        {/* Check 3: AMLA */}
+                        <label className={`p-3 rounded-lg border flex items-start gap-2.5 cursor-pointer transition ${
+                          reviewChecks.amla ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={reviewChecks.amla}
+                            onChange={(e) => setReviewChecks((prev) => ({ ...prev, amla: e.target.checked }))}
+                            className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                          />
+                          <div className="space-y-0.5">
+                            <div className="font-bold">3. Confirm AMLA RA 9160 & PEP</div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              Cleared AMLC Watchlist, PEP checks, and sanctions screening.
+                            </div>
+                          </div>
+                        </label>
+
+                        {/* Check 4: Capital Build */}
+                        <label className={`p-3 rounded-lg border flex items-start gap-2.5 cursor-pointer transition ${
+                          reviewChecks.capitalBuild ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={reviewChecks.capitalBuild}
+                            onChange={(e) => setReviewChecks((prev) => ({ ...prev, capitalBuild: e.target.checked }))}
+                            className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                          />
+                          <div className="space-y-0.5">
+                            <div className="font-bold">4. Confirm Capital Build Pledge</div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              Verified subscribed share commitment (Payment deferred until review passes).
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+
+                      {!(reviewChecks.pmes && reviewChecks.ekyc && reviewChecks.amla && reviewChecks.capitalBuild) && selectedMemberForReview.kycStatus === 'PENDING_REVIEW' && (
+                        <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-[11px] text-amber-900 flex items-center gap-2">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span>Reviewer must manually check all 4 statutory items above to unlock member approval.</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Underwriting Resolution / Committee Decision Box */}
@@ -1814,6 +2245,7 @@ export default function AdminDashboard() {
                           </button>
                           <button
                             type="button"
+                            disabled={!(reviewChecks.pmes && reviewChecks.ekyc && reviewChecks.amla && reviewChecks.capitalBuild)}
                             onClick={() =>
                               setMemberConfirmModal({
                                 isOpen: true,
@@ -1822,26 +2254,40 @@ export default function AdminDashboard() {
                                 notes: memberReviewNotes,
                               })
                             }
-                            className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition flex items-center gap-1.5"
+                            className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition flex items-center gap-1.5"
                           >
                             <CheckCircle2 className="w-4 h-4" /> Approve & Activate Membership
                           </button>
                         </>
                       ) : selectedMemberForReview.kycStatus === 'VERIFIED' ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setMemberConfirmModal({
-                              isOpen: true,
-                              action: 'REJECT',
-                              member: selectedMemberForReview,
-                              notes: memberReviewNotes || 'Deactivated by cooperative administrator.',
-                            })
-                          }
-                          className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg transition flex items-center gap-1.5"
-                        >
-                          <Ban className="w-3.5 h-3.5 text-slate-500" /> Set Status to Inactive
-                        </button>
+                        <>
+                          {selectedMemberForReview.sharePaymentStatus === 'UNPAID' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSharePaymentMember(selectedMemberForReview);
+                                setShowSharePaymentModal(true);
+                              }}
+                              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition flex items-center gap-1.5"
+                            >
+                              <CreditCard className="w-4 h-4" /> Collect Share Capital
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMemberConfirmModal({
+                                isOpen: true,
+                                action: 'REJECT',
+                                member: selectedMemberForReview,
+                                notes: memberReviewNotes || 'Deactivated by cooperative administrator.',
+                              })
+                            }
+                            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg transition flex items-center gap-1.5"
+                          >
+                            <Ban className="w-3.5 h-3.5 text-slate-500" /> Set Status to Inactive
+                          </button>
+                        </>
                       ) : (
                         <button
                           type="button"
@@ -1890,16 +2336,34 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1.5">
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-2">
                     {memberConfirmModal.action === 'APPROVE' ? (
                       <>
-                        <p className="font-semibold text-emerald-900">
-                          Activate member as {memberConfirmModal.member.classification} Member in good standing?
+                        <div className="font-semibold text-emerald-950 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          Activate {memberConfirmModal.member.name} as {memberConfirmModal.member.classification} Member?
+                        </div>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
+                          This executes the statutory admission resolution under RA 9520 Art. 26.
                         </p>
-                        <p className="text-slate-600 text-[11px]">
-                          This executes the committee resolution under RA 9520 Art. 26. The member will gain immediate voting rights 
-                          (for regular members), dividend accrual eligibility, savings accounts, and borrowing capability.
-                        </p>
+                        
+                        <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 text-[11px] space-y-1">
+                          <div className="font-bold flex items-center gap-1">
+                            <Receipt className="w-3.5 h-3.5 text-rose-600" /> Platform Onboarding Billing (₱15.00)
+                          </div>
+                          <div>
+                            Approving this member bills <strong>₱15.00</strong> to Bayani Cooperative (Electronic Invoice with 12% Output VAT).
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] space-y-1">
+                          <div className="font-bold flex items-center gap-1">
+                            <CreditCard className="w-3.5 h-3.5 text-amber-700" /> Deferred Share Capital Collection
+                          </div>
+                          <div>
+                            Member has pledged <strong>₱{(memberConfirmModal.member.initialPledge || 3000).toLocaleString()}</strong>. They can now pay via <strong>Over-the-Counter (₱0 fee)</strong> or <strong>QR Ph (1.5% fee)</strong>.
+                          </div>
+                        </div>
                       </>
                     ) : (
                       <>
@@ -1931,8 +2395,168 @@ export default function AdminDashboard() {
                       }`}
                     >
                       {memberConfirmModal.action === 'APPROVE'
-                        ? 'Confirm & Activate Member'
+                        ? 'Confirm Approval (Charge Coop ₱15)'
                         : 'Confirm Deactivation'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal: Share Capital Settlement (OTC or QR Ph with 1.5% fee to Platform Escrow) */}
+            {showSharePaymentModal && sharePaymentMember && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-5 animate-fade-in">
+                  <div className="flex justify-between items-start border-b border-slate-100 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="bg-emerald-100 text-emerald-800 font-mono text-[10px] font-bold px-2 py-0.5 rounded">
+                          {sharePaymentMember.memberNo}
+                        </span>
+                        <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded">
+                          CBU SETTLEMENT
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-bold text-slate-900">Collect Initial Share Capital</h3>
+                      <p className="text-xs text-slate-500">{sharePaymentMember.name}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSharePaymentModal(false)}
+                      className="text-slate-400 hover:text-slate-600 p-1"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Pledge Overview */}
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Subscribed Shares:</span>
+                      <strong className="text-slate-900 font-mono">
+                        {sharePaymentMember.subscribedShares || 30} Common Shares (@ ₱100.00 par)
+                      </strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Pledged Capital Amount:</span>
+                      <strong className="text-emerald-700 font-mono text-sm">
+                        ₱{(sharePaymentMember.initialPledge || 3000).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Payment Method Selector */}
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-slate-800 block">Select Payment Channel:</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Option 1: Over-the-counter */}
+                      <button
+                        type="button"
+                        onClick={() => setSharePaymentMethod('OTC')}
+                        className={`p-3.5 border rounded-xl text-left transition-all ${
+                          sharePaymentMethod === 'OTC'
+                            ? 'border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <Landmark className="w-4 h-4 text-emerald-700" />
+                          <span className="text-xs font-bold text-slate-900">Over-The-Counter</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500">Branch Cashier (₱0 fee)</div>
+                      </button>
+
+                      {/* Option 2: QR Payment */}
+                      <button
+                        type="button"
+                        onClick={() => setSharePaymentMethod('QRPH')}
+                        className={`p-3.5 border rounded-xl text-left transition-all ${
+                          sharePaymentMethod === 'QRPH'
+                            ? 'border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <QrCode className="w-4 h-4 text-emerald-700" />
+                          <span className="text-xs font-bold text-slate-900">PayMongo QR Ph</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500">1.5% convenience fee</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Payment Breakdown Calculation */}
+                  {(() => {
+                    const pledge = sharePaymentMember.initialPledge || 3000;
+                    const convenienceFee = sharePaymentMethod === 'QRPH' ? Math.round(pledge * 0.015 * 100) / 100 : 0;
+                    const totalPayable = pledge + convenienceFee;
+
+                    return (
+                      <div className="space-y-3 text-xs">
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="text-slate-600">Share Capital Principal:</span>
+                            <span className="font-mono font-semibold text-slate-900">₱{pledge.toFixed(2)}</span>
+                          </div>
+                          {sharePaymentMethod === 'QRPH' && (
+                            <div className="flex justify-between text-amber-700">
+                              <span>Convenience Fee (1.5%):</span>
+                              <span className="font-mono font-semibold">+ ₱{convenienceFee.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="border-t border-slate-200 pt-1.5 flex justify-between font-bold text-slate-900">
+                            <span>Total Settlement:</span>
+                            <span className="font-mono text-emerald-700 text-sm">₱{totalPayable.toFixed(2)}</span>
+                          </div>
+                        </div>
+
+                        {sharePaymentMethod === 'QRPH' ? (
+                          <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-2">
+                            <div className="flex items-center gap-2 text-indigo-950 font-bold">
+                              <Wallet className="w-4 h-4 text-indigo-600" />
+                              <span>Cooperative Platform Escrow Credit Rule</span>
+                            </div>
+                            <p className="text-[11px] text-indigo-900 leading-relaxed">
+                              Share capital paid via QR payment (<strong>₱{pledge.toLocaleString()}</strong>) will be credited directly to 
+                              <strong> Bayani Cooperative&apos;s Platform Escrow</strong> (`1-01-05`). The 1.5% convenience fee (₱{convenienceFee.toFixed(2)}) is deducted for payment gateway processing.
+                            </p>
+
+                            {/* Dynamic QR Ph Visual Mock */}
+                            <div className="bg-white border border-indigo-200 rounded-lg p-3 flex items-center justify-center gap-3">
+                              <div className="w-20 h-20 bg-slate-900 text-white rounded-lg flex flex-col items-center justify-center text-[8px] font-mono p-1 text-center">
+                                <QrCode className="w-6 h-6 text-white mb-1" />
+                                ₱{totalPayable.toFixed(2)}
+                              </div>
+                              <div className="space-y-0.5 text-[10px] text-slate-600">
+                                <div className="font-bold text-slate-800">Scan via GCash, Maya, or Bank App</div>
+                                <div className="font-mono text-[9px] text-slate-400">EMVCo QR Ph: 000201010212...</div>
+                                <div className="text-emerald-700 font-semibold">Instant Real-Time Settlement</div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600">
+                            <span className="font-bold text-slate-800">Branch Cashier Official Receipt:</span> Receive ₱{pledge.toLocaleString()} cash from member. An Official Receipt (OR) will be issued and booked under Common Stock (`3-01-03`).
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setShowSharePaymentModal(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteShareCapitalPayment}
+                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition shadow-sm flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Confirm & Record Share Capital Payment
                     </button>
                   </div>
                 </div>

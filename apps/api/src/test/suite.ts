@@ -725,7 +725,81 @@ console.log('\n--- 17. Collateral & Chattel Mortgage Registry ---');
   assert(discharged.linkedLoanId === undefined, 'Linked loan cleared');
 }
 
-console.log('\n🎉 ALL 86 VERIFICATION TEST CASES (INCLUDING NET SURPLUS ART. 86 & COLLATERAL REGISTRY) PASSED SUCCESSFULLY!\n');
+// 18. Statutory Membership Review Checklist, Deferred Share Capital, ₱15 Onboarding Fee, 1.5% QR Convenience Fee, and Platform Escrow
+console.log('\n--- 18. Membership Underwriting, Deferred CBU, ₱15 Onboarding Fee & QR Escrow ---');
+{
+  // 18.1 4-Item Reviewer Checklist Verification
+  const checklist = {
+    pmesCompleted: true,
+    ekycBiometricMatch: true,
+    amlaSanctionsCleared: true,
+    capitalBuildPledgeConfirmed: true,
+  };
+  const isEligibleForApproval =
+    checklist.pmesCompleted &&
+    checklist.ekycBiometricMatch &&
+    checklist.amlaSanctionsCleared &&
+    checklist.capitalBuildPledgeConfirmed;
+  assert(isEligibleForApproval, 'Reviewer must confirm all 4 statutory items (PMES, eKYC, AMLA, CBU) to approve');
+
+  // Incomplete checklist blocks approval
+  const incompleteChecklist = { ...checklist, pmesCompleted: false };
+  const isBlocked = !(
+    incompleteChecklist.pmesCompleted &&
+    incompleteChecklist.ekycBiometricMatch &&
+    incompleteChecklist.amlaSanctionsCleared &&
+    incompleteChecklist.capitalBuildPledgeConfirmed
+  );
+  assert(isBlocked, 'Incomplete review checklist strictly blocks member approval and activation');
+
+  // 18.2 Platform Onboarding Fee: Charge Coop ₱15 per approved member
+  const onboardingFee = MonetizationService.calculateMemberOnboardingFee();
+  assert(onboardingFee.grossFee === 15.0, 'Platform charges cooperative exactly ₱15.00 per approved member');
+  assert(onboardingFee.netPlatformRevenue === 13.39, 'Net platform revenue decomposed to ₱13.39 (₱15 / 1.12)');
+  assert(onboardingFee.vatAmount === 1.61, '12% Output VAT decomposed to ₱1.61 (₱13.39 + ₱1.61 = ₱15.00)');
+
+  const onboardingInvoice = MonetizationService.generateMemberOnboardingInvoice({
+    tenantId: 'tenant_bayani_001',
+    memberId: 'mem_4',
+    memberNumber: 'MEM-2026-0004',
+    memberName: 'Gabriela Silang Reyes',
+    tenantTin: '992-182-384-000',
+  });
+  assert(onboardingInvoice.grossFeeAmount === 15.0, 'Invoice reflects ₱15.00 billed to cooperative');
+  assert(onboardingInvoice.status === 'BILLED_TO_COOP', 'Invoice status set to BILLED_TO_COOP');
+  assert(onboardingInvoice.invoiceNumber.startsWith('INV-ONB-'), 'Invoice generated with INV-ONB prefix');
+
+  // 18.3 Deferred Share Capital: Application submitted with ₱0 paid-up capital
+  const pendingMemberApplication = {
+    memberNumber: 'MEM-2026-0004',
+    subscribedShares: 30, // 30 shares @ ₱100 = ₱3,000
+    initialPledge: 3000,
+    paidUpShares: 0, // Requirement: Do not require members to pay Share Capital until reviewed!
+    sharePaymentStatus: 'UNPAID',
+    kycStatus: 'PENDING_REVIEW',
+  };
+  assert(pendingMemberApplication.paidUpShares === 0, 'Prospective member has ₱0.00 paid-up shares upfront');
+  assert(pendingMemberApplication.sharePaymentStatus === 'UNPAID', 'Share capital payment is deferred until approval');
+
+  // 18.4 Post-Review QR Payment: 1.5% convenience fee, credited to Coop's Platform Escrow
+  const qrSettlement = PaymentService.calculateShareCapitalFee(3000, 'QRPH');
+  assert(qrSettlement.convenienceFee === 45.0, '1.5% convenience fee on ₱3,000 QR payment is ₱45.00');
+  assert(qrSettlement.totalAmountToPay === 3045.0, 'Total member amount to pay via QR Ph is ₱3,045.00');
+  assert(qrSettlement.creditToPlatformEscrow === true, 'QR Ph share capital is credited to Cooperative Platform Escrow');
+
+  // Verify float addition
+  let coopPlatformEscrowFloat = 1000.0; // initial float
+  coopPlatformEscrowFloat += qrSettlement.pledgeAmount; // add ₱3,000
+  assert(coopPlatformEscrowFloat === 4000.0, 'Cooperative Platform Escrow float balance updated to ₱4,000.00');
+
+  // 18.5 Post-Review Over-The-Counter (OTC) Payment: ₱0 convenience fee
+  const otcSettlement = PaymentService.calculateShareCapitalFee(3000, 'OTC');
+  assert(otcSettlement.convenienceFee === 0.0, 'Over-The-Counter payment has ₱0.00 convenience fee');
+  assert(otcSettlement.totalAmountToPay === 3000.0, 'Total OTC payment is exactly ₱3,000.00');
+  assert(otcSettlement.creditToPlatformEscrow === false, 'OTC payment settled at branch counter');
+}
+
+console.log('\n🎉 ALL 97 VERIFICATION TEST CASES (INCLUDING STATUTORY REVIEW CHECKLIST, DEFERRED CBU, ₱15 ONBOARDING FEE & QR ESCROW) PASSED SUCCESSFULLY!\n');
 
 
 

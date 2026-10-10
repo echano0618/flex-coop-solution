@@ -88,4 +88,24 @@ export class PaymentService {
       excessToSavings,
     };
   }
+
+  /**
+   * Calculates convenience fee for Share Capital settlement:
+   * OTC: ₱0.00
+   * QR Ph: Exactly 1.5% convenience fee
+   */
+  static calculateShareCapitalFee(pledgeAmount: number, channel: 'OTC' | 'QRPH'): {
+    pledgeAmount: number;
+    convenienceFee: number;
+    totalAmountToPay: number;
+    creditToPlatformEscrow: boolean;
+  } {
+    const convenienceFee = channel === 'QRPH' ? Math.round(pledgeAmount * 0.015 * 100) / 100 : 0.0;
+    return {
+      pledgeAmount,
+      convenienceFee,
+      totalAmountToPay: Math.round((pledgeAmount + convenienceFee) * 100) / 100,
+      creditToPlatformEscrow: channel === 'QRPH',
+    };
+  }
 }

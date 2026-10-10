@@ -719,10 +719,21 @@ export default function MemberRegisterPage() {
               </div>
             </div>
 
+            {/* Deferred Share Capital Notice Banner */}
+            <div className="bg-amber-950/50 border border-amber-600/50 rounded-xl p-4 flex items-start gap-3 text-xs text-amber-200">
+              <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-amber-300">Deferred Payment Policy (RA 9520 & CDA Underwriting)</div>
+                <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">
+                  You are <strong>not required to pay Share Capital today</strong>. Membership admission requires prior approval of your PMES certification and eKYC biometrics. Once approved by the committee, you can fulfill your share pledge via <strong>Over-the-Counter (₱0 fee)</strong> or <strong>QR Ph (1.5% convenience fee)</strong>.
+                </p>
+              </div>
+            </div>
+
             {/* Payment Rail for Paid-Up */}
             <div className="space-y-3">
               <label className="block text-xs font-medium text-slate-300">
-                Payment Channel for Initial Paid-Up Capital
+                Preferred Post-Approval Settlement Channel
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label
@@ -743,7 +754,7 @@ export default function MemberRegisterPage() {
                     <QrCode className="w-4 h-4 text-emerald-400" />
                     <div>
                       <div className="text-xs font-bold">PayMongo Dynamic QR Ph</div>
-                      <div className="text-[10px] text-slate-400">GCash, Maya, ShopeePay, BDO, BPI</div>
+                      <div className="text-[10px] text-slate-400">1.5% convenience fee • Instant float</div>
                     </div>
                   </div>
                 </label>
@@ -766,7 +777,7 @@ export default function MemberRegisterPage() {
                     <DollarSign className="w-4 h-4 text-emerald-400" />
                     <div>
                       <div className="text-xs font-bold">Over-The-Counter Branch Cashier</div>
-                      <div className="text-[10px] text-slate-400">Pay cash in branch during orientation</div>
+                      <div className="text-[10px] text-slate-400">₱0.00 fee • Cash at teller counter</div>
                     </div>
                   </div>
                 </label>
