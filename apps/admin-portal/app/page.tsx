@@ -1433,51 +1433,20 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col lg:flex-row">
       {/* Desktop App Drawer on Left Side */}
       <aside className="hidden lg:flex flex-col w-64 xl:w-72 bg-slate-900 text-slate-200 border-r border-slate-800 shrink-0 sticky top-0 h-screen z-40">
-        {/* Drawer Header & Brand Identity */}
+        {/* Drawer Header & Coop Brand Identity */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-lg shadow-md shrink-0">
-              F
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-sm text-white leading-tight truncate">
-                Flex Coop Solution
-              </div>
-              <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>CDA Licensed SaaS</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Tenant Scoping */}
-        <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 text-xs">
-          <div className="flex items-center gap-2 text-slate-300">
-            <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span className="font-semibold text-slate-200 truncate">Bayani Cooperative</span>
-          </div>
-          <div className="text-[10px] font-mono text-emerald-400 pl-5 truncate">
-            bayani-flexcoop.tuntongtech.com
-          </div>
-        </div>
-
-        {/* Staff Role Persona & Permission Badge */}
-        <div className="p-4 mx-3 my-3 bg-slate-800/70 rounded-xl border border-slate-700/60 shadow-inner">
-          <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0`}>
-              {currentStaff.initials}
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold shadow-md shrink-0">
+              <Building2 className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="font-bold text-xs text-white truncate">{currentStaff.name}</div>
-              <div className="text-[11px] text-emerald-400 font-medium truncate">{currentStaff.roleTitle}</div>
+              <div className="font-bold text-sm text-white leading-tight truncate">
+                Bayani Cooperative
+              </div>
+              <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                Powered by Tuntong Tech Solution
+              </div>
             </div>
-          </div>
-          <div className="mt-2.5 pt-2 border-t border-slate-700/60 flex items-center justify-between text-[10px]">
-            <span className="text-slate-400">Role Permissions:</span>
-            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold px-2 py-0.5 rounded font-mono">
-              {visibleTabs.length} of {ALL_MODULE_TABS.length} Modules
-            </span>
           </div>
         </div>
 
@@ -1516,21 +1485,6 @@ export default function AdminDashboard() {
 
         {/* Drawer Footer Utilities */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
-          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-[11px]">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-              <span className="text-slate-300 font-mono text-[10px]">Cloud Firestore</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleSyncFirestore}
-              disabled={firestoreSyncStatus === 'SYNCING'}
-              className="text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-mono font-bold transition disabled:opacity-50"
-            >
-              {firestoreSyncStatus === 'SYNCING' ? 'Syncing...' : firestoreSyncStatus === 'SYNCED' ? '✓ Synced' : 'Sync'}
-            </button>
-          </div>
-
           <Link
             href="/member"
             className="flex items-center justify-between p-2 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-800/50 text-emerald-300 transition text-[11px] font-semibold"
@@ -1551,52 +1505,26 @@ export default function AdminDashboard() {
           <aside className="fixed inset-y-0 left-0 w-72 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col z-50 shadow-2xl overflow-y-auto">
             {/* Mobile Drawer Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-lg shadow-md shrink-0">
-                  F
+              <div className="flex items-center space-x-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold shadow-md shrink-0">
+                  <Building2 className="w-5 h-5 text-white" />
                 </div>
-                <div>
-                  <div className="font-bold text-sm text-white leading-tight">Flex Coop Solution</div>
-                  <div className="text-[10px] text-emerald-400 font-medium">CDA Licensed SaaS</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-sm text-white leading-tight truncate">
+                    Bayani Cooperative
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                    Powered by Tuntong Tech Solution
+                  </div>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsMobileDrawerOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
-            </div>
-
-            {/* Mobile Tenant Scoping */}
-            <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 text-xs">
-              <div className="flex items-center gap-2 text-slate-300">
-                <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span className="font-semibold text-slate-200 truncate">Bayani Cooperative</span>
-              </div>
-              <div className="text-[10px] font-mono text-emerald-400 pl-5 truncate">
-                bayani-flexcoop.tuntongtech.com
-              </div>
-            </div>
-
-            {/* Mobile Staff Card */}
-            <div className="p-4 mx-3 my-3 bg-slate-800/70 rounded-xl border border-slate-700/60">
-              <div className="flex items-center gap-2.5">
-                <div className={`w-8 h-8 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0`}>
-                  {currentStaff.initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold text-xs text-white truncate">{currentStaff.name}</div>
-                  <div className="text-[11px] text-emerald-400 font-medium truncate">{currentStaff.roleTitle}</div>
-                </div>
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-700/60 flex items-center justify-between text-[10px]">
-                <span className="text-slate-400">Permissions:</span>
-                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold px-2 py-0.5 rounded font-mono">
-                  {visibleTabs.length} Modules Allowed
-                </span>
-              </div>
             </div>
 
             {/* Mobile Navigation Links */}
@@ -1665,7 +1593,7 @@ export default function AdminDashboard() {
               </button>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium truncate">
-                  <span>Flex Coop</span>
+                  <span>Bayani Cooperative</span>
                   <span>/</span>
                   <span className="text-emerald-700 font-semibold truncate">{currentModule?.label || 'Overview'}</span>
                 </div>
