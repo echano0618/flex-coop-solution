@@ -50,6 +50,7 @@ const DEFAULT_LOAN_PRODUCTS = [
     coMakerRuleDescription: 'Requires 1 active co-maker in good standing with min ₱5,000 paid-up share capital. Co-maker must key in Member ID and sign solidary undertaking.',
     requiresCollateral: false,
     isActive: true,
+    status: 'ACTIVE',
   },
   {
     id: 'prod_emergency',
@@ -69,6 +70,7 @@ const DEFAULT_LOAN_PRODUCTS = [
     coMakerRuleDescription: 'Requires 1 co-maker who has completed PMES and has active cooperative savings.',
     requiresCollateral: false,
     isActive: true,
+    status: 'ACTIVE',
   },
   {
     id: 'prod_educational',
@@ -88,6 +90,7 @@ const DEFAULT_LOAN_PRODUCTS = [
     coMakerRuleDescription: 'Co-maker optional; borrower must submit certificate of school matriculation.',
     requiresCollateral: false,
     isActive: true,
+    status: 'ACTIVE',
   },
 ];
 
@@ -158,7 +161,10 @@ export default function MemberPortalPage() {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
             setLoanProducts(parsed);
-            setSelectedProductId(parsed[0].id);
+            const activeOnes = parsed.filter((p: any) => p.isActive !== false && p.status !== 'INACTIVE');
+            if (activeOnes.length > 0) {
+              setSelectedProductId(activeOnes[0].id);
+            }
           }
         } catch (e) {
           console.error('Failed to parse loan products:', e);
@@ -177,6 +183,10 @@ export default function MemberPortalPage() {
               if (!map.has(p.code || p.id)) map.set(p.code || p.id, p);
             });
             const merged = Array.from(map.values());
+            const activeOnes = merged.filter((p: any) => p.isActive !== false && p.status !== 'INACTIVE');
+            if (activeOnes.length > 0 && !activeOnes.some((p: any) => p.id === selectedProductId)) {
+              setSelectedProductId(activeOnes[0].id);
+            }
             return merged;
           });
         }
@@ -184,7 +194,13 @@ export default function MemberPortalPage() {
       .catch(() => {});
   }, []);
 
-  const selectedProduct = loanProducts.find((p) => p.id === selectedProductId) || loanProducts[0] || DEFAULT_LOAN_PRODUCTS[0];
+  // Show only ACTIVE products to members for new loan applications
+  const activeLoanProducts = loanProducts.filter((p) => p.isActive !== false && p.status !== 'INACTIVE');
+  const selectedProduct =
+    activeLoanProducts.find((p) => p.id === selectedProductId) ||
+    activeLoanProducts[0] ||
+    loanProducts[0] ||
+    DEFAULT_LOAN_PRODUCTS[0];
 
   // Member Loan Application State
   const [loanAmount, setLoanAmount] = useState<number>(50000);
@@ -608,39 +624,45 @@ export default function MemberPortalPage() {
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-2">1. Select Loan Product / Offer</label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
-                      {loanProducts.map((p) => {
-                        const isSelected = selectedProductId === p.id;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedProductId(p.id);
-                              if (loanAmount > p.maxAmount) setLoanAmount(p.maxAmount);
-                              if (loanAmount < p.minAmount) setLoanAmount(p.minAmount);
-                              if (loanTerm > p.maxTermMonths) setLoanTerm(p.maxTermMonths);
-                            }}
-                            className={`p-3 rounded-xl border text-left transition-colors relative ${
-                              isSelected
-                                ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 shadow-xs'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <span className="text-xs font-bold">{p.name}</span>
-                              <span className="text-[10px] font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-500">
-                                {p.code}
-                              </span>
-                            </div>
-                            <div className="text-[11px] font-normal text-slate-500 mt-1">
-                              {(p.annualInterestRate * 100).toFixed(1)}% p.a. • Up to {p.maxTermMonths} mos
-                            </div>
-                            <div className="text-[10px] text-emerald-700 font-medium mt-1">
-                              ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}
-                            </div>
-                          </button>
-                        );
-                      })}
+                      {activeLoanProducts.length === 0 ? (
+                        <div className="col-span-2 p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs">
+                          No active loan products are currently available for new applications. Please contact the cooperative office.
+                        </div>
+                      ) : (
+                        activeLoanProducts.map((p) => {
+                          const isSelected = selectedProductId === p.id;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedProductId(p.id);
+                                if (loanAmount > p.maxAmount) setLoanAmount(p.maxAmount);
+                                if (loanAmount < p.minAmount) setLoanAmount(p.minAmount);
+                                if (loanTerm > p.maxTermMonths) setLoanTerm(p.maxTermMonths);
+                              }}
+                              className={`p-3 rounded-xl border text-left transition-colors relative ${
+                                isSelected
+                                  ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 shadow-xs'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs font-bold">{p.name}</span>
+                                <span className="text-[10px] font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-500">
+                                  {p.code}
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-normal text-slate-500 mt-1">
+                                {(p.annualInterestRate * 100).toFixed(1)}% p.a. • Up to {p.maxTermMonths} mos
+                              </div>
+                              <div className="text-[10px] text-emerald-700 font-medium mt-1">
+                                ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
 

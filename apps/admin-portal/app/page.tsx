@@ -33,6 +33,10 @@ import {
   FileCheck,
   RefreshCw,
   TrendingUp,
+  Search,
+  Filter,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 
 type TabType = 'overview' | 'members' | 'products' | 'los' | 'calculator' | 'collateral' | 'cashier' | 'accounting' | 'surplus' | 'invoices' | 'reports';
@@ -140,6 +144,7 @@ const DEFAULT_LOAN_PRODUCTS = [
     coMakerRuleDescription: 'Requires 1 active co-maker in good standing with min ₱5,000 paid-up share capital. Co-maker must key in Member ID and sign solidary undertaking.',
     requiresCollateral: false,
     isActive: true,
+    status: 'ACTIVE',
   },
   {
     id: 'prod_emergency',
@@ -159,6 +164,7 @@ const DEFAULT_LOAN_PRODUCTS = [
     coMakerRuleDescription: 'Requires 1 co-maker who has completed PMES and has active cooperative savings.',
     requiresCollateral: false,
     isActive: true,
+    status: 'ACTIVE',
   },
   {
     id: 'prod_educational',
@@ -178,6 +184,7 @@ const DEFAULT_LOAN_PRODUCTS = [
     coMakerRuleDescription: 'Co-maker optional; borrower must submit certificate of school matriculation.',
     requiresCollateral: false,
     isActive: true,
+    status: 'ACTIVE',
   },
 ];
 
@@ -302,6 +309,7 @@ export default function AdminDashboard() {
   const [newProductRequiresCollateral, setNewProductRequiresCollateral] = useState<boolean>(false);
   const [newProductServiceFeeRate, setNewProductServiceFeeRate] = useState<number>(1.5);
   const [newProductFinesRate, setNewProductFinesRate] = useState<number>(3.0);
+  const [newProductStatus, setNewProductStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
 
   const handleAddLoanProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,7 +330,8 @@ export default function AdminDashboard() {
       minCoMakers: newProductRequiresCoMaker ? Number(newProductMinCoMakers) : 0,
       coMakerRuleDescription: newProductCoMakerRule,
       requiresCollateral: newProductRequiresCollateral,
-      isActive: true,
+      isActive: newProductStatus === 'ACTIVE',
+      status: newProductStatus,
     };
 
     const updated = [createdProduct, ...loanProducts];
@@ -341,9 +350,43 @@ export default function AdminDashboard() {
       console.warn('API sync warning:', err);
     }
 
-    setProductSaveNotification(`Loan Product "${createdProduct.name}" (${createdProduct.code}) saved successfully to database & registry!`);
+    setProductSaveNotification(`Loan Product "${createdProduct.name}" (${createdProduct.code}) saved with status ${newProductStatus}!`);
     setTimeout(() => setProductSaveNotification(null), 5000);
     setShowProductModal(false);
+  };
+
+  const handleToggleProductStatus = async (productId: string) => {
+    const targetProduct = loanProducts.find((p) => p.id === productId);
+    if (!targetProduct) return;
+    const newIsActive = targetProduct.isActive === false ? true : false;
+    const newStatus = newIsActive ? 'ACTIVE' : 'INACTIVE';
+
+    const updated = loanProducts.map((p) =>
+      p.id === productId ? { ...p, isActive: newIsActive, status: newStatus } : p
+    );
+    setLoanProducts(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('flexcoop_loan_products', JSON.stringify(updated));
+    }
+
+    try {
+      await fetch(`http://localhost:4000/api/v1/loan-products/${productId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: newIsActive }),
+      });
+    } catch (err) {
+      console.warn('API sync warning:', err);
+    }
+
+    setProductSaveNotification(
+      `Product "${targetProduct.name}" is now ${newStatus}. ${
+        newIsActive
+          ? 'Now visible to members for applications.'
+          : 'Hidden from new member applications; existing loans remain active.'
+      }`
+    );
+    setTimeout(() => setProductSaveNotification(null), 5000);
   };
 
   // Collaterals & Chattel Mortgages State
@@ -465,7 +508,11 @@ export default function AdminDashboard() {
     setSurplusPostedStatus(`Successfully posted Net Surplus Distribution voucher ${voucherRef} to CDA General Ledger! Debits: ₱${computedNetSurplus.toLocaleString()} == Credits: ₱${computedNetSurplus.toLocaleString()} (STRICTLY BALANCED).`);
   };
 
-  // Members Simulation State
+  // Members Simulation State & Directory Filters
+  const [memberSearchQuery, setMemberSearchQuery] = useState<string>('');
+  const [memberClassificationFilter, setMemberClassificationFilter] = useState<string>('ALL');
+  const [memberStatusFilter, setMemberStatusFilter] = useState<string>('ALL');
+
   const [members, setMembers] = useState([
     {
       id: 'mem_1',
@@ -495,7 +542,120 @@ export default function AdminDashboard() {
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 180.191.22.45)',
     },
+    {
+      id: 'mem_3',
+      memberNo: 'MEM-2026-0003',
+      name: 'Antonio Luna Valenzuela',
+      email: 'antonio.luna@gmail.com',
+      classification: 'ASSOCIATE',
+      kycStatus: 'VERIFIED',
+      idType: 'PhilHealth ID (Encrypted SPI)',
+      paidUpShares: 5000,
+      sharesCount: 50,
+      savingsBalance: 1200,
+      loanBalance: 0,
+      npcConsent: 'Agreed (IP: 112.198.88.21)',
+    },
+    {
+      id: 'mem_4',
+      memberNo: 'MEM-2026-0004',
+      name: 'Gabriela Silang Reyes',
+      email: 'gabriela.silang@outlook.com',
+      classification: 'REGULAR',
+      kycStatus: 'PENDING_REVIEW',
+      idType: 'Passport (SPI Biometric Review)',
+      paidUpShares: 3000,
+      sharesCount: 30,
+      savingsBalance: 500,
+      loanBalance: 0,
+      npcConsent: 'Agreed (IP: 49.144.120.89)',
+    },
+    {
+      id: 'mem_5',
+      memberNo: 'MEM-2026-0005',
+      name: 'Emilio Aguinaldo Famy',
+      email: 'emilio.aguinaldo@gmail.com',
+      classification: 'ASSOCIATE',
+      kycStatus: 'INACTIVE',
+      idType: 'UMID Card (Encrypted SPI)',
+      paidUpShares: 2000,
+      sharesCount: 20,
+      savingsBalance: 100,
+      loanBalance: 0,
+      npcConsent: 'Agreed (IP: 124.106.18.99)',
+    },
   ]);
+
+  const filteredMembers = members.filter((m) => {
+    const q = memberSearchQuery.toLowerCase().trim();
+    const matchesQuery =
+      !q ||
+      m.memberNo.toLowerCase().includes(q) ||
+      m.name.toLowerCase().includes(q) ||
+      (m.email && m.email.toLowerCase().includes(q));
+    const matchesClass =
+      memberClassificationFilter === 'ALL' || m.classification === memberClassificationFilter;
+    const matchesStatus =
+      memberStatusFilter === 'ALL' || m.kycStatus === memberStatusFilter;
+    return matchesQuery && matchesClass && matchesStatus;
+  });
+
+  // Collateral Registry Search State
+  const [collateralSearchQuery, setCollateralSearchQuery] = useState<string>('');
+
+  const filteredCollaterals = collaterals.filter((c: any) => {
+    const q = collateralSearchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      (c.memberNumber && c.memberNumber.toLowerCase().includes(q)) ||
+      (c.memberName && c.memberName.toLowerCase().includes(q)) ||
+      (c.description && c.description.toLowerCase().includes(q)) ||
+      (c.tctNumber && c.tctNumber.toLowerCase().includes(q)) ||
+      (c.plateNumber && c.plateNumber.toLowerCase().includes(q))
+    );
+  });
+
+  // LOS Approval Matrix Confirmation Modal State
+  const [losConfirmModal, setLosConfirmModal] = useState<{
+    isOpen: boolean;
+    actionType: 'PROCEED_APPROVAL' | 'CANCEL_APPLICATION';
+    targetStatus: string;
+    stageTitle: string;
+    actionTitle: string;
+    message: string;
+    statutoryDetail: string;
+    confirmBtnText: string;
+    confirmBtnClass: string;
+  } | null>(null);
+  const [losNotification, setLosNotification] = useState<string | null>(null);
+
+  const handleOpenLosConfirm = (config: {
+    actionType: 'PROCEED_APPROVAL' | 'CANCEL_APPLICATION';
+    targetStatus: string;
+    stageTitle: string;
+    actionTitle: string;
+    message: string;
+    statutoryDetail: string;
+    confirmBtnText: string;
+    confirmBtnClass: string;
+  }) => {
+    setLosConfirmModal({
+      isOpen: true,
+      ...config,
+    });
+  };
+
+  const handleConfirmLosAction = () => {
+    if (!losConfirmModal) return;
+    setLoanStatus(losConfirmModal.targetStatus);
+    const actionLabel =
+      losConfirmModal.actionType === 'PROCEED_APPROVAL' ? 'Approved & Advanced' : 'Cancelled';
+    setLosNotification(
+      `Application LN-2026-00001: ${losConfirmModal.stageTitle} ${actionLabel}. New Status: ${losConfirmModal.targetStatus}.`
+    );
+    setTimeout(() => setLosNotification(null), 5000);
+    setLosConfirmModal(null);
+  };
 
   // Interactive Loan Calculator State
   const [calcAmount, setCalcAmount] = useState<number>(50000);
@@ -894,6 +1054,92 @@ export default function AdminDashboard() {
               </button>
             </div>
 
+            {/* Search and Filters Bar */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                {/* Search via Member No or Full Name */}
+                <div className="sm:col-span-5 relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={memberSearchQuery}
+                    onChange={(e) => setMemberSearchQuery(e.target.value)}
+                    placeholder="Search by Member No, Full Name, or Email..."
+                    className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                  {memberSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setMemberSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter by Classification */}
+                <div className="sm:col-span-3">
+                  <select
+                    value={memberClassificationFilter}
+                    onChange={(e) => setMemberClassificationFilter(e.target.value)}
+                    className="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
+                  >
+                    <option value="ALL">All Classifications (Regular & Associate)</option>
+                    <option value="REGULAR">REGULAR Member</option>
+                    <option value="ASSOCIATE">ASSOCIATE Member</option>
+                  </select>
+                </div>
+
+                {/* Filter by Status */}
+                <div className="sm:col-span-3">
+                  <select
+                    value={memberStatusFilter}
+                    onChange={(e) => setMemberStatusFilter(e.target.value)}
+                    className="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
+                  >
+                    <option value="ALL">All Statuses (Verified, Pending, Inactive)</option>
+                    <option value="VERIFIED">VERIFIED / Active</option>
+                    <option value="PENDING_REVIEW">PENDING eKYC Review</option>
+                    <option value="INACTIVE">INACTIVE</option>
+                  </select>
+                </div>
+
+                {/* Reset Filters */}
+                <div className="sm:col-span-1 flex justify-end">
+                  {(memberSearchQuery || memberClassificationFilter !== 'ALL' || memberStatusFilter !== 'ALL') ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMemberSearchQuery('');
+                        setMemberClassificationFilter('ALL');
+                        setMemberStatusFilter('ALL');
+                      }}
+                      title="Reset all filters"
+                      className="p-2 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 border border-rose-200 rounded-lg transition"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {filteredMembers.length}/{members.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                <span>
+                  Showing <strong>{filteredMembers.length}</strong> of <strong>{members.length}</strong> registered members
+                </span>
+                {(memberSearchQuery || memberClassificationFilter !== 'ALL' || memberStatusFilter !== 'ALL') && (
+                  <span className="text-emerald-700 font-medium">
+                    Filter Active • {filteredMembers.length} matching results
+                  </span>
+                )}
+              </div>
+            </div>
+
             <div className="overflow-x-auto border border-slate-200 rounded-lg">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
@@ -908,26 +1154,84 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {members.map((m) => (
-                    <tr key={m.id} className="hover:bg-slate-50">
-                      <td className="p-3 font-mono font-medium">{m.memberNo}</td>
-                      <td className="p-3 font-semibold text-slate-900">{m.name}</td>
-                      <td className="p-3"><span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-medium">{m.classification}</span></td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-1.5 text-emerald-700 font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>{m.idType}</span>
+                  {filteredMembers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-500">
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <Users className="w-8 h-8 text-slate-300" />
+                          <span className="font-semibold text-slate-700">No members match your search and filter criteria.</span>
+                          <p className="text-xs text-slate-400 max-w-sm">
+                            Try adjusting the search query, classification, or KYC status filter to locate member records.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMemberSearchQuery('');
+                              setMemberClassificationFilter('ALL');
+                              setMemberStatusFilter('ALL');
+                            }}
+                            className="mt-2 text-xs text-emerald-700 font-bold hover:underline"
+                          >
+                            Reset All Filters
+                          </button>
                         </div>
                       </td>
-                      <td className="p-3 text-right font-medium">{m.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-slate-500 font-mono text-[11px]">{m.npcConsent}</td>
-                      <td className="p-3 text-center">
-                        <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold text-[11px]">
-                          ACTIVE
-                        </span>
-                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredMembers.map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-50 transition">
+                        <td className="p-3 font-mono font-medium text-slate-900">{m.memberNo}</td>
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-900">{m.name}</div>
+                          <div className="text-[11px] text-slate-400 font-mono">{m.email}</div>
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                              m.classification === 'REGULAR'
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                            }`}
+                          >
+                            {m.classification}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                            {m.kycStatus === 'VERIFIED' ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            ) : m.kycStatus === 'PENDING_REVIEW' ? (
+                              <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            ) : (
+                              <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            )}
+                            <span className="truncate max-w-[200px]" title={m.idType}>{m.idType}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-right font-medium text-slate-900">
+                          ₱{m.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-slate-500 font-mono text-[11px]">{m.npcConsent}</td>
+                        <td className="p-3 text-center">
+                          {m.kycStatus === 'VERIFIED' && (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> VERIFIED
+                            </span>
+                          )}
+                          {m.kycStatus === 'PENDING_REVIEW' && (
+                            <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> PENDING REVIEW
+                            </span>
+                          )}
+                          {m.kycStatus === 'INACTIVE' && (
+                            <span className="bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> INACTIVE
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -967,63 +1271,102 @@ export default function AdminDashboard() {
 
             {/* Product Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {loanProducts.map((p) => (
-                <div key={p.id} className="border border-slate-200 rounded-xl p-5 bg-slate-50/60 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-4">
-                  <div>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                        {p.type}
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                        {p.code}
-                      </span>
-                    </div>
-
-                    <h3 className="font-bold text-base text-slate-900">{p.name}</h3>
-                    <p className="text-xs text-slate-600 mt-1 line-clamp-2">
-                      {p.coMakerRuleDescription}
-                    </p>
-
-                    <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Principal Range:</span>
-                        <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Annual Interest:</span>
-                        <span className="font-semibold text-emerald-700">{(p.annualInterestRate * 100).toFixed(1)}% p.a.</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Repayment Term:</span>
-                        <span className="font-semibold text-slate-900">{p.minTermMonths} - {p.maxTermMonths} Months</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Amortization Engine:</span>
-                        <span className="font-medium text-slate-700 text-[11px] text-right">
-                          {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
+              {loanProducts.map((p) => {
+                const isActive = p.isActive !== false && p.status !== 'INACTIVE';
+                return (
+                  <div
+                    key={p.id}
+                    className={`border rounded-xl p-5 transition-all flex flex-col justify-between space-y-4 ${
+                      isActive
+                        ? 'border-slate-200 bg-slate-50/60 hover:bg-slate-50'
+                        : 'border-slate-300 bg-slate-100/70 opacity-90'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                            {p.type}
+                          </span>
+                          {isActive ? (
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> ACTIVE
+                            </span>
+                          ) : (
+                            <span className="bg-slate-200 text-slate-700 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> INACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                          {p.code}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center pt-1">
-                        <span className="text-slate-500">Co-Maker Rule:</span>
-                        {p.requiresCoMaker ? (
-                          <span className="bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                            ✓ {p.minCoMakers} Co-Maker Req.
+
+                      <h3 className="font-bold text-base text-slate-900">{p.name}</h3>
+                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">
+                        {p.coMakerRuleDescription}
+                      </p>
+
+                      <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Principal Range:</span>
+                          <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Annual Interest:</span>
+                          <span className="font-semibold text-emerald-700">{(p.annualInterestRate * 100).toFixed(1)}% p.a.</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Repayment Term:</span>
+                          <span className="font-semibold text-slate-900">{p.minTermMonths} - {p.maxTermMonths} Months</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Amortization Engine:</span>
+                          <span className="font-medium text-slate-700 text-[11px] text-right">
+                            {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
                           </span>
-                        ) : (
-                          <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[11px]">
-                            Optional
-                          </span>
-                        )}
+                        </div>
+                        <div className="flex justify-between items-center pt-1">
+                          <span className="text-slate-500">Co-Maker Rule:</span>
+                          {p.requiresCoMaker ? (
+                            <span className="bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                              ✓ {p.minCoMakers} Co-Maker Req.
+                            </span>
+                          ) : (
+                            <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[11px]">
+                              Optional
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Service Fee: {(p.serviceFeeRate * 100).toFixed(1)}%</span>
-                    <span>Penalty: {(p.finesRateMonthly * 100).toFixed(1)}%/mo</span>
+                    <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
+                      <span>Fee: {(p.serviceFeeRate * 100).toFixed(1)}% • Pen: {(p.finesRateMonthly * 100).toFixed(1)}%/mo</span>
+                      {isActive ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleProductStatus(p.id)}
+                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded border border-rose-200 transition flex items-center gap-1"
+                          title="Deactivate this product so it is hidden from member applications"
+                        >
+                          <Ban className="w-3 h-3" /> Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleProductStatus(p.id)}
+                          className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2.5 py-1 rounded border border-emerald-300 transition flex items-center gap-1"
+                          title="Activate this product for member applications"
+                        >
+                          <Check className="w-3 h-3" /> Activate
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Product Configuration Modal */}
@@ -1210,6 +1553,21 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                      <label className="block font-semibold text-slate-800">Initial Product Status</label>
+                      <select
+                        value={newProductStatus}
+                        onChange={(e) => setNewProductStatus(e.target.value as 'ACTIVE' | 'INACTIVE')}
+                        className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                      >
+                        <option value="ACTIVE">ACTIVE — Publish immediately for member applications</option>
+                        <option value="INACTIVE">INACTIVE — Draft / Archived (Hidden from member applications)</option>
+                      </select>
+                      <p className="text-[11px] text-slate-500">
+                        Only active products are visible for member self-service applications. Inactive products remain preserved in existing loans.
+                      </p>
+                    </div>
+
                     <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
                       <button
                         type="button"
@@ -1319,9 +1677,44 @@ export default function AdminDashboard() {
               </div>
             )}
 
+            {/* LOS Verification Notification */}
+            {losNotification && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{losNotification}</span>
+                </div>
+                <span className="font-mono text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold">
+                  Status Updated
+                </span>
+              </div>
+            )}
+
+            {/* Application Cancelled Notice */}
+            {loanStatus === 'CANCELLED' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                  <div>
+                    <strong className="text-rose-900 font-bold text-sm block">Loan Application Cancelled & Voided</strong>
+                    <p className="text-rose-800 text-[11px] mt-0.5">
+                      Application LN-2026-00001 has been formally cancelled upon verification. Pipeline stages and co-maker undertakings are archived.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLoanStatus('SUBMITTED')}
+                  className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition"
+                >
+                  Reset / Reactivate to Triage
+                </button>
+              </div>
+            )}
+
             {/* Application Card */}
             <div className="p-5 border border-slate-200 rounded-xl bg-slate-50 space-y-4">
-              <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+              <div className="flex flex-col sm:flex-row justify-between items-start border-b border-slate-200 pb-3 gap-3">
                 <div>
                   <div className="text-xs font-mono text-slate-500">Application: LN-2026-00001</div>
                   <div className="text-base font-bold text-slate-900">Maria Clara Santos (Regular Member)</div>
@@ -1331,9 +1724,29 @@ export default function AdminDashboard() {
                     <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">Juan Perez Dela Cruz (MEM-2026-0002)</span>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right flex flex-col items-start sm:items-end">
                   <div className="text-xs uppercase text-slate-500 font-semibold">Principal Requested</div>
                   <div className="text-2xl font-black text-slate-900">₱50,000.00</div>
+                  {loanStatus !== 'CANCELLED' && loanStatus !== 'DISBURSED' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleOpenLosConfirm({
+                          actionType: 'CANCEL_APPLICATION',
+                          targetStatus: 'CANCELLED',
+                          stageTitle: 'Application Cancellation',
+                          actionTitle: 'Confirm Loan Application Cancellation',
+                          message: 'Are you sure you want to cancel and void loan application LN-2026-00001 (Maria Clara Santos, ₱50,000.00)?',
+                          statutoryDetail: 'Under cooperative credit regulations, this will cancel the underwriting process, void pending co-maker solidary liabilities, and issue a cancellation audit log.',
+                          confirmBtnText: 'Confirm Cancellation',
+                          confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                        })
+                      }
+                      className="mt-1.5 text-[11px] font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded border border-rose-200 transition flex items-center gap-1"
+                    >
+                      <Ban className="w-3.5 h-3.5" /> Cancel Application
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1405,7 +1818,18 @@ export default function AdminDashboard() {
                       {currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER' ? (
                         <button
                           type="button"
-                          onClick={() => setLoanStatus('UNDER_CREDIT_REVIEW')}
+                          onClick={() =>
+                            handleOpenLosConfirm({
+                              actionType: 'PROCEED_APPROVAL',
+                              targetStatus: 'UNDER_CREDIT_REVIEW',
+                              stageTitle: 'Loan Officer Endorsement',
+                              actionTitle: 'Proceed Approval to Credit Committee',
+                              message: 'You are endorsing application LN-2026-00001 (Maria Clara Santos, ₱50,000.00) to the Credit Committee.',
+                              statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
+                              confirmBtnText: 'Proceed Approval',
+                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                            })
+                          }
                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
                         >
                           Endorse to Committee
@@ -1444,7 +1868,18 @@ export default function AdminDashboard() {
                       {currentStaff.role === 'CREDIT_COMMITTEE' || currentStaff.role === 'GENERAL_MANAGER' ? (
                         <button
                           type="button"
-                          onClick={() => setLoanStatus('BOD_APPROVAL')}
+                          onClick={() =>
+                            handleOpenLosConfirm({
+                              actionType: 'PROCEED_APPROVAL',
+                              targetStatus: 'BOD_APPROVAL',
+                              stageTitle: 'Credit Committee Evaluation',
+                              actionTitle: 'Proceed Approval to Board of Directors',
+                              message: 'You are approving application LN-2026-00001 (₱50,000.00) and escalating to the Board of Directors for policy sign-off.',
+                              statutoryDetail: 'Committee sign-off verifies compliance with the cooperative credit manual and confirms collateral/co-maker risk buffers.',
+                              confirmBtnText: 'Proceed Approval',
+                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                            })
+                          }
                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
                         >
                           Approve & Escalate to BOD
@@ -1483,7 +1918,18 @@ export default function AdminDashboard() {
                       {currentStaff.role === 'BOD' || currentStaff.role === 'GENERAL_MANAGER' ? (
                         <button
                           type="button"
-                          onClick={() => setLoanStatus('APPROVED')}
+                          onClick={() =>
+                            handleOpenLosConfirm({
+                              actionType: 'PROCEED_APPROVAL',
+                              targetStatus: 'APPROVED',
+                              stageTitle: 'Board of Directors Resolution',
+                              actionTitle: 'Proceed with BOD Final Authorization',
+                              message: 'You are ratifying the Board Credit Facility Resolution for application LN-2026-00001 (₱50,000.00). Funds will be unlocked for Cashier disbursement.',
+                              statutoryDetail: 'Under CDA MC 2015-06, Board sign-off authorizes disbursement from cooperative deposit liabilities.',
+                              confirmBtnText: 'Proceed Approval',
+                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                            })
+                          }
                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
                         >
                           BOD Final Sign-Off
@@ -1522,7 +1968,18 @@ export default function AdminDashboard() {
                       {currentStaff.role === 'CASHIER' || currentStaff.role === 'GENERAL_MANAGER' ? (
                         <button
                           type="button"
-                          onClick={() => setLoanStatus('DISBURSED')}
+                          onClick={() =>
+                            handleOpenLosConfirm({
+                              actionType: 'PROCEED_APPROVAL',
+                              targetStatus: 'DISBURSED',
+                              stageTitle: 'Cashier Disbursement Execution',
+                              actionTitle: 'Proceed with Cashier Disbursement',
+                              message: 'You are executing disbursement of net proceeds (₱48,250.00) to Maria Clara Santos after upfront fee deductions (2% platform + 1.5% coop).',
+                              statutoryDetail: 'An official Disbursement Voucher and BIR Electronic Sales Invoice INV-2026-00918 will be booked in the General Ledger.',
+                              confirmBtnText: 'Proceed Disbursement',
+                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                            })
+                          }
                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 rounded transition-colors shadow-sm"
                         >
                           Execute Disbursement
@@ -1552,6 +2009,85 @@ export default function AdminDashboard() {
                 </span>
               </div>
             </div>
+
+            {/* LOS Verification Action Confirmation Modal */}
+            {losConfirmModal?.isOpen && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+                <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+                  <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      {losConfirmModal.actionType === 'PROCEED_APPROVAL' ? (
+                        <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                          <CheckCircle2 className="w-5 h-5" />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-700 shrink-0">
+                          <AlertTriangle className="w-5 h-5" />
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Confirmation Required
+                        </span>
+                        <h3 className="text-base font-bold text-slate-900">{losConfirmModal.actionTitle}</h3>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLosConfirmModal(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Application Number:</span>
+                      <span className="font-mono font-bold text-slate-900">LN-2026-00001</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Applicant / Borrower:</span>
+                      <span className="font-semibold text-slate-900">Maria Clara Santos (MEM-2026-0001)</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Requested Principal:</span>
+                      <span className="font-bold text-slate-900">₱50,000.00</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Authorizing Officer:</span>
+                      <span className="font-semibold text-emerald-800">{currentStaff.name} ({currentStaff.roleTitle})</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <p className="text-slate-800 font-medium leading-relaxed">
+                      {losConfirmModal.message}
+                    </p>
+                    <div className="p-3 bg-amber-50/70 border border-amber-200 text-amber-900 rounded-lg text-[11px] leading-relaxed">
+                      <strong>Verification Note:</strong> {losConfirmModal.statutoryDetail}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200 flex justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setLosConfirmModal(null)}
+                      className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 text-xs font-semibold transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmLosAction}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition shadow-sm ${losConfirmModal.confirmBtnClass}`}
+                    >
+                      {losConfirmModal.confirmBtnText}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Disclosure Statement Modal */}
             {showDisclosureModal && (
@@ -2509,6 +3045,43 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
+              {/* Collateral Search Toolbar */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="relative w-full sm:w-96">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={collateralSearchQuery}
+                    onChange={(e) => setCollateralSearchQuery(e.target.value)}
+                    placeholder="Search by Member No (e.g. MEM-2026-0001) or Member Name..."
+                    className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                  {collateralSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCollateralSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                  <span>
+                    Showing <strong>{filteredCollaterals.length}</strong> of <strong>{collaterals.length}</strong> registered assets
+                  </span>
+                  {collateralSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCollateralSearchQuery('')}
+                      className="text-xs text-rose-600 hover:underline font-medium"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Collateral Registry Table */}
               <div className="border border-slate-200 rounded-xl overflow-hidden mt-4">
                 <table className="w-full text-left text-xs">
@@ -2524,88 +3097,111 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {collaterals.map((c) => {
-                      const isREM = c.type === 'REAL_ESTATE_MORTGAGE';
-                      const ltvPct = isREM ? '55.6%' : '54.2%';
-                      const isEncumbered = c.encumbranceStatus === 'REGISTERED_MORTGAGE';
-
-                      return (
-                        <tr key={c.id} className="hover:bg-slate-50/80 transition">
-                          <td className="p-3">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-                                  isREM
-                                    ? 'bg-indigo-100 text-indigo-900 border border-indigo-200'
-                                    : 'bg-amber-100 text-amber-900 border border-amber-200'
-                                }`}
-                              >
-                                {isREM ? 'REM' : 'CHATTEL'}
-                              </span>
-                              <strong className="text-slate-900">{c.description}</strong>
-                            </div>
-                            <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                              {isREM
-                                ? `${c.tctNumber} • ${c.registryOfDeedsLocation} (${c.lotAreaSqm || 180} sqm)`
-                                : `Plate ${c.plateNumber} • ${c.vehicleMakeModel || 'Utility Truck'} (${c.ltoOrCrNumber})`}
-                            </div>
-                          </td>
-                          <td className="p-3">
-                            <div className="font-semibold text-slate-900">{c.memberName}</div>
-                            <div className="text-[11px] text-slate-500 font-mono">{c.memberNumber}</div>
-                          </td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">
-                            ₱{c.appraisedValue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="p-3 text-right font-mono text-emerald-700 font-semibold">
-                            ₱{c.maxAllowableLoanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px]">
-                              {ltvPct} (SAFE)
+                    {filteredCollaterals.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-500">
+                          <div className="flex flex-col items-center justify-center space-y-2">
+                            <Scale className="w-8 h-8 text-slate-300" />
+                            <span className="font-semibold text-slate-700">
+                              No collateral records found matching &quot;{collateralSearchQuery}&quot;.
                             </span>
-                          </td>
-                          <td className="p-3">
-                            {isEncumbered ? (
-                              <div>
-                                <span className="bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded text-[10px] flex items-center gap-1 w-fit">
-                                  <Lock className="w-3 h-3 text-emerald-700" /> ENCUMBERED
+                            <p className="text-xs text-slate-400 max-w-sm">
+                              Try searching with another Member No (e.g. MEM-2026-0001, MEM-2026-0002) or full name.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setCollateralSearchQuery('')}
+                              className="mt-2 text-xs text-emerald-700 font-bold hover:underline"
+                            >
+                              Clear Search Query
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCollaterals.map((c) => {
+                        const isREM = c.type === 'REAL_ESTATE_MORTGAGE';
+                        const ltvPct = isREM ? '55.6%' : '54.2%';
+                        const isEncumbered = c.encumbranceStatus === 'REGISTERED_MORTGAGE';
+
+                        return (
+                          <tr key={c.id} className="hover:bg-slate-50/80 transition">
+                            <td className="p-3">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                                    isREM
+                                      ? 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                                      : 'bg-amber-100 text-amber-900 border border-amber-200'
+                                  }`}
+                                >
+                                  {isREM ? 'REM' : 'CHATTEL'}
                                 </span>
-                                <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                  Linked: {c.linkedLoanNumber || 'LN-2026-0001'}
-                                </span>
+                                <strong className="text-slate-900">{c.description}</strong>
                               </div>
-                            ) : (
-                              <div>
-                                <span className="bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded text-[10px] w-fit block">
-                                  DISCHARGED
-                                </span>
-                                <span className="text-[10px] text-slate-400 block mt-0.5">Title Released</span>
+                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                {isREM
+                                  ? `${c.tctNumber} • ${c.registryOfDeedsLocation} (${c.lotAreaSqm || 180} sqm)`
+                                  : `Plate ${c.plateNumber} • ${c.vehicleMakeModel || 'Utility Truck'} (${c.ltoOrCrNumber})`}
                               </div>
-                            )}
-                          </td>
-                          <td className="p-3 text-right">
-                            {isEncumbered ? (
-                              <button
-                                type="button"
-                                onClick={() => handleDischargeMortgage(c.id)}
-                                className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded transition"
-                              >
-                                Discharge Mortgage
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleReEncumberMortgage(c.id)}
-                                className="text-[11px] bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold px-2.5 py-1 rounded transition"
-                              >
-                                Annotate Mortgage
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                            <td className="p-3">
+                              <div className="font-semibold text-slate-900">{c.memberName}</div>
+                              <div className="text-[11px] text-slate-500 font-mono">{c.memberNumber}</div>
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-slate-900">
+                              ₱{c.appraisedValue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-right font-mono text-emerald-700 font-semibold">
+                              ₱{c.maxAllowableLoanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px]">
+                                {ltvPct} (SAFE)
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              {isEncumbered ? (
+                                <div>
+                                  <span className="bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded text-[10px] flex items-center gap-1 w-fit">
+                                    <Lock className="w-3 h-3 text-emerald-700" /> ENCUMBERED
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                    Linked: {c.linkedLoanNumber || 'LN-2026-0001'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div>
+                                  <span className="bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded text-[10px] w-fit block">
+                                    DISCHARGED
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">Title Released</span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              {isEncumbered ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDischargeMortgage(c.id)}
+                                  className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded transition"
+                                >
+                                  Discharge Mortgage
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReEncumberMortgage(c.id)}
+                                  className="text-[11px] bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold px-2.5 py-1 rounded transition"
+                                >
+                                  Annotate Mortgage
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>

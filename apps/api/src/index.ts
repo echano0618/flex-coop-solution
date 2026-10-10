@@ -615,6 +615,7 @@ app.post('/api/v1/loan-products', (req: Request, res: Response) => {
     minCoMakers,
     coMakerRuleDescription,
     requiresCollateral,
+    isActive,
   } = req.body;
 
   if (!name || !code || !minAmount || !maxAmount || annualInterestRate === undefined) {
@@ -639,7 +640,7 @@ app.post('/api/v1/loan-products', (req: Request, res: Response) => {
     minCoMakers: minCoMakers ? Number(minCoMakers) : (requiresCoMaker ? 1 : 0),
     coMakerRuleDescription: coMakerRuleDescription || (requiresCoMaker ? 'Must be an active member in good standing with updated share capital' : undefined),
     requiresCollateral: Boolean(requiresCollateral),
-    isActive: true,
+    isActive: isActive !== undefined ? Boolean(isActive) : true,
   };
 
   products.push(newProduct);
