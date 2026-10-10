@@ -47,13 +47,52 @@ import {
   CheckSquare,
   Square,
   User,
+  Key,
+  Settings,
+  Activity,
+  UserPlus,
+  Shield,
+  ArrowUpRight,
+  ArrowDownRight,
+  Layers,
+  Unlock,
+  ToggleLeft,
+  ToggleRight,
+  BarChart3,
+  Mail,
+  BadgeCheck,
+  Trash2,
 } from 'lucide-react';
 
-type TabType = 'overview' | 'members' | 'products' | 'los' | 'calculator' | 'collateral' | 'cashier' | 'accounting' | 'surplus' | 'invoices' | 'reports';
+type StaffRole =
+  | 'SYSTEM_ADMIN'
+  | 'GENERAL_MANAGER'
+  | 'LOAN_OFFICER'
+  | 'CREDIT_COMMITTEE'
+  | 'BOD'
+  | 'CASHIER'
+  | 'ACCOUNTANT'
+  | 'COMPLIANCE_OFFICER';
+
+type TabType =
+  | 'overview'
+  | 'members'
+  | 'products'
+  | 'los'
+  | 'calculator'
+  | 'collateral'
+  | 'cashier'
+  | 'accounting'
+  | 'surplus'
+  | 'invoices'
+  | 'reports'
+  | 'iam'
+  | 'rbac'
+  | 'platform_usage';
 
 interface StaffAccount {
   id: string;
-  role: 'GENERAL_MANAGER' | 'LOAN_OFFICER' | 'CREDIT_COMMITTEE' | 'BOD' | 'CASHIER' | 'ACCOUNTANT' | 'COMPLIANCE_OFFICER';
+  role: StaffRole;
   roleTitle: string;
   name: string;
   initials: string;
@@ -62,7 +101,28 @@ interface StaffAccount {
   allowedTabs: TabType[];
 }
 
+const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
+  SYSTEM_ADMIN: ['overview', 'iam', 'rbac', 'platform_usage', 'reports'],
+  GENERAL_MANAGER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'platform_usage'],
+  LOAN_OFFICER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral'],
+  CREDIT_COMMITTEE: ['overview', 'products', 'los', 'calculator', 'collateral'],
+  BOD: ['overview', 'products', 'los', 'calculator', 'collateral', 'surplus', 'reports'],
+  CASHIER: ['overview', 'los', 'cashier'],
+  ACCOUNTANT: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator'],
+  COMPLIANCE_OFFICER: ['overview', 'members', 'collateral', 'surplus', 'reports'],
+};
+
 const STAFF_ACCOUNTS: StaffAccount[] = [
+  {
+    id: 'usr_sysadmin_01',
+    role: 'SYSTEM_ADMIN',
+    roleTitle: 'Platform System Admin',
+    name: 'Engr. Alex V. Mercer',
+    initials: 'AM',
+    color: 'bg-red-600',
+    description: 'Root platform administrative access, IAM user provisioning, RBAC configuration, and Platform Escrow monitoring.',
+    allowedTabs: ['overview', 'iam', 'rbac', 'platform_usage', 'reports'],
+  },
   {
     id: 'usr_gm_01',
     role: 'GENERAL_MANAGER',
@@ -70,8 +130,8 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     name: 'Atty. Roberto Dela Rosa',
     initials: 'RD',
     color: 'bg-indigo-600',
-    description: 'Full statutory administrative & override access across all cooperative modules.',
-    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports'],
+    description: 'Full statutory administrative & override access across all cooperative modules and Platform Escrow.',
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'platform_usage'],
   },
   {
     id: 'usr_lo_01',
@@ -267,17 +327,415 @@ export default function AdminDashboard() {
     { id: 'surplus', label: 'Net Surplus & Patronage (Art. 86)', icon: PieChart, category: 'Finance' },
     { id: 'invoices', label: 'Tax & Invoices (12% VAT)', icon: FileText, category: 'Finance' },
     { id: 'reports', label: 'CDA & CIC Mandatory Reports', icon: ShieldCheck, category: 'Governance' },
+    { id: 'iam', label: 'Identity & Access (IAM)', icon: Key, category: 'Administration' },
+    { id: 'rbac', label: 'Role-Based Access (RBAC)', icon: Shield, category: 'Administration' },
+    { id: 'platform_usage', label: 'Platform Escrow & Usage', icon: Activity, category: 'Administration' },
   ];
 
-  const visibleTabs = ALL_MODULE_TABS.filter((tab) => currentStaff.allowedTabs.includes(tab.id));
+  // Dynamic RBAC State & Permission Matrix
+  const [rolePermissions, setRolePermissions] = useState<Record<StaffRole, TabType[]>>(DEFAULT_ROLE_PERMISSIONS);
+  const [rbacSelectedRole, setRbacSelectedRole] = useState<StaffRole>('LOAN_OFFICER');
+  const [rbacNotification, setRbacNotification] = useState<string | null>(null);
+
+  // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
+  const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
+  const visibleTabs = ALL_MODULE_TABS.filter((tab) => effectiveAllowedTabs.includes(tab.id));
   const currentModule = ALL_MODULE_TABS.find((t) => t.id === activeTab);
 
   const handleSelectStaff = (staff: StaffAccount) => {
     setCurrentStaff(staff);
-    if (!staff.allowedTabs.includes(activeTab)) {
-      setActiveTab(staff.allowedTabs[0] || 'overview');
+    const tabsForRole = rolePermissions[staff.role] || staff.allowedTabs;
+    if (!tabsForRole.includes(activeTab)) {
+      setActiveTab(tabsForRole[0] || 'overview');
     }
     setIsRoleDropdownOpen(false);
+  };
+
+  const handleToggleRolePermission = (role: StaffRole, tabId: TabType) => {
+    setRolePermissions((prev) => {
+      const currentTabs = prev[role] || [];
+      const hasTab = currentTabs.includes(tabId);
+      const updated = hasTab ? currentTabs.filter((t) => t !== tabId) : [...currentTabs, tabId];
+      return {
+        ...prev,
+        [role]: updated,
+      };
+    });
+    const willHave = !(rolePermissions[role] || []).includes(tabId);
+    setRbacNotification(`Role '${role}': Module '${tabId}' ${willHave ? 'GRANTED' : 'REVOKED'}. Drawer updated immediately.`);
+    setTimeout(() => setRbacNotification(null), 3500);
+  };
+
+  const handleResetStatutoryRbac = () => {
+    setRolePermissions(DEFAULT_ROLE_PERMISSIONS);
+    setRbacNotification('Reset all role permissions to CDA Statutory Defaults (MC 2015-06).');
+    setTimeout(() => setRbacNotification(null), 3500);
+  };
+
+  // IAM Module State
+  interface PortalUser {
+    id: string;
+    name: string;
+    email: string;
+    role: StaffRole;
+    status: 'ACTIVE' | 'SUSPENDED' | 'INVITED';
+    branch: string;
+    lastLogin: string;
+    mfaEnabled: boolean;
+    assignedBy: string;
+    assignedAt: string;
+  }
+
+  const [portalUsers, setPortalUsers] = useState<PortalUser[]>([
+    {
+      id: 'usr_sysadmin_01',
+      name: 'Engr. Alex V. Mercer',
+      email: 'alex.mercer@flexcoop.tech',
+      role: 'SYSTEM_ADMIN',
+      status: 'ACTIVE',
+      branch: 'Platform Global Core',
+      lastLogin: 'Active now (Session IP: 120.29.74.12)',
+      mfaEnabled: true,
+      assignedBy: 'ROOT_PROVISIONER',
+      assignedAt: '2026-01-01',
+    },
+    {
+      id: 'usr_gm_01',
+      name: 'Atty. Roberto Dela Rosa',
+      email: 'gm@bayanicoop.ph',
+      role: 'GENERAL_MANAGER',
+      status: 'ACTIVE',
+      branch: 'Main Branch - Head Office',
+      lastLogin: '10 mins ago',
+      mfaEnabled: true,
+      assignedBy: 'Engr. Alex V. Mercer',
+      assignedAt: '2026-01-15',
+    },
+    {
+      id: 'usr_lo_01',
+      name: 'Grace Villanueva',
+      email: 'grace.v@bayanicoop.ph',
+      role: 'LOAN_OFFICER',
+      status: 'ACTIVE',
+      branch: 'Credit & Loans Dept',
+      lastLogin: '25 mins ago',
+      mfaEnabled: true,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-02-01',
+    },
+    {
+      id: 'usr_cashier_01',
+      name: 'Leah Mendoza',
+      email: 'leah.mendoza@bayanicoop.ph',
+      role: 'CASHIER',
+      status: 'ACTIVE',
+      branch: 'Main Cashier Cage',
+      lastLogin: '1 hour ago',
+      mfaEnabled: false,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-02-10',
+    },
+    {
+      id: 'usr_acct_01',
+      name: 'Felipe Santos, CPA',
+      email: 'accounting@bayanicoop.ph',
+      role: 'ACCOUNTANT',
+      status: 'ACTIVE',
+      branch: 'Finance & Treasury',
+      lastLogin: 'Yesterday 17:40',
+      mfaEnabled: true,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-02-15',
+    },
+    {
+      id: 'usr_crecom_01',
+      name: 'Engr. Manuel Reyes',
+      email: 'crecom@bayanicoop.ph',
+      role: 'CREDIT_COMMITTEE',
+      status: 'ACTIVE',
+      branch: 'Credit Committee',
+      lastLogin: '3 days ago',
+      mfaEnabled: true,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-01-20',
+    },
+    {
+      id: 'usr_dpo_01',
+      name: 'Atty. Cristina Gomez',
+      email: 'compliance@bayanicoop.ph',
+      role: 'COMPLIANCE_OFFICER',
+      status: 'ACTIVE',
+      branch: 'Legal & Compliance Dept',
+      lastLogin: '2 days ago',
+      mfaEnabled: true,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-01-25',
+    },
+    {
+      id: 'usr_bod_01',
+      name: 'Dr. Corazon Aquino-Cruz',
+      email: 'bod.chair@bayanicoop.ph',
+      role: 'BOD',
+      status: 'ACTIVE',
+      branch: 'Board of Directors',
+      lastLogin: '5 days ago',
+      mfaEnabled: true,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-01-10',
+    },
+    {
+      id: 'usr_pending_01',
+      name: 'Maria Clarissa Dizon',
+      email: 'mclarissa@bayanicoop.ph',
+      role: 'LOAN_OFFICER',
+      status: 'INVITED',
+      branch: 'Bacolod Satellite Branch',
+      lastLogin: 'Never (Invitation Pending)',
+      mfaEnabled: false,
+      assignedBy: 'Engr. Alex V. Mercer',
+      assignedAt: '2026-03-01',
+    },
+  ]);
+
+  const [iamSearchQuery, setIamSearchQuery] = useState<string>('');
+  const [iamRoleFilter, setIamRoleFilter] = useState<string>('ALL');
+  const [iamStatusFilter, setIamStatusFilter] = useState<string>('ALL');
+  const [showInviteUserModal, setShowInviteUserModal] = useState<boolean>(false);
+  const [inviteName, setInviteName] = useState<string>('');
+  const [inviteEmail, setInviteEmail] = useState<string>('');
+  const [inviteRole, setInviteRole] = useState<StaffRole>('LOAN_OFFICER');
+  const [inviteBranch, setInviteBranch] = useState<string>('Main Branch - Head Office');
+  const [inviteMfa, setInviteMfa] = useState<boolean>(true);
+  const [iamNotification, setIamNotification] = useState<string | null>(null);
+
+  const [iamAuditLogs, setIamAuditLogs] = useState<{ id: string; timestamp: string; actor: string; action: string; target: string }[]>([
+    {
+      id: 'audit_01',
+      timestamp: '2026-03-02 14:35:10',
+      actor: 'Engr. Alex V. Mercer (SYSTEM_ADMIN)',
+      action: 'ACCESS_GRANTED',
+      target: 'Invited Maria Clarissa Dizon as LOAN_OFFICER (Bacolod Satellite Branch)',
+    },
+    {
+      id: 'audit_02',
+      timestamp: '2026-03-02 11:20:00',
+      actor: 'Engr. Alex V. Mercer (SYSTEM_ADMIN)',
+      action: 'ROLE_ASSIGNED',
+      target: 'Assigned CASHIER role to Leah Mendoza',
+    },
+    {
+      id: 'audit_03',
+      timestamp: '2026-03-01 09:15:22',
+      actor: 'Atty. Roberto Dela Rosa (GENERAL_MANAGER)',
+      action: 'MFA_ENFORCED',
+      target: 'Enforced hardware/TOTP MFA on Felipe Santos, CPA',
+    },
+  ]);
+
+  const handleInvitePortalUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteName.trim() || !inviteEmail.trim()) return;
+    const newUser: PortalUser = {
+      id: `usr_portal_${Date.now()}`,
+      name: inviteName.trim(),
+      email: inviteEmail.trim(),
+      role: inviteRole,
+      status: 'INVITED',
+      branch: inviteBranch,
+      lastLogin: 'Never (Invitation Pending)',
+      mfaEnabled: inviteMfa,
+      assignedBy: `${currentStaff.name} (${currentStaff.role})`,
+      assignedAt: new Date().toISOString().substring(0, 10),
+    };
+    setPortalUsers([newUser, ...portalUsers]);
+    setIamAuditLogs([
+      {
+        id: `audit_${Date.now()}`,
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        actor: `${currentStaff.name} (${currentStaff.role})`,
+        action: 'ACCESS_GRANTED',
+        target: `Granted portal access and invited ${inviteName.trim()} as ${inviteRole} (${inviteBranch})`,
+      },
+      ...iamAuditLogs,
+    ]);
+    setShowInviteUserModal(false);
+    setInviteName('');
+    setInviteEmail('');
+    setIamNotification(`Portal access invitation successfully sent to ${inviteEmail} with role ${inviteRole}!`);
+    setTimeout(() => setIamNotification(null), 4000);
+  };
+
+  const handleUpdateUserRole = (userId: string, newRole: StaffRole) => {
+    setPortalUsers((prev) =>
+      prev.map((u) => {
+        if (u.id === userId) {
+          return {
+            ...u,
+            role: newRole,
+            assignedBy: `${currentStaff.name} (${currentStaff.role})`,
+            assignedAt: new Date().toISOString().substring(0, 10),
+          };
+        }
+        return u;
+      })
+    );
+    const targetUser = portalUsers.find((u) => u.id === userId);
+    setIamAuditLogs([
+      {
+        id: `audit_${Date.now()}`,
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        actor: `${currentStaff.name} (${currentStaff.role})`,
+        action: 'ROLE_REASSIGNED',
+        target: `Reassigned ${targetUser?.name || userId} to ${newRole}`,
+      },
+      ...iamAuditLogs,
+    ]);
+    setIamNotification(`Updated role for ${targetUser?.name} to ${newRole}.`);
+    setTimeout(() => setIamNotification(null), 3000);
+  };
+
+  const handleToggleUserStatus = (userId: string) => {
+    const targetUser = portalUsers.find((u) => u.id === userId);
+    if (!targetUser) return;
+    const newStatus = targetUser.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+    setPortalUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, status: newStatus } : u))
+    );
+    setIamAuditLogs([
+      {
+        id: `audit_${Date.now()}`,
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        actor: `${currentStaff.name} (${currentStaff.role})`,
+        action: newStatus === 'SUSPENDED' ? 'ACCESS_SUSPENDED' : 'ACCESS_ACTIVATED',
+        target: `${newStatus} portal access for ${targetUser.name}`,
+      },
+      ...iamAuditLogs,
+    ]);
+    setIamNotification(`${targetUser.name} access status is now ${newStatus}.`);
+    setTimeout(() => setIamNotification(null), 3000);
+  };
+
+  // Platform Escrow & Usage State
+  interface EscrowTransaction {
+    id: string;
+    timestamp: string;
+    type: 'INFLOW_SHARE_CAPITAL' | 'INFLOW_REPAYMENT' | 'OUTFLOW_DISBURSEMENT' | 'PLATFORM_ONBOARDING_FEE' | 'CONVENIENCE_FEE' | 'TREASURY_SWEEP';
+    description: string;
+    reference: string;
+    memberOrCounterparty: string;
+    grossAmount: number;
+    platformFee: number;
+    vatAmount: number;
+    netEscrowAmount: number;
+    runningBalance: number;
+    status: 'SETTLED' | 'PENDING_CLEARING';
+  }
+
+  const [escrowLedger, setEscrowLedger] = useState<EscrowTransaction[]>([
+    {
+      id: 'tx_esc_001',
+      timestamp: '2026-03-02 14:30:12',
+      type: 'INFLOW_SHARE_CAPITAL',
+      description: 'Gabriela Silang Reyes initial share capital via PayMongo QR Ph',
+      reference: 'PAYMONGO-QRPH-908123',
+      memberOrCounterparty: 'Gabriela Silang Reyes (MEM-2026-0003)',
+      grossAmount: 3000,
+      platformFee: 45, // 1.5% convenience fee
+      vatAmount: 4.82,
+      netEscrowAmount: 3000,
+      runningBalance: 48470,
+      status: 'SETTLED',
+    },
+    {
+      id: 'tx_fee_001',
+      timestamp: '2026-03-02 14:28:05',
+      type: 'PLATFORM_ONBOARDING_FEE',
+      description: 'Flex Coop Platform Onboarding Charge (₱15.00/approved member)',
+      reference: 'BIR-FLEX-INV-2026-0042',
+      memberOrCounterparty: 'Bayani Cooperative (Tenant)',
+      grossAmount: -15,
+      platformFee: 13.39, // Net service fee
+      vatAmount: 1.61, // 12% EVAT
+      netEscrowAmount: -15,
+      runningBalance: 45470,
+      status: 'SETTLED',
+    },
+    {
+      id: 'tx_esc_002',
+      timestamp: '2026-03-02 11:15:40',
+      type: 'INFLOW_SHARE_CAPITAL',
+      description: 'Juan Dela Cruz additional share subscription via PayMongo QR Ph',
+      reference: 'PAYMONGO-QRPH-904412',
+      memberOrCounterparty: 'Juan Perez Dela Cruz (MEM-2026-0002)',
+      grossAmount: 2000,
+      platformFee: 30,
+      vatAmount: 3.21,
+      netEscrowAmount: 2000,
+      runningBalance: 45485,
+      status: 'SETTLED',
+    },
+    {
+      id: 'tx_esc_003',
+      timestamp: '2026-03-01 16:45:10',
+      type: 'INFLOW_REPAYMENT',
+      description: 'Loan Amortization #1 settlement via PayMongo QR Ph Instapay',
+      reference: 'QRPH-INSTAPAY-88129',
+      memberOrCounterparty: 'Maria Clara Santos (MEM-2026-0001)',
+      grossAmount: 25000,
+      platformFee: 375,
+      vatAmount: 40.18,
+      netEscrowAmount: 25000,
+      runningBalance: 43485,
+      status: 'SETTLED',
+    },
+    {
+      id: 'tx_esc_004',
+      timestamp: '2026-03-01 09:20:30',
+      type: 'INFLOW_REPAYMENT',
+      description: 'Emergency Loan Amortization settlement via PayMongo QR Ph',
+      reference: 'QRPH-GCASH-77123',
+      memberOrCounterparty: 'Pedro Penduko (MEM-2026-0004)',
+      grossAmount: 20000,
+      platformFee: 300,
+      vatAmount: 32.14,
+      netEscrowAmount: 20000,
+      runningBalance: 18485,
+      status: 'SETTLED',
+    },
+  ]);
+
+  const [escrowFilterType, setEscrowFilterType] = useState<string>('ALL');
+  const [showSweepModal, setShowSweepModal] = useState<boolean>(false);
+  const [sweepAmount, setSweepAmount] = useState<number>(40000);
+  const [platformUsageNotification, setPlatformUsageNotification] = useState<string | null>(null);
+
+  const handleExecuteTreasurySweep = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (sweepAmount <= 0) return;
+    const currentBal = escrowLedger[0]?.runningBalance ?? 48470;
+    if (sweepAmount > currentBal) {
+      alert('Sweep amount cannot exceed current Platform Escrow float!');
+      return;
+    }
+    const newBal = currentBal - sweepAmount;
+    const newTx: EscrowTransaction = {
+      id: `tx_sweep_${Date.now()}`,
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      type: 'TREASURY_SWEEP',
+      description: `Daily Treasury Sweep to LandBank Mother Depository Account (1-01-01) #0012-9981-22`,
+      reference: `SWEEP-LBP-${Math.floor(100000 + Math.random() * 900000)}`,
+      memberOrCounterparty: 'Land Bank of the Philippines (Bayani Coop Mother Account)',
+      grossAmount: -sweepAmount,
+      platformFee: 0,
+      vatAmount: 0,
+      netEscrowAmount: -sweepAmount,
+      runningBalance: newBal,
+      status: 'SETTLED',
+    };
+    setEscrowLedger([newTx, ...escrowLedger]);
+    setShowSweepModal(false);
+    setPlatformUsageNotification(`Treasury Sweep of ₱${sweepAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} successfully transferred to LandBank Mother Account! Automated GL voucher JV-SWEEP-2026 generated.`);
+    setTimeout(() => setPlatformUsageNotification(null), 5000);
   };
 
   const handleSyncFirestore = () => {
@@ -1327,7 +1785,7 @@ export default function AdminDashboard() {
           )}
 
           {/* Segregation of Duties Notice Banner (if active tab is restricted for active staff) */}
-          {!currentStaff.allowedTabs.includes(activeTab) && (
+          {!effectiveAllowedTabs.includes(activeTab) && (
             <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 mb-6 flex items-start gap-3 shadow-xs">
               <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <div className="text-xs">
@@ -1344,10 +1802,10 @@ export default function AdminDashboard() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setActiveTab(currentStaff.allowedTabs[0] || 'overview')}
+                  onClick={() => setActiveTab(effectiveAllowedTabs[0] || 'overview')}
                   className="mt-2.5 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold px-3 py-1.5 rounded-lg text-xs transition"
                 >
-                  ← Go to Authorized Module ({ALL_MODULE_TABS.find(t => t.id === currentStaff.allowedTabs[0])?.label || 'Dashboard'})
+                  ← Go to Authorized Module ({ALL_MODULE_TABS.find(t => t.id === effectiveAllowedTabs[0])?.label || 'Dashboard'})
                 </button>
               </div>
             </div>
@@ -4774,6 +5232,910 @@ export default function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 12: IDENTITY & ACCESS MANAGEMENT (IAM) */}
+        {activeTab === 'iam' && (
+          <div className="space-y-6">
+            {/* Header & IAM Info */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
+                    <Shield className="w-3 h-3 text-red-600" />
+                    <span>System Admin Privilege (Root IAM)</span>
+                  </span>
+                  <span className="text-slate-400 text-xs">•</span>
+                  <span className="text-xs text-slate-500 font-mono">Tenant: bayani_001</span>
+                </div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Identity & Access Management (IAM)</h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  Provision admin portal user credentials, grant or revoke portal access, assign operational roles, and enforce hardware/TOTP multi-factor authentication under CDA Governance Circular 2015-06.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteUserModal(true)}
+                  className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs shadow-md shadow-red-950/10 flex items-center gap-2 transition"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Grant Portal Access / Invite User</span>
+                </button>
+              </div>
+            </div>
+
+            {/* IAM Notification Banner */}
+            {iamNotification && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{iamNotification}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIamNotification(null)}
+                  className="text-emerald-700 hover:text-emerald-900"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Quick IAM Directory Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-xl border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Portal Users</div>
+                <div className="text-2xl font-black text-slate-900 mt-1 font-mono">{portalUsers.length}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Across all cooperative departments</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Active Staff Accounts</div>
+                <div className="text-2xl font-black text-emerald-600 mt-1 font-mono">
+                  {portalUsers.filter((u) => u.status === 'ACTIVE').length}
+                </div>
+                <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">Authorized for live portal access</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">MFA Enforced</div>
+                <div className="text-2xl font-black text-indigo-600 mt-1 font-mono">
+                  {portalUsers.filter((u) => u.mfaEnabled).length}
+                </div>
+                <div className="text-[10px] text-indigo-600 font-semibold mt-0.5">Hardware / TOTP 2FA Protected</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Pending Invitations</div>
+                <div className="text-2xl font-black text-amber-600 mt-1 font-mono">
+                  {portalUsers.filter((u) => u.status === 'INVITED').length}
+                </div>
+                <div className="text-[10px] text-amber-600 font-semibold mt-0.5">Awaiting activation sign-off</div>
+              </div>
+            </div>
+
+            {/* Search & Filter Controls */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center justify-between">
+              <div className="flex-1 min-w-[240px] relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search portal user by name, email, or department..."
+                  value={iamSearchQuery}
+                  onChange={(e) => setIamSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Filter className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={iamRoleFilter}
+                  onChange={(e) => setIamRoleFilter(e.target.value)}
+                  className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 font-medium"
+                >
+                  <option value="ALL">All Roles</option>
+                  <option value="SYSTEM_ADMIN">System Admin</option>
+                  <option value="GENERAL_MANAGER">General Manager</option>
+                  <option value="LOAN_OFFICER">Loan Officer</option>
+                  <option value="CREDIT_COMMITTEE">Credit Committee</option>
+                  <option value="BOD">Board of Directors</option>
+                  <option value="CASHIER">Cashier / Teller</option>
+                  <option value="ACCOUNTANT">Accountant</option>
+                  <option value="COMPLIANCE_OFFICER">Compliance / DPO</option>
+                </select>
+
+                <select
+                  value={iamStatusFilter}
+                  onChange={(e) => setIamStatusFilter(e.target.value)}
+                  className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 font-medium"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active Only</option>
+                  <option value="SUSPENDED">Suspended</option>
+                  <option value="INVITED">Invited</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Portal Users Directory Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-800">Admin Portal Directory & Fiduciary Role Assignments</span>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  Showing {portalUsers.filter((u) => {
+                    const matchesSearch = u.name.toLowerCase().includes(iamSearchQuery.toLowerCase()) || u.email.toLowerCase().includes(iamSearchQuery.toLowerCase());
+                    const matchesRole = iamRoleFilter === 'ALL' || u.role === iamRoleFilter;
+                    const matchesStatus = iamStatusFilter === 'ALL' || u.status === iamStatusFilter;
+                    return matchesSearch && matchesRole && matchesStatus;
+                  }).length} of {portalUsers.length} Users
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3.5">User Identity</th>
+                      <th className="p-3.5">Assigned Operational Role</th>
+                      <th className="p-3.5">Access Status</th>
+                      <th className="p-3.5">Security / MFA</th>
+                      <th className="p-3.5">Last Portal Activity</th>
+                      <th className="p-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {portalUsers
+                      .filter((u) => {
+                        const matchesSearch = u.name.toLowerCase().includes(iamSearchQuery.toLowerCase()) || u.email.toLowerCase().includes(iamSearchQuery.toLowerCase());
+                        const matchesRole = iamRoleFilter === 'ALL' || u.role === iamRoleFilter;
+                        const matchesStatus = iamStatusFilter === 'ALL' || u.status === iamStatusFilter;
+                        return matchesSearch && matchesRole && matchesStatus;
+                      })
+                      .map((user) => {
+                        const staffInfo = STAFF_ACCOUNTS.find((s) => s.role === user.role);
+                        return (
+                          <tr key={user.id} className="hover:bg-slate-50/80 transition">
+                            <td className="p-3.5">
+                              <div className="flex items-center gap-2.5">
+                                <div className={`w-8 h-8 rounded-full ${staffInfo?.color || 'bg-slate-700'} text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-xs`}>
+                                  {user.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-900 truncate">{user.name}</div>
+                                  <div className="text-[11px] text-slate-500 font-mono">{user.email}</div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">{user.branch}</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="p-3.5">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-slate-900">{staffInfo?.roleTitle || user.role}</span>
+                                </div>
+                                {/* Quick Role Reassignment Selector for System Admin */}
+                                <select
+                                  value={user.role}
+                                  onChange={(e) => handleUpdateUserRole(user.id, e.target.value as StaffRole)}
+                                  className="text-[11px] font-medium border border-slate-200 rounded-md px-2 py-0.5 bg-slate-50 text-slate-700 hover:border-slate-300 focus:outline-hidden"
+                                >
+                                  <option value="SYSTEM_ADMIN">System Admin</option>
+                                  <option value="GENERAL_MANAGER">General Manager</option>
+                                  <option value="LOAN_OFFICER">Loan Officer</option>
+                                  <option value="CREDIT_COMMITTEE">Credit Committee</option>
+                                  <option value="BOD">Board of Directors</option>
+                                  <option value="CASHIER">Cashier / Teller</option>
+                                  <option value="ACCOUNTANT">Accountant</option>
+                                  <option value="COMPLIANCE_OFFICER">Compliance Officer</option>
+                                </select>
+                              </div>
+                            </td>
+
+                            <td className="p-3.5">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                                  user.status === 'ACTIVE'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : user.status === 'SUSPENDED'
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    user.status === 'ACTIVE'
+                                      ? 'bg-emerald-500'
+                                      : user.status === 'SUSPENDED'
+                                      ? 'bg-rose-500'
+                                      : 'bg-amber-500'
+                                  }`}
+                                ></span>
+                                <span>{user.status}</span>
+                              </span>
+                            </td>
+
+                            <td className="p-3.5">
+                              {user.mfaEnabled ? (
+                                <div className="flex items-center gap-1 text-emerald-700 font-semibold text-[11px]">
+                                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>MFA Enforced</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1 text-slate-400 font-medium text-[11px]">
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  <span>Optional</span>
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="p-3.5">
+                              <div className="text-slate-800 font-medium">{user.lastLogin}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">Assigned by: {user.assignedBy}</div>
+                            </td>
+
+                            <td className="p-3.5 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleUserStatus(user.id)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                                    user.status === 'ACTIVE'
+                                      ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                  }`}
+                                >
+                                  {user.status === 'ACTIVE' ? 'Suspend Access' : 'Reactivate'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* IAM Audit Stream Section */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-slate-700" />
+                  <h3 className="text-sm font-bold text-slate-900">IAM Administrative Audit Trail</h3>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400">CDA Immutable Logging Protocol</span>
+              </div>
+
+              <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden text-xs">
+                {iamAuditLogs.map((log) => (
+                  <div key={log.id} className="p-3 flex items-start justify-between gap-3 bg-slate-50/50 hover:bg-slate-50 transition">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] font-bold text-slate-500">{log.timestamp}</span>
+                        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-800 font-mono">
+                          {log.action}
+                        </span>
+                      </div>
+                      <div className="text-slate-800 font-medium">{log.target}</div>
+                      <div className="text-[10px] text-slate-400">Triggered by: {log.actor}</div>
+                    </div>
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-1" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 13: ROLE-BASED ACCESS CONTROL (RBAC) */}
+        {activeTab === 'rbac' && (
+          <div className="space-y-6">
+            {/* Header & RBAC Info */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                    <Shield className="w-3 h-3 text-indigo-600" />
+                    <span>Dynamic Role Permissions</span>
+                  </span>
+                  <span className="text-slate-400 text-xs">•</span>
+                  <span className="text-xs text-slate-500 font-mono">Active Matrix: 8 Roles / 14 Modules</span>
+                </div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Role-Based Access Control (RBAC) Module</h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  Configure allowed navigation modules and operational capabilities per role. All changes dynamically refresh the Left App Drawer navigation in real-time.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleResetStatutoryRbac}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset to CDA Defaults</span>
+                </button>
+              </div>
+            </div>
+
+            {/* RBAC Notification Banner */}
+            {rbacNotification && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{rbacNotification}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRbacNotification(null)}
+                  className="text-emerald-700 hover:text-emerald-900"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Role Selector Tabs */}
+            <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap gap-1.5">
+              {(
+                [
+                  'SYSTEM_ADMIN',
+                  'GENERAL_MANAGER',
+                  'LOAN_OFFICER',
+                  'CREDIT_COMMITTEE',
+                  'BOD',
+                  'CASHIER',
+                  'ACCOUNTANT',
+                  'COMPLIANCE_OFFICER',
+                ] as StaffRole[]
+              ).map((role) => {
+                const staff = STAFF_ACCOUNTS.find((s) => s.role === role);
+                const isSelected = rbacSelectedRole === role;
+                const permissionsCount = rolePermissions[role]?.length || 0;
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    onClick={() => setRbacSelectedRole(role)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      isSelected
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded-full ${staff?.color || 'bg-slate-600'} text-white text-[9px] font-bold flex items-center justify-center shrink-0`}>
+                      {staff?.initials || role.substring(0, 2)}
+                    </div>
+                    <span>{staff?.roleTitle || role}</span>
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                        isSelected ? 'bg-slate-800 text-emerald-300' : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      {permissionsCount}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selected Role Profile Overview Card */}
+            {(() => {
+              const selectedStaff = STAFF_ACCOUNTS.find((s) => s.role === rbacSelectedRole);
+              const allowedTabsForSelected = rolePermissions[rbacSelectedRole] || [];
+              return (
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-2xl ${selectedStaff?.color} text-white font-black text-sm flex items-center justify-center shadow-sm`}>
+                        {selectedStaff?.initials}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-slate-900 text-base">{selectedStaff?.roleTitle}</h3>
+                          <span className="font-mono text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                            {rbacSelectedRole}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">{selectedStaff?.description}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">Authorized Access:</span>
+                      <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold font-mono px-2.5 py-1 rounded-lg">
+                        {allowedTabsForSelected.length} of {ALL_MODULE_TABS.length} Modules Allowed
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Segregation of Duties Guidance */}
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                    <div className="text-slate-600">
+                      <strong>CDA MC 2015-06 Segregation Guideline:</strong> Ensure that cash handling roles (Cashier) are isolated from general ledger postings (Accountant) and credit approvals (Loan Officer / Credit Committee) to preserve strict internal controls.
+                    </div>
+                  </div>
+
+                  {/* Modules Permissions Matrix Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                    {ALL_MODULE_TABS.map((tab) => {
+                      const Icon = tab.icon;
+                      const isPermitted = allowedTabsForSelected.includes(tab.id);
+                      return (
+                        <div
+                          key={tab.id}
+                          className={`p-3.5 rounded-xl border transition flex items-start justify-between gap-3 ${
+                            isPermitted
+                              ? 'bg-emerald-50/40 border-emerald-200'
+                              : 'bg-white border-slate-200 opacity-60 hover:opacity-100'
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div className={`p-2 rounded-lg shrink-0 ${isPermitted ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 text-xs truncate">{tab.label}</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
+                                <span className="font-semibold text-slate-600">{tab.category}</span>
+                                <span>•</span>
+                                <span className="font-mono text-[9px]">{tab.id}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRolePermission(rbacSelectedRole, tab.id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${
+                              isPermitted
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                            }`}
+                          >
+                            {isPermitted ? 'Granted' : 'Revoked'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* TAB 14: PLATFORM USAGE & ESCROW MODULE */}
+        {activeTab === 'platform_usage' && (
+          <div className="space-y-6">
+            {/* Header & Platform Usage Info */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                    <Activity className="w-3 h-3 text-emerald-600" />
+                    <span>Live Platform Settlement Float</span>
+                  </span>
+                  <span className="text-slate-400 text-xs">•</span>
+                  <span className="text-xs text-slate-500 font-mono">Central BSP Settlement Account (1-01-05)</span>
+                </div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Platform Escrow Balance & Detailed Utilization</h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  Real-time visibility into Platform Escrow balances held across PayMongo QR Ph member deposits, automated platform onboarding fee billing (₱15/member), and Treasury Sweep operations to the cooperative mother bank.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowSweepModal(true)}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-950/10 flex items-center gap-2 transition"
+                >
+                  <ArrowUpRight className="w-4 h-4" />
+                  <span>Execute Treasury Sweep</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Platform Usage Notification Banner */}
+            {platformUsageNotification && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{platformUsageNotification}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPlatformUsageNotification(null)}
+                  className="text-emerald-700 hover:text-emerald-900"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Top 4 Escrow & Billing Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Card 1: Platform Escrow Float */}
+              <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white p-5 rounded-2xl border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+                  <span>Platform Escrow Float</span>
+                  <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded">
+                    GL 1-01-05
+                  </span>
+                </div>
+                <div className="text-3xl font-black font-mono tracking-tight text-white mt-2">
+                  ₱{(escrowLedger[0]?.runningBalance ?? 48470).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Central BSP Designated Float</span>
+                </div>
+              </div>
+
+              {/* Card 2: Total Gross Inflows */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Gross QR Ph Inflows</div>
+                <div className="text-2xl font-black font-mono text-slate-900 mt-2">
+                  ₱50,000.00
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Share Capital (₱5k) + Repayments (₱45k)
+                </div>
+              </div>
+
+              {/* Card 3: Platform Fees & Onboarding Charges */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform Billed</div>
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded font-mono">12% VAT Incl.</span>
+                </div>
+                <div className="text-2xl font-black font-mono text-indigo-600 mt-2">
+                  ₱825.00
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  ₱15/member onboarding + 1.5% QR fees
+                </div>
+              </div>
+
+              {/* Card 4: Mother Bank Depository */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Settlement Mother Bank</div>
+                <div className="text-lg font-bold text-slate-900 mt-2">
+                  LandBank of the Phils.
+                </div>
+                <div className="text-[11px] font-mono text-slate-500 mt-1 truncate">
+                  Acct #0012-9981-22 (GL 1-01-01)
+                </div>
+              </div>
+            </div>
+
+            {/* Platform Utilization Architecture Explainer */}
+            <div className="bg-slate-900 text-slate-200 p-5 rounded-2xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">Platform Settlement & Fee Flow Architecture</h3>
+                </div>
+                <span className="text-[10px] font-mono text-emerald-400">BSP Circular 1055 • PayMongo Rail</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-mono">1</span>
+                    <span>QR Ph Member Deposits</span>
+                  </span>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Members pay Share Capital or Loan Amortizations via PayMongo QR Ph. Gross proceeds directly credit the Platform Escrow account (<code className="font-mono text-emerald-300">1-01-05</code>).
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-mono">2</span>
+                    <span>Automated Fee Deduction</span>
+                  </span>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Upon membership approval, the system charges ₱15.00 (₱13.39 net + ₱1.61 12% EVAT), creating an electronic BIR billing voucher to the cooperative.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-[10px] font-mono">3</span>
+                    <span>Daily Treasury Sweeps</span>
+                  </span>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    General Manager or System Admin initiates automated Treasury Sweeps from Platform Escrow to the cooperative's LandBank depository (<code className="font-mono text-amber-300">1-01-01</code>).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed Transaction Utilization Ledger Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs space-y-0">
+              <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">Detailed Platform Escrow Utilization Ledger</h3>
+                  <p className="text-[11px] text-slate-500">Immutable ledger of float inflows, fee deductions, and clearing settlements.</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={escrowFilterType}
+                    onChange={(e) => setEscrowFilterType(e.target.value)}
+                    className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 font-medium"
+                  >
+                    <option value="ALL">All Transactions</option>
+                    <option value="INFLOW_SHARE_CAPITAL">Share Capital Deposits</option>
+                    <option value="INFLOW_REPAYMENT">Loan Repayments</option>
+                    <option value="PLATFORM_ONBOARDING_FEE">Platform Onboarding Fees (₱15)</option>
+                    <option value="TREASURY_SWEEP">Treasury Sweeps</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3.5">Timestamp & ID</th>
+                      <th className="p-3.5">Particulars / Transaction Type</th>
+                      <th className="p-3.5">Member / Counterparty</th>
+                      <th className="p-3.5 text-right">Gross Amount</th>
+                      <th className="p-3.5 text-right">Platform Fee / VAT</th>
+                      <th className="p-3.5 text-right">Net Escrow Impact</th>
+                      <th className="p-3.5 text-right">Running Escrow Float</th>
+                      <th className="p-3.5 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {escrowLedger
+                      .filter((tx) => escrowFilterType === 'ALL' || tx.type === escrowFilterType)
+                      .map((tx) => {
+                        const isCredit = tx.netEscrowAmount >= 0;
+                        return (
+                          <tr key={tx.id} className="hover:bg-slate-50/80 transition">
+                            <td className="p-3.5">
+                              <div className="font-mono text-[11px] font-bold text-slate-900">{tx.reference}</div>
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.timestamp}</div>
+                            </td>
+
+                            <td className="p-3.5">
+                              <div className="font-semibold text-slate-900">{tx.description}</div>
+                              <div className="text-[10px] text-slate-500 font-mono mt-0.5">{tx.type}</div>
+                            </td>
+
+                            <td className="p-3.5">
+                              <div className="font-medium text-slate-800">{tx.memberOrCounterparty}</div>
+                            </td>
+
+                            <td className="p-3.5 text-right font-mono font-bold text-slate-900">
+                              ₱{Math.abs(tx.grossAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+
+                            <td className="p-3.5 text-right font-mono text-[11px]">
+                              {tx.platformFee > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-indigo-700">₱{tx.platformFee.toFixed(2)}</span>
+                                  <span className="text-[10px] text-slate-400 block font-mono">(VAT: ₱{tx.vatAmount.toFixed(2)})</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">-</span>
+                              )}
+                            </td>
+
+                            <td className={`p-3.5 text-right font-mono font-black ${isCredit ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {isCredit ? '+' : ''}₱{tx.netEscrowAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+
+                            <td className="p-3.5 text-right font-mono font-bold text-slate-900">
+                              ₱{tx.runningBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+
+                            <td className="p-3.5 text-center">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {tx.status}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 1: GRANT ACCESS / INVITE PORTAL USER */}
+        {showInviteUserModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Grant Portal Access & Provision User</h3>
+                  <p className="text-xs text-slate-500">Invite new administrative staff to Bayani Cooperative admin portal.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowInviteUserModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleInvitePortalUser} className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Full Name & Honorific</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Atty. Maria Rosario Santos"
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Official Work Email</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. msantos@bayanicoop.ph"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Assigned Operational Role</label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as StaffRole)}
+                      className="w-full p-2.5 border border-slate-200 rounded-xl bg-white font-medium"
+                    >
+                      <option value="LOAN_OFFICER">Loan Officer</option>
+                      <option value="CASHIER">Cashier / Teller</option>
+                      <option value="CREDIT_COMMITTEE">Credit Committee</option>
+                      <option value="ACCOUNTANT">Accountant</option>
+                      <option value="COMPLIANCE_OFFICER">Compliance / DPO</option>
+                      <option value="BOD">Board of Directors</option>
+                      <option value="GENERAL_MANAGER">General Manager</option>
+                      <option value="SYSTEM_ADMIN">System Admin</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Branch / Department</label>
+                    <input
+                      type="text"
+                      value={inviteBranch}
+                      onChange={(e) => setInviteBranch(e.target.value)}
+                      className="w-full p-2.5 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    id="mfaToggle"
+                    checked={inviteMfa}
+                    onChange={(e) => setInviteMfa(e.target.checked)}
+                    className="w-4 h-4 text-red-600 rounded border-slate-300"
+                  />
+                  <label htmlFor="mfaToggle" className="text-slate-700 font-semibold cursor-pointer">
+                    Enforce Multi-Factor Authentication (MFA) upon first login
+                  </label>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowInviteUserModal(false)}
+                    className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl font-semibold hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-md shadow-red-950/10"
+                  >
+                    Send Invitation & Provision Access
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 2: EXECUTE TREASURY SWEEP */}
+        {showSweepModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Execute Treasury Sweep</h3>
+                  <p className="text-xs text-slate-500">Transfer Platform Escrow float to Cooperative Mother Depository.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSweepModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleExecuteTreasurySweep} className="space-y-4 text-xs">
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-950">
+                  <div className="text-[10px] uppercase font-bold text-emerald-700">Current Available Escrow Float</div>
+                  <div className="text-xl font-black font-mono mt-0.5">
+                    ₱{(escrowLedger[0]?.runningBalance ?? 48470).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Sweep Amount (₱)</label>
+                  <input
+                    type="number"
+                    min="1000"
+                    max={escrowLedger[0]?.runningBalance ?? 48470}
+                    step="500"
+                    required
+                    value={sweepAmount}
+                    onChange={(e) => setSweepAmount(Number(e.target.value))}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-sm font-bold focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Recommended operational cushion of ₱5,000.00 will remain in float.
+                  </span>
+                </div>
+
+                <div className="space-y-2 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Source Account:</span>
+                    <strong className="font-mono">1-01-05 Platform Escrow</strong>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Destination Bank:</span>
+                    <strong className="font-mono">LandBank #0012-9981-22</strong>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Clearing Channel:</span>
+                    <strong className="text-emerald-700">BSP PhilPaSS / PesoNet Same-Day</strong>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowSweepModal(false)}
+                    className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl font-semibold hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md shadow-emerald-950/10"
+                  >
+                    Confirm & Sweep Float
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
