@@ -14,6 +14,7 @@ import { FirestoreCoopService } from '../core/firestore.service';
 import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus } from '@flexcoop/shared-types';
 import { NetSurplusService } from '../modules/accounting/surplus.service';
 import { CollateralService } from '../modules/lending/collateral.service';
+import { CooperativeTaxService } from '../modules/accounting/tax.service';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -916,7 +917,131 @@ console.log('\n--- 19. System Admin, IAM, Dynamic RBAC & Platform Escrow Utiliza
   assert(totalDebit === totalCredit, 'Treasury Sweep journal voucher JV-SWEEP-2026 is strictly balanced (DR == CR ₱40,000.00)');
 }
 
-console.log('\n🎉 ALL 112 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC & PLATFORM ESCROW UTILIZATION) PASSED SUCCESSFULLY!\n');
+// 20. Statutory Cooperative Tax Profile & Exemption Rules (RA 9520 Articles 60 & 61)
+console.log('\n--- 20. Statutory Cooperative Tax Profile & Exemption Rules (RA 9520 & BIR) ---');
+{
+  const tenantId = 'tenant_bayani_001';
+
+  // 20.1 Tax Legal Classification & Category A vs Category B Threshold
+  const coopTaxProfile = CooperativeTaxService.getCooperativeTaxProfile({
+    tenantId,
+    accumulatedReserves: 250000.0, // ₱250k accumulated reserves
+  });
+  assert(coopTaxProfile.taxCategory === 'CATEGORY_A', 'Cooperative with ₱250k reserves is classified as Category A (<= ₱10M threshold)');
+  assert(coopTaxProfile.hasActiveBirExemption === true, 'Cooperative holds active BIR Certificate of Tax Exemption (CTE)');
+  assert(coopTaxProfile.hasActiveCdaGoodStanding === true, 'Cooperative holds active CDA Certificate of Good Standing (CGS)');
+
+  // Category B test (Reserves > ₱10M)
+  const largeCoopProfile = CooperativeTaxService.getCooperativeTaxProfile({
+    tenantId: 'tenant_large_001',
+    accumulatedReserves: 15000000.0, // ₱15M reserves
+  });
+  assert(largeCoopProfile.taxCategory === 'CATEGORY_B', 'Cooperative with ₱15M reserves is classified as Category B (> ₱10M threshold)');
+
+  // 20.2 Member Transactions: 100% Tax-Exempt (Share Capital, Loan Notes DST, Interest Collection, Dividends)
+  // A. Member Share Capital
+  const shareCapitalEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'MEMBER',
+    transactionType: 'SHARE_CAPITAL_SUBSCRIPTION',
+    grossAmount: 15000.0,
+  });
+  assert(shareCapitalEval.isFullyTaxExempt === true, 'Member share capital is 100% tax-exempt from VAT, Percentage Tax, and DST');
+  assert(shareCapitalEval.applicableTaxes.every((t) => t.taxDue === 0), 'All statutory taxes evaluated at ₱0.00 for member share capital');
+
+  // B. Member Loan Promissory Note (Documentary Stamp Tax Exemption)
+  const loanNoteEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'MEMBER',
+    transactionType: 'LOAN_DISBURSEMENT',
+    grossAmount: 50000.0,
+  });
+  assert(loanNoteEval.isFullyTaxExempt === true, 'Member loan promissory note is 100% exempt from Documentary Stamp Tax (NIRC Sec. 199)');
+  assert(loanNoteEval.officialReceiptInscription.includes('DST-EXEMPT'), 'Receipt carries statutory DST-Exempt inscription');
+
+  // C. Member Loan Interest Payment
+  const loanInterestEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'MEMBER',
+    transactionType: 'LOAN_INTEREST_COLLECTION',
+    grossAmount: 6000.0,
+  });
+  assert(loanInterestEval.isFullyTaxExempt === true, 'Member loan interest collection is 100% exempt from Income Tax and 12% VAT');
+
+  // D. Member Dividends (Interest on Share Capital & Patronage Refund)
+  const dividendEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'MEMBER',
+    transactionType: 'INTEREST_ON_SHARE_CAPITAL',
+    grossAmount: 25000.0,
+  });
+  assert(dividendEval.isFullyTaxExempt === true, 'Member Interest on Share Capital and Patronage Refund exempt from withholding tax (BIR Ruling 138-2019)');
+
+  // 20.3 Non-Member Transactions: Category A (Exempt CIT) vs Category B (25% CIT & 12% VAT)
+  const catANonMemberEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'NON_MEMBER',
+    transactionType: 'LOAN_INTEREST_COLLECTION',
+    grossAmount: 10000.0,
+    accumulatedReserves: 250000.0, // Category A
+  });
+  assert(catANonMemberEval.applicableTaxes.find((t) => t.taxCode === 'CIT-EXEMPT')?.taxDue === 0, 'Category A cooperative is exempt from income tax on non-member operations');
+
+  const catBNonMemberEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'NON_MEMBER',
+    transactionType: 'LOAN_INTEREST_COLLECTION',
+    grossAmount: 10000.0,
+    accumulatedReserves: 15000000.0, // Category B
+  });
+  assert(catBNonMemberEval.isFullyTaxExempt === false, 'Category B cooperative is NOT tax-exempt on non-member operations');
+  assert(catBNonMemberEval.applicableTaxes.some((t) => t.taxCode === 'RCIT-25' && t.taxDue === 2500.0), 'Category B non-member operations assessed 25% Regular Corporate Income Tax (₱2,500.00 on ₱10,000.00)');
+  assert(catBNonMemberEval.applicableTaxes.some((t) => t.taxCode === 'VAT-12' && t.taxDue === 1200.0), 'Category B non-member operations assessed 12% Output VAT (₱1,200.00 on ₱10,000.00)');
+
+  // 20.4 Mandatory Withholding Agent Obligations (WTC on Salaries & EWT on Rent/Prof Fees)
+  // A. Staff Salary Payroll (BIR Form 1601-C)
+  const salaryEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'EMPLOYEE',
+    transactionType: 'STAFF_SALARY_PAYROLL',
+    grossAmount: 35000.0, // Taxable compensation above ₱20,833
+  });
+  assert(salaryEval.isFullyTaxExempt === false, 'Cooperative MUST act as Withholding Agent for employee compensation (NIRC Sec. 79)');
+  assert(Boolean(salaryEval.birFilingFormRequired?.includes('1601-C')), 'Salary withholding requires BIR Form 1601-C monthly return');
+
+  // B. Office Rental Expense (5% EWT under BIR Form 1601-EQ & 2307)
+  const rentEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'VENDOR',
+    transactionType: 'OFFICE_RENTAL_EXPENSE',
+    grossAmount: 30000.0,
+  });
+  assert(rentEval.isFullyTaxExempt === false, 'Office rental is subject to 5% Expanded Withholding Tax');
+  assert(rentEval.applicableTaxes[0].taxDue === 1500.0, '5% EWT on ₱30,000 rental is exactly ₱1,500.00');
+  assert(rentEval.netCooperativeAmount === 28500.0, 'Net cash paid to lessor is ₱28,500.00 with BIR Form 2307 attached');
+
+  // C. Professional CPA Audit Fee (5% EWT)
+  const profEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'VENDOR',
+    transactionType: 'PROFESSIONAL_AUDIT_LEGAL_FEE',
+    grossAmount: 20000.0,
+  });
+  assert(profEval.applicableTaxes[0].taxDue === 1000.0, '5% EWT on ₱20,000 professional fee is exactly ₱1,000.00');
+
+  // 20.5 Final Withholding Tax on Commercial Bank Deposits (20%)
+  const bankInterestEval = CooperativeTaxService.evaluateTransactionTax({
+    counterpartyType: 'VENDOR', // Bank
+    transactionType: 'BANK_DEPOSIT_INTEREST_INCOME',
+    grossAmount: 5000.0,
+  });
+  assert(bankInterestEval.applicableTaxes[0].taxDue === 1000.0, 'Commercial bank deposit interest is subject to 20% final withholding tax (₱1,000 on ₱5,000)');
+
+  // 20.6 BIR Form 1702-EX (Annual Information Return for Tax-Exempt Entities)
+  const bir1702Ex = CooperativeTaxService.generateBir1702ExSummary({
+    taxableYear: 2025,
+    memberGrossReceipts: 4500000.0,
+    nonMemberGrossReceipts: 0,
+    accumulatedReserves: 250000.0,
+  });
+  assert(bir1702Ex.taxDue === 0, 'BIR Form 1702-EX calculates ₱0.00 tax due for Category A cooperative with pure member receipts');
+  assert(bir1702Ex.cdaCertGoodStandingAttached === true, 'BIR Form 1702-EX attaches CDA Certificate of Good Standing');
+  assert(bir1702Ex.birCertTaxExemptionAttached === true, 'BIR Form 1702-EX attaches BIR Certificate of Tax Exemption');
+}
+
+console.log('\n🎉 ALL 130 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC, PLATFORM ESCROW & COOPERATIVE TAX RULES UNDER RA 9520) PASSED SUCCESSFULLY!\n');
+
 
 
 

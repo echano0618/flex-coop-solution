@@ -325,7 +325,7 @@ export default function AdminDashboard() {
     { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode, category: 'Treasury' },
     { id: 'accounting', label: 'CDA General Ledger', icon: BookOpen, category: 'Finance' },
     { id: 'surplus', label: 'Net Surplus & Patronage (Art. 86)', icon: PieChart, category: 'Finance' },
-    { id: 'invoices', label: 'Tax & Invoices (12% VAT)', icon: FileText, category: 'Finance' },
+    { id: 'invoices', label: 'Tax & BIR Compliance (RA 9520)', icon: FileText, category: 'Finance' },
     { id: 'reports', label: 'CDA & CIC Mandatory Reports', icon: ShieldCheck, category: 'Governance' },
     { id: 'iam', label: 'Identity & Access (IAM)', icon: Key, category: 'Administration' },
     { id: 'rbac', label: 'Role-Based Access (RBAC)', icon: Shield, category: 'Administration' },
@@ -1428,6 +1428,12 @@ export default function AdminDashboard() {
     glEntry: string;
     cashierName: string;
   } | null>(null);
+
+  // Cooperative Statutory Tax Profile & Assessment Engine State (RA 9520 Articles 60 & 61)
+  const [taxSelectedCategory, setTaxSelectedCategory] = useState<
+    'MEMBER_SHARE' | 'MEMBER_LOAN_NOTE' | 'MEMBER_INTEREST' | 'MEMBER_DIVIDENDS' | 'STAFF_SALARY' | 'OFFICE_RENT' | 'PROFESSIONAL_FEE' | 'BANK_INTEREST' | 'NON_MEMBER_TX'
+  >('MEMBER_SHARE');
+  const [taxTestAmount, setTaxTestAmount] = useState<number>(50000);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col lg:flex-row">
@@ -4504,59 +4510,440 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 5: TAX & INVOICES */}
+        {/* TAB 5: COOPERATIVE TAX & BIR STATUTORY COMPLIANCE (RA 9520) */}
         {activeTab === 'invoices' && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Electronic Tax Invoices (12% Output VAT)</h2>
-              <p className="text-xs text-slate-500">Automated BIR sales invoices generated upon upfront loan fee deduction.</p>
+          <div className="space-y-6">
+            {/* Header & Statutory Context */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                    <span>RA 9520 Articles 60 & 61 • BIR CTE Valid</span>
+                  </span>
+                  <span className="text-slate-400 text-xs">•</span>
+                  <span className="text-xs text-slate-500 font-mono">TIN: 009-887-123-000</span>
+                </div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Cooperative Tax Profile & Statutory Exemption Engine</h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  Statutory tax exemptions under Republic Act No. 9520 (Philippine Cooperative Code), BIR Certificate of Tax Exemption (CTE), and mandatory Withholding Agent compliance.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold px-3 py-1.5 rounded-xl font-mono flex items-center gap-1.5 shadow-xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>100% Tax-Exempt on Member Operations</span>
+                </span>
+              </div>
             </div>
 
-            <div className="border border-slate-200 rounded-lg p-6 bg-slate-50 space-y-4 max-w-xl">
-              <div className="flex justify-between items-start border-b border-slate-200 pb-4">
-                <div>
-                  <div className="text-xs uppercase font-bold text-slate-400">Official Electronic Sales Invoice</div>
-                  <div className="text-base font-bold text-slate-900">INV-2026-00918</div>
-                  <div className="text-xs text-slate-500">Ref: DISB-TX-ESCROW-992182</div>
+            {/* Top 4 Profile Cards: Legal Classification & Certificates */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Card 1: Statutory Tax Classification */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <span>Tax Legal Category</span>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-bold">Category A</span>
                 </div>
-                <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-bold">
-                  DEDUCTED UPFRONT
+                <div className="text-lg font-black text-slate-900 leading-snug">
+                  100% Exempt on Members
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Exempt from Corporate Income Tax, 12% VAT, Percentage Tax, and DST on member loans and shares (RA 9520 Art. 60).
+                </p>
+              </div>
+
+              {/* Card 2: Accumulated Statutory Reserves & Undivided Savings */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <span>Accumulated Reserves</span>
+                  <span className="text-[10px] font-mono text-slate-500 font-semibold">&le; ₱10M Limit</span>
+                </div>
+                <div className="text-2xl font-black font-mono text-emerald-600">
+                  ₱250,000.00
+                </div>
+                <div className="space-y-1">
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: '2.5%' }}></div>
+                  </div>
+                  <div className="text-[10px] text-slate-400 flex justify-between">
+                    <span>Current: 2.5% of Threshold</span>
+                    <span className="font-semibold text-emerald-700">₱9.75M Buffer Safe</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 3: BIR Certificate of Tax Exemption (CTE) */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <span>BIR Exemption (CTE)</span>
+                  <span className="bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-bold">Active</span>
+                </div>
+                <div className="text-base font-black font-mono text-slate-900 truncate">
+                  BIR-CTE-2024-008129
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  RDO 039 • Issued under BIR RR 7-2012. Valid through <strong className="text-slate-800">Dec 31, 2027</strong> (3-year cycle).
+                </p>
+              </div>
+
+              {/* Card 4: CDA Certificate of Good Standing (CGS) */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <span>CDA Good Standing (CGS)</span>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-bold">Verified</span>
+                </div>
+                <div className="text-base font-black font-mono text-slate-900 truncate">
+                  CGS-2026-NCR-0442
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Valid for <strong className="text-slate-800">FY 2026</strong>. Annual submission of CAPR & AFS required to keep BIR exemption.
+                </p>
+              </div>
+            </div>
+
+            {/* Interactive Transaction Tax Evaluation Engine */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Calculator className="w-4 h-4 text-emerald-600" />
+                    <span>Interactive Transaction Tax Assessment Engine</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Select a cooperative transaction to test statutory taxability, legal citations, and required receipt inscriptions.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">Sample Amount:</span>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-xs">₱</span>
+                    <input
+                      type="number"
+                      value={taxTestAmount}
+                      onChange={(e) => setTaxTestAmount(Math.max(100, Number(e.target.value)))}
+                      className="pl-6 pr-2.5 py-1 text-xs font-mono font-bold border border-slate-200 rounded-lg w-28 focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Transaction Selector Buttons */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'MEMBER_SHARE', label: '1. Member Share Capital (CBU)', counterparty: 'MEMBER' },
+                  { id: 'MEMBER_LOAN_NOTE', label: '2. Member Loan Promissory Note (DST)', counterparty: 'MEMBER' },
+                  { id: 'MEMBER_INTEREST', label: '3. Member Loan Interest Payment', counterparty: 'MEMBER' },
+                  { id: 'MEMBER_DIVIDENDS', label: '4. Member Dividends (ISC / Patronage)', counterparty: 'MEMBER' },
+                  { id: 'STAFF_SALARY', label: '5. Staff Compensation Payroll (WTC)', counterparty: 'EMPLOYEE' },
+                  { id: 'OFFICE_RENT', label: '6. Office Rental Expense (5% EWT)', counterparty: 'VENDOR' },
+                  { id: 'PROFESSIONAL_FEE', label: '7. CPA Audit / Legal Fees (5% EWT)', counterparty: 'VENDOR' },
+                  { id: 'BANK_INTEREST', label: '8. Commercial Bank Interest (20% Final)', counterparty: 'BANK' },
+                  { id: 'NON_MEMBER_TX', label: '9. Non-Member Operations (Cat. A vs B)', counterparty: 'NON-MEMBER' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setTaxSelectedCategory(item.id as any)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition border ${
+                      taxSelectedCategory === item.id
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Live Assessment Result Card */}
+              {(() => {
+                let statusBadge = { title: '100% TAX-EXEMPT', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', isExempt: true };
+                let taxLines: { name: string; rate: string; amount: number; legalBasis: string }[] = [];
+                let statutoryNotice = '';
+                let receiptText = '';
+                let birFormNotice = '';
+
+                if (taxSelectedCategory === 'MEMBER_SHARE') {
+                  statusBadge = { title: '100% TAX-EXEMPT (RA 9520 ART. 60)', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', isExempt: true };
+                  taxLines = [
+                    { name: '12% Value-Added Tax (VAT)', rate: '0.00%', amount: 0, legalBasis: 'NIRC Sec. 109(1)(L) & RA 9520 Art. 60' },
+                    { name: 'Documentary Stamp Tax (DST)', rate: '0.00%', amount: 0, legalBasis: 'NIRC Sec. 199(a) (Exempt for Cooperative Shares)' },
+                    { name: 'Income Tax', rate: '0.00%', amount: 0, legalBasis: 'RA 9520 Art. 60 / BIR Certificate of Tax Exemption' },
+                  ];
+                  statutoryNotice = 'Member capital contributions (Capital Build-Up / Common Share subscriptions) are strictly non-taxable equity transactions.';
+                  receiptText = 'TAX-EXEMPT TRANSACTION PURSUANT TO RA 9520 ART. 60 & BIR CTE NO. BIR-CTE-2024-008129';
+                  birFormNotice = 'Reported under BIR Form 1702-EX (Annual Information Return for Tax-Exempt Organizations)';
+                } else if (taxSelectedCategory === 'MEMBER_LOAN_NOTE') {
+                  statusBadge = { title: '100% DST EXEMPT (NIRC SEC. 199)', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', isExempt: true };
+                  const commercialDst = Math.round((taxTestAmount / 200) * 1.5 * 100) / 100;
+                  taxLines = [
+                    { name: 'Documentary Stamp Tax on Member Loan', rate: '0.00%', amount: 0, legalBasis: 'NIRC Sec. 199(a) & RA 9520 Art. 60 (Standard Bank DST would be ₱' + commercialDst.toLocaleString() + ')' },
+                  ];
+                  statutoryNotice = 'Promissory notes, loan contracts, and credit facilities executed with members are explicitly exempt from Documentary Stamp Tax.';
+                  receiptText = 'DST-EXEMPT MEMBER LOAN FACILITY (NIRC SEC. 199 / RA 9520 ART. 60)';
+                  birFormNotice = 'Exempt loan document annotated with CDA registration and BIR CTE number';
+                } else if (taxSelectedCategory === 'MEMBER_INTEREST') {
+                  statusBadge = { title: '100% TAX-EXEMPT (NO VAT / NO CIT)', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', isExempt: true };
+                  taxLines = [
+                    { name: 'Corporate Income Tax on Interest', rate: '0.00%', amount: 0, legalBasis: 'RA 9520 Art. 60 & BIR RR 7-2012' },
+                    { name: '12% Value-Added Tax / Gross Receipts', rate: '0.00%', amount: 0, legalBasis: 'NIRC Sec. 109(1)(L)' },
+                  ];
+                  statutoryNotice = 'Interest income and service charges collected from bona fide cooperative members are 100% exempt from corporate income tax and VAT.';
+                  receiptText = 'OFFICIAL RECEIPT: TAX-EXEMPT UNDER RA 9520 ART. 60 & BIR CTE NO. BIR-CTE-2024-008129';
+                  birFormNotice = 'Reported as Tax-Exempt Gross Receipts on BIR Form 1702-EX';
+                } else if (taxSelectedCategory === 'MEMBER_DIVIDENDS') {
+                  statusBadge = { title: '100% EXEMPT FROM WITHHOLDING TAX', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', isExempt: true };
+                  taxLines = [
+                    { name: 'Final Withholding Tax on Dividends', rate: '0.00%', amount: 0, legalBasis: 'BIR Ruling No. 138-2019 / RA 9520 Art. 60' },
+                  ];
+                  statutoryNotice = 'Interest on Share Capital (ISC) and Patronage Refunds (PR) distributed to members are NOT subject to dividend tax or withholding tax in the hands of members.';
+                  receiptText = 'TAX-EXEMPT MEMBER SURPLUS DIVIDEND (RA 9520 ART. 86 / BIR RULING 138-2019)';
+                  birFormNotice = 'Disclosed in CDA Mandatory Social & Performance Audit reports';
+                } else if (taxSelectedCategory === 'STAFF_SALARY') {
+                  const isTaxable = taxTestAmount > 20833;
+                  const wtc = isTaxable ? Math.round((taxTestAmount - 20833) * 0.15 * 100) / 100 : 0;
+                  statusBadge = { title: 'MANDATORY WITHHOLDING AGENT', bg: 'bg-amber-50 text-amber-800 border-amber-200', isExempt: false };
+                  taxLines = [
+                    { name: 'Withholding Tax on Compensation (WTC)', rate: isTaxable ? '15.00% (bracket)' : '0.00% (exempt bracket)', amount: wtc, legalBasis: 'NIRC Sec. 79 (Cooperatives are withholding agents)' },
+                  ];
+                  statutoryNotice = 'Tax exemption applies to the cooperative, NOT to individual employees. The cooperative MUST deduct and remit Withholding Tax on Compensation for salaried staff.';
+                  receiptText = 'SALARY DISBURSEMENT VOUCHER NET OF WITHHOLDING TAX (BIR FORM 1601-C)';
+                  birFormNotice = 'BIR Form 1601-C (Monthly Remittance Return of Income Taxes Withheld on Compensation) - Due every 10th of month';
+                } else if (taxSelectedCategory === 'OFFICE_RENT') {
+                  const ewt = Math.round(taxTestAmount * 0.05 * 100) / 100;
+                  statusBadge = { title: 'WITHHOLDING AGENT: 5% EWT MANDATE', bg: 'bg-amber-50 text-amber-800 border-amber-200', isExempt: false };
+                  taxLines = [
+                    { name: 'Expanded Withholding Tax on Rental (EWT)', rate: '5.00%', amount: ewt, legalBasis: 'BIR RR 2-98 / BIR Form 1601-EQ' },
+                  ];
+                  statutoryNotice = 'The cooperative must withhold 5% Expanded Withholding Tax on lease payments and issue BIR Form 2307 to the property owner/lessor.';
+                  receiptText = 'RENT PAYMENT: NET ₱' + (taxTestAmount - ewt).toLocaleString() + ' + BIR FORM 2307 (₱' + ewt.toLocaleString() + ' EWT)';
+                  birFormNotice = 'BIR Form 1601-EQ (Quarterly) & Certificate Form 2307 issued to lessor';
+                } else if (taxSelectedCategory === 'PROFESSIONAL_FEE') {
+                  const ewt = Math.round(taxTestAmount * 0.05 * 100) / 100;
+                  statusBadge = { title: 'WITHHOLDING AGENT: 5% EWT MANDATE', bg: 'bg-amber-50 text-amber-800 border-amber-200', isExempt: false };
+                  taxLines = [
+                    { name: 'Creditable Withholding Tax on Professional Fees', rate: '5.00%', amount: ewt, legalBasis: 'BIR RR 11-2018 / NIRC Sec. 57' },
+                  ];
+                  statutoryNotice = 'Fees paid to external CPAs, auditors, and legal counsel are subject to 5% (or 10%) expanded withholding tax.';
+                  receiptText = 'PROFESSIONAL FEE: NET ₱' + (taxTestAmount - ewt).toLocaleString() + ' + BIR FORM 2307 CERTIFICATE';
+                  birFormNotice = 'BIR Form 1601-EQ & BIR Form 2307 Certificate';
+                } else if (taxSelectedCategory === 'BANK_INTEREST') {
+                  const finalTax = Math.round(taxTestAmount * 0.20 * 100) / 100;
+                  statusBadge = { title: '20% FINAL TAX DEDUCTED BY BANK', bg: 'bg-rose-50 text-rose-800 border-rose-200', isExempt: false };
+                  taxLines = [
+                    { name: 'Final Withholding Tax on Bank Deposits', rate: '20.00%', amount: finalTax, legalBasis: 'NIRC Sec. 24(B)(1) (Commercial Banks)' },
+                  ];
+                  statutoryNotice = 'Interest earned from deposits in commercial banks (LandBank, BDO, BPI) is subject to 20% final tax automatically withheld by the bank. Funds deposited in Cooperative Banks/Federations are exempt.';
+                  receiptText = 'COMMERCIAL BANK CREDIT MEMO NET OF 20% FINAL WITHHOLDING TAX';
+                  birFormNotice = 'Recorded as Final Taxed Non-Operating Income in General Ledger';
+                } else {
+                  // NON_MEMBER_TX
+                  statusBadge = { title: 'CATEGORY A: EXEMPT (RESERVES <= ₱10M)', bg: 'bg-blue-50 text-blue-800 border-blue-200', isExempt: true };
+                  taxLines = [
+                    { name: 'Corporate Income Tax (Category A)', rate: '0.00%', amount: 0, legalBasis: 'RA 9520 Art. 61(1) (Reserves ₱250k <= ₱10M ceiling)' },
+                    { name: '12% Value-Added Tax', rate: '0.00% / 12.00%', amount: 0, legalBasis: 'Exempt unless non-member annual gross sales exceed ₱3,000,000' },
+                  ];
+                  statutoryNotice = 'Because Bayani Cooperative has accumulated reserves under ₱10,000,000 (Category A), operations with non-members remain exempt from income tax. If reserves exceed ₱10M (Category B), non-member operations become subject to 25% CIT and 12% VAT.';
+                  receiptText = 'NON-MEMBER TRANSACTION: TAX-EXEMPT UNDER RA 9520 ART. 61(1) (CATEGORY A)';
+                  birFormNotice = 'Reported on BIR Form 1702-EX under Non-Member Activities Schedule';
+                }
+
+                const totalTaxDue = taxLines.reduce((acc, l) => acc + l.amount, 0);
+
+                return (
+                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-3 border-b border-slate-200">
+                      <div>
+                        <div className="text-[10px] uppercase font-bold text-slate-400">Statutory Tax Ruling:</div>
+                        <div className="text-base font-extrabold text-slate-900">{statutoryNotice}</div>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${statusBadge.bg}`}>
+                        {statusBadge.title}
+                      </span>
+                    </div>
+
+                    {/* Tax Breakdown Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs bg-white rounded-xl border border-slate-200 overflow-hidden">
+                        <thead className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200">
+                          <tr>
+                            <th className="p-3">Tax Description</th>
+                            <th className="p-3 text-right">Applicable Rate</th>
+                            <th className="p-3 text-right">Tax Due (₱)</th>
+                            <th className="p-3 text-right">Net Proceed (₱)</th>
+                            <th className="p-3">Statutory Legal Citation</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-800">
+                          {taxLines.map((line, idx) => (
+                            <tr key={idx}>
+                              <td className="p-3 font-semibold">{line.name}</td>
+                              <td className="p-3 text-right font-mono font-bold">{line.rate}</td>
+                              <td className="p-3 text-right font-mono font-black text-rose-600">
+                                {line.amount > 0 ? `₱${line.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00 (EXEMPT)'}
+                              </td>
+                              <td className="p-3 text-right font-mono font-black text-emerald-700">
+                                ₱{(taxTestAmount - line.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="p-3 font-mono text-[11px] text-slate-500">{line.legalBasis}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-slate-50 border-t border-slate-200 font-bold">
+                          <tr>
+                            <td colSpan={2} className="p-3 text-slate-700">Total Tax Remittance Required:</td>
+                            <td className="p-3 text-right font-mono text-rose-700">
+                              ₱{totalTaxDue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-right font-mono text-emerald-800">
+                              ₱{(taxTestAmount - totalTaxDue).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-[11px] text-slate-400">
+                              {statusBadge.isExempt ? '100% Retained by Cooperative' : 'Remitted to BIR as Withholding Agent'}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    {/* Stamping Inscription Card */}
+                    <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-1">
+                      <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between">
+                        <span>Mandatory Receipt Stamping Inscription (BIR RR 7-2012):</span>
+                        <span className="text-emerald-700 font-mono text-[9px] font-bold">CDA MC 2015-06 COMPLIANT</span>
+                      </div>
+                      <div className="p-2.5 bg-slate-900 text-emerald-400 font-mono text-[11px] rounded-lg">
+                        "{receiptText}"
+                      </div>
+                      <div className="text-[10px] text-slate-500 pt-0.5">
+                        {birFormNotice}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Cooperative BIR Mandatory Tax Returns Schedule & Compliance Calendar */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Cooperative Mandatory BIR Tax Filing Calendar</h3>
+                  <p className="text-xs text-slate-500">Statutory return requirements for CDA-registered cooperatives in good standing.</p>
+                </div>
+                <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded">
+                  NIRC & RA 9520 Compliance Calendar
                 </span>
               </div>
 
-              <div className="text-xs space-y-1.5 text-slate-600">
-                <div className="flex justify-between">
-                  <span>Customer (Cooperative):</span>
-                  <span className="font-semibold text-slate-800">Bayani Multi-Purpose Cooperative</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 font-mono">BIR Form 1702-EX</span>
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">Annual Return</span>
+                  </div>
+                  <div className="font-semibold text-slate-800">Annual Information Return for Tax-Exempt Entities</div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Mandatory annual submission due on or before <strong>April 15</strong>. Must attach CDA Certificate of Good Standing and Audited Financial Statements.
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span>BIR TIN:</span>
-                  <span className="font-mono">009-887-123-000</span>
+
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 font-mono">BIR Form 1601-C</span>
+                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">Monthly</span>
+                  </div>
+                  <div className="font-semibold text-slate-800">Monthly Remittance of Taxes Withheld on Compensation</div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Due every <strong>10th day</strong> of the following month for withholding taxes deducted from staff salaries and employee payroll.
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span>Gross Loan Amount Disbursed:</span>
-                  <span>₱50,000.00</span>
+
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 font-mono">BIR Form 1601-EQ / 2307</span>
+                    <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">Quarterly / Monthly</span>
+                  </div>
+                  <div className="font-semibold text-slate-800">Creditable Expanded Withholding Tax (EWT)</div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Remits 5% tax withheld on office rentals and professional CPA/legal fees. The coop issues <strong>BIR Form 2307</strong> certificates to lessors and vendors.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Third-Party Cloud Software Vendor Invoices (SaaS Provider 12% Output VAT) */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Third-Party SaaS Platform Invoices (Vendor 12% Output VAT)</h3>
+                  <p className="text-xs text-slate-500">
+                    Electronic VAT sales invoices issued to the cooperative by technology providers for cloud infrastructure and onboarding fees.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-1 rounded-lg">
+                  Vendor BIR Mandate
+                </span>
+              </div>
+
+              {/* Legal Clarification Banner */}
+              <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-200 text-xs text-indigo-950 flex items-start gap-2.5">
+                <FileText className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong>Important Tax Distinction:</strong> Under RA 9520, Bayani Cooperative is <strong>100% tax-exempt</strong> on its loan services and share capital transactions with members. However, external commercial technology vendors (e.g. <em>Tuntong Tech Solution / Flex Coop Solution</em>), as registered corporate IT enterprises, are legally mandated by the BIR to issue 12% Output VAT sales invoices to the cooperative for software hosting and member onboarding fees.
                 </div>
               </div>
 
-              <div className="border-t border-slate-200 pt-3 space-y-1.5 text-xs">
-                <div className="flex justify-between font-semibold text-slate-800">
-                  <span>Gross Processing Fee (2.0%):</span>
-                  <span>₱1,000.00</span>
+              {/* Sample Official Electronic Sales Invoice */}
+              <div className="border border-slate-200 rounded-xl p-5 bg-slate-50 space-y-4 max-w-xl">
+                <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Official Electronic Sales Invoice (Platform Vendor)</div>
+                    <div className="text-sm font-bold text-slate-900 font-mono">INV-2026-00918</div>
+                    <div className="text-[11px] text-slate-500 font-mono">Vendor: Tuntong Tech Solution Inc. • TIN: 009-182-991-000</div>
+                  </div>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                    PAID / SETTLED
+                  </span>
                 </div>
-                <div className="flex justify-between text-slate-500 pl-3">
-                  <span>VATable Sales (Net of VAT):</span>
-                  <span>₱892.86</span>
-                </div>
-                <div className="flex justify-between text-slate-500 pl-3">
-                  <span>12% Output VAT:</span>
-                  <span>₱107.14</span>
-                </div>
-              </div>
 
-              <div className="border-t border-slate-300 pt-3 flex justify-between font-bold text-sm text-slate-900">
-                <span>Total Amount Remitted:</span>
-                <span className="text-emerald-700">₱1,000.00</span>
+                <div className="text-xs space-y-1.5 text-slate-600">
+                  <div className="flex justify-between">
+                    <span>Customer (Cooperative):</span>
+                    <span className="font-semibold text-slate-800">Bayani Multi-Purpose Cooperative</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Customer BIR TIN:</span>
+                    <span className="font-mono">009-887-123-000</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Service Particulars:</span>
+                    <span>Cloud Loan Origination & Automated Member Onboarding</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-3 space-y-1.5 text-xs">
+                  <div className="flex justify-between font-semibold text-slate-800">
+                    <span>Gross Technology Processing Fee:</span>
+                    <span>₱1,000.00</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 pl-3">
+                    <span>VATable Sales (Net Base):</span>
+                    <span>₱892.86</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 pl-3">
+                    <span>12% Output VAT Remitted by Vendor:</span>
+                    <span className="font-semibold text-indigo-700">₱107.14</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-300 pt-3 flex justify-between font-bold text-sm text-slate-900">
+                  <span>Total Amount Paid by Coop:</span>
+                  <span className="text-emerald-700 font-mono">₱1,000.00</span>
+                </div>
               </div>
             </div>
           </div>
@@ -6341,9 +6728,14 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                {/* BIR / CDA Mandatory Inscription */}
-                <div className="text-center text-[10px] text-slate-400 italic">
-                  "This serves as an Official Receipt under CDA MC 2015-06 and Philippine Tax Regulations."
+                {/* BIR / CDA Mandatory Tax Exemption Inscription */}
+                <div className="bg-emerald-50/70 border border-emerald-200/60 p-2.5 rounded-xl text-center space-y-0.5">
+                  <div className="text-[10px] text-emerald-900 font-bold uppercase tracking-wider font-mono">
+                    TAX-EXEMPT TRANSACTION • RA 9520 ART. 60 & 61 • BIR CTE NO. BIR-CTE-2024-008129
+                  </div>
+                  <div className="text-[10px] text-slate-500 italic">
+                    "This serves as an Official Receipt under CDA MC 2015-06 and Philippine Tax Regulations."
+                  </div>
                 </div>
               </div>
 
