@@ -1,0 +1,21 @@
+{
+  "name": "flex-coop-solution",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise SaaS Cooperative Banking and Lending Platform (CDA-compliant)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "test": "npm run --workspaces --if-present test",
+    "lint": "npm run --workspaces --if-present lint",
+    "dev:api": "npm --workspace=apps/api run dev",
+    "dev:admin": "npm --workspace=apps/admin-portal run dev"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^5.4.5"
+  }
+}

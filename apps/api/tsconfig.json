@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@flexcoop/cda-coa": ["../../packages/cda-coa/dist"],
+      "@flexcoop/db-migrations": ["../../packages/db-migrations/dist"],
+      "@flexcoop/shared-types": ["../../packages/shared-types/dist"]
+    }
+  },
+  "include": ["src/**/*"]
+}

@@ -1,0 +1,19 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Multi-tenant KYC and Promissory Note documents
+    match /tenants/{tenantId}/{allPaths=**} {
+      // Must be authenticated and belong to tenant
+      allow read: if request.auth != null &&
+        (request.auth.token.tenant_id == tenantId || request.auth.token.role == 'SUPERADMIN');
+
+      // Staff (Loan Officer, Compliance Officer, General Manager) or owner member upload
+      allow write: if request.auth != null &&
+        (request.auth.token.tenant_id == tenantId) &&
+        (
+          request.auth.token.role in ['GENERAL_MANAGER', 'LOAN_OFFICER', 'COMPLIANCE_OFFICER'] ||
+          (request.auth.token.role == 'MEMBER' && request.resource.size < 10 * 1024 * 1024) // 10MB max upload
+        );
+    }
+  }
+}

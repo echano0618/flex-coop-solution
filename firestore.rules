@@ -1,0 +1,567 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Multi-Tenant Hierarchy:
+    // All cooperative tenant resources are nested under:
+    //   /tenants/{tenantId}/{collectionName}/{documentId}
+    //
+    // Collection: /tenants/{tenantId}/members
+    // Document ID: {memberId} (matches member auth UID or member identifier)
+    // Fields:
+    //   - memberNumber: string (required, 3-50 chars)
+    //   - firstName: string (required, 1-100 chars)
+    //   - middleName: string (optional, 0-100 chars)
+    //   - lastName: string (required, 1-100 chars)
+    //   - email: string (required, valid email, 5-150 chars)
+    //   - phone: string (required, 7-25 chars)
+    //   - classification: string (required, 'REGULAR' | 'ASSOCIATE')
+    //   - status: string (required, 'PENDING_APPROVAL' | 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'TERMINATED')
+    //   - kycStatus: string (required, 'UNVERIFIED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFIED' | 'REJECTED')
+    //   - createdAt: string | timestamp (immutable)
+    //
+    // Collection: /tenants/{tenantId}/kyc_records
+    // Document ID: {recordId}
+    // Fields:
+    //   - memberId: string (required, 1-128 chars)
+    //   - idType: string (required, government ID enum)
+    //   - idNumberEncrypted: string (required, SPI ciphertext)
+    //   - frontDocumentUrl: string (required, URL)
+    //   - selfieUrl: string (required, URL)
+    //   - status: string (required, 'UNVERIFIED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFIED' | 'REJECTED')
+    //   - createdAt: string | timestamp (immutable)
+    //
+    // Collection: /tenants/{tenantId}/loans
+    // Document ID: {loanId}
+    // Fields:
+    //   - loanNumber: string (required, 3-50 chars)
+    //   - memberId: string (required, matches applicant auth UID on submission)
+    //   - productId: string (required, 1-50 chars)
+    //   - principalAmount: number (required, > 0 and <= 100,000,000)
+    //   - interestRateAnnual: number (required, >= 0 and <= 2.0)
+    //   - termMonths: number (required, 1 to 360)
+    //   - status: string (required, 'DRAFT' | 'SUBMITTED' | 'UNDER_CREDIT_REVIEW' | 'COMMITTEE_APPROVAL' | 'BOD_APPROVAL' | 'APPROVED' | 'REJECTED' | 'DISBURSED' | 'COMPLETED' | 'DEFAULTED' | 'RESTRUCTURED')
+    //   - balanceRemaining: number (required on disbursement/amortization, >= 0)
+    //   - createdAt: string | timestamp (immutable)
+    //
+    // Collection: /tenants/{tenantId}/amortization_schedules
+    // Document ID: {scheduleId}
+    // Fields:
+    //   - loanId: string (required, 1-128 chars)
+    //   - memberId: string (required, 1-128 chars)
+    //   - installments: list (required, <= 360 items)
+    //
+    // Collection: /tenants/{tenantId}/payments
+    // Document ID: {paymentId}
+    // Fields:
+    //   - receiptNumber: string (required Official Receipt / OR number, 3-100 chars)
+    //   - loanId: string (required, 1-128 chars)
+    //   - memberId: string (required, 1-128 chars)
+    //   - grossAmountPaid: number (required, > 0)
+    //   - netLoanPayment: number (required, > 0)
+    //   - channel: string (required, 'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER' | 'MANUAL_BANK_TRANSFER')
+    //   - cashierUserId: string (optional, 1-128 chars)
+    //   - paidAt: string | timestamp (required)
+    //   - createdAt: string | timestamp (immutable)
+    //
+    // Collection: /tenants/{tenantId}/chart_of_accounts
+    // Document ID: {accountId}
+    // Fields:
+    //   - code: string (required CDA standard code, e.g., '1-01-01', 3-20 chars)
+    //   - name: string (required account title, 2-150 chars)
+    //   - category: string (required, 'ASSETS' | 'LIABILITIES' | 'EQUITY' | 'REVENUE' | 'EXPENSES')
+    //   - normalBalance: string (required, 'DEBIT' | 'CREDIT')
+    //   - isActive: bool (required)
+    //
+    // Collection: /tenants/{tenantId}/journal_entries
+    // Document ID: {entryId}
+    // Fields: (Strictly Immutable Audit Trail - update & delete are disallowed)
+    //   - entryNumber: string (required, 3-50 chars)
+    //   - postingDate: string | timestamp (required)
+    //   - referenceType: string (required, CDA journal ref)
+    //   - description: string (required, 1-500 chars)
+    //   - totalDebit: number (required, > 0)
+    //   - totalCredit: number (required, > 0)
+    //   - isBalanced: bool (required, must be true)
+    //   - lines: list (required, 2 to 100 journal lines)
+    //   - createdByUserId: string (required, matches auth UID)
+    //
+    // Collection: /tenants/{tenantId}/invoices
+    // Document ID: {invoiceId}
+    // Fields: (Strictly Immutable Audit Trail - update & delete are disallowed)
+    //   - invoiceNumber: string (required electronic sales invoice, 3-50 chars)
+    //   - tenantId: string (required, matches tenantId)
+    //   - loanId: string (required, 1-128 chars)
+    //   - grossFeeAmount: number (required, >= 0)
+    //   - vatAmount: number (required 12% output VAT, >= 0)
+    //   - netRevenue: number (required, >= 0)
+    //   - status: string (required, 'ISSUED' | 'DEDUCTED' | 'PAID' | 'VOIDED')
+    //
+    // Collection: /tenants/{tenantId}/amlc_alerts
+    // Document ID: {alertId}
+    // Fields:
+    //   - transactionId: string (required, 1-128 chars)
+    //   - memberId: string (required, 1-128 chars)
+    //   - amount: number (required, >= 500000 for covered transactions)
+    //   - transactionType: string (required, 1-50 chars)
+    //   - status: string (required, 'PENDING_REVIEW' | 'FILED_WITH_AMLC' | 'DISMISSED')
+    //
+    // Collection: /tenants/{tenantId}/reports
+    // Document ID: {reportId}
+    // Fields:
+    //   - reportType: string (required, e.g., 'CAPR' | 'CPES' | 'CIC_CREDIT_REGISTRY' | 'PAR_AGING')
+    //   - generatedAt: string | timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Global Authentication & RBAC Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() &&
+        'role' in request.auth.token &&
+        request.auth.token.role == 'SUPERADMIN';
+    }
+
+    // Every tenant request must verify matching tenant claim or superadmin
+    function isTenantUser(tenantId) {
+      return isAuthenticated() &&
+        (isSuperAdmin() ||
+         ('tenant_id' in request.auth.token && request.auth.token.tenant_id == tenantId));
+    }
+
+    // Role-Based Access Control verification via JWT custom claims
+    function hasRole(tenantId, roleName) {
+      return isTenantUser(tenantId) &&
+        (isSuperAdmin() ||
+         ('role' in request.auth.token && request.auth.token.role == roleName));
+    }
+
+    function isGM(tenantId) {
+      return hasRole(tenantId, 'GENERAL_MANAGER');
+    }
+
+    function isLoanOfficer(tenantId) {
+      return hasRole(tenantId, 'LOAN_OFFICER');
+    }
+
+    function isCreditCommittee(tenantId) {
+      return hasRole(tenantId, 'CREDIT_COMMITTEE');
+    }
+
+    function isBOD(tenantId) {
+      return hasRole(tenantId, 'BOD');
+    }
+
+    function isCashier(tenantId) {
+      return hasRole(tenantId, 'CASHIER');
+    }
+
+    function isAccountant(tenantId) {
+      return hasRole(tenantId, 'ACCOUNTANT');
+    }
+
+    function isComplianceOfficer(tenantId) {
+      return hasRole(tenantId, 'COMPLIANCE_OFFICER');
+    }
+
+    function isMember(tenantId) {
+      return hasRole(tenantId, 'MEMBER');
+    }
+
+    // Member identity resolution
+    function isSelfMember(tenantId, memberId) {
+      return isMember(tenantId) &&
+        (request.auth.uid == memberId ||
+         (('member_id' in request.auth.token) && request.auth.token.member_id == memberId));
+    }
+
+    // Common Field Helpers
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.size() >= 5 &&
+        email.size() <= 150 &&
+        email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isValidUrl(url) {
+      return url is string &&
+        url.size() <= 1000 &&
+        (url.matches('^https://.*') || url.matches('^http://.*'));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidMemberData(data) {
+      return hasRequiredFields(['memberNumber', 'firstName', 'lastName', 'email', 'phone', 'classification', 'status', 'kycStatus']) &&
+        data.memberNumber is string && data.memberNumber.size() >= 3 && data.memberNumber.size() <= 50 &&
+        data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 100 &&
+        (!('middleName' in data) || (data.middleName is string && data.middleName.size() <= 100)) &&
+        data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 100 &&
+        isValidEmail(data.email) &&
+        data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 25 &&
+        data.classification in ['REGULAR', 'ASSOCIATE'] &&
+        data.status in ['PENDING_APPROVAL', 'ACTIVE', 'INACTIVE', 'SUSPENDED', 'TERMINATED'] &&
+        data.kycStatus in ['UNVERIFIED', 'SUBMITTED', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED'];
+    }
+
+    function isValidKycRecord(data) {
+      return hasRequiredFields(['memberId', 'idType', 'idNumberEncrypted', 'frontDocumentUrl', 'selfieUrl', 'status']) &&
+        data.memberId is string && data.memberId.size() >= 1 && data.memberId.size() <= 128 &&
+        data.idType is string && data.idType.size() >= 2 && data.idType.size() <= 50 &&
+        data.idNumberEncrypted is string && data.idNumberEncrypted.size() >= 1 && data.idNumberEncrypted.size() <= 1000 &&
+        isValidUrl(data.frontDocumentUrl) &&
+        isValidUrl(data.selfieUrl) &&
+        (!('backDocumentUrl' in data) || isValidUrl(data.backDocumentUrl)) &&
+        data.status in ['UNVERIFIED', 'SUBMITTED', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED'];
+    }
+
+    function isValidLoanData(data) {
+      return hasRequiredFields(['loanNumber', 'memberId', 'productId', 'principalAmount', 'interestRateAnnual', 'termMonths', 'status']) &&
+        data.loanNumber is string && data.loanNumber.size() >= 3 && data.loanNumber.size() <= 50 &&
+        data.memberId is string && data.memberId.size() >= 1 && data.memberId.size() <= 128 &&
+        data.productId is string && data.productId.size() >= 1 && data.productId.size() <= 50 &&
+        data.principalAmount is number && data.principalAmount > 0 && data.principalAmount <= 100000000 &&
+        data.interestRateAnnual is number && data.interestRateAnnual >= 0 && data.interestRateAnnual <= 2.0 &&
+        data.termMonths is int && data.termMonths >= 1 && data.termMonths <= 360 &&
+        data.status in ['DRAFT', 'SUBMITTED', 'UNDER_CREDIT_REVIEW', 'COMMITTEE_APPROVAL', 'BOD_APPROVAL', 'APPROVED', 'REJECTED', 'DISBURSED', 'COMPLETED', 'DEFAULTED', 'RESTRUCTURED'] &&
+        (!('balanceRemaining' in data) || (data.balanceRemaining is number && data.balanceRemaining >= 0));
+    }
+
+    function isValidPaymentData(data) {
+      return hasRequiredFields(['receiptNumber', 'loanId', 'memberId', 'channel', 'grossAmountPaid', 'netLoanPayment']) &&
+        data.receiptNumber is string && data.receiptNumber.size() >= 3 && data.receiptNumber.size() <= 100 &&
+        data.loanId is string && data.loanId.size() >= 1 && data.loanId.size() <= 128 &&
+        data.memberId is string && data.memberId.size() >= 1 && data.memberId.size() <= 128 &&
+        data.channel in ['PAYMONGO_QRPH', 'IN_PERSON_CASHIER', 'MANUAL_BANK_TRANSFER'] &&
+        data.grossAmountPaid is number && data.grossAmountPaid > 0 && data.grossAmountPaid <= 100000000 &&
+        data.netLoanPayment is number && data.netLoanPayment > 0 && data.netLoanPayment <= data.grossAmountPaid;
+    }
+
+    function isValidAccountData(data) {
+      return hasRequiredFields(['code', 'name', 'category', 'normalBalance', 'isActive']) &&
+        data.code is string && data.code.size() >= 3 && data.code.size() <= 20 &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 150 &&
+        data.category in ['ASSETS', 'LIABILITIES', 'EQUITY', 'REVENUE', 'EXPENSES'] &&
+        data.normalBalance in ['DEBIT', 'CREDIT'] &&
+        data.isActive is bool;
+    }
+
+    function isValidJournalEntry(data) {
+      return hasRequiredFields(['entryNumber', 'postingDate', 'referenceType', 'description', 'lines', 'totalDebit', 'totalCredit', 'isBalanced', 'createdByUserId']) &&
+        data.entryNumber is string && data.entryNumber.size() >= 3 && data.entryNumber.size() <= 50 &&
+        data.referenceType in ['LOAN_DISBURSEMENT', 'LOAN_REPAYMENT', 'SHARE_CAPITAL_DEPOSIT', 'SAVINGS_DEPOSIT', 'MANUAL_JOURNAL'] &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 500 &&
+        data.lines is list && data.lines.size() >= 2 && data.lines.size() <= 100 &&
+        data.totalDebit is number && data.totalDebit > 0 &&
+        data.totalCredit is number && data.totalCredit > 0 &&
+        data.isBalanced is bool && data.isBalanced == true &&
+        data.createdByUserId is string && data.createdByUserId == request.auth.uid;
+    }
+
+    function isValidInvoiceData(data, tenantId) {
+      return hasRequiredFields(['invoiceNumber', 'tenantId', 'loanId', 'grossFeeAmount', 'vatAmount', 'netRevenue', 'status']) &&
+        data.invoiceNumber is string && data.invoiceNumber.size() >= 3 && data.invoiceNumber.size() <= 50 &&
+        data.tenantId == tenantId &&
+        data.loanId is string && data.loanId.size() >= 1 && data.loanId.size() <= 128 &&
+        data.grossFeeAmount is number && data.grossFeeAmount >= 0 &&
+        data.vatAmount is number && data.vatAmount >= 0 &&
+        data.netRevenue is number && data.netRevenue >= 0 &&
+        data.status in ['ISSUED', 'DEDUCTED', 'PAID', 'VOIDED'];
+    }
+
+    function isValidAmlcAlert(data) {
+      return hasRequiredFields(['transactionId', 'memberId', 'amount', 'transactionType', 'status']) &&
+        data.transactionId is string && data.transactionId.size() >= 1 && data.transactionId.size() <= 128 &&
+        data.memberId is string && data.memberId.size() >= 1 && data.memberId.size() <= 128 &&
+        data.amount is number && data.amount >= 500000 &&
+        data.transactionType is string && data.transactionType.size() >= 1 && data.transactionType.size() <= 50 &&
+        data.status in ['PENDING_REVIEW', 'FILED_WITH_AMLC', 'DISMISSED'];
+    }
+
+    // ===============================================================
+    // Root Match & Tenant Scoping
+    // ===============================================================
+
+    // Root default deny: all documents outside /tenants/{tenantId} are denied
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Multi-tenant cooperative collections
+    match /tenants/{tenantId} {
+      // Tenant root document access (read for authenticated tenant members, manage by GM/Superadmin)
+      allow read: if isTenantUser(tenantId);
+      allow create, update, delete: if isGM(tenantId);
+
+      // -------------------------------------------------------------
+      // 1. Members Collection
+      // -------------------------------------------------------------
+      match /members/{memberId} {
+        // Members read own profile; Officers/Staff have authorized view
+        allow read: if isGM(tenantId) ||
+                       isLoanOfficer(tenantId) ||
+                       isCreditCommittee(tenantId) ||
+                       isComplianceOfficer(tenantId) ||
+                       isSelfMember(tenantId, memberId);
+
+        // General Manager or Loan Officer can create new members
+        allow create: if (isGM(tenantId) || isLoanOfficer(tenantId)) &&
+                         isValidMemberData(request.resource.data);
+
+        // Update: GM or Loan Officer (cannot tamper memberNumber or createdAt)
+        allow update: if (isGM(tenantId) || isLoanOfficer(tenantId)) &&
+                         isValidMemberData(request.resource.data) &&
+                         areImmutableFieldsUnchanged(['memberNumber', 'createdAt']);
+
+        // Delete: Only General Manager
+        allow delete: if isGM(tenantId);
+      }
+
+      // -------------------------------------------------------------
+      // 2. eKYC Records
+      // -------------------------------------------------------------
+      match /kyc_records/{recordId} {
+        // Compliance Officer, Loan Officer, Credit Committee, GM can read; Member can read own record
+        allow read: if isGM(tenantId) ||
+                       isComplianceOfficer(tenantId) ||
+                       isLoanOfficer(tenantId) ||
+                       isCreditCommittee(tenantId) ||
+                       (isMember(tenantId) && resource.data.memberId == request.auth.uid);
+
+        // Member submits own KYC or Loan Officer / GM uploads
+        allow create: if isTenantUser(tenantId) &&
+                         isValidKycRecord(request.resource.data) &&
+                         (isGM(tenantId) ||
+                          isLoanOfficer(tenantId) ||
+                          (isMember(tenantId) && request.resource.data.memberId == request.auth.uid));
+
+        // Underwriting review update: Loan Officer, Compliance Officer, or GM
+        allow update: if (isGM(tenantId) || isLoanOfficer(tenantId) || isComplianceOfficer(tenantId)) &&
+                         isValidKycRecord(request.resource.data) &&
+                         areImmutableFieldsUnchanged(['memberId', 'createdAt']);
+
+        allow delete: if isGM(tenantId);
+      }
+
+      // -------------------------------------------------------------
+      // 3. Loans (LOS & LMS)
+      // -------------------------------------------------------------
+      match /loans/{loanId} {
+        // Read: Staff (GM, LO, CreCom, BOD, Cashier, Compliance) or Borrower Member
+        allow read: if isGM(tenantId) ||
+                       isLoanOfficer(tenantId) ||
+                       isCreditCommittee(tenantId) ||
+                       isBOD(tenantId) ||
+                       isCashier(tenantId) ||
+                       isComplianceOfficer(tenantId) ||
+                       (isMember(tenantId) && resource.data.memberId == request.auth.uid);
+
+        // Create:
+        // - Member can submit own application with DRAFT/SUBMITTED status
+        // - Loan Officer or GM can originate loan
+        allow create: if isTenantUser(tenantId) &&
+                         isValidLoanData(request.resource.data) &&
+                         ((isMember(tenantId) &&
+                           request.resource.data.memberId == request.auth.uid &&
+                           request.resource.data.status in ['DRAFT', 'SUBMITTED']) ||
+                          ((isLoanOfficer(tenantId) || isGM(tenantId)) &&
+                           request.resource.data.status in ['DRAFT', 'SUBMITTED', 'UNDER_CREDIT_REVIEW']));
+
+        // Update (Segregation of Duties):
+        // Immutable identity: memberId, loanNumber, createdAt cannot be modified
+        allow update: if isTenantUser(tenantId) &&
+                         isValidLoanData(request.resource.data) &&
+                         areImmutableFieldsUnchanged(['memberId', 'loanNumber', 'createdAt']) &&
+                         (
+                           // General Manager: Full management update (cannot disburse directly if reserved for cashier workflow)
+                           isGM(tenantId) ||
+
+                           // Loan Officer: Can underwriting/update loans; CANNOT disburse cash proceeds
+                           (isLoanOfficer(tenantId) &&
+                            request.resource.data.status != 'DISBURSED' &&
+                            resource.data.status != 'DISBURSED') ||
+
+                           // Credit Committee: Can update approval recommendation stages; CANNOT disburse
+                           (isCreditCommittee(tenantId) &&
+                            request.resource.data.status in ['UNDER_CREDIT_REVIEW', 'COMMITTEE_APPROVAL', 'BOD_APPROVAL', 'REJECTED'] &&
+                            request.resource.data.status != 'DISBURSED' &&
+                            resource.data.status != 'DISBURSED') ||
+
+                           // BOD: Can approve policy sign-offs; CANNOT disburse cash proceeds
+                           (isBOD(tenantId) &&
+                            resource.data.status == 'BOD_APPROVAL' &&
+                            request.resource.data.status in ['APPROVED', 'REJECTED'] &&
+                            request.resource.data.status != 'DISBURSED') ||
+
+                           // Cashier: Can disburse APPROVED loans or update loan balances on payment; CANNOT approve loans
+                           (isCashier(tenantId) &&
+                            (
+                              // Execution of loan disbursal: loan MUST already be APPROVED
+                              (resource.data.status == 'APPROVED' && request.resource.data.status == 'DISBURSED') ||
+                              // Balance decrement during repayment: loan must already be DISBURSED
+                              (resource.data.status == 'DISBURSED' &&
+                               request.resource.data.status in ['DISBURSED', 'COMPLETED'] &&
+                               areImmutableFieldsUnchanged(['status', 'principalAmount', 'interestRateAnnual', 'termMonths', 'productId']))
+                            ))
+                         );
+
+        // Delete: Only General Manager (Loan Officers, Cashiers, CreCom, BOD explicitly CANNOT delete)
+        allow delete: if isGM(tenantId);
+      }
+
+      // -------------------------------------------------------------
+      // 4. Amortization Schedules
+      // -------------------------------------------------------------
+      match /amortization_schedules/{scheduleId} {
+        // Read: Staff or the loan borrower member
+        allow read: if isGM(tenantId) ||
+                       isLoanOfficer(tenantId) ||
+                       isCreditCommittee(tenantId) ||
+                       isBOD(tenantId) ||
+                       isCashier(tenantId) ||
+                       isAccountant(tenantId) ||
+                       (isMember(tenantId) && resource.data.memberId == request.auth.uid);
+
+        // Create/Update: Loan Officer, Cashier (for marking paid installments), or GM
+        allow create: if (isGM(tenantId) || isLoanOfficer(tenantId) || isCashier(tenantId)) &&
+                         hasRequiredFields(['loanId', 'memberId', 'installments']) &&
+                         request.resource.data.installments is list &&
+                         request.resource.data.installments.size() <= 360;
+
+        allow update: if (isGM(tenantId) || isLoanOfficer(tenantId) || isCashier(tenantId)) &&
+                         hasRequiredFields(['loanId', 'memberId', 'installments']) &&
+                         request.resource.data.installments is list &&
+                         request.resource.data.installments.size() <= 360 &&
+                         areImmutableFieldsUnchanged(['loanId', 'memberId']);
+
+        allow delete: if isGM(tenantId);
+      }
+
+      // -------------------------------------------------------------
+      // 5. Payments (Official Receipts & Repayments)
+      // -------------------------------------------------------------
+      match /payments/{paymentId} {
+        // Read: Cashier, Accountant, GM, or Member for their own payment receipts
+        allow read: if isGM(tenantId) ||
+                       isCashier(tenantId) ||
+                       isAccountant(tenantId) ||
+                       (isMember(tenantId) && resource.data.memberId == request.auth.uid);
+
+        // Create: Cashier or GM
+        allow create: if (isCashier(tenantId) || isGM(tenantId)) &&
+                         isValidPaymentData(request.resource.data);
+
+        // Payments with Official Receipts (OR) CANNOT be updated or deleted to maintain immutable cash audit trails
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      // -------------------------------------------------------------
+      // 6. CDA General Ledger: Chart of Accounts
+      // -------------------------------------------------------------
+      match /chart_of_accounts/{accountId} {
+        // Read: Accountant, Cashier, GM
+        allow read: if isGM(tenantId) || isAccountant(tenantId) || isCashier(tenantId);
+
+        // Create/Update/Delete: Accountant or GM (Cashier cannot edit GL accounts)
+        allow create: if (isAccountant(tenantId) || isGM(tenantId)) &&
+                         isValidAccountData(request.resource.data);
+
+        allow update: if (isAccountant(tenantId) || isGM(tenantId)) &&
+                         isValidAccountData(request.resource.data) &&
+                         areImmutableFieldsUnchanged(['code']);
+
+        allow delete: if isGM(tenantId) || isAccountant(tenantId);
+      }
+
+      // -------------------------------------------------------------
+      // 7. CDA General Ledger: Journal Entries (Strictly Immutable Audit Trail)
+      // -------------------------------------------------------------
+      match /journal_entries/{entryId} {
+        // Read: Accountant, GM, Compliance Officer
+        allow read: if isGM(tenantId) || isAccountant(tenantId) || isComplianceOfficer(tenantId);
+
+        // Create: Accountant or GM. Cannot disburse cash directly.
+        allow create: if (isAccountant(tenantId) || isGM(tenantId)) &&
+                         isValidJournalEntry(request.resource.data);
+
+        // STRICT ACCOUNTING INTEGRITY: Once created, journal entries cannot be updated or deleted
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      // -------------------------------------------------------------
+      // 8. Platform Invoices (Strictly Immutable)
+      // -------------------------------------------------------------
+      match /invoices/{invoiceId} {
+        // Read: Accountant, GM, Superadmin
+        allow read: if isGM(tenantId) || isAccountant(tenantId) || isSuperAdmin();
+
+        // Create: System / GM / Superadmin upon loan fee deduction
+        allow create: if (isGM(tenantId) || isSuperAdmin()) &&
+                         isValidInvoiceData(request.resource.data, tenantId);
+
+        // STRICT AUDIT TRAIL: Invoices cannot be modified or deleted
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      // -------------------------------------------------------------
+      // 9. AMLC Alerts (Anti-Money Laundering Council)
+      // -------------------------------------------------------------
+      match /amlc_alerts/{alertId} {
+        // Read: Compliance Officer, GM, Superadmin
+        allow read: if isGM(tenantId) || isComplianceOfficer(tenantId) || isSuperAdmin();
+
+        // Write: Compliance Officer or GM
+        allow create: if (isComplianceOfficer(tenantId) || isGM(tenantId)) &&
+                         isValidAmlcAlert(request.resource.data);
+
+        allow update: if (isComplianceOfficer(tenantId) || isGM(tenantId)) &&
+                         isValidAmlcAlert(request.resource.data) &&
+                         areImmutableFieldsUnchanged(['transactionId', 'memberId', 'amount']);
+
+        allow delete: if isGM(tenantId);
+      }
+
+      // -------------------------------------------------------------
+      // 10. Statutory & Compliance Reports
+      // -------------------------------------------------------------
+      match /reports/{reportId} {
+        // Read: Compliance Officer, BOD, GM, Accountant
+        allow read: if isGM(tenantId) ||
+                       isComplianceOfficer(tenantId) ||
+                       isBOD(tenantId) ||
+                       isAccountant(tenantId);
+
+        // Write: Compliance Officer or GM
+        allow create, update: if (isComplianceOfficer(tenantId) || isGM(tenantId)) &&
+                                 hasRequiredFields(['reportType', 'generatedAt']) &&
+                                 request.resource.data.reportType is string &&
+                                 request.resource.data.reportType.size() <= 50;
+
+        allow delete: if isGM(tenantId);
+      }
+    }
+  }
+}

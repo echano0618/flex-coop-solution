@@ -1,0 +1,91 @@
+import { PaymentChannel, PaymentTransaction } from '@flexcoop/shared-types';
+
+export class PaymentService {
+  /**
+   * Calculates pass-on convenience fee for PayMongo QR Ph
+   * Fixed ₱15 or 1.5% whichever is configured
+   */
+  static calculatePassOnFee(amount: number, channel: PaymentChannel): number {
+    if (channel !== 'PAYMONGO_QRPH') {
+      return 0.0; // In-person and bank transfer have NO pass-on fee
+    }
+    // PayMongo standard QR Ph fee: 1.5% or min ₱15
+    return Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
+  }
+
+  /**
+   * Generates dynamic PayMongo QR Ph Payment Intent data
+   */
+  static generateQRPhIntent(params: {
+    loanId: string;
+    memberId: string;
+    installmentAmount: number;
+    description: string;
+  }): {
+    intentId: string;
+    loanInstallmentAmount: number;
+    passOnFee: number;
+    totalAmountToPay: number;
+    qrCodePayload: string;
+    expiresAt: string;
+  } {
+    const passOnFee = this.calculatePassOnFee(params.installmentAmount, 'PAYMONGO_QRPH');
+    const totalAmountToPay = Math.round((params.installmentAmount + passOnFee) * 100) / 100;
+    const intentId = `pi_qrph_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // Standard Philippine EMVCo QR Ph test string / deep link
+    const qrCodePayload = `00020101021226580010ph.paymongo0115${intentId}520460115303608540${totalAmountToPay.toFixed(
+      2
+    )}5802PH5912FLEXCOOP6006MANILA62190115${params.loanId.substring(0, 15)}6304`;
+
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes expiry
+
+    return {
+      intentId,
+      loanInstallmentAmount: params.installmentAmount,
+      passOnFee,
+      totalAmountToPay,
+      qrCodePayload,
+      expiresAt,
+    };
+  }
+
+  /**
+   * Allocates repayment amount across Penalties -> Interest -> Principal -> Excess
+   */
+  static allocatePayment(params: {
+    amountPaid: number;
+    penaltyDue: number;
+    interestDue: number;
+    principalDue: number;
+  }): {
+    penaltyPortion: number;
+    interestPortion: number;
+    principalPortion: number;
+    excessToSavings: number;
+  } {
+    let remaining = params.amountPaid;
+
+    // 1. Settle Penalties first
+    const penaltyPortion = Math.min(remaining, params.penaltyDue);
+    remaining = Math.round((remaining - penaltyPortion) * 100) / 100;
+
+    // 2. Settle Interest next
+    const interestPortion = Math.min(remaining, params.interestDue);
+    remaining = Math.round((remaining - interestPortion) * 100) / 100;
+
+    // 3. Settle Principal
+    const principalPortion = Math.min(remaining, params.principalDue);
+    remaining = Math.round((remaining - principalPortion) * 100) / 100;
+
+    // 4. Any remaining is credited to voluntary savings
+    const excessToSavings = Math.max(0, remaining);
+
+    return {
+      penaltyPortion,
+      interestPortion,
+      principalPortion,
+      excessToSavings,
+    };
+  }
+}
