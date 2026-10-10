@@ -37,6 +37,8 @@ import {
   Filter,
   Ban,
   RotateCcw,
+  Eye,
+  Award,
 } from 'lucide-react';
 
 type TabType = 'overview' | 'members' | 'products' | 'los' | 'calculator' | 'collateral' | 'cashier' | 'accounting' | 'surplus' | 'invoices' | 'reports';
@@ -509,11 +511,34 @@ export default function AdminDashboard() {
   };
 
   // Members Simulation State & Directory Filters
+  interface MemberRecord {
+    id: string;
+    memberNo: string;
+    name: string;
+    email: string;
+    classification: 'REGULAR' | 'ASSOCIATE' | string;
+    kycStatus: 'VERIFIED' | 'PENDING_REVIEW' | 'INACTIVE' | string;
+    idType: string;
+    paidUpShares: number;
+    sharesCount: number;
+    savingsBalance: number;
+    loanBalance: number;
+    npcConsent: string;
+    pmesStatus?: 'COMPLETED' | 'PENDING' | string;
+    pmesCertNo?: string | null;
+    pmesDate?: string | null;
+    biometricScore?: number | null;
+    amlaStatus?: string | null;
+    reviewedBy?: string | null;
+    reviewDate?: string | null;
+    reviewNotes?: string | null;
+  }
+
   const [memberSearchQuery, setMemberSearchQuery] = useState<string>('');
   const [memberClassificationFilter, setMemberClassificationFilter] = useState<string>('ALL');
   const [memberStatusFilter, setMemberStatusFilter] = useState<string>('ALL');
 
-  const [members, setMembers] = useState([
+  const [members, setMembers] = useState<MemberRecord[]>([
     {
       id: 'mem_1',
       memberNo: 'MEM-2026-0001',
@@ -527,6 +552,14 @@ export default function AdminDashboard() {
       savingsBalance: 5000,
       loanBalance: 47000,
       npcConsent: 'Agreed (IP: 120.29.74.12)',
+      pmesStatus: 'COMPLETED',
+      pmesCertNo: 'PMES-2026-0012',
+      pmesDate: 'Jan 15, 2026',
+      biometricScore: 99.1,
+      amlaStatus: 'PASSED (Clean / Negative Hit)',
+      reviewedBy: 'Atty. Roberto Dela Rosa (General Manager)',
+      reviewDate: 'Jan 16, 2026',
+      reviewNotes: 'Standard regular member admission. Full voting rights.',
     },
     {
       id: 'mem_2',
@@ -541,6 +574,14 @@ export default function AdminDashboard() {
       savingsBalance: 2000,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 180.191.22.45)',
+      pmesStatus: 'COMPLETED',
+      pmesCertNo: 'PMES-2026-0028',
+      pmesDate: 'Feb 10, 2026',
+      biometricScore: 98.7,
+      amlaStatus: 'PASSED (Clean / Negative Hit)',
+      reviewedBy: 'Atty. Roberto Dela Rosa (General Manager)',
+      reviewDate: 'Feb 11, 2026',
+      reviewNotes: 'Verified regular member. Designable as loan co-maker.',
     },
     {
       id: 'mem_3',
@@ -555,6 +596,14 @@ export default function AdminDashboard() {
       savingsBalance: 1200,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 112.198.88.21)',
+      pmesStatus: 'COMPLETED',
+      pmesCertNo: 'PMES-2026-0045',
+      pmesDate: 'Mar 05, 2026',
+      biometricScore: 97.5,
+      amlaStatus: 'PASSED (Clean / Negative Hit)',
+      reviewedBy: 'Grace Villanueva (Senior Loan Officer)',
+      reviewDate: 'Mar 06, 2026',
+      reviewNotes: 'Associate member. Non-voting, qualified for savings and consumer credit.',
     },
     {
       id: 'mem_4',
@@ -569,6 +618,14 @@ export default function AdminDashboard() {
       savingsBalance: 500,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 49.144.120.89)',
+      pmesStatus: 'COMPLETED',
+      pmesCertNo: 'PMES-2026-0094',
+      pmesDate: 'Oct 08, 2026',
+      biometricScore: 98.4,
+      amlaStatus: 'PASSED (Negative on AMLC / UN Sanctions / PEP List)',
+      reviewedBy: null,
+      reviewDate: null,
+      reviewNotes: null,
     },
     {
       id: 'mem_5',
@@ -583,6 +640,14 @@ export default function AdminDashboard() {
       savingsBalance: 100,
       loanBalance: 0,
       npcConsent: 'Agreed (IP: 124.106.18.99)',
+      pmesStatus: 'PENDING',
+      pmesCertNo: 'N/A',
+      pmesDate: null,
+      biometricScore: 82.0,
+      amlaStatus: 'INCOMPLETE (Pending Physical Verification)',
+      reviewedBy: null,
+      reviewDate: null,
+      reviewNotes: 'Suspended pending updated KYC identity documentation.',
     },
   ]);
 
@@ -599,6 +664,51 @@ export default function AdminDashboard() {
       memberStatusFilter === 'ALL' || m.kycStatus === memberStatusFilter;
     return matchesQuery && matchesClass && matchesStatus;
   });
+
+  // Member eKYC & Membership Review / Approval State
+  const [selectedMemberForReview, setSelectedMemberForReview] = useState<any | null>(null);
+  const [memberReviewNotes, setMemberReviewNotes] = useState<string>('');
+  const [memberActionNotification, setMemberActionNotification] = useState<string | null>(null);
+  const [memberConfirmModal, setMemberConfirmModal] = useState<{
+    isOpen: boolean;
+    action: 'APPROVE' | 'REJECT';
+    member: any;
+    notes: string;
+  } | null>(null);
+
+  const handleExecuteMemberDecision = () => {
+    if (!memberConfirmModal) return;
+    const { action, member, notes } = memberConfirmModal;
+    const newStatus = action === 'APPROVE' ? 'VERIFIED' : 'INACTIVE';
+
+    setMembers((prev) =>
+      prev.map((m) =>
+        m.id === member.id
+          ? {
+              ...m,
+              kycStatus: newStatus,
+              reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+              reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+              reviewNotes: notes || (action === 'APPROVE' ? 'Approved & Certified by Committee.' : 'Declined / Requires document re-submission.'),
+            }
+          : m
+      )
+    );
+
+    if (action === 'APPROVE') {
+      setMemberActionNotification(
+        `Member ${member.memberNo} (${member.name}) successfully approved and activated under CDA RA 9520 rules!`
+      );
+    } else {
+      setMemberActionNotification(
+        `Member ${member.memberNo} (${member.name}) application set to INACTIVE / Returned for correction.`
+      );
+    }
+    setTimeout(() => setMemberActionNotification(null), 5000);
+
+    setMemberConfirmModal(null);
+    setSelectedMemberForReview(null);
+  };
 
   // Collateral Registry Search State
   const [collateralSearchQuery, setCollateralSearchQuery] = useState<string>('');
@@ -1041,7 +1151,7 @@ export default function AdminDashboard() {
         {/* TAB: MEMBERS */}
         {activeTab === 'members' && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Cooperative Membership & eKYC Directory</h2>
                 <p className="text-xs text-slate-500">NPC Data Privacy Act compliant member records with encrypted sensitive personal information (SPI).</p>
@@ -1053,6 +1163,23 @@ export default function AdminDashboard() {
                 + Register New Member
               </button>
             </div>
+
+            {/* Member Action Notification Toast */}
+            {memberActionNotification && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-center justify-between shadow-sm animate-fade-in">
+                <div className="flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{memberActionNotification}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMemberActionNotification(null)}
+                  className="text-emerald-700 hover:text-emerald-950 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {/* Search and Filters Bar */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
@@ -1151,12 +1278,13 @@ export default function AdminDashboard() {
                     <th className="p-3 text-right">Paid-Up Shares (₱)</th>
                     <th className="p-3">NPC Consent</th>
                     <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {filteredMembers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-500">
+                      <td colSpan={8} className="p-8 text-center text-slate-500">
                         <div className="flex flex-col items-center justify-center space-y-2">
                           <Users className="w-8 h-8 text-slate-300" />
                           <span className="font-semibold text-slate-700">No members match your search and filter criteria.</span>
@@ -1229,12 +1357,394 @@ export default function AdminDashboard() {
                             </span>
                           )}
                         </td>
+                        <td className="p-3 text-right whitespace-nowrap">
+                          {m.kycStatus === 'PENDING_REVIEW' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedMemberForReview(m);
+                                setMemberReviewNotes(
+                                  m.reviewNotes ||
+                                    'PMES attendance certificate verified and eKYC biometrics cleared. Eligible for membership admission under RA 9520.'
+                                );
+                              }}
+                              className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1.5 shadow-sm transition"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Review & Approve
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedMemberForReview(m);
+                                setMemberReviewNotes(m.reviewNotes || '');
+                              }}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-slate-200 transition"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-500" />
+                              View Dossier
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
+
+            {/* Modal: Member eKYC & Underwriting Review Dossier */}
+            {selectedMemberForReview && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+                <div className="bg-white rounded-2xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8 animate-fade-in">
+                  {/* Modal Header */}
+                  <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 text-white flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
+                          {selectedMemberForReview.memberNo}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            selectedMemberForReview.classification === 'REGULAR'
+                              ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          }`}
+                        >
+                          {selectedMemberForReview.classification} MEMBER
+                        </span>
+                        {selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? (
+                          <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded animate-pulse">
+                            PENDING REVIEW
+                          </span>
+                        ) : selectedMemberForReview.kycStatus === 'VERIFIED' ? (
+                          <span className="bg-emerald-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded">
+                            VERIFIED ACTIVE
+                          </span>
+                        ) : (
+                          <span className="bg-slate-400 text-slate-950 text-[10px] font-bold px-2 py-0.5 rounded">
+                            INACTIVE
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-xl font-bold">{selectedMemberForReview.name}</h3>
+                      <p className="text-xs text-slate-300 font-mono mt-0.5">{selectedMemberForReview.email}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMemberForReview(null)}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Modal Body: 4-Pillar Statutory Compliance Dossier */}
+                  <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-3 text-xs text-amber-900">
+                      <Scale className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold">Philippine Cooperative Code (RA 9520) & CDA eKYC Governance</div>
+                        <p className="text-amber-800 text-[11px] mt-0.5">
+                          Membership review mandates statutory verification of: <strong>(1) PMES attendance certificate</strong> (Art. 26), 
+                          <strong>(2) eKYC identity & biometrics</strong> (AMLA RA 9160), <strong>(3) AMLC / PEP watchlist clearance</strong>, and 
+                          <strong>(4) Minimum Share Capital subscription (CBU)</strong> prior to activation.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 4 Compliance Pillars */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      {/* Pillar 1: PMES Certification */}
+                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <BookOpen className="w-4 h-4 text-indigo-600" />
+                            1. PMES Certification
+                          </span>
+                          {selectedMemberForReview.pmesStatus === 'COMPLETED' ? (
+                            <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> COMPLETED
+                            </span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-800 font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border border-amber-200">
+                              <Clock className="w-3 h-3 text-amber-600" /> PENDING SEMINAR
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-1 text-[11px] text-slate-600 pt-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Certificate No:</span>
+                            <span className="font-mono font-semibold text-slate-800">{selectedMemberForReview.pmesCertNo || 'PMES-2026-0094'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Seminar Date:</span>
+                            <span className="font-medium text-slate-800">{selectedMemberForReview.pmesDate || 'Oct 08, 2026'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Certified By:</span>
+                            <span className="text-slate-800 font-medium">Coop Education Committee (EdCom)</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pillar 2: eKYC & Biometrics */}
+                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                            2. eKYC & Biometric Match
+                          </span>
+                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> {selectedMemberForReview.biometricScore || 98.4}% MATCH
+                          </span>
+                        </div>
+                        <div className="space-y-1 text-[11px] text-slate-600 pt-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Gov&apos;t ID Submitted:</span>
+                            <span className="font-semibold text-slate-800 truncate max-w-[150px]">{selectedMemberForReview.idType}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Facial Liveness:</span>
+                            <span className="text-emerald-700 font-semibold">Active 3D Liveness Passed</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">DPA (RA 10173):</span>
+                            <span className="font-mono text-[10px] text-slate-700">{selectedMemberForReview.npcConsent}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pillar 3: AMLC & Sanctions */}
+                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <ShieldAlert className="w-4 h-4 text-teal-600" />
+                            3. AMLA RA 9160 & PEP Check
+                          </span>
+                          <span className="bg-teal-100 text-teal-800 font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border border-teal-200">
+                            <CheckCircle2 className="w-3 h-3 text-teal-600" /> CLEAN / NO HITS
+                          </span>
+                        </div>
+                        <div className="space-y-1 text-[11px] text-slate-600 pt-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Watchlist Status:</span>
+                            <span className="text-slate-800 font-semibold">{selectedMemberForReview.amlaStatus || 'PASSED (Clean)'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">PEP Exposure:</span>
+                            <span className="text-emerald-700 font-semibold">No PEP Ties Detected</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Risk Assessment:</span>
+                            <span className="text-slate-800 font-medium">Low Risk (Standard Due Diligence)</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pillar 4: Capital Build-Up (CBU) */}
+                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <CreditCard className="w-4 h-4 text-amber-600" />
+                            4. Capital Build-Up (CBU)
+                          </span>
+                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> MET MINIMUM
+                          </span>
+                        </div>
+                        <div className="space-y-1 text-[11px] text-slate-600 pt-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Subscribed Shares:</span>
+                            <span className="font-semibold text-slate-800">{selectedMemberForReview.sharesCount} Shares (@ ₱100/par)</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Paid-Up Capital:</span>
+                            <span className="font-bold text-slate-900">₱{selectedMemberForReview.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Initial Savings Deposit:</span>
+                            <span className="font-semibold text-slate-800">₱{selectedMemberForReview.savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Underwriting Resolution / Committee Decision Box */}
+                    <div className="border border-slate-300 rounded-xl p-4 bg-slate-50/70 space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-indigo-600" />
+                          Membership Underwriting & Committee Resolution
+                        </label>
+                        <div className="text-[11px] text-slate-500">
+                          Reviewing As: <strong className="text-slate-800">{currentStaff.name}</strong> ({currentStaff.roleTitle})
+                        </div>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={memberReviewNotes}
+                        onChange={(e) => setMemberReviewNotes(e.target.value)}
+                        placeholder="Enter committee resolution findings, PMES confirmation details, or underwriting notes..."
+                        className="w-full text-xs p-3 border border-slate-300 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Modal Footer Actions */}
+                  <div className="bg-slate-100 p-4 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMemberForReview(null)}
+                      className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200 rounded-lg transition"
+                    >
+                      Close Dossier
+                    </button>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                      {selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMemberConfirmModal({
+                                isOpen: true,
+                                action: 'REJECT',
+                                member: selectedMemberForReview,
+                                notes: memberReviewNotes,
+                              })
+                            }
+                            className="px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-lg transition"
+                          >
+                            Return for Correction / Decline
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMemberConfirmModal({
+                                isOpen: true,
+                                action: 'APPROVE',
+                                member: selectedMemberForReview,
+                                notes: memberReviewNotes,
+                              })
+                            }
+                            className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition flex items-center gap-1.5"
+                          >
+                            <CheckCircle2 className="w-4 h-4" /> Approve & Activate Membership
+                          </button>
+                        </>
+                      ) : selectedMemberForReview.kycStatus === 'VERIFIED' ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMemberConfirmModal({
+                              isOpen: true,
+                              action: 'REJECT',
+                              member: selectedMemberForReview,
+                              notes: memberReviewNotes || 'Deactivated by cooperative administrator.',
+                            })
+                          }
+                          className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg transition flex items-center gap-1.5"
+                        >
+                          <Ban className="w-3.5 h-3.5 text-slate-500" /> Set Status to Inactive
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMemberConfirmModal({
+                              isOpen: true,
+                              action: 'APPROVE',
+                              member: selectedMemberForReview,
+                              notes: memberReviewNotes || 'Re-activated after document submission.',
+                            })
+                          }
+                          className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition flex items-center gap-1.5"
+                        >
+                          <CheckCircle2 className="w-4 h-4" /> Re-Activate Membership
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal: Verification Confirmation Dialog */}
+            {memberConfirmModal?.isOpen && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 animate-fade-in">
+                  <div className="flex items-center gap-3">
+                    {memberConfirmModal.action === 'APPROVE' ? (
+                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">
+                        {memberConfirmModal.action === 'APPROVE'
+                          ? 'Confirm Member Approval'
+                          : 'Decline / Return Member Application'}
+                      </h3>
+                      <p className="text-xs text-slate-500 font-mono">
+                        {memberConfirmModal.member.memberNo} • {memberConfirmModal.member.name}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1.5">
+                    {memberConfirmModal.action === 'APPROVE' ? (
+                      <>
+                        <p className="font-semibold text-emerald-900">
+                          Activate member as {memberConfirmModal.member.classification} Member in good standing?
+                        </p>
+                        <p className="text-slate-600 text-[11px]">
+                          This executes the committee resolution under RA 9520 Art. 26. The member will gain immediate voting rights 
+                          (for regular members), dividend accrual eligibility, savings accounts, and borrowing capability.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-rose-900">
+                          Return or deactivate this membership record?
+                        </p>
+                        <p className="text-slate-600 text-[11px]">
+                          The member will be marked as INACTIVE and notified to provide additional KYC identification or complete the PMES seminar.
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setMemberConfirmModal(null)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteMemberDecision}
+                      className={`px-4 py-2 text-xs font-bold text-white rounded-lg transition shadow-sm ${
+                        memberConfirmModal.action === 'APPROVE'
+                          ? 'bg-emerald-600 hover:bg-emerald-700'
+                          : 'bg-rose-600 hover:bg-rose-700'
+                      }`}
+                    >
+                      {memberConfirmModal.action === 'APPROVE'
+                        ? 'Confirm & Activate Member'
+                        : 'Confirm Deactivation'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
