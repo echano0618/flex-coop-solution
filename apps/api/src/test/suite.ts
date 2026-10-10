@@ -453,7 +453,74 @@ console.log('\n--- 13. Dynamic Subdomain Tenant Resolution (tuntongtech.com) ---
   assert(matchedTenant !== undefined && matchedTenant.id === 'tenant_bayani_001', 'Maps extracted subdomain to Bayani Cooperative tenant document');
 }
 
-console.log('\n🎉 ALL 51 VERIFICATION TEST CASES (INCLUDING DOMAIN ROUTING & FIRESTORE) PASSED SUCCESSFULLY!\n');
+// 14. Member Share Capital Purchase & Savings Deposits (In-Person & Self-Service Rails)
+console.log('\n--- 14. Share Capital Purchase & Savings Deposit Transactions ---');
+{
+  // 14.1 In-Person Share Capital Purchase (Counter Cashier)
+  const inPersonShareEntry = GeneralLedgerService.buildShareDepositEntry({
+    memberId: 'mem_maria_santos',
+    memberNumber: 'MEM-2026-0001',
+    amount: 2000, // 20 shares @ ₱100
+    channel: 'IN_PERSON_CASHIER',
+    userId: 'usr_cashier_01',
+  });
+  assert(inPersonShareEntry.isBalanced, 'In-person share purchase entry is strictly balanced');
+  assert(inPersonShareEntry.lines.some((l) => l.accountCode === '1-01-01' && l.debit === 2000), 'Debits Cash on Hand (1-01-01) for ₱2,000');
+  assert(inPersonShareEntry.lines.some((l) => l.accountCode === '3-01-03' && l.credit === 2000), 'Credits Paid-Up Share Capital - Common (3-01-03) for ₱2,000');
+
+  // 14.2 Self-Service QR Ph Share Capital Purchase (PayMongo Float)
+  const qrShareEntry = GeneralLedgerService.buildShareDepositEntry({
+    memberId: 'mem_maria_santos',
+    memberNumber: 'MEM-2026-0001',
+    amount: 1000, // 10 shares @ ₱100
+    channel: 'PAYMONGO_QRPH',
+    passOnFee: 15, // ₱15 floor
+    userId: 'usr_self_service',
+  });
+  assert(qrShareEntry.isBalanced, 'Self-service QR Ph share purchase entry is strictly balanced');
+  assert(qrShareEntry.lines.some((l) => l.accountCode === '1-01-05' && l.debit === 1015), 'Debits Digital Wallet Float (1-01-05) for gross ₱1,015');
+  assert(qrShareEntry.lines.some((l) => l.accountCode === '3-01-03' && l.credit === 1000), 'Credits Paid-Up Capital (3-01-03) for ₱1,000');
+  assert(qrShareEntry.lines.some((l) => l.accountCode === '4-02-02' && l.credit === 15), 'Credits Pass-on Fee Recovery (4-02-02) for ₱15');
+
+  // 14.3 In-Person Savings Deposit (Voluntary Regular Savings)
+  const inPersonSavingsEntry = GeneralLedgerService.buildSavingsDepositEntry({
+    memberId: 'mem_juan_delacruz',
+    memberNumber: 'MEM-2026-0002',
+    amount: 1500,
+    savingsType: 'VOLUNTARY',
+    channel: 'IN_PERSON_CASHIER',
+    userId: 'usr_cashier_01',
+  });
+  assert(inPersonSavingsEntry.isBalanced, 'In-person savings deposit entry is strictly balanced');
+  assert(inPersonSavingsEntry.lines.some((l) => l.accountCode === '1-01-01' && l.debit === 1500), 'Debits Cash on Hand (1-01-01) for ₱1,500');
+  assert(inPersonSavingsEntry.lines.some((l) => l.accountCode === '2-01-02' && l.credit === 1500), 'Credits Voluntary Savings Deposits (2-01-02) for ₱1,500');
+
+  // 14.4 Self-Service QR Ph Compulsory Savings Deposit
+  const qrSavingsEntry = GeneralLedgerService.buildSavingsDepositEntry({
+    memberId: 'mem_juan_delacruz',
+    memberNumber: 'MEM-2026-0002',
+    amount: 2500,
+    savingsType: 'COMPULSORY',
+    channel: 'PAYMONGO_QRPH',
+    passOnFee: 37.5, // 1.5% of ₱2,500
+    userId: 'usr_self_service',
+  });
+  assert(qrSavingsEntry.isBalanced, 'Self-service QR Ph compulsory savings deposit entry is strictly balanced');
+  assert(qrSavingsEntry.lines.some((l) => l.accountCode === '2-01-01' && l.credit === 2500), 'Credits Compulsory Savings Deposits (2-01-01) for ₱2,500');
+
+  // 14.5 Trial Balance Integrity
+  const allEntries = [
+    { id: 'je_1', ...inPersonShareEntry },
+    { id: 'je_2', ...qrShareEntry },
+    { id: 'je_3', ...inPersonSavingsEntry },
+    { id: 'je_4', ...qrSavingsEntry },
+  ];
+  const tb = GeneralLedgerService.generateTrialBalance(allEntries);
+  assert(tb.isBalanced, 'Trial balance across share capital and savings deposit entries is strictly balanced');
+  assert(tb.totalDebit === tb.totalCredit, 'Grand Debit equals Grand Credit across all transactions');
+}
+
+console.log('\n🎉 ALL 63 VERIFICATION TEST CASES (INCLUDING SHARE CAPITAL & SAVINGS RAILS) PASSED SUCCESSFULLY!\n');
 
 
 

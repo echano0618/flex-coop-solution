@@ -439,29 +439,50 @@ app.get('/api/v1/shares', (req: Request, res: Response) => {
 
 app.post('/api/v1/shares/deposit', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const { memberId, amount } = req.body;
+  const { memberId, amount, channel, sharesCount, cashierUserId, passOnFee } = req.body;
 
-  if (!memberId || !amount || amount <= 0) {
+  if (!memberId || !amount || Number(amount) <= 0) {
     return res.status(400).json({ success: false, error: 'Valid memberId and deposit amount required.' });
   }
 
   const accounts = dbStore.shareAccounts.get(tenantId) || [];
-  const account = accounts.find((a) => a.memberId === memberId);
+  let account = accounts.find((a) => a.memberId === memberId);
 
   if (!account) {
-    return res.status(404).json({ success: false, error: 'Share capital account not found for member.' });
+    account = {
+      id: `shr_${Date.now().toString(36)}`,
+      memberId,
+      accountNumber: `SC-${Date.now().toString(36).toUpperCase()}`,
+      subscribedShares: sharesCount ? Number(sharesCount) : Math.ceil(Number(amount) / 100),
+      parValuePerShare: 100,
+      subscribedAmount: sharesCount ? Number(sharesCount) * 100 : Number(amount),
+      paidUpAmount: 0,
+      balance: 0,
+      updatedAt: new Date().toISOString(),
+    };
+    accounts.push(account);
+    dbStore.shareAccounts.set(tenantId, accounts);
   }
 
-  account.paidUpAmount += Number(amount);
-  account.balance += Number(amount);
+  const depositNum = Number(amount);
+  account.paidUpAmount += depositNum;
+  account.balance += depositNum;
+  if (sharesCount && account.paidUpAmount > account.subscribedAmount) {
+    account.subscribedShares += Number(sharesCount);
+    account.subscribedAmount += Number(sharesCount) * account.parValuePerShare;
+  }
   account.updatedAt = new Date().toISOString();
+
+  const receiptNumber = `OR-SHR-${Date.now().toString(36).toUpperCase()}`;
 
   // Automatic balanced CDA journal entry
   const journalData = GeneralLedgerService.buildShareDepositEntry({
     memberId,
     memberNumber: account.accountNumber,
-    amount: Number(amount),
-    userId: 'usr_cashier',
+    amount: depositNum,
+    channel: channel === 'PAYMONGO_QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
+    passOnFee: Number(passOnFee || 0),
+    userId: cashierUserId || 'usr_cashier',
   });
 
   const entries = dbStore.journalEntries.get(tenantId) || [];
@@ -473,14 +494,96 @@ app.post('/api/v1/shares/deposit', (req: Request, res: Response) => {
   const amlcAlert = RegulatoryReportsService.checkAMLCThreshold({
     transactionId: journalEntry.id,
     memberId,
-    amount: Number(amount),
+    amount: depositNum,
     transactionType: 'SHARE_CAPITAL_DEPOSIT',
   });
   if (amlcAlert) {
     dbStore.amlcAlerts.push(amlcAlert);
   }
 
-  res.json({ success: true, account, journalEntry, amlcAlert });
+  res.json({
+    success: true,
+    message: `Share capital contribution of ₱${depositNum.toFixed(2)} (${Math.floor(depositNum / account.parValuePerShare)} shares) processed successfully.`,
+    receiptNumber,
+    account,
+    journalEntry,
+    amlcAlert,
+  });
+});
+
+app.get('/api/v1/savings', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const savings = dbStore.savingsAccounts.get(tenantId) || [];
+  res.json({ success: true, count: savings.length, data: savings });
+});
+
+app.post('/api/v1/savings/deposit', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberId, amount, channel, savingsType, cashierUserId, passOnFee } = req.body;
+
+  if (!memberId || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ success: false, error: 'Valid memberId and deposit amount required.' });
+  }
+
+  const savingsList = dbStore.savingsAccounts.get(tenantId) || [];
+  let account = savingsList.find((s) => s.memberId === memberId && (!savingsType || s.type === savingsType));
+
+  if (!account) {
+    account = {
+      id: `sav_${Date.now().toString(36)}`,
+      memberId,
+      accountNumber: `SAV-${savingsType === 'COMPULSORY' ? 'COMP' : 'VOL'}-${Date.now().toString(36).toUpperCase()}`,
+      type: savingsType === 'COMPULSORY' ? 'COMPULSORY' : 'VOLUNTARY',
+      interestRateAnnual: savingsType === 'COMPULSORY' ? 0.03 : 0.02,
+      balance: 0,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    savingsList.push(account);
+    dbStore.savingsAccounts.set(tenantId, savingsList);
+  }
+
+  const depositNum = Number(amount);
+  account.balance += depositNum;
+  account.updatedAt = new Date().toISOString();
+
+  const receiptNumber = `OR-SAV-${Date.now().toString(36).toUpperCase()}`;
+
+  const journalData = GeneralLedgerService.buildSavingsDepositEntry({
+    memberId,
+    memberNumber: account.accountNumber,
+    amount: depositNum,
+    savingsType: account.type,
+    channel: channel === 'PAYMONGO_QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
+    passOnFee: Number(passOnFee || 0),
+    userId: cashierUserId || 'usr_cashier',
+  });
+
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const journalEntry = { id: `je_${Date.now()}`, ...journalData };
+  entries.push(journalEntry);
+  dbStore.journalEntries.set(tenantId, entries);
+
+  // AMLC Check
+  const amlcAlert = RegulatoryReportsService.checkAMLCThreshold({
+    transactionId: journalEntry.id,
+    memberId,
+    amount: depositNum,
+    transactionType: 'SAVINGS_DEPOSIT',
+  });
+  if (amlcAlert) {
+    dbStore.amlcAlerts.push(amlcAlert);
+  }
+
+  res.json({
+    success: true,
+    message: `Savings deposit of ₱${depositNum.toFixed(2)} credited to account ${account.accountNumber}.`,
+    receiptNumber,
+    account,
+    journalEntry,
+    amlcAlert,
+  });
 });
 
 // ==========================================

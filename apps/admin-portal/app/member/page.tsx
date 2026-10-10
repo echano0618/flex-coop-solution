@@ -16,6 +16,11 @@ import {
   AlertCircle,
   ExternalLink,
   ChevronRight,
+  Plus,
+  X,
+  Landmark,
+  Printer,
+  BookOpen,
 } from 'lucide-react';
 
 export default function MemberPortalPage() {
@@ -36,6 +41,24 @@ export default function MemberPortalPage() {
 
   // Active Loan State
   const [loanBalance, setLoanBalance] = useState<number>(50000.0);
+
+  // Share Capital & Savings Balances State
+  const [paidUpCapital, setPaidUpCapital] = useState<number>(15000);
+  const [sharesCount, setSharesCount] = useState<number>(150);
+  const [savingsBalance, setSavingsBalance] = useState<number>(5000);
+
+  // Self-Service Deposit / Share Purchase Modal State
+  const [depositModalType, setDepositModalType] = useState<'SHARES' | 'SAVINGS' | null>(null);
+  const [depositSharesCount, setDepositSharesCount] = useState<number>(10); // 10 shares @ ₱100 = ₱1,000
+  const [depositSavingsAmount, setDepositSavingsAmount] = useState<number>(1000);
+  const [depositChannel, setDepositChannel] = useState<'PAYMONGO_QRPH' | 'IN_PERSON_SLIP'>('PAYMONGO_QRPH');
+  const [depositSuccessResult, setDepositSuccessResult] = useState<{
+    type: string;
+    amount: number;
+    reference: string;
+    channel: string;
+    sharesAdded?: number;
+  } | null>(null);
 
   // Calculations for Loan Application
   const annualRate = loanProduct === 'REGULAR' ? 0.12 : 0.06;
@@ -213,34 +236,48 @@ export default function MemberPortalPage() {
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Paid-Up Share Capital</span>
                     <span className="bg-amber-50 text-amber-800 font-bold text-[11px] px-2 py-0.5 rounded">CDA Equity</span>
                   </div>
-                  <div className="text-3xl font-extrabold text-slate-900 mt-2">₱15,000.00</div>
-                  <div className="text-xs text-slate-500 mt-1">150 Shares @ ₱100.00 par value</div>
+                  <div className="text-3xl font-extrabold text-slate-900 mt-2">
+                    ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">{sharesCount} Shares @ ₱100.00 par value</div>
                 </div>
 
-                <div className="mt-5 pt-4 border-t border-slate-100 text-xs space-y-1.5 text-slate-600">
+                <div className="mt-5 pt-4 border-t border-slate-100 text-xs space-y-3 text-slate-600">
                   <div className="flex justify-between">
-                    <span>Subscribed Shares:</span>
-                    <span className="font-semibold text-slate-800">200 Shares (₱20,000.00)</span>
+                    <span>Subscribed Capital:</span>
+                    <span className="font-semibold text-slate-800">₱{((sharesCount + 50) * 100).toLocaleString()}.00</span>
                   </div>
                   <div className="flex justify-between text-emerald-700 font-semibold">
-                    <span>Dividend & Patronage Eligibility:</span>
+                    <span>Dividend Eligibility:</span>
                     <span>100% Active</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDepositModalType('SHARES');
+                      setDepositSuccessResult(null);
+                    }}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Purchase New Shares
+                  </button>
                 </div>
               </div>
 
-              {/* Compulsory Savings Card */}
+              {/* Compulsory & Voluntary Savings Card */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
                 <div>
                   <div className="flex justify-between items-start">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Compulsory Savings</span>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Savings Account</span>
                     <span className="bg-emerald-50 text-emerald-800 font-bold text-[11px] px-2 py-0.5 rounded">3.0% Interest</span>
                   </div>
-                  <div className="text-3xl font-extrabold text-slate-900 mt-2">₱5,000.00</div>
+                  <div className="text-3xl font-extrabold text-slate-900 mt-2">
+                    ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
                   <div className="text-xs text-slate-500 mt-1">Deposit Liabilities account (2-01-01)</div>
                 </div>
 
-                <div className="mt-5 pt-4 border-t border-slate-100 text-xs space-y-1.5 text-slate-600">
+                <div className="mt-5 pt-4 border-t border-slate-100 text-xs space-y-3 text-slate-600">
                   <div className="flex justify-between">
                     <span>Account Status:</span>
                     <span className="font-semibold text-emerald-700">ACTIVE & EARNING</span>
@@ -249,6 +286,16 @@ export default function MemberPortalPage() {
                     <span>Loan Collateral Leverage:</span>
                     <span className="font-semibold text-slate-800">Qualified for 3x loan</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDepositModalType('SAVINGS');
+                      setDepositSuccessResult(null);
+                    }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Deposit to Savings
+                  </button>
                 </div>
               </div>
             </div>
@@ -707,6 +754,309 @@ export default function MemberPortalPage() {
                   Consent Version: <strong>v2026.1</strong> • Logged IP: <strong>120.29.74.12</strong> • Timestamp: <strong>2026-01-20T09:05:00Z</strong>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+        {/* SELF-SERVICE DEPOSIT & SHARE PURCHASE MODAL */}
+        {depositModalType && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Modal Header */}
+              <div className="bg-slate-900 text-white p-6 relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDepositModalType(null);
+                    setDepositSuccessResult(null);
+                  }}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow">
+                    F
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base tracking-tight leading-tight">
+                      {depositModalType === 'SHARES' ? 'Purchase Cooperative Shares' : 'Deposit to Savings'}
+                    </h3>
+                    <div className="text-[11px] text-slate-300">
+                      Bayani Multi-Purpose Cooperative • Member: <strong>Maria Clara Santos</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {!depositSuccessResult ? (
+                <div className="p-6 space-y-5 text-xs">
+                  {depositModalType === 'SHARES' ? (
+                    /* Share Purchase Controls */
+                    <div className="space-y-3">
+                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900">
+                        <div className="font-bold flex items-center gap-1.5 text-xs">
+                          <BookOpen className="w-4 h-4 text-amber-700" /> Capital Build-Up (Common Stock)
+                        </div>
+                        <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                          Par value is fixed at <strong>₱100.00 / share</strong>. Purchasing shares increases your voting equity and annual dividend allocation under RA 9520.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">
+                          Select Shares to Purchase:
+                        </label>
+                        <div className="flex gap-2 mb-2">
+                          {[5, 10, 20, 50].map((num) => (
+                            <button
+                              key={num}
+                              type="button"
+                              onClick={() => setDepositSharesCount(num)}
+                              className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition ${
+                                depositSharesCount === num
+                                  ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              +{num} shs
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            value={depositSharesCount}
+                            onChange={(e) => setDepositSharesCount(Math.max(1, Number(e.target.value)))}
+                            className="w-24 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                          />
+                          <span className="text-slate-500">shares × ₱100.00 =</span>
+                          <strong className="text-slate-900 font-mono text-sm">
+                            ₱{(depositSharesCount * 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Savings Deposit Controls */
+                    <div className="space-y-3">
+                      <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900">
+                        <div className="font-bold flex items-center gap-1.5 text-xs">
+                          <PiggyBank className="w-4 h-4 text-emerald-700" /> Member Voluntary Savings
+                        </div>
+                        <p className="text-[11px] text-emerald-800 mt-1 leading-relaxed">
+                          Earns <strong>3.0% interest per annum</strong> credited semi-annually. Acts as loan collateral leverage (up to 3x loan entitlement).
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">
+                          Select Deposit Amount:
+                        </label>
+                        <div className="flex gap-2 mb-2">
+                          {[500, 1000, 2000, 5000].map((amt) => (
+                            <button
+                              key={amt}
+                              type="button"
+                              onClick={() => setDepositSavingsAmount(amt)}
+                              className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition ${
+                                depositSavingsAmount === amt
+                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              ₱{amt.toLocaleString()}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="100"
+                            step="100"
+                            value={depositSavingsAmount}
+                            onChange={(e) => setDepositSavingsAmount(Math.max(100, Number(e.target.value)))}
+                            className="w-32 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Payment Channel Choice */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                      Fulfillment Method:
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setDepositChannel('PAYMONGO_QRPH')}
+                        className={`p-3 border rounded-xl text-left transition ${
+                          depositChannel === 'PAYMONGO_QRPH'
+                            ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <QrCode className="w-4 h-4 text-emerald-600" />
+                          <span>Self-Service QR Ph</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-normal">
+                          Instant credit via GCash, Maya, or any InstaPay bank app.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDepositChannel('IN_PERSON_SLIP')}
+                        className={`p-3 border rounded-xl text-left transition ${
+                          depositChannel === 'IN_PERSON_SLIP'
+                            ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Landmark className="w-4 h-4 text-emerald-600" />
+                          <span>In-Person Teller</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-normal">
+                          Generate deposit slip for cashier counter (₱0 fee).
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Summary & Execution */}
+                  {(() => {
+                    const principal = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
+                    const passOn = depositChannel === 'PAYMONGO_QRPH' ? Math.max(15, Math.round(principal * 0.015 * 100) / 100) : 0;
+                    const total = principal + passOn;
+
+                    return (
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Net Deposit / Capital Credit:</span>
+                          <strong className="text-slate-900 font-mono">₱{principal.toFixed(2)}</strong>
+                        </div>
+                        {depositChannel === 'PAYMONGO_QRPH' && (
+                          <div className="flex justify-between text-amber-700">
+                            <span>Pass-On Gateway Convenience Fee:</span>
+                            <span className="font-mono font-semibold">+ ₱{passOn.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="border-t border-slate-200 pt-2 flex justify-between text-slate-900 font-bold">
+                          <span>Total Amount to Pay:</span>
+                          <span className="text-emerald-700 font-mono text-base">₱{total.toFixed(2)}</span>
+                        </div>
+
+                        {depositChannel === 'PAYMONGO_QRPH' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const refNo = `QR-TX-${Date.now().toString(36).toUpperCase()}`;
+                              if (depositModalType === 'SHARES') {
+                                setPaidUpCapital((prev) => prev + principal);
+                                setSharesCount((prev) => prev + depositSharesCount);
+                              } else {
+                                setSavingsBalance((prev) => prev + principal);
+                              }
+                              setDepositSuccessResult({
+                                type: depositModalType === 'SHARES' ? 'Share Capital Purchase' : 'Savings Deposit',
+                                amount: principal,
+                                reference: refNo,
+                                channel: 'PayMongo QR Ph (Instant Self-Service)',
+                                sharesAdded: depositModalType === 'SHARES' ? depositSharesCount : undefined,
+                              });
+                            }}
+                            className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                          >
+                            <QrCode className="w-4 h-4" />
+                            <span>Simulate Instant QR Ph Settlement</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const refNo = `DEP-${depositModalType === 'SHARES' ? 'SHR' : 'SAV'}-${Math.floor(10000 + Math.random() * 90000)}`;
+                              setDepositSuccessResult({
+                                type: depositModalType === 'SHARES' ? 'Share Capital Purchase Slip' : 'Savings Deposit Slip',
+                                amount: principal,
+                                reference: refNo,
+                                channel: 'In-Person Branch Teller Counter',
+                                sharesAdded: depositModalType === 'SHARES' ? depositSharesCount : undefined,
+                              });
+                            }}
+                            className="w-full mt-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                          >
+                            <FileText className="w-4 h-4" />
+                            <span>Generate In-Person Counter Deposit Slip</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                /* Success / Receipt Screen */
+                <div className="p-6 text-center space-y-4">
+                  <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+
+                  <div>
+                    <h4 className="text-base font-bold text-slate-900">{depositSuccessResult.type}</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {depositSuccessResult.channel.includes('Instant')
+                        ? 'Transaction settled and credited to your account!'
+                        : 'Deposit slip generated! Present at any coop cashier counter.'}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-left font-mono text-xs space-y-2">
+                    <div className="flex justify-between border-b pb-1.5">
+                      <span className="text-slate-500 font-sans">Reference Number:</span>
+                      <strong className="text-indigo-600">{depositSuccessResult.reference}</strong>
+                    </div>
+                    <div className="flex justify-between border-b pb-1.5">
+                      <span className="text-slate-500 font-sans">Amount:</span>
+                      <strong className="text-slate-900">
+                        ₱{depositSuccessResult.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                    {depositSuccessResult.sharesAdded && (
+                      <div className="flex justify-between border-b pb-1.5">
+                        <span className="text-slate-500 font-sans">New Shares Issued:</span>
+                        <strong className="text-amber-800">+{depositSuccessResult.sharesAdded} Common Shares</strong>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Channel:</span>
+                      <span className="text-emerald-700 font-sans font-semibold">{depositSuccessResult.channel}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => alert(`Printing transaction slip ${depositSuccessResult.reference}...`)}
+                      className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl font-bold text-xs flex items-center gap-1.5 transition"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Print Slip
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepositModalType(null);
+                        setDepositSuccessResult(null);
+                      }}
+                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

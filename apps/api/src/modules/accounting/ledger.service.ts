@@ -222,24 +222,35 @@ export class GeneralLedgerService {
   }
 
   /**
-   * Automated Entry: Member Share Capital Paid-Up Contribution
+   * Automated Entry: Member Share Capital Paid-Up Contribution (In-Person or Self-Service QR Ph)
    */
   static buildShareDepositEntry(params: {
     memberId: string;
     memberNumber: string;
     amount: number;
+    channel?: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' | 'BANK_TRANSFER';
+    passOnFee?: number;
     userId: string;
   }): Omit<JournalEntry, 'id'> {
-    const cashAccount = CDACoAManager.findByCode('1-01-01')!; // Cash on Hand
+    const cashCode =
+      params.channel === 'PAYMONGO_QRPH'
+        ? '1-01-05' // Digital Wallet / Float
+        : params.channel === 'BANK_TRANSFER'
+        ? '1-01-02' // Cash in Bank
+        : '1-01-01'; // Cash on Hand
+
+    const cashAccount = CDACoAManager.findByCode(cashCode)!;
     const shareAccount = CDACoAManager.findByCode('3-01-03')!; // Paid-Up Share Capital - Common
+
+    const totalDebit = params.amount + (params.passOnFee || 0);
 
     const lines: JournalEntryLine[] = [
       {
         accountCode: cashAccount.code,
         accountName: cashAccount.name,
-        debit: params.amount,
+        debit: totalDebit,
         credit: 0,
-        memo: `Share capital deposit from member ${params.memberNumber}`,
+        memo: `Share capital contribution from member ${params.memberNumber} via ${params.channel || 'IN_PERSON_CASHIER'}`,
       },
       {
         accountCode: shareAccount.code,
@@ -250,13 +261,98 @@ export class GeneralLedgerService {
       },
     ];
 
+    if (params.passOnFee && params.passOnFee > 0) {
+      const recoveryAccount = CDACoAManager.findByCode('4-02-02')!;
+      lines.push({
+        accountCode: recoveryAccount.code,
+        accountName: recoveryAccount.name,
+        debit: 0,
+        credit: params.passOnFee,
+        memo: `Pass-on gateway fee recovery for share capital purchase`,
+      });
+    }
+
     const validation = this.validateEntry(lines);
     return {
       entryNumber: `JE-SHR-${Date.now().toString(36).toUpperCase()}`,
       postingDate: new Date().toISOString().split('T')[0],
       referenceType: 'SHARE_CAPITAL_DEPOSIT',
       referenceId: params.memberId,
-      description: `Share Capital Paid-Up Contribution (Member: ${params.memberNumber})`,
+      description: `Share Capital Paid-Up Contribution (Member: ${params.memberNumber}, Channel: ${params.channel || 'IN_PERSON_CASHIER'})`,
+      lines,
+      totalDebit: validation.totalDebit,
+      totalCredit: validation.totalCredit,
+      isBalanced: true,
+      createdByUserId: params.userId,
+      postedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Automated Entry: Member Savings Deposit (In-Person or Self-Service QR Ph)
+   */
+  static buildSavingsDepositEntry(params: {
+    memberId: string;
+    memberNumber: string;
+    amount: number;
+    savingsType?: 'COMPULSORY' | 'VOLUNTARY' | 'TIME_DEPOSIT';
+    channel?: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' | 'BANK_TRANSFER';
+    passOnFee?: number;
+    userId: string;
+  }): Omit<JournalEntry, 'id'> {
+    const cashCode =
+      params.channel === 'PAYMONGO_QRPH'
+        ? '1-01-05' // Digital Wallet / Float
+        : params.channel === 'BANK_TRANSFER'
+        ? '1-01-02' // Cash in Bank
+        : '1-01-01'; // Cash on Hand
+
+    const savingsCode =
+      params.savingsType === 'COMPULSORY'
+        ? '2-01-01'
+        : params.savingsType === 'TIME_DEPOSIT'
+        ? '2-01-03'
+        : '2-01-02'; // Voluntary Regular Savings
+    const cashAccount = CDACoAManager.findByCode(cashCode)!;
+    const savingsAccount = CDACoAManager.findByCode(savingsCode)!;
+
+    const totalDebit = params.amount + (params.passOnFee || 0);
+
+    const lines: JournalEntryLine[] = [
+      {
+        accountCode: cashAccount.code,
+        accountName: cashAccount.name,
+        debit: totalDebit,
+        credit: 0,
+        memo: `Savings deposit from member ${params.memberNumber} via ${params.channel || 'IN_PERSON_CASHIER'}`,
+      },
+      {
+        accountCode: savingsAccount.code,
+        accountName: savingsAccount.name,
+        debit: 0,
+        credit: params.amount,
+        memo: `Member savings deposit (${params.savingsType || 'VOLUNTARY'})`,
+      },
+    ];
+
+    if (params.passOnFee && params.passOnFee > 0) {
+      const recoveryAccount = CDACoAManager.findByCode('4-02-02')!;
+      lines.push({
+        accountCode: recoveryAccount.code,
+        accountName: recoveryAccount.name,
+        debit: 0,
+        credit: params.passOnFee,
+        memo: `Pass-on gateway fee recovery for savings deposit`,
+      });
+    }
+
+    const validation = this.validateEntry(lines);
+    return {
+      entryNumber: `JE-SAV-${Date.now().toString(36).toUpperCase()}`,
+      postingDate: new Date().toISOString().split('T')[0],
+      referenceType: 'SAVINGS_DEPOSIT',
+      referenceId: params.memberId,
+      description: `Member Savings Deposit (Member: ${params.memberNumber}, Type: ${params.savingsType || 'VOLUNTARY'})`,
       lines,
       totalDebit: validation.totalDebit,
       totalCredit: validation.totalCredit,

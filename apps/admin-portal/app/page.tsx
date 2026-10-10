@@ -22,6 +22,8 @@ import {
   Check,
   Lock,
   UserCheck,
+  Printer,
+  X,
 } from 'lucide-react';
 
 interface StaffAccount {
@@ -137,6 +139,9 @@ export default function AdminDashboard() {
       kycStatus: 'VERIFIED',
       idType: 'PhilSys National ID (Encrypted SPI)',
       paidUpShares: 15000,
+      sharesCount: 150,
+      savingsBalance: 5000,
+      loanBalance: 47000,
       npcConsent: 'Agreed (IP: 120.29.74.12)',
     },
     {
@@ -148,6 +153,9 @@ export default function AdminDashboard() {
       kycStatus: 'VERIFIED',
       idType: 'Driver\'s License (Encrypted SPI)',
       paidUpShares: 10000,
+      sharesCount: 100,
+      savingsBalance: 2000,
+      loanBalance: 0,
       npcConsent: 'Agreed (IP: 180.191.22.45)',
     },
   ]);
@@ -169,11 +177,41 @@ export default function AdminDashboard() {
   const coopServiceFee = Math.round(calcAmount * 0.015 * 100) / 100;
   const netDisbursed = calcAmount - platformFee - coopServiceFee;
 
-  // PayMongo QR Ph Pass-On Math
+  // Cashier Multi-Transaction State
+  const [cashierTxCategory, setCashierTxCategory] = useState<'LOAN_REPAYMENT' | 'SHARE_PURCHASE' | 'SAVINGS_DEPOSIT'>('SHARE_PURCHASE');
+  const [cashierMemberId, setCashierMemberId] = useState<string>('mem_1');
+  const [sharesToBuy, setSharesToBuy] = useState<number>(20); // ₱100.00 par value = ₱2,000.00
+  const [savingsDepositAmount, setSavingsDepositAmount] = useState<number>(2000);
+  const [savingsCategory, setSavingsCategory] = useState<'VOLUNTARY' | 'COMPULSORY'>('VOLUNTARY');
+
+  // PayMongo QR Ph Pass-On Math & Cashiering
   const [paymentAmount, setPaymentAmount] = useState<number>(4500);
-  const [paymentChannel, setPaymentChannel] = useState<'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER'>('PAYMONGO_QRPH');
-  const passOnFee = paymentChannel === 'PAYMONGO_QRPH' ? Math.max(15, Math.round(paymentAmount * 0.015 * 100) / 100) : 0;
-  const totalCharge = paymentAmount + passOnFee;
+  const [paymentChannel, setPaymentChannel] = useState<'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER'>('IN_PERSON_CASHIER');
+
+  // Dynamic Cashier Transaction Amount based on Category
+  const activeTxAmount =
+    cashierTxCategory === 'SHARE_PURCHASE'
+      ? sharesToBuy * 100
+      : cashierTxCategory === 'SAVINGS_DEPOSIT'
+      ? savingsDepositAmount
+      : paymentAmount;
+
+  const passOnFee = paymentChannel === 'PAYMONGO_QRPH' ? Math.max(15, Math.round(activeTxAmount * 0.015 * 100) / 100) : 0;
+  const totalCharge = activeTxAmount + passOnFee;
+
+  // Official Receipt Modal State
+  const [officialReceiptModal, setOfficialReceiptModal] = useState<{
+    receiptNo: string;
+    memberName: string;
+    memberNo: string;
+    txType: string;
+    grossAmount: number;
+    particulars: string;
+    channel: string;
+    date: string;
+    glEntry: string;
+    cashierName: string;
+  } | null>(null);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -936,74 +974,290 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 3: CASHIER & PAYMONGO QR PH */}
+        {/* TAB 3: CASHIER COUNTER & OFFICIAL RECEIPT (OR) ISSUANCE */}
         {activeTab === 'cashier' && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Cashier Repayments & PayMongo QR Ph Rail</h2>
-              <p className="text-xs text-slate-500">Supports dynamic PayMongo QR Ph with pass-on fees, or in-person cash payments at ₱0 convenience fee.</p>
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Landmark className="w-5 h-5 text-emerald-600" />
+                  <span>Cooperative Cashier Counter & Payment Rails</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Facilitates in-person counter transactions for Share Capital, Savings Deposits, and Loan Repayments with immediate CDA General Ledger posting.
+                </p>
+              </div>
+
+              {/* Transaction Category Selector */}
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setCashierTxCategory('SHARE_PURCHASE')}
+                  className={`px-3 py-1.5 rounded-md transition ${
+                    cashierTxCategory === 'SHARE_PURCHASE'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  📈 Share Capital
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCashierTxCategory('SAVINGS_DEPOSIT')}
+                  className={`px-3 py-1.5 rounded-md transition ${
+                    cashierTxCategory === 'SAVINGS_DEPOSIT'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  🏦 Savings Deposit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCashierTxCategory('LOAN_REPAYMENT')}
+                  className={`px-3 py-1.5 rounded-md transition ${
+                    cashierTxCategory === 'LOAN_REPAYMENT'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  💰 Loan Repayment
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Payment Controls */}
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Repayment Installment Amount (₱)</label>
-                  <input
-                    type="number"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(Math.max(100, Number(e.target.value)))}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                  />
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column: Transaction Input Controls */}
+              <div className="lg:col-span-7 space-y-5">
+                {/* 1. Member Selector */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                    1. Select Cooperative Member
+                  </label>
+                  <select
+                    value={cashierMemberId}
+                    onChange={(e) => setCashierMemberId(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white font-medium text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    {members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.memberNo}) — Paid-Up: ₱{m.paidUpShares.toLocaleString()} | Savings: ₱{(m.savingsBalance || 0).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Active Selected Member Info Badges */}
+                  {(() => {
+                    const activeMem = members.find((m) => m.id === cashierMemberId) || members[0];
+                    return (
+                      <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-200 text-xs">
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-500 block">Paid-Up Capital</span>
+                          <strong className="text-slate-900 text-xs">₱{activeMem.paidUpShares.toLocaleString()}</strong>
+                          <span className="text-[10px] text-slate-400 block">{activeMem.sharesCount || Math.floor(activeMem.paidUpShares / 100)} shares</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-500 block">Savings Balance</span>
+                          <strong className="text-slate-900 text-xs">₱{(activeMem.savingsBalance || 0).toLocaleString()}</strong>
+                          <span className="text-[10px] text-emerald-600 block">3.0% p.a.</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-500 block">Loan Balance</span>
+                          <strong className="text-slate-900 text-xs">₱{(activeMem.loanBalance || 0).toLocaleString()}</strong>
+                          <span className="text-[10px] text-blue-600 block">Regular Loan</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
+                {/* 2. Specific Transaction Inputs */}
+                {cashierTxCategory === 'SHARE_PURCHASE' && (
+                  <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5" /> Share Capital Build-Up (Common Stock)
+                      </span>
+                      <span className="text-xs font-mono bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded">
+                        Par Value: ₱100.00 / share
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Number of New Shares to Purchase:
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          min="1"
+                          max="1000"
+                          value={sharesToBuy}
+                          onChange={(e) => setSharesToBuy(Math.max(1, Number(e.target.value)))}
+                          className="w-32 border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                        <div className="flex gap-1.5">
+                          {[5, 10, 20, 50].map((count) => (
+                            <button
+                              key={count}
+                              type="button"
+                              onClick={() => setSharesToBuy(count)}
+                              className={`px-2.5 py-1 text-xs rounded-md border font-medium transition ${
+                                sharesToBuy === count
+                                  ? 'bg-amber-600 text-white border-amber-600'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              +{count} shs
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-lg border border-amber-200 text-xs space-y-1 text-slate-700">
+                      <div className="flex justify-between">
+                        <span>Total Paid-Up Consideration:</span>
+                        <strong className="text-slate-900 font-mono">₱{(sharesToBuy * 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="flex justify-between text-emerald-700">
+                        <span>New Subscribed & Paid-Up Total:</span>
+                        <strong className="font-mono">
+                          {((members.find((m) => m.id === cashierMemberId)?.sharesCount || 150) + sharesToBuy)} Shares (₱
+                          {((members.find((m) => m.id === cashierMemberId)?.paidUpShares || 15000) + sharesToBuy * 100).toLocaleString()}
+                          )
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {cashierTxCategory === 'SAVINGS_DEPOSIT' && (
+                  <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 space-y-3">
+                    <span className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5" /> Member Savings Deposit
+                    </span>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">Savings Account Type</label>
+                        <select
+                          value={savingsCategory}
+                          onChange={(e) => setSavingsCategory(e.target.value as any)}
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-2 text-xs bg-white font-medium text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          <option value="VOLUNTARY">Voluntary Regular Savings (3% p.a.)</option>
+                          <option value="COMPULSORY">Compulsory Capital Build-Up (2% p.a.)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">Deposit Amount (₱)</label>
+                        <input
+                          type="number"
+                          min="100"
+                          step="100"
+                          value={savingsDepositAmount}
+                          onChange={(e) => setSavingsDepositAmount(Math.max(100, Number(e.target.value)))}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      {[500, 1000, 2000, 5000].map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setSavingsDepositAmount(amt)}
+                          className={`px-2.5 py-1 text-xs rounded-md border font-medium transition ${
+                            savingsDepositAmount === amt
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          ₱{amt.toLocaleString()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {cashierTxCategory === 'LOAN_REPAYMENT' && (
+                  <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-4 space-y-3">
+                    <span className="text-xs font-bold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5" /> Loan Amortization Repayment
+                    </span>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">Repayment Installment Amount (₱)</label>
+                      <input
+                        type="number"
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(Math.max(100, Number(e.target.value)))}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                      />
+                    </div>
+                    <div className="text-xs text-slate-600 grid grid-cols-3 gap-2 bg-white p-2.5 rounded-lg border border-slate-200">
+                      <div>Principal: <strong className="text-slate-900 font-mono">₱{(paymentAmount - 500).toFixed(2)}</strong></div>
+                      <div>Interest: <strong className="text-slate-900 font-mono">₱450.00</strong></div>
+                      <div>Penalty: <strong className="text-slate-900 font-mono">₱50.00</strong></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Payment Method */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Payment Method</label>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                    2. Payment Channel
+                  </label>
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setPaymentChannel('PAYMONGO_QRPH')}
-                      className={`p-3 border rounded-lg text-left text-xs ${
-                        paymentChannel === 'PAYMONGO_QRPH'
-                          ? 'border-emerald-600 bg-emerald-50 font-bold text-emerald-900'
-                          : 'border-slate-200 bg-white text-slate-700'
+                      onClick={() => setPaymentChannel('IN_PERSON_CASHIER')}
+                      className={`p-3 border rounded-xl text-left text-xs transition ${
+                        paymentChannel === 'IN_PERSON_CASHIER'
+                          ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-900 ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        <QrCode className="w-4 h-4 text-emerald-600" /> PayMongo QR Ph
+                        <Landmark className="w-4 h-4 text-emerald-600" /> Over-The-Counter Cash
                       </div>
-                      <div className="text-slate-500 font-normal">Pass-on convenience fee applies</div>
+                      <div className="text-slate-500 font-normal">Physical cash/check in teller drawer (₱0.00 fee)</div>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => setPaymentChannel('IN_PERSON_CASHIER')}
-                      className={`p-3 border rounded-lg text-left text-xs ${
-                        paymentChannel === 'IN_PERSON_CASHIER'
-                          ? 'border-emerald-600 bg-emerald-50 font-bold text-emerald-900'
-                          : 'border-slate-200 bg-white text-slate-700'
+                      onClick={() => setPaymentChannel('PAYMONGO_QRPH')}
+                      className={`p-3 border rounded-xl text-left text-xs transition ${
+                        paymentChannel === 'PAYMONGO_QRPH'
+                          ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-900 ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        <Landmark className="w-4 h-4 text-emerald-600" /> Over-The-Counter
+                        <QrCode className="w-4 h-4 text-emerald-600" /> Customer-Facing QR Ph
                       </div>
-                      <div className="text-slate-500 font-normal">₱0.00 convenience fee</div>
+                      <div className="text-slate-500 font-normal">Generate PayMongo QR Ph for member scan</div>
                     </button>
                   </div>
                 </div>
 
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2 text-sm">
+                {/* 4. Payment Posting Summary & Execution */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Loan Repayment Credit:</span>
-                    <span className="font-semibold text-slate-900">₱{paymentAmount.toFixed(2)}</span>
+                    <span className="text-slate-600">Net Transaction Credit:</span>
+                    <span className="font-semibold text-slate-900 font-mono text-sm">₱{activeTxAmount.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-amber-700">
-                    <span>Pass-On Convenience Fee:</span>
-                    <span className="font-semibold">+ ₱{passOnFee.toFixed(2)}</span>
-                  </div>
-                  <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-slate-900">
-                    <span>Total Amount Charged to Member:</span>
-                    <span className="text-emerald-700">₱{totalCharge.toFixed(2)}</span>
+                  {paymentChannel === 'PAYMONGO_QRPH' && (
+                    <div className="flex justify-between text-amber-700">
+                      <span>Pass-On Gateway Convenience Fee:</span>
+                      <span className="font-semibold font-mono">+ ₱{passOnFee.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-slate-900 text-sm">
+                    <span>Total Amount Received:</span>
+                    <span className="text-emerald-700 font-mono text-base">₱{totalCharge.toFixed(2)}</span>
                   </div>
 
                   {/* Cashier Execution Guard */}
@@ -1011,52 +1265,153 @@ export default function AdminDashboard() {
                     {currentStaff.role === 'CASHIER' || currentStaff.role === 'GENERAL_MANAGER' ? (
                       <button
                         type="button"
-                        onClick={() => alert(`Official Receipt (OR) generated successfully!\nAmount: ₱${paymentAmount.toFixed(2)}\nCashier: ${currentStaff.name}\nAccount: 1-01-01 (Cash on Hand)`)}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                        onClick={() => {
+                          const member = members.find((m) => m.id === cashierMemberId) || members[0];
+                          const orNumber = `OR-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+                          const nowIso = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+
+                          let particulars = '';
+                          let debitAccount = paymentChannel === 'IN_PERSON_CASHIER' ? '1-01-01 (Cash on Hand)' : '1-01-05 (Payment Gateway Float)';
+                          let creditAccount = '';
+
+                          if (cashierTxCategory === 'SHARE_PURCHASE') {
+                            const addedShares = sharesToBuy;
+                            const addedAmount = addedShares * 100;
+                            particulars = `Purchase & Subscription of ${addedShares} Common Shares @ ₱100.00 par value`;
+                            creditAccount = '3-01-03 (Paid-Up Share Capital - Common)';
+
+                            setMembers((prev) =>
+                              prev.map((m) =>
+                                m.id === member.id
+                                  ? {
+                                      ...m,
+                                      paidUpShares: m.paidUpShares + addedAmount,
+                                      sharesCount: (m.sharesCount || 0) + addedShares,
+                                    }
+                                  : m
+                              )
+                            );
+                          } else if (cashierTxCategory === 'SAVINGS_DEPOSIT') {
+                            const depositAmount = savingsDepositAmount;
+                            particulars = `Deposit to ${savingsCategory === 'COMPULSORY' ? 'Compulsory' : 'Voluntary Regular'} Savings Account`;
+                            creditAccount =
+                              savingsCategory === 'COMPULSORY'
+                                ? '2-01-01 (Savings Deposits - Compulsory)'
+                                : '2-01-02 (Savings Deposits - Voluntary)';
+
+                            setMembers((prev) =>
+                              prev.map((m) =>
+                                m.id === member.id
+                                  ? {
+                                      ...m,
+                                      savingsBalance: (m.savingsBalance || 0) + depositAmount,
+                                    }
+                                  : m
+                              )
+                            );
+                          } else {
+                            particulars = `Loan Amortization Repayment (Principal + Interest)`;
+                            creditAccount = '1-02-01 (Loans Receivable) / 4-01-01 (Interest Income)';
+
+                            setMembers((prev) =>
+                              prev.map((m) =>
+                                m.id === member.id
+                                  ? {
+                                      ...m,
+                                      loanBalance: Math.max(0, (m.loanBalance || 0) - (paymentAmount - 500)),
+                                    }
+                                  : m
+                              )
+                            );
+                          }
+
+                          setOfficialReceiptModal({
+                            receiptNo: orNumber,
+                            memberName: member.name,
+                            memberNo: member.memberNo,
+                            txType:
+                              cashierTxCategory === 'SHARE_PURCHASE'
+                                ? 'Share Capital Purchase (Capital Build-Up)'
+                                : cashierTxCategory === 'SAVINGS_DEPOSIT'
+                                ? 'Savings Account Deposit'
+                                : 'Loan Amortization Repayment',
+                            grossAmount: activeTxAmount,
+                            particulars,
+                            channel: paymentChannel === 'IN_PERSON_CASHIER' ? 'Over-The-Counter Cash' : 'Counter PayMongo QR Ph',
+                            date: nowIso,
+                            glEntry: `DR: ${debitAccount} ₱${activeTxAmount.toFixed(2)} | CR: ${creditAccount} ₱${activeTxAmount.toFixed(2)}`,
+                            cashierName: currentStaff.name,
+                          });
+                        }}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-xl transition shadow-sm flex items-center justify-center gap-2"
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Post Payment & Issue Official Receipt (OR)</span>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Post In-Person Transaction & Issue Official Receipt (OR)</span>
                       </button>
                     ) : (
                       <button
                         type="button"
                         disabled
                         title="Segregation of Duties: Only bonded Cashiers or GM may handle collections"
-                        className="w-full bg-slate-200 text-slate-500 text-xs font-medium py-2 rounded-lg cursor-not-allowed border border-slate-300"
+                        className="w-full bg-slate-200 text-slate-500 text-xs font-medium py-3 rounded-xl cursor-not-allowed border border-slate-300"
                       >
-                        Payment Posting Restricted to Cashier
+                        Posting Restricted to Cashier Role (CDA MC 2015-06 Segregation of Duties)
                       </button>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* QR Ph Live Code Box */}
-              <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 flex flex-col items-center justify-center text-center">
+              {/* Right Column: Dynamic Receipt Preview / Customer QR Ph Display */}
+              <div className="lg:col-span-5 flex flex-col justify-between">
                 {paymentChannel === 'PAYMONGO_QRPH' ? (
-                  <>
-                    <div className="w-48 h-48 bg-white border-2 border-emerald-600 rounded-lg p-3 shadow-md flex flex-col items-center justify-center">
-                      <div className="w-36 h-36 bg-slate-900 rounded flex items-center justify-center text-white text-xs font-mono p-2 text-center">
-                        [QR Ph Code Payload]
+                  <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 flex flex-col items-center justify-center text-center h-full">
+                    <div className="w-48 h-48 bg-white border-2 border-emerald-600 rounded-xl p-3 shadow-md flex flex-col items-center justify-center">
+                      <div className="w-36 h-36 bg-slate-900 rounded-lg flex items-center justify-center text-white text-xs font-mono p-2 text-center">
+                        [Customer QR Ph Code]
                         <br />
                         ₱{totalCharge.toFixed(2)}
                       </div>
                     </div>
                     <div className="mt-4 font-bold text-slate-900 text-sm">PayMongo Dynamic QR Ph Code</div>
                     <div className="text-xs text-slate-500 max-w-xs mt-1">
-                      Scannable via GCash, Maya, BDO, BPI, UnionBank, or any InstaPay-enabled banking app.
+                      Present on customer monitor. Scannable via GCash, Maya, BDO, BPI, or any InstaPay banking app.
                     </div>
-                  </>
+                  </div>
                 ) : (
-                  <>
-                    <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-3">
+                  <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 flex flex-col items-center justify-center text-center h-full">
+                    <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-3 shadow-sm">
                       <Landmark className="w-8 h-8" />
                     </div>
                     <div className="font-bold text-slate-900 text-sm">In-Person Counter Cashiering</div>
-                    <div className="text-xs text-slate-500 max-w-xs mt-1">
-                      Member pays cash/check directly at the cooperative branch. Full ₱{paymentAmount.toFixed(2)} is credited to loan amortization with zero convenience fees.
+                    <div className="text-xs text-slate-600 max-w-xs mt-1 leading-relaxed">
+                      Member pays directly at branch teller. Full <strong>₱{activeTxAmount.toFixed(2)}</strong> is credited with zero convenience fees.
                     </div>
-                  </>
+
+                    <div className="w-full mt-6 bg-white p-4 rounded-xl border border-slate-200 text-left text-xs space-y-2">
+                      <div className="font-bold text-slate-800 text-[11px] uppercase tracking-wider border-b pb-1">
+                        Statutory Accounting Verification:
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Debited Account:</span>
+                        <span className="font-mono text-emerald-800 font-semibold">1-01-01 (Cash on Hand)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Credited Account:</span>
+                        <span className="font-mono text-indigo-800 font-semibold">
+                          {cashierTxCategory === 'SHARE_PURCHASE'
+                            ? '3-01-03 (Paid-Up Capital)'
+                            : cashierTxCategory === 'SAVINGS_DEPOSIT'
+                            ? '2-01-02 (Voluntary Savings)'
+                            : '1-02-01 (Loans Receivable)'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Accounting Principle:</span>
+                        <span className="font-medium text-emerald-700">Strict Double-Entry (DR = CR)</span>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -1328,6 +1683,129 @@ export default function AdminDashboard() {
                     <strong className="text-slate-900">7.0% Max Allocation</strong>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* OFFICIAL RECEIPT (OR) POPUP MODAL */}
+        {officialReceiptModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Receipt Header Banner */}
+              <div className="bg-slate-900 text-white p-6 relative">
+                <button
+                  type="button"
+                  onClick={() => setOfficialReceiptModal(null)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-xl shadow">
+                    F
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base tracking-tight leading-tight">
+                      Bayani Multi-Purpose Cooperative
+                    </h3>
+                    <div className="text-[11px] text-slate-300 font-mono">
+                      CDA Reg: CDA-NCR-2024-00921 • TIN: 009-887-123-000
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
+                  <span className="font-bold tracking-widest text-emerald-400 uppercase text-[11px]">
+                    Official Receipt
+                  </span>
+                  <span className="font-mono bg-slate-800 px-2.5 py-0.5 rounded text-slate-200 font-bold">
+                    {officialReceiptModal.receiptNo}
+                  </span>
+                </div>
+              </div>
+
+              {/* Receipt Body */}
+              <div className="p-6 space-y-4 text-xs">
+                <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Received From:</span>
+                    <strong className="text-slate-900 text-xs">{officialReceiptModal.memberName}</strong>
+                    <span className="text-slate-500 block text-[11px]">Member ID: {officialReceiptModal.memberNo}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Date & Time:</span>
+                    <span className="text-slate-700 font-medium block">{officialReceiptModal.date}</span>
+                    <span className="text-emerald-700 font-semibold text-[11px]">{officialReceiptModal.channel}</span>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                      <tr>
+                        <th className="p-2.5">Particulars / Statutory Description</th>
+                        <th className="p-2.5 text-right">Amount (₱)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-800">
+                      <tr>
+                        <td className="p-2.5">
+                          <div className="font-semibold">{officialReceiptModal.txType}</div>
+                          <div className="text-[11px] text-slate-500">{officialReceiptModal.particulars}</div>
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-sm">
+                          ₱{officialReceiptModal.grossAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot className="bg-emerald-50 border-t border-slate-200 font-bold">
+                      <tr>
+                        <td className="p-2.5 text-emerald-950">TOTAL RECEIVED:</td>
+                        <td className="p-2.5 text-right font-mono text-emerald-950 text-base">
+                          ₱{officialReceiptModal.grossAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* CDA Accounting Verification Stamp */}
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[11px] space-y-1">
+                  <div className="flex justify-between text-slate-500">
+                    <span>Double-Entry General Ledger Posting:</span>
+                    <span className="text-emerald-700 font-bold">STRICTLY BALANCED</span>
+                  </div>
+                  <div className="font-mono text-slate-700 text-[10px] break-all bg-white p-2 rounded border border-slate-200">
+                    {officialReceiptModal.glEntry}
+                  </div>
+                  <div className="flex justify-between pt-1 text-slate-600">
+                    <span>Bonded Cashier / Teller:</span>
+                    <strong>{officialReceiptModal.cashierName} (CASHIER)</strong>
+                  </div>
+                </div>
+
+                {/* BIR / CDA Mandatory Inscription */}
+                <div className="text-center text-[10px] text-slate-400 italic">
+                  "This serves as an Official Receipt under CDA MC 2015-06 and Philippine Tax Regulations."
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => alert(`Printing Official Receipt ${officialReceiptModal.receiptNo}...`)}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Receipt</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOfficialReceiptModal(null)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition"
+                >
+                  Done
+                </button>
               </div>
             </div>
           </div>
