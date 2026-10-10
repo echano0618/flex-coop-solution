@@ -39,6 +39,7 @@ import {
   RotateCcw,
   Eye,
   Award,
+  Menu,
 } from 'lucide-react';
 
 type TabType = 'overview' | 'members' | 'products' | 'los' | 'calculator' | 'collateral' | 'cashier' | 'accounting' | 'surplus' | 'invoices' | 'reports';
@@ -239,7 +240,38 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
+
+  const ALL_MODULE_TABS: {
+    id: TabType;
+    label: string;
+    icon: any;
+    category: string;
+  }[] = [
+    { id: 'overview', label: 'Executive Dashboard', icon: Landmark, category: 'Core' },
+    { id: 'members', label: 'Members & eKYC', icon: Users, category: 'Membership' },
+    { id: 'products', label: 'Loan Products & Offers', icon: Sliders, category: 'Lending' },
+    { id: 'los', label: 'LOS Approval Matrix', icon: CreditCard, category: 'Lending' },
+    { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator, category: 'Lending' },
+    { id: 'collateral', label: 'Collateral & Chattel Registry', icon: Scale, category: 'Lending' },
+    { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode, category: 'Treasury' },
+    { id: 'accounting', label: 'CDA General Ledger', icon: BookOpen, category: 'Finance' },
+    { id: 'surplus', label: 'Net Surplus & Patronage (Art. 86)', icon: PieChart, category: 'Finance' },
+    { id: 'invoices', label: 'Tax & Invoices (12% VAT)', icon: FileText, category: 'Finance' },
+    { id: 'reports', label: 'CDA & CIC Mandatory Reports', icon: ShieldCheck, category: 'Governance' },
+  ];
+
+  const visibleTabs = ALL_MODULE_TABS.filter((tab) => currentStaff.allowedTabs.includes(tab.id));
+  const currentModule = ALL_MODULE_TABS.find((t) => t.id === activeTab);
+
+  const handleSelectStaff = (staff: StaffAccount) => {
+    setCurrentStaff(staff);
+    if (!staff.allowedTabs.includes(activeTab)) {
+      setActiveTab(staff.allowedTabs[0] || 'overview');
+    }
+    setIsRoleDropdownOpen(false);
+  };
 
   const handleSyncFirestore = () => {
     setFirestoreSyncStatus('SYNCING');
@@ -821,225 +853,386 @@ export default function AdminDashboard() {
   } | null>(null);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      {/* Top Header */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col lg:flex-row">
+      {/* Desktop App Drawer on Left Side */}
+      <aside className="hidden lg:flex flex-col w-64 xl:w-72 bg-slate-900 text-slate-200 border-r border-slate-800 shrink-0 sticky top-0 h-screen z-40">
+        {/* Drawer Header & Brand Identity */}
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-lg shadow-md shrink-0">
               F
             </div>
-            <div>
-              <div className="font-bold text-lg leading-tight flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="font-bold text-sm text-white leading-tight truncate">
                 Flex Coop Solution
-                <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
-                  CDA Compliant
-                </span>
               </div>
-              <div className="text-xs text-slate-500">Enterprise SaaS Cooperative Banking & Lending</div>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            {/* Member Portal Quick Links */}
-            <div className="hidden lg:flex items-center space-x-1 border-r border-slate-200 pr-3">
-              <Link
-                href="/member/login"
-                className="text-xs font-semibold text-slate-700 hover:text-emerald-700 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                Member Login
-              </Link>
-              <Link
-                href="/member/register"
-                className="text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors"
-              >
-                + Member Onboarding
-              </Link>
-              <Link
-                href="/coop-register"
-                className="text-xs font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors ml-1"
-              >
-                + Register New Coop
-              </Link>
-            </div>
-
-            <Link
-              href="/member"
-              className="text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
-            >
-              <span>Member Portal</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-
-            {/* Active Tenant Badge */}
-            <div className="hidden xl:flex items-center space-x-2.5 bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs">
-              <Building2 className="w-4 h-4 text-emerald-600" />
-              <div>
-                <div className="font-semibold text-slate-900 leading-tight">Bayani Cooperative</div>
-                <div className="text-emerald-800 font-mono text-[10px] font-semibold">bayani-flexcoop.tuntongtech.com</div>
+              <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>CDA Licensed SaaS</span>
               </div>
-            </div>
-
-            {/* Cloud Firestore Database Badge & Sync */}
-            <div className="hidden lg:flex items-center space-x-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-              <div>
-                <div className="font-semibold text-amber-950 leading-tight">Cloud Firestore</div>
-                <div className="text-amber-800 font-mono text-[10px]">/tenants/tenant_bayani_001/</div>
-              </div>
-              <button
-                type="button"
-                onClick={handleSyncFirestore}
-                disabled={firestoreSyncStatus === 'SYNCING'}
-                className="ml-1 text-[10px] bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold px-2 py-0.5 rounded transition-colors disabled:opacity-50"
-              >
-                {firestoreSyncStatus === 'SYNCING' ? 'Syncing...' : firestoreSyncStatus === 'SYNCED' ? '✓ Synced' : 'Sync'}
-              </button>
-            </div>
-
-            {/* Interactive Staff Role Switcher (RBAC) */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-                className="flex items-center space-x-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs transition-all shadow-sm"
-              >
-                <div className={`w-7 h-7 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-[10px] shadow-sm`}>
-                  {currentStaff.initials}
-                </div>
-                <div className="text-left hidden sm:block">
-                  <div className="font-bold text-slate-900 leading-tight flex items-center gap-1">
-                    <span>{currentStaff.name}</span>
-                    <ChevronDown className="w-3 h-3 text-slate-500" />
-                  </div>
-                  <div className="text-[10px] text-emerald-700 font-semibold">{currentStaff.roleTitle}</div>
-                </div>
-              </button>
-
-              {isRoleDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-84 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-2 space-y-1">
-                  <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                      Staff Role-Based Access (RBAC)
-                    </span>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono">
-                      CDA MC 2015-06
-                    </span>
-                  </div>
-                  {STAFF_ACCOUNTS.map((staff) => (
-                    <button
-                      key={staff.id}
-                      type="button"
-                      onClick={() => {
-                        setCurrentStaff(staff);
-                        setIsRoleDropdownOpen(false);
-                      }}
-                      className={`w-full text-left p-2.5 rounded-lg flex items-start gap-2.5 text-xs transition-colors ${
-                        currentStaff.id === staff.id
-                          ? 'bg-emerald-50 border border-emerald-300 text-slate-900'
-                          : 'hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div className={`w-7 h-7 rounded-full ${staff.color} text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5 shadow-sm`}>
-                        {staff.initials}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold flex items-center justify-between">
-                          <span className="truncate">{staff.name}</span>
-                          {currentStaff.id === staff.id && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
-                        </div>
-                        <div className="text-[11px] font-semibold text-emerald-700">{staff.roleTitle}</div>
-                        <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{staff.description}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Main Content Layout */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Navigation Tabs with Permission Indicators */}
-        <div className="flex space-x-2 border-b border-slate-200 pb-4 mb-6 overflow-x-auto">
-          {[
-            { id: 'overview', label: 'Executive Dashboard', icon: Landmark },
-            { id: 'members', label: 'Members & eKYC', icon: Users },
-            { id: 'products', label: 'Loan Products & Offers', icon: Sliders },
-            { id: 'los', label: 'LOS Approval Matrix', icon: CreditCard },
-            { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator },
-            { id: 'collateral', label: 'Collateral & Chattel Registry', icon: Scale },
-            { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode },
-            { id: 'accounting', label: 'CDA General Ledger', icon: BookOpen },
-            { id: 'surplus', label: 'Net Surplus & Patronage (Art. 86)', icon: PieChart },
-            { id: 'invoices', label: 'Tax & Invoices (12% VAT)', icon: FileText },
-            { id: 'reports', label: 'CDA & CIC Mandatory Reports', icon: ShieldCheck },
-          ].map((tab) => {
+        {/* Tenant Scoping */}
+        <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 text-xs">
+          <div className="flex items-center gap-2 text-slate-300">
+            <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span className="font-semibold text-slate-200 truncate">Bayani Cooperative</span>
+          </div>
+          <div className="text-[10px] font-mono text-emerald-400 pl-5 truncate">
+            bayani-flexcoop.tuntongtech.com
+          </div>
+        </div>
+
+        {/* Staff Role Persona & Permission Badge */}
+        <div className="p-4 mx-3 my-3 bg-slate-800/70 rounded-xl border border-slate-700/60 shadow-inner">
+          <div className="flex items-center gap-2.5">
+            <div className={`w-8 h-8 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0`}>
+              {currentStaff.initials}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="font-bold text-xs text-white truncate">{currentStaff.name}</div>
+              <div className="text-[11px] text-emerald-400 font-medium truncate">{currentStaff.roleTitle}</div>
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2 border-t border-slate-700/60 flex items-center justify-between text-[10px]">
+            <span className="text-slate-400">Role Permissions:</span>
+            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold px-2 py-0.5 rounded font-mono">
+              {visibleTabs.length} of {ALL_MODULE_TABS.length} Modules
+            </span>
+          </div>
+        </div>
+
+        {/* App Drawer Navigation Menu (Strictly Visible based on Role Permission) */}
+        <div className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
+          <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+            <span>Authorized Modules</span>
+            <span className="text-emerald-500 font-mono text-[9px]">CDA MC 2015-06</span>
+          </div>
+
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
-            const hasPermission = currentStaff.allowedTabs.includes(tab.id as any);
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-colors shrink-0 ${
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all group ${
                   isActive
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : hasPermission
-                    ? 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                    : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 opacity-80'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-md shadow-emerald-950/20'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {!hasPermission && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                    isActive ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-200 text-slate-600'
-                  }`}>
-                    View-Only
-                  </span>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
+                  <span className="truncate">{tab.label}</span>
+                </div>
+                {isActive && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0"></span>
                 )}
               </button>
             );
           })}
         </div>
 
-        {/* Cloud Firestore Sync Confirmation Banner */}
-        {firestoreSyncStatus === 'SYNCED' && (
-          <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 mb-6 flex items-center justify-between shadow-sm animate-in fade-in duration-300">
-            <div className="flex items-center gap-2.5 text-xs">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>
-                <strong>Cloud Firestore Synchronized:</strong> 59 CDA Chart of Accounts, 2 Member Profiles, and Active Loan Documents are up to date under path <code className="font-mono text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded">/tenants/tenant_bayani_001/</code>.
-              </span>
+        {/* Drawer Footer Utilities */}
+        <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
+          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span className="text-slate-300 font-mono text-[10px]">Cloud Firestore</span>
             </div>
-            <span className="text-[10px] bg-emerald-200 text-emerald-900 font-mono px-2 py-0.5 rounded font-bold">
-              Status: 200 OK
-            </span>
+            <button
+              type="button"
+              onClick={handleSyncFirestore}
+              disabled={firestoreSyncStatus === 'SYNCING'}
+              className="text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-mono font-bold transition disabled:opacity-50"
+            >
+              {firestoreSyncStatus === 'SYNCING' ? 'Syncing...' : firestoreSyncStatus === 'SYNCED' ? '✓ Synced' : 'Sync'}
+            </button>
           </div>
-        )}
 
-        {/* Segregation of Duties Notice Banner (if active tab is restricted for active staff) */}
-        {!currentStaff.allowedTabs.includes(activeTab) && (
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 mb-6 flex items-start gap-3 shadow-sm">
-            <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-xs">
-              <div className="font-bold text-sm text-amber-950 flex items-center gap-2">
-                <span>Statutory Segregation of Duties Notice (CDA MC 2015-06)</span>
-                <span className="bg-amber-200 text-amber-900 px-2 py-0.5 rounded text-[10px] font-mono">
-                  Read-Only Mode for {currentStaff.roleTitle}
+          <Link
+            href="/member"
+            className="flex items-center justify-between p-2 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-800/50 text-emerald-300 transition text-[11px] font-semibold"
+          >
+            <span>Member Self-Service</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      </aside>
+
+      {/* Mobile Off-Canvas Drawer Overlay */}
+      {isMobileDrawerOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div
+            className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsMobileDrawerOpen(false)}
+          />
+          <aside className="fixed inset-y-0 left-0 w-72 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col z-50 shadow-2xl overflow-y-auto">
+            {/* Mobile Drawer Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-lg shadow-md shrink-0">
+                  F
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-white leading-tight">Flex Coop Solution</div>
+                  <div className="text-[10px] text-emerald-400 font-medium">CDA Licensed SaaS</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Mobile Tenant Scoping */}
+            <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 text-xs">
+              <div className="flex items-center gap-2 text-slate-300">
+                <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                <span className="font-semibold text-slate-200 truncate">Bayani Cooperative</span>
+              </div>
+              <div className="text-[10px] font-mono text-emerald-400 pl-5 truncate">
+                bayani-flexcoop.tuntongtech.com
+              </div>
+            </div>
+
+            {/* Mobile Staff Card */}
+            <div className="p-4 mx-3 my-3 bg-slate-800/70 rounded-xl border border-slate-700/60">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0`}>
+                  {currentStaff.initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-xs text-white truncate">{currentStaff.name}</div>
+                  <div className="text-[11px] text-emerald-400 font-medium truncate">{currentStaff.roleTitle}</div>
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-700/60 flex items-center justify-between text-[10px]">
+                <span className="text-slate-400">Permissions:</span>
+                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold px-2 py-0.5 rounded font-mono">
+                  {visibleTabs.length} Modules Allowed
                 </span>
               </div>
-              <p className="mt-1 text-amber-800 leading-relaxed">
-                You are currently viewing this module as <strong>{currentStaff.name} ({currentStaff.roleTitle})</strong>. 
-                Under standard Cooperative Governance regulations, action items in this module are reserved for authorized fiduciary roles. 
-                Switch to the appropriate staff role via the header dropdown to simulate authoring or approving actions.
-              </p>
+            </div>
+
+            {/* Mobile Navigation Links */}
+            <div className="flex-1 px-3 py-2 space-y-1">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                <span>Authorized Modules</span>
+                <span className="text-emerald-500 font-mono text-[9px]">CDA MC 2015-06</span>
+              </div>
+
+              {visibleTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                      isActive
+                        ? 'bg-emerald-600 text-white font-semibold shadow-md'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <span className="truncate">{tab.label}</span>
+                    </div>
+                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0"></span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Mobile Drawer Footer Utilities */}
+            <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
+              <Link
+                href="/member"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                className="flex items-center justify-between p-2 rounded-lg bg-emerald-950/50 border border-emerald-800/50 text-emerald-300 transition text-[11px] font-semibold"
+              >
+                <span>Member Self-Service</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Main Workspace Canvas */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        {/* Top Header Bar */}
+        <header className="border-b border-slate-200 bg-white sticky top-0 z-30 shadow-xs">
+          <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+            {/* Left: Mobile Drawer Button & Breadcrumb */}
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsMobileDrawerOpen(true)}
+                className="lg:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition shrink-0"
+                aria-label="Open navigation menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium truncate">
+                  <span>Flex Coop</span>
+                  <span>/</span>
+                  <span className="text-emerald-700 font-semibold truncate">{currentModule?.label || 'Overview'}</span>
+                </div>
+                <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight truncate">
+                  {currentModule?.label}
+                </h1>
+              </div>
+            </div>
+
+            {/* Right: Quick Links, Role Switcher */}
+            <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+              {/* Member Portal Quick Links */}
+              <div className="hidden xl:flex items-center space-x-1 border-r border-slate-200 pr-3">
+                <Link
+                  href="/member/login"
+                  className="text-xs font-semibold text-slate-700 hover:text-emerald-700 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  Member Login
+                </Link>
+                <Link
+                  href="/member/register"
+                  className="text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                >
+                  + Member Onboarding
+                </Link>
+                <Link
+                  href="/coop-register"
+                  className="text-xs font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors ml-1"
+                >
+                  + Register New Coop
+                </Link>
+              </div>
+
+              <Link
+                href="/member"
+                className="hidden sm:flex text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-lg items-center gap-1.5 transition-colors shadow-xs"
+              >
+                <span>Member Portal</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+
+              {/* Interactive Staff Role Switcher (RBAC) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
+                  className="flex items-center space-x-2 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs transition-all shadow-xs"
+                >
+                  <div className={`w-7 h-7 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-[10px] shadow-xs`}>
+                    {currentStaff.initials}
+                  </div>
+                  <div className="text-left hidden sm:block">
+                    <div className="font-bold text-slate-900 leading-tight flex items-center gap-1">
+                      <span>{currentStaff.name}</span>
+                      <ChevronDown className="w-3 h-3 text-slate-500" />
+                    </div>
+                    <div className="text-[10px] text-emerald-700 font-semibold">{currentStaff.roleTitle}</div>
+                  </div>
+                </button>
+
+                {isRoleDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-84 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-2 space-y-1">
+                    <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        Staff Role-Based Access (RBAC)
+                      </span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono">
+                        CDA MC 2015-06
+                      </span>
+                    </div>
+                    {STAFF_ACCOUNTS.map((staff) => (
+                      <button
+                        key={staff.id}
+                        type="button"
+                        onClick={() => handleSelectStaff(staff)}
+                        className={`w-full text-left p-2.5 rounded-lg flex items-start gap-2.5 text-xs transition-colors ${
+                          currentStaff.id === staff.id
+                            ? 'bg-emerald-50 border border-emerald-300 text-slate-900'
+                            : 'hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div className={`w-7 h-7 rounded-full ${staff.color} text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5 shadow-xs`}>
+                          {staff.initials}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold flex items-center justify-between">
+                            <span className="truncate">{staff.name}</span>
+                            {currentStaff.id === staff.id && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                          </div>
+                          <div className="text-[11px] font-semibold text-emerald-700">{staff.roleTitle}</div>
+                          <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{staff.description}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        )}
+        </header>
+
+        {/* Main Workspace Body */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
+          {/* Cloud Firestore Sync Confirmation Banner */}
+          {firestoreSyncStatus === 'SYNCED' && (
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 mb-6 flex items-center justify-between shadow-xs animate-in fade-in duration-300">
+              <div className="flex items-center gap-2.5 text-xs">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Cloud Firestore Synchronized:</strong> 59 CDA Chart of Accounts, 2 Member Profiles, and Active Loan Documents are up to date under path <code className="font-mono text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded">/tenants/tenant_bayani_001/</code>.
+                </span>
+              </div>
+              <span className="text-[10px] bg-emerald-200 text-emerald-900 font-mono px-2 py-0.5 rounded font-bold">
+                Status: 200 OK
+              </span>
+            </div>
+          )}
+
+          {/* Segregation of Duties Notice Banner (if active tab is restricted for active staff) */}
+          {!currentStaff.allowedTabs.includes(activeTab) && (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 mb-6 flex items-start gap-3 shadow-xs">
+              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <div className="font-bold text-sm text-amber-950 flex items-center gap-2">
+                  <span>Statutory Segregation of Duties Notice (CDA MC 2015-06)</span>
+                  <span className="bg-amber-200 text-amber-900 px-2 py-0.5 rounded text-[10px] font-mono">
+                    Restricted Module for {currentStaff.roleTitle}
+                  </span>
+                </div>
+                <p className="mt-1 text-amber-800 leading-relaxed">
+                  You are currently viewing this module as <strong>{currentStaff.name} ({currentStaff.roleTitle})</strong>. 
+                  Under standard Cooperative Governance regulations, action items in this module are reserved for authorized fiduciary roles. 
+                  Switch to an authorized staff role via the header dropdown or click below to return to your authorized workspace.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(currentStaff.allowedTabs[0] || 'overview')}
+                  className="mt-2.5 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold px-3 py-1.5 rounded-lg text-xs transition"
+                >
+                  ← Go to Authorized Module ({ALL_MODULE_TABS.find(t => t.id === currentStaff.allowedTabs[0])?.label || 'Dashboard'})
+                </button>
+              </div>
+            </div>
+          )}
 
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
@@ -4261,6 +4454,7 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+        </main>
       </div>
     </div>
   );
