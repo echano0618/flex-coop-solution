@@ -7,17 +7,21 @@ export function middleware(request: NextRequest) {
 
   // Pattern 1: <tenant>-flexcoop.tuntongtech.com (Production)
   // Pattern 2: <tenant>-flexcoop.localhost or <tenant>.localhost (Local development)
+  // Clean domain & suffix resolution
   let tenantSlug = 'bayani'; // Default demonstration tenant
   let isTenantSubdomain = false;
 
-  const prodMatch = cleanHost.match(/^([a-z0-9_-]+)-flexcoop\.tuntongtech\.com$/i);
-  const localMatch = cleanHost.match(/^([a-z0-9_-]+)(-flexcoop)?\.localhost$/i);
+  const prodSuffix = '-flexcoop.tuntongtech.com';
+  const devSuffix = '-flexcoop.localhost';
 
-  if (prodMatch && prodMatch[1]) {
-    tenantSlug = prodMatch[1];
+  if (cleanHost.endsWith(prodSuffix)) {
+    tenantSlug = cleanHost.slice(0, -prodSuffix.length);
     isTenantSubdomain = true;
-  } else if (localMatch && localMatch[1]) {
-    tenantSlug = localMatch[1];
+  } else if (cleanHost.endsWith(devSuffix)) {
+    tenantSlug = cleanHost.slice(0, -devSuffix.length);
+    isTenantSubdomain = true;
+  } else if (cleanHost.endsWith('.localhost') && cleanHost !== 'localhost') {
+    tenantSlug = cleanHost.slice(0, -'.localhost'.length);
     isTenantSubdomain = true;
   }
 

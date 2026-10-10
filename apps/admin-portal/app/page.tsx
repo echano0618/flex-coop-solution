@@ -210,6 +210,12 @@ export default function AdminDashboard() {
               >
                 + Member Onboarding
               </Link>
+              <Link
+                href="/coop-register"
+                className="text-xs font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors ml-1"
+              >
+                + Register New Coop
+              </Link>
             </div>
 
             <Link
