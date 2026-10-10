@@ -12,6 +12,8 @@ import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { AuthService } from '../core/auth';
 import { FirestoreCoopService } from '../core/firestore.service';
 import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus } from '@flexcoop/shared-types';
+import { NetSurplusService } from '../modules/accounting/surplus.service';
+import { CollateralService } from '../modules/lending/collateral.service';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -627,7 +629,103 @@ console.log('\n--- 15. Loan Product Setup & Co-Maker Endorsement Lifecycle ---')
   assert(targetLoan!.coMaker!.status === 'ACCEPTED', 'Co-maker record marked as ACCEPTED');
 }
 
-console.log('\n🎉 ALL 70 VERIFICATION TEST CASES (INCLUDING LOAN PRODUCT & CO-MAKER WORKFLOW) PASSED SUCCESSFULLY!\n');
+// 16. Annual Net Surplus Allocation & Patronage Refund (RA 9520 Article 86)
+console.log('\n--- 16. Annual Net Surplus Allocation & Patronage Refund (Art. 86 RA 9520) ---');
+{
+  const calculation = NetSurplusService.calculateNetSurplus({
+    fiscalYear: 2025,
+    grossRevenue: 4500000,
+    totalExpenses: 3250000,
+    generalReserveFundRate: 0.10, // 10% min
+    cetfRate: 0.10,               // 10% total (5% local, 5% apex)
+    communityDevFundRate: 0.03,   // 3% min
+    optionalFundRate: 0.07,       // 7% max
+    shareCapitalInterestRatio: 0.60, // 60% ISC, 40% PR
+    members: [
+      {
+        memberId: 'mem_maria_santos',
+        memberNumber: 'MEM-2026-0001',
+        memberName: 'Maria Clara Santos',
+        paidUpShareCapital: 15000,
+        interestPaidOnLoans: 12450
+      },
+      {
+        memberId: 'mem_juan_delacruz',
+        memberNumber: 'MEM-2026-0002',
+        memberName: 'Juan Perez Dela Cruz',
+        paidUpShareCapital: 10000,
+        interestPaidOnLoans: 9800
+      }
+    ]
+  });
+
+  assert(calculation.netSurplus === 1250000, `Net surplus calculated correctly (₱4.5M - ₱3.25M = ₱1,250,000): ₱${calculation.netSurplus}`);
+  assert(calculation.generalReserveFund === 125000, `General Reserve Fund (10%): ₱${calculation.generalReserveFund}`);
+  assert(calculation.cetfApexFund === 62500, `CETF Apex Federation (50% of 10% = 5%): ₱${calculation.cetfApexFund}`);
+  assert(calculation.cetfLocalFund === 62500, `CETF Local Cooperative (50% of 10% = 5%): ₱${calculation.cetfLocalFund}`);
+  assert(calculation.communityDevelopmentFund === 37500, `Community Development Fund (3%): ₱${calculation.communityDevelopmentFund}`);
+  assert(calculation.optionalFund === 87500, `Optional Reserve Fund (7%): ₱${calculation.optionalFund}`);
+  assert(calculation.totalStatutoryReserves === 375000, `Total statutory reserves (30%): ₱${calculation.totalStatutoryReserves}`);
+  assert(calculation.distributableSurplus === 875000, `Distributable surplus (70%): ₱${calculation.distributableSurplus}`);
+  assert(calculation.totalInterestOnShareCapital === 525000, `Interest on Share Capital pool (60%): ₱${calculation.totalInterestOnShareCapital}`);
+  assert(calculation.totalPatronageRefund === 350000, `Patronage Refund pool (40%): ₱${calculation.totalPatronageRefund}`);
+
+  // Member pro-rata vouchers
+  assert(calculation.memberAllocations.length === 2, '2 member vouchers generated');
+  const mariaVoucher = calculation.memberAllocations.find(v => v.memberId === 'mem_maria_santos');
+  assert(mariaVoucher !== undefined, 'Maria Clara Santos surplus voucher found');
+  assert(mariaVoucher!.interestOnShareCapital === 315000, `Maria Clara received 60% of ISC pool: ₱${mariaVoucher!.interestOnShareCapital}`);
+
+  // Balanced CDA Double-Entry Voucher
+  const jv = NetSurplusService.buildSurplusDistributionEntry(calculation, 'usr_acct_01');
+  assert(jv.isBalanced === true, 'Surplus distribution journal entry is strictly balanced');
+  assert(jv.totalDebit === 1250000, 'Total debit equals Net Surplus (₱1,250,000)');
+  assert(jv.totalCredit === 1250000, 'Total credit equals sum of reserves and distributable payables (₱1,250,000)');
+}
+
+// 17. Collateral & Chattel Mortgage Registry
+console.log('\n--- 17. Collateral & Chattel Mortgage Registry ---');
+{
+  // 17.1 Real Estate Mortgage (REM) LTV checks (70% standard cap)
+  const remSafe = CollateralService.calculateLTV(1000000, 1800000);
+  assert(remSafe.ltvRatio === 0.5556, `REM LTV ratio: ${remSafe.ltvPercentage}`);
+  assert(remSafe.riskCategory === 'SAFE', 'REM LTV 55.56% is classified as SAFE (<= 70%)');
+  assert(remSafe.isCompliant === true, 'REM conforms to 70% CDA regulatory lending ceiling');
+
+  const remHigh = CollateralService.calculateLTV(1500000, 1800000);
+  assert(remHigh.riskCategory === 'HIGH_RISK', 'REM LTV 83.33% classified as HIGH_RISK (> 80%)');
+  assert(remHigh.isCompliant === false, 'REM exceeds 70% threshold');
+
+  // 17.2 Chattel Mortgage (Vehicle) LTV checks (60% standard cap)
+  const chattelSafe = CollateralService.calculateLTV(650000, 1200000);
+  assert(chattelSafe.riskCategory === 'SAFE', 'Chattel LTV classified as SAFE');
+
+  // 17.3 Collateral Registration, Encumbrance, and Discharge Workflow
+  const newCollateral = CollateralService.createCollateralItem({
+    tenantId: 'tenant_bayani_001',
+    memberId: 'mem_maria_santos',
+    memberNumber: 'MEM-2026-0001',
+    memberName: 'Maria Clara Santos',
+    type: 'REAL_ESTATE_MORTGAGE',
+    description: '180 sqm Residential Lot & 2-Storey House, Fairview, Quezon City',
+    appraisedValue: 1800000,
+    tctNumber: 'TCT-004-2019004812',
+    registryOfDeedsLocation: 'Quezon City'
+  });
+  assert(newCollateral.encumbranceStatus === 'UNENCUMBERED', 'New collateral registered with status UNENCUMBERED');
+
+  // Encumber to loan
+  const encumbered = CollateralService.encumber(newCollateral, 'loan_rem_001', 'LN-2026-0001', '2026-02-15');
+  assert(encumbered.encumbranceStatus === 'REGISTERED_MORTGAGE', 'Collateral transitioned to REGISTERED_MORTGAGE');
+  assert(encumbered.linkedLoanNumber === 'LN-2026-0001', 'Linked loan number recorded');
+
+  // Discharge upon full settlement
+  const discharged = CollateralService.discharge(encumbered);
+  assert(discharged.encumbranceStatus === 'DISCHARGED', 'Mortgage released and status transitioned to DISCHARGED');
+  assert(discharged.linkedLoanId === undefined, 'Linked loan cleared');
+}
+
+console.log('\n🎉 ALL 86 VERIFICATION TEST CASES (INCLUDING NET SURPLUS ART. 86 & COLLATERAL REGISTRY) PASSED SUCCESSFULLY!\n');
 
 
 

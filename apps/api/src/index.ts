@@ -14,7 +14,9 @@ import { AuthService, UserRole } from './core/auth';
 import { FirestoreCoopService } from './core/firestore.service';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
-import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant } from '@flexcoop/shared-types';
+import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, CollateralItem, SurplusDistributionResult } from '@flexcoop/shared-types';
+import { NetSurplusService } from './modules/accounting/surplus.service';
+import { CollateralService } from './modules/lending/collateral.service';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -1451,6 +1453,219 @@ app.get('/api/v1/firestore/ledger', async (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ==========================================
+// ANNUAL NET SURPLUS & PATRONAGE REFUND (ART. 86 RA 9520)
+// ==========================================
+app.get('/api/v1/surplus/current', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const distributions = dbStore.surplusDistributions.get(tenantId) || [];
+  const latest = distributions[distributions.length - 1] || null;
+  res.json({ success: true, data: latest });
+});
+
+app.post('/api/v1/surplus/calculate', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const {
+    fiscalYear,
+    grossRevenue,
+    totalExpenses,
+    generalReserveFundRate,
+    cetfRate,
+    communityDevFundRate,
+    optionalFundRate,
+    shareCapitalInterestRatio,
+  } = req.body;
+
+  const members = dbStore.members.get(tenantId) || [];
+  const shareAccounts = dbStore.shareAccounts.get(tenantId) || [];
+
+  const memberPayload = members.map((m) => {
+    const shareAcc = shareAccounts.find((s) => s.memberId === m.id);
+    const paidUp = shareAcc ? shareAcc.paidUpAmount : 10000;
+    return {
+      memberId: m.id,
+      memberNumber: m.memberNumber,
+      memberName: `${m.firstName} ${m.lastName}`,
+      paidUpShareCapital: paidUp,
+      interestPaidOnLoans: m.id === 'mem_maria_santos' ? 5000 : 3000,
+    };
+  });
+
+  const calculation = NetSurplusService.calculateNetSurplus({
+    fiscalYear: Number(fiscalYear) || 2026,
+    grossRevenue: Number(grossRevenue) || 1500000,
+    totalExpenses: Number(totalExpenses) || 250000,
+    generalReserveFundRate: generalReserveFundRate ? Number(generalReserveFundRate) : undefined,
+    cetfRate: cetfRate ? Number(cetfRate) : undefined,
+    communityDevFundRate: communityDevFundRate ? Number(communityDevFundRate) : undefined,
+    optionalFundRate: optionalFundRate ? Number(optionalFundRate) : undefined,
+    shareCapitalInterestRatio: shareCapitalInterestRatio ? Number(shareCapitalInterestRatio) : undefined,
+    members: memberPayload,
+  });
+
+  res.json({ success: true, data: calculation });
+});
+
+app.post('/api/v1/surplus/post-distribution', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { surplusResult, userId } = req.body;
+
+  if (!surplusResult) {
+    return res.status(400).json({ success: false, error: 'surplusResult is required.' });
+  }
+
+  // Build CDA Balanced Journal Entry
+  const je = NetSurplusService.buildSurplusDistributionEntry(surplusResult, userId || 'usr_accountant_01');
+  const existingJE = dbStore.journalEntries.get(tenantId) || [];
+  const jeId = `je_surplus_${Date.now()}`;
+  dbStore.journalEntries.set(tenantId, [{ id: jeId, ...je } as any, ...existingJE]);
+
+  // Record surplus result
+  surplusResult.status = 'POSTED_TO_GL';
+  surplusResult.journalEntryId = jeId;
+  surplusResult.approvedAt = new Date().toISOString();
+
+  const existingSurplus = dbStore.surplusDistributions.get(tenantId) || [];
+  dbStore.surplusDistributions.set(tenantId, [
+    ...existingSurplus.filter((s) => s.fiscalYear !== surplusResult.fiscalYear),
+    surplusResult,
+  ]);
+
+  res.json({
+    success: true,
+    message: `Net Surplus distribution for FY ${surplusResult.fiscalYear} authorized and posted to General Ledger (Voucher: ${je.voucherNumber}).`,
+    data: surplusResult,
+    journalEntry: { id: jeId, ...je },
+  });
+});
+
+app.get('/api/v1/surplus/member/:memberId', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberId } = req.params;
+  const distributions = dbStore.surplusDistributions.get(tenantId) || [];
+  const latest = distributions[distributions.length - 1];
+
+  if (!latest) {
+    return res.status(404).json({ success: false, error: 'No surplus distributions recorded.' });
+  }
+
+  const voucher = latest.memberAllocations.find((m) => m.memberId === memberId || m.memberNumber === memberId);
+  if (!voucher) {
+    return res.status(404).json({ success: false, error: 'Member has no surplus allocation for this period.' });
+  }
+
+  res.json({
+    success: true,
+    fiscalYear: latest.fiscalYear,
+    data: voucher,
+  });
+});
+
+// ==========================================
+// COLLATERAL & CHATTEL MORTGAGE REGISTRY
+// ==========================================
+app.get('/api/v1/collaterals', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const items = dbStore.collaterals.get(tenantId) || [];
+  res.json({ success: true, count: items.length, data: items });
+});
+
+app.post('/api/v1/collaterals', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const {
+    memberId,
+    memberNumber,
+    memberName,
+    type,
+    description,
+    appraisedValue,
+    assessedValue,
+    tctNumber,
+    registryOfDeedsLocation,
+    lotAreaSqm,
+    vehicleMakeModel,
+    plateNumber,
+    engineNumber,
+    chassisNumber,
+    ltoOrCrNumber,
+    notaryPublic,
+    notes,
+  } = req.body;
+
+  if (!memberId || !type || !description || !appraisedValue) {
+    return res
+      .status(400)
+      .json({ success: false, error: 'memberId, type, description, and appraisedValue are required.' });
+  }
+
+  const item = CollateralService.createCollateralItem({
+    tenantId,
+    memberId,
+    memberNumber: memberNumber || 'MEM-2026-0001',
+    memberName,
+    type,
+    description,
+    appraisedValue: Number(appraisedValue),
+    assessedValue: assessedValue ? Number(assessedValue) : undefined,
+    tctNumber,
+    registryOfDeedsLocation,
+    lotAreaSqm: lotAreaSqm ? Number(lotAreaSqm) : undefined,
+    vehicleMakeModel,
+    plateNumber,
+    engineNumber,
+    chassisNumber,
+    ltoOrCrNumber,
+    notaryPublic,
+    notes,
+  });
+
+  const existing = dbStore.collaterals.get(tenantId) || [];
+  dbStore.collaterals.set(tenantId, [item, ...existing]);
+
+  res.status(201).json({
+    success: true,
+    message: `Collateral '${item.description}' registered successfully with max allowable loan amount ₱${item.maxAllowableLoanAmount.toLocaleString()}.`,
+    data: item,
+  });
+});
+
+app.put('/api/v1/collaterals/:id/encumber', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { id } = req.params;
+  const { loanId, loanNumber, registrationDate } = req.body;
+
+  const items = dbStore.collaterals.get(tenantId) || [];
+  const item = items.find((c) => c.id === id);
+  if (!item) return res.status(404).json({ success: false, error: 'Collateral not found.' });
+
+  const updated = CollateralService.encumber(item, loanId, loanNumber, registrationDate);
+  dbStore.collaterals.set(tenantId, items.map((c) => (c.id === id ? updated : c)));
+
+  res.json({
+    success: true,
+    message: `Collateral ${id} successfully encumbered with registered mortgage against Loan ${loanNumber}.`,
+    data: updated,
+  });
+});
+
+app.put('/api/v1/collaterals/:id/discharge', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { id } = req.params;
+
+  const items = dbStore.collaterals.get(tenantId) || [];
+  const item = items.find((c) => c.id === id);
+  if (!item) return res.status(404).json({ success: false, error: 'Collateral not found.' });
+
+  const updated = CollateralService.discharge(item);
+  dbStore.collaterals.set(tenantId, items.map((c) => (c.id === id ? updated : c)));
+
+  res.json({
+    success: true,
+    message: `Collateral ${id} mortgage discharged and encumbrance released.`,
+    data: updated,
+  });
 });
 
 app.listen(PORT, () => {

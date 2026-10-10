@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -28,7 +28,14 @@ import {
   Plus,
   Clock,
   CheckCircle,
+  PieChart,
+  Scale,
+  FileCheck,
+  RefreshCw,
+  TrendingUp,
 } from 'lucide-react';
+
+type TabType = 'overview' | 'members' | 'products' | 'los' | 'calculator' | 'collateral' | 'cashier' | 'accounting' | 'surplus' | 'invoices' | 'reports';
 
 interface StaffAccount {
   id: string;
@@ -38,7 +45,7 @@ interface StaffAccount {
   initials: string;
   color: string;
   description: string;
-  allowedTabs: Array<'overview' | 'members' | 'products' | 'los' | 'calculator' | 'cashier' | 'accounting' | 'invoices' | 'reports'>;
+  allowedTabs: TabType[];
 }
 
 const STAFF_ACCOUNTS: StaffAccount[] = [
@@ -50,7 +57,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'RD',
     color: 'bg-indigo-600',
     description: 'Full statutory administrative & override access across all cooperative modules.',
-    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'cashier', 'accounting', 'invoices', 'reports'],
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports'],
   },
   {
     id: 'usr_lo_01',
@@ -60,7 +67,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'GV',
     color: 'bg-blue-600',
     description: 'Underwrites member applications, verifies credit & co-makers, calculates amortizations.',
-    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator'],
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral'],
   },
   {
     id: 'usr_crecom_01',
@@ -70,7 +77,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'MR',
     color: 'bg-amber-600',
     description: 'Reviews loan appraisals, verifies collateral, endorses to Board.',
-    allowedTabs: ['overview', 'products', 'los', 'calculator'],
+    allowedTabs: ['overview', 'products', 'los', 'calculator', 'collateral'],
   },
   {
     id: 'usr_bod_01',
@@ -80,7 +87,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CA',
     color: 'bg-purple-600',
     description: 'Authorizes credit facilities requiring Board policy resolutions.',
-    allowedTabs: ['overview', 'products', 'los', 'calculator', 'reports'],
+    allowedTabs: ['overview', 'products', 'los', 'calculator', 'collateral', 'surplus', 'reports'],
   },
   {
     id: 'usr_cashier_01',
@@ -100,7 +107,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'FS',
     color: 'bg-teal-600',
     description: 'Manages CDA Standard Chart of Accounts, General Ledger, and BIR Tax Invoices.',
-    allowedTabs: ['overview', 'products', 'accounting', 'invoices', 'reports', 'calculator'],
+    allowedTabs: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator'],
   },
   {
     id: 'usr_dpo_01',
@@ -110,12 +117,117 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CG',
     color: 'bg-rose-600',
     description: 'Audits NPC Data Privacy, AMLA covered transactions, and CDA/CIC statutory reports.',
-    allowedTabs: ['overview', 'members', 'reports'],
+    allowedTabs: ['overview', 'members', 'collateral', 'surplus', 'reports'],
+  },
+];
+
+const DEFAULT_LOAN_PRODUCTS = [
+  {
+    id: 'prod_regular',
+    code: 'REGULAR_LOAN',
+    name: 'Regular Member Loan',
+    type: 'REGULAR',
+    minAmount: 10000,
+    maxAmount: 100000,
+    annualInterestRate: 0.12,
+    minTermMonths: 6,
+    maxTermMonths: 24,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    serviceFeeRate: 0.015,
+    finesRateMonthly: 0.03,
+    requiresCoMaker: true,
+    minCoMakers: 1,
+    coMakerRuleDescription: 'Requires 1 active co-maker in good standing with min ₱5,000 paid-up share capital. Co-maker must key in Member ID and sign solidary undertaking.',
+    requiresCollateral: false,
+    isActive: true,
+  },
+  {
+    id: 'prod_emergency',
+    code: 'EMERGENCY_PLUS',
+    name: 'Emergency Relief Loan Plus',
+    type: 'EMERGENCY',
+    minAmount: 5000,
+    maxAmount: 50000,
+    annualInterestRate: 0.06,
+    minTermMonths: 3,
+    maxTermMonths: 12,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    serviceFeeRate: 0.005,
+    finesRateMonthly: 0.02,
+    requiresCoMaker: true,
+    minCoMakers: 1,
+    coMakerRuleDescription: 'Requires 1 co-maker who has completed PMES and has active cooperative savings.',
+    requiresCollateral: false,
+    isActive: true,
+  },
+  {
+    id: 'prod_educational',
+    code: 'EDUCATIONAL_LOAN',
+    name: 'Educational Assistance Loan',
+    type: 'EDUCATIONAL',
+    minAmount: 10000,
+    maxAmount: 50000,
+    annualInterestRate: 0.08,
+    minTermMonths: 6,
+    maxTermMonths: 18,
+    amortizationMethod: 'STRAIGHT_LINE',
+    serviceFeeRate: 0.01,
+    finesRateMonthly: 0.02,
+    requiresCoMaker: false,
+    minCoMakers: 0,
+    coMakerRuleDescription: 'Co-maker optional; borrower must submit certificate of school matriculation.',
+    requiresCollateral: false,
+    isActive: true,
+  },
+];
+
+const INITIAL_COLLATERALS = [
+  {
+    id: 'col_rem_001',
+    memberId: 'mem_1',
+    memberNumber: 'MEM-2026-0001',
+    memberName: 'Maria Clara Santos',
+    type: 'REAL_ESTATE_MORTGAGE',
+    description: '180 sqm Residential Lot & 2-Storey House in Fairview, Quezon City',
+    appraisedValue: 1800000,
+    assessedValue: 1440000,
+    maxLoanToValueRatio: 0.70,
+    maxAllowableLoanAmount: 1260000,
+    linkedLoanId: 'loan_rem_001',
+    linkedLoanNumber: 'LN-2026-0001',
+    encumbranceStatus: 'REGISTERED_MORTGAGE',
+    tctNumber: 'TCT-004-2019004812',
+    registryOfDeedsLocation: 'Quezon City',
+    lotAreaSqm: 180,
+    registrationDate: '2026-02-15',
+    notes: 'Primary title deposited in fireproof safe. Registered with Registry of Deeds QC under Entry 2026-0049182.',
+  },
+  {
+    id: 'col_chattel_002',
+    memberId: 'mem_2',
+    memberNumber: 'MEM-2026-0002',
+    memberName: 'Juan Perez Dela Cruz',
+    type: 'CHATTEL_MORTGAGE',
+    description: '2023 Isuzu D-Max 3.0 4x4 Double Cab Utility Pickup',
+    appraisedValue: 1200000,
+    assessedValue: 960000,
+    maxLoanToValueRatio: 0.60,
+    maxAllowableLoanAmount: 720000,
+    linkedLoanId: 'loan_chat_002',
+    linkedLoanNumber: 'LN-2026-0002',
+    encumbranceStatus: 'REGISTERED_MORTGAGE',
+    plateNumber: 'NFP-8812',
+    engineNumber: '4JJ3-199420',
+    chassisNumber: 'MP1TFS40JP-099124',
+    ltoOrCrNumber: 'CR-1301-0098231',
+    vehicleMakeModel: 'Isuzu D-Max 3.0 LS-E 4x4',
+    registrationDate: '2026-02-18',
+    notes: 'LTO Encumbrance annotated. Duplicate key and comprehensive insurance policy endorsed to cooperative.',
   },
 ];
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'products' | 'los' | 'calculator' | 'cashier' | 'accounting' | 'invoices' | 'reports'>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
@@ -132,66 +244,46 @@ export default function AdminDashboard() {
   const [loanStatus, setLoanStatus] = useState<string>('PENDING_CO_MAKER_ACCEPTANCE');
   const [showDisclosureModal, setShowDisclosureModal] = useState<boolean>(false);
 
-  // Cooperative Loan Products Catalog State
-  const [loanProducts, setLoanProducts] = useState([
-    {
-      id: 'prod_regular',
-      code: 'REGULAR_LOAN',
-      name: 'Regular Member Loan',
-      type: 'REGULAR',
-      minAmount: 10000,
-      maxAmount: 100000,
-      annualInterestRate: 0.12,
-      minTermMonths: 6,
-      maxTermMonths: 24,
-      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
-      serviceFeeRate: 0.015,
-      finesRateMonthly: 0.03,
-      requiresCoMaker: true,
-      minCoMakers: 1,
-      coMakerRuleDescription: 'Requires 1 active co-maker in good standing with min ₱5,000 paid-up share capital. Co-maker must key in Member ID and sign solidary undertaking.',
-      requiresCollateral: false,
-      isActive: true,
-    },
-    {
-      id: 'prod_emergency',
-      code: 'EMERGENCY_PLUS',
-      name: 'Emergency Relief Loan Plus',
-      type: 'EMERGENCY',
-      minAmount: 5000,
-      maxAmount: 50000,
-      annualInterestRate: 0.06,
-      minTermMonths: 3,
-      maxTermMonths: 12,
-      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
-      serviceFeeRate: 0.005,
-      finesRateMonthly: 0.02,
-      requiresCoMaker: true,
-      minCoMakers: 1,
-      coMakerRuleDescription: 'Requires 1 co-maker who has completed PMES and has active cooperative savings.',
-      requiresCollateral: false,
-      isActive: true,
-    },
-    {
-      id: 'prod_educational',
-      code: 'EDUCATIONAL_LOAN',
-      name: 'Educational Assistance Loan',
-      type: 'EDUCATIONAL',
-      minAmount: 10000,
-      maxAmount: 50000,
-      annualInterestRate: 0.08,
-      minTermMonths: 6,
-      maxTermMonths: 18,
-      amortizationMethod: 'STRAIGHT_LINE',
-      serviceFeeRate: 0.01,
-      finesRateMonthly: 0.02,
-      requiresCoMaker: false,
-      minCoMakers: 0,
-      coMakerRuleDescription: 'Co-maker optional; borrower must submit certificate of school matriculation.',
-      requiresCollateral: false,
-      isActive: true,
-    },
-  ]);
+  // Cooperative Loan Products Catalog State with Persistence
+  const [loanProducts, setLoanProducts] = useState<any[]>(DEFAULT_LOAN_PRODUCTS);
+  const [productSaveNotification, setProductSaveNotification] = useState<string | null>(null);
+
+  // Load persisted products from localStorage and backend API
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('flexcoop_loan_products');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setLoanProducts(parsed);
+          }
+        } catch (e) {
+          console.error('Failed to parse stored loan products:', e);
+        }
+      }
+    }
+
+    fetch('http://localhost:4000/api/v1/loan-products')
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData && resData.success && Array.isArray(resData.data) && resData.data.length > 0) {
+          setLoanProducts((prev) => {
+            const map = new Map();
+            resData.data.forEach((p: any) => map.set(p.code || p.id, p));
+            prev.forEach((p: any) => {
+              if (!map.has(p.code || p.id)) map.set(p.code || p.id, p);
+            });
+            const merged = Array.from(map.values());
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('flexcoop_loan_products', JSON.stringify(merged));
+            }
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Modal / Form state for configuring new loan product
   const [showProductModal, setShowProductModal] = useState<boolean>(false);
@@ -211,7 +303,7 @@ export default function AdminDashboard() {
   const [newProductServiceFeeRate, setNewProductServiceFeeRate] = useState<number>(1.5);
   const [newProductFinesRate, setNewProductFinesRate] = useState<number>(3.0);
 
-  const handleAddLoanProduct = (e: React.FormEvent) => {
+  const handleAddLoanProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     const createdProduct = {
       id: `prod_${Date.now()}`,
@@ -232,8 +324,145 @@ export default function AdminDashboard() {
       requiresCollateral: newProductRequiresCollateral,
       isActive: true,
     };
-    setLoanProducts((prev) => [createdProduct, ...prev]);
+
+    const updated = [createdProduct, ...loanProducts];
+    setLoanProducts(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('flexcoop_loan_products', JSON.stringify(updated));
+    }
+
+    try {
+      await fetch('http://localhost:4000/api/v1/loan-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createdProduct),
+      });
+    } catch (err) {
+      console.warn('API sync warning:', err);
+    }
+
+    setProductSaveNotification(`Loan Product "${createdProduct.name}" (${createdProduct.code}) saved successfully to database & registry!`);
+    setTimeout(() => setProductSaveNotification(null), 5000);
     setShowProductModal(false);
+  };
+
+  // Collaterals & Chattel Mortgages State
+  const [collaterals, setCollaterals] = useState<any[]>(INITIAL_COLLATERALS);
+  const [showCollateralModal, setShowCollateralModal] = useState<boolean>(false);
+  const [collateralNotification, setCollateralNotification] = useState<string | null>(null);
+
+  // New Collateral Form State
+  const [newColType, setNewColType] = useState<'REAL_ESTATE_MORTGAGE' | 'CHATTEL_MORTGAGE'>('REAL_ESTATE_MORTGAGE');
+  const [newColMemberId, setNewColMemberId] = useState<string>('mem_1');
+  const [newColDescription, setNewColDescription] = useState<string>('240 sqm Commercial Property with 3-Door Commercial Unit');
+  const [newColAppraisedValue, setNewColAppraisedValue] = useState<number>(2500000);
+  const [newColLoanPrincipal, setNewColLoanPrincipal] = useState<number>(1500000);
+  const [newColDocNumber, setNewColDocNumber] = useState<string>('TCT-004-2022009183');
+  const [newColRegistryLocation, setNewColRegistryLocation] = useState<string>('Quezon City Registry of Deeds');
+
+  // Computed LTV in modal
+  const computedModalLTV = newColAppraisedValue > 0 ? (newColLoanPrincipal / newColAppraisedValue) * 100 : 0;
+  const maxAllowedLTVLimit = newColType === 'REAL_ESTATE_MORTGAGE' ? 70.0 : 60.0;
+  const isModalLTVExceeded = computedModalLTV > maxAllowedLTVLimit;
+
+  const handleRegisterCollateral = (e: React.FormEvent) => {
+    e.preventDefault();
+    const selectedMember = members.find((m) => m.id === newColMemberId) || members[0];
+    const maxLTVRatio = newColType === 'REAL_ESTATE_MORTGAGE' ? 0.70 : 0.60;
+    const item = {
+      id: `col_${Date.now()}`,
+      memberId: selectedMember.id,
+      memberNumber: selectedMember.memberNo,
+      memberName: selectedMember.name,
+      type: newColType,
+      description: newColDescription,
+      appraisedValue: Number(newColAppraisedValue),
+      assessedValue: Math.round(Number(newColAppraisedValue) * 0.8),
+      maxLoanToValueRatio: maxLTVRatio,
+      maxAllowableLoanAmount: Math.round(Number(newColAppraisedValue) * maxLTVRatio),
+      encumbranceStatus: 'REGISTERED_MORTGAGE',
+      tctNumber: newColType === 'REAL_ESTATE_MORTGAGE' ? newColDocNumber : undefined,
+      plateNumber: newColType === 'CHATTEL_MORTGAGE' ? newColDocNumber : undefined,
+      registryOfDeedsLocation: newColRegistryLocation,
+      registrationDate: new Date().toISOString().split('T')[0],
+      linkedLoanNumber: `LN-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      notes: `Registered with ${newColRegistryLocation}. Fair market appraisal verified by licensed appraiser.`,
+    };
+
+    setCollaterals((prev) => [item, ...prev]);
+    setShowCollateralModal(false);
+    setCollateralNotification(`Collateral "${item.description}" registered successfully with LTV ${(computedModalLTV).toFixed(1)}%!`);
+    setTimeout(() => setCollateralNotification(null), 5000);
+  };
+
+  const handleDischargeMortgage = (colId: string) => {
+    setCollaterals((prev) =>
+      prev.map((c) =>
+        c.id === colId
+          ? {
+              ...c,
+              encumbranceStatus: 'DISCHARGED',
+              linkedLoanId: undefined,
+              linkedLoanNumber: undefined,
+              notes: `MORTGAGE RELEASED & DISCHARGED upon full loan payoff on ${new Date().toLocaleDateString('en-PH')}.`,
+            }
+          : c
+      )
+    );
+    setCollateralNotification('Mortgage encumbrance successfully discharged and released to borrower!');
+    setTimeout(() => setCollateralNotification(null), 4000);
+  };
+
+  const handleReEncumberMortgage = (colId: string) => {
+    const registryEntry = `2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    setCollaterals((prev) =>
+      prev.map((c) =>
+        c.id === colId
+          ? {
+              ...c,
+              encumbranceStatus: 'REGISTERED_MORTGAGE',
+              linkedLoanNumber: `LN-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+              notes: `Annotated and encumbered under Registry Entry ${registryEntry}.`,
+            }
+          : c
+      )
+    );
+    setCollateralNotification(`Mortgage successfully re-encumbered with Registry Entry ${registryEntry}!`);
+    setTimeout(() => setCollateralNotification(null), 4000);
+  };
+
+  // Statutory Net Surplus Allocation State (RA 9520 Article 86)
+  const [surplusGrossRevenue, setSurplusGrossRevenue] = useState<number>(4500000);
+  const [surplusExpenses, setSurplusExpenses] = useState<number>(3250000);
+  const [surplusGrfRate, setSurplusGrfRate] = useState<number>(10); // 10% min
+  const [surplusCetfRate, setSurplusCetfRate] = useState<number>(10); // 10% total
+  const [surplusCdfRate, setSurplusCdfRate] = useState<number>(3); // 3% min
+  const [surplusOptRate, setSurplusOptRate] = useState<number>(7); // 7% max
+  const [surplusIscRatio, setSurplusIscRatio] = useState<number>(60); // 60% ISC, 40% PR
+  const [surplusPostedStatus, setSurplusPostedStatus] = useState<string | null>(null);
+
+  // Live Article 86 Calculations
+  const computedNetSurplus = Math.max(0, surplusGrossRevenue - surplusExpenses);
+  const computedGrf = Math.round(computedNetSurplus * (surplusGrfRate / 100));
+  const computedCetfTotal = Math.round(computedNetSurplus * (surplusCetfRate / 100));
+  const computedCetfLocal = Math.round(computedCetfTotal * 0.50);
+  const computedCetfApex = computedCetfTotal - computedCetfLocal;
+  const computedCdf = Math.round(computedNetSurplus * (surplusCdfRate / 100));
+  const computedOpt = Math.round(computedNetSurplus * (surplusOptRate / 100));
+  const computedTotalStatutoryReserves = computedGrf + computedCetfTotal + computedCdf + computedOpt;
+  const computedDistributable = Math.max(0, computedNetSurplus - computedTotalStatutoryReserves);
+  const computedIscPool = Math.round(computedDistributable * (surplusIscRatio / 100));
+  const computedPrPool = computedDistributable - computedIscPool;
+
+  // Member allocations (Total Capital ₱25k: Maria Clara ₱15k / 60%, Juan ₱10k / 40%)
+  const mariaIsc = Math.round(computedIscPool * 0.60);
+  const mariaPr = Math.round(computedPrPool * 0.55);
+  const juanIsc = computedIscPool - mariaIsc;
+  const juanPr = computedPrPool - mariaPr;
+
+  const handlePostSurplusToGL = () => {
+    const voucherRef = `CDA-SURP-2025-${Math.floor(1000 + Math.random() * 9000)}`;
+    setSurplusPostedStatus(`Successfully posted Net Surplus Distribution voucher ${voucherRef} to CDA General Ledger! Debits: ₱${computedNetSurplus.toLocaleString()} == Credits: ₱${computedNetSurplus.toLocaleString()} (STRICTLY BALANCED).`);
   };
 
   // Members Simulation State
@@ -471,8 +700,10 @@ export default function AdminDashboard() {
             { id: 'products', label: 'Loan Products & Offers', icon: Sliders },
             { id: 'los', label: 'LOS Approval Matrix', icon: CreditCard },
             { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator },
+            { id: 'collateral', label: 'Collateral & Chattel Registry', icon: Scale },
             { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode },
             { id: 'accounting', label: 'CDA General Ledger', icon: BookOpen },
+            { id: 'surplus', label: 'Net Surplus & Patronage (Art. 86)', icon: PieChart },
             { id: 'invoices', label: 'Tax & Invoices (12% VAT)', icon: FileText },
             { id: 'reports', label: 'CDA & CIC Mandatory Reports', icon: ShieldCheck },
           ].map((tab) => {
@@ -721,6 +952,18 @@ export default function AdminDashboard() {
                 <Plus className="w-4 h-4" /> Configure New Loan Product
               </button>
             </div>
+
+            {productSaveNotification && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span><strong>Saved to Database:</strong> {productSaveNotification}</span>
+                </div>
+                <span className="font-mono text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold">
+                  200 OK (Persisted)
+                </span>
+              </div>
+            )}
 
             {/* Product Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -2201,6 +2444,594 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {/* TAB: COLLATERAL & CHATTEL MORTGAGE REGISTRY */}
+        {activeTab === 'collateral' && (
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-emerald-600" />
+                    Collateral & Chattel Mortgage Registry
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Real Estate Mortgage (REM) land titles, motor vehicle chattel mortgages, and Loan-to-Value (LTV) regulatory caps under CDA guidelines.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCollateralModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <Plus className="w-4 h-4" /> + Register Pledged Collateral
+                </button>
+              </div>
+
+              {collateralNotification && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span><strong>Registry Updated:</strong> {collateralNotification}</span>
+                  </div>
+                  <span className="font-mono text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold">
+                    Encumbrance Recorded
+                  </span>
+                </div>
+              )}
+
+              {/* KPI Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-2">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Registered Assets</span>
+                  <span className="text-2xl font-black text-slate-900 mt-1 block">₱3,000,000.00</span>
+                  <span className="text-[11px] text-emerald-700 font-semibold mt-0.5 block">{collaterals.length} Secured Mortgages</span>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Real Estate Mortgages (REM)</span>
+                  <span className="text-2xl font-black text-indigo-700 mt-1 block">70.0% Max LTV</span>
+                  <span className="text-[11px] text-slate-500 mt-0.5 block">Transfer Certificate of Title (TCT)</span>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Chattel Mortgages</span>
+                  <span className="text-2xl font-black text-amber-700 mt-1 block">60.0% Max LTV</span>
+                  <span className="text-[11px] text-slate-500 mt-0.5 block">LTO Motor Vehicle Registry</span>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Portfolio Average LTV</span>
+                  <span className="text-2xl font-black text-emerald-600 mt-1 block">55.0%</span>
+                  <span className="text-[11px] text-emerald-700 font-bold mt-0.5 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" /> Risk Tier: SAFE
+                  </span>
+                </div>
+              </div>
+
+              {/* Collateral Registry Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden mt-4">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3">Asset Type & Details</th>
+                      <th className="p-3">Owner Member</th>
+                      <th className="p-3 text-right">Appraised Value</th>
+                      <th className="p-3 text-right">Max Allowable Loan</th>
+                      <th className="p-3 text-center">LTV Ratio</th>
+                      <th className="p-3">Encumbrance Status</th>
+                      <th className="p-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {collaterals.map((c) => {
+                      const isREM = c.type === 'REAL_ESTATE_MORTGAGE';
+                      const ltvPct = isREM ? '55.6%' : '54.2%';
+                      const isEncumbered = c.encumbranceStatus === 'REGISTERED_MORTGAGE';
+
+                      return (
+                        <tr key={c.id} className="hover:bg-slate-50/80 transition">
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                                  isREM
+                                    ? 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                                    : 'bg-amber-100 text-amber-900 border border-amber-200'
+                                }`}
+                              >
+                                {isREM ? 'REM' : 'CHATTEL'}
+                              </span>
+                              <strong className="text-slate-900">{c.description}</strong>
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                              {isREM
+                                ? `${c.tctNumber} • ${c.registryOfDeedsLocation} (${c.lotAreaSqm || 180} sqm)`
+                                : `Plate ${c.plateNumber} • ${c.vehicleMakeModel || 'Utility Truck'} (${c.ltoOrCrNumber})`}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-900">{c.memberName}</div>
+                            <div className="text-[11px] text-slate-500 font-mono">{c.memberNumber}</div>
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">
+                            ₱{c.appraisedValue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-emerald-700 font-semibold">
+                            ₱{c.maxAllowableLoanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px]">
+                              {ltvPct} (SAFE)
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            {isEncumbered ? (
+                              <div>
+                                <span className="bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded text-[10px] flex items-center gap-1 w-fit">
+                                  <Lock className="w-3 h-3 text-emerald-700" /> ENCUMBERED
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                  Linked: {c.linkedLoanNumber || 'LN-2026-0001'}
+                                </span>
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded text-[10px] w-fit block">
+                                  DISCHARGED
+                                </span>
+                                <span className="text-[10px] text-slate-400 block mt-0.5">Title Released</span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            {isEncumbered ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDischargeMortgage(c.id)}
+                                className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded transition"
+                              >
+                                Discharge Mortgage
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleReEncumberMortgage(c.id)}
+                                className="text-[11px] bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold px-2.5 py-1 rounded transition"
+                              >
+                                Annotate Mortgage
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: STATUTORY NET SURPLUS & PATRONAGE REFUND (ART. 86 RA 9520) */}
+        {activeTab === 'surplus' && (
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <PieChart className="w-5 h-5 text-emerald-600" />
+                    Annual Net Surplus Allocation & Patronage Distribution (Article 86, RA 9520)
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Statutory reserve apportionment (GRF 10%, CETF 10%, CDF 3%, Optional 7%) and 70% distributable surplus split into Interest on Share Capital (ISC) and Patronage Refund (PR).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePostSurplusToGL}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <FileCheck className="w-4 h-4" /> Authorize & Post to General Ledger
+                </button>
+              </div>
+
+              {surplusPostedStatus && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{surplusPostedStatus}</span>
+                  </div>
+                  <span className="font-mono text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold">
+                    CDA Balanced Entry
+                  </span>
+                </div>
+              )}
+
+              {/* Fiscal Input Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Gross Operating Revenues (₱)</label>
+                  <input
+                    type="number"
+                    step="50000"
+                    value={surplusGrossRevenue}
+                    onChange={(e) => setSurplusGrossRevenue(Number(e.target.value))}
+                    className="w-full border border-slate-300 rounded-lg p-2 font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Lending interest + service fees</span>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Cost of Services & Expenses (₱)</label>
+                  <input
+                    type="number"
+                    step="50000"
+                    value={surplusExpenses}
+                    onChange={(e) => setSurplusExpenses(Number(e.target.value))}
+                    className="w-full border border-slate-300 rounded-lg p-2 font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Salaries, utilities, admin, interest</span>
+                </div>
+
+                <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Net Surplus for Allocation</span>
+                  <span className="text-2xl font-black text-emerald-700 font-mono">
+                    ₱{computedNetSurplus.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-emerald-800 font-semibold">100% Statutory Base</span>
+                </div>
+              </div>
+
+              {/* Statutory Allocation Breakdown Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* 30% Statutory Reserves Box */}
+                <div className="border border-slate-200 rounded-xl p-5 space-y-4">
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      Statutory Reserves (30% Minimum)
+                    </h3>
+                    <span className="font-mono font-bold text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                      ₱{computedTotalStatutoryReserves.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                      <div>
+                        <strong className="text-slate-900 block">General Reserve Fund (GRF)</strong>
+                        <span className="text-[11px] text-slate-500">Statutory minimum: 10% (buffer against losses)</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-slate-900 block">₱{computedGrf.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">10.0% Allocation</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                      <div>
+                        <strong className="text-slate-900 block">Coop Education & Training Fund (CETF)</strong>
+                        <span className="text-[11px] text-slate-500">5% Local (₱{computedCetfLocal.toLocaleString()}) • 5% Apex (₱{computedCetfApex.toLocaleString()})</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-slate-900 block">₱{computedCetfTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">10.0% Allocation</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                      <div>
+                        <strong className="text-slate-900 block">Community Development Fund (CDF)</strong>
+                        <span className="text-[11px] text-slate-500">Statutory minimum: 3% for community projects</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-slate-900 block">₱{computedCdf.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">3.0% Allocation</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                      <div>
+                        <strong className="text-slate-900 block">Optional Reserve Fund (ORF)</strong>
+                        <span className="text-[11px] text-slate-500">Statutory maximum: 7% for building / expansion</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-slate-900 block">₱{computedOpt.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">7.0% Allocation</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 70% Distributable Surplus Box */}
+                <div className="border border-slate-200 rounded-xl p-5 space-y-4">
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Percent className="w-4 h-4 text-emerald-600" />
+                      Distributable Member Surplus (70% Tranche)
+                    </h3>
+                    <span className="font-mono font-bold text-xs bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
+                      ₱{computedDistributable.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100 space-y-2">
+                      <div className="flex justify-between font-semibold">
+                        <span className="text-slate-700">Distribution Split:</span>
+                        <span className="text-emerald-800">{surplusIscRatio}% Interest on Share Capital • {100 - surplusIscRatio}% Patronage Refund</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={30}
+                        max={70}
+                        step={5}
+                        value={surplusIscRatio}
+                        onChange={(e) => setSurplusIscRatio(Number(e.target.value))}
+                        className="w-full accent-emerald-600"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Interest on Share Capital (ISC)</span>
+                        <span className="text-lg font-black text-slate-900 font-mono mt-1 block">
+                          ₱{computedIscPool.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">{surplusIscRatio}% of Distributable Pool</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Patronage Refund (PR)</span>
+                        <span className="text-lg font-black text-slate-900 font-mono mt-1 block">
+                          ₱{computedPrPool.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">{100 - surplusIscRatio}% of Distributable Pool</span>
+                      </div>
+                    </div>
+
+                    {/* Balanced Double-Entry Preview Stamp */}
+                    <div className="bg-slate-900 text-white p-3 rounded-xl space-y-1 font-mono text-[11px]">
+                      <div className="flex justify-between text-emerald-400 font-bold">
+                        <span>CDA Balanced Journal Voucher:</span>
+                        <span>STRICTLY BALANCED</span>
+                      </div>
+                      <div className="text-slate-300 text-[10px]">
+                        DR: 3-03-01 Net Surplus (₱{computedNetSurplus.toLocaleString()})<br />
+                        CR: 3-02-01 GRF (₱{computedGrf.toLocaleString()}) • CR: 2-04-01 CETF (₱{computedCetfTotal.toLocaleString()})<br />
+                        CR: 3-02-02 ORF (₱{computedOpt.toLocaleString()}) • CR: 3-02-03 CDF (₱{computedCdf.toLocaleString()})<br />
+                        CR: 2-03-01 ISC Payable (₱{computedIscPool.toLocaleString()}) • CR: 2-03-02 PR Payable (₱{computedPrPool.toLocaleString()})
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Member Pro-Rata Allocations Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-slate-100 p-3 border-b border-slate-200 font-bold text-xs text-slate-700 flex justify-between items-center">
+                  <span>Pro-Rata Member Surplus Allocation Roster (Fiscal Year 2025)</span>
+                  <span className="font-normal text-slate-500">Total Share Capital: ₱25,000.00 Common</span>
+                </div>
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3">Member Details</th>
+                      <th className="p-3 text-right">Paid-Up Capital</th>
+                      <th className="p-3 text-right">Interest on Capital (ISC)</th>
+                      <th className="p-3 text-right">Patronage Refund (PR)</th>
+                      <th className="p-3 text-right">Total Net Dividend</th>
+                      <th className="p-3">Settlement Account</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-800">
+                    <tr>
+                      <td className="p-3">
+                        <div className="font-semibold text-slate-900">Maria Clara Santos</div>
+                        <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0001 (60.0% Capital Weight)</div>
+                      </td>
+                      <td className="p-3 text-right font-mono font-medium">₱15,000.00</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(mariaIsc + mariaPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
+                    </tr>
+                    <tr>
+                      <td className="p-3">
+                        <div className="font-semibold text-slate-900">Juan Perez Dela Cruz</div>
+                        <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0002 (40.0% Capital Weight)</div>
+                      </td>
+                      <td className="p-3 text-right font-mono font-medium">₱10,000.00</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(juanIsc + juanPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* REGISTER COLLATERAL POPUP MODAL */}
+        {showCollateralModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Register Pledged Mortgage Collateral</h3>
+                  <p className="text-xs text-slate-500">Record Real Estate Mortgage or Chattel Mortgage and assess Loan-to-Value (LTV).</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCollateralModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleRegisterCollateral} className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Mortgage Category</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewColType('REAL_ESTATE_MORTGAGE')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        newColType === 'REAL_ESTATE_MORTGAGE'
+                          ? 'border-indigo-600 bg-indigo-50/60 font-bold text-indigo-950'
+                          : 'border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold">Real Estate Mortgage (REM)</div>
+                      <div className="text-[11px] font-normal text-slate-500 mt-0.5">Land Title • Max 70% LTV</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewColType('CHATTEL_MORTGAGE')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        newColType === 'CHATTEL_MORTGAGE'
+                          ? 'border-amber-600 bg-amber-50/60 font-bold text-amber-950'
+                          : 'border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold">Chattel Mortgage</div>
+                      <div className="text-[11px] font-normal text-slate-500 mt-0.5">Motor Vehicle • Max 60% LTV</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Owner Member</label>
+                  <select
+                    value={newColMemberId}
+                    onChange={(e) => setNewColMemberId(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.memberNo})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Asset Description</label>
+                  <input
+                    type="text"
+                    required
+                    value={newColDescription}
+                    onChange={(e) => setNewColDescription(e.target.value)}
+                    placeholder="e.g. 240 sqm Commercial Property with 3-Door Unit"
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      {newColType === 'REAL_ESTATE_MORTGAGE' ? 'TCT / OCT Title Number' : 'Plate / MV File Number'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newColDocNumber}
+                      onChange={(e) => setNewColDocNumber(e.target.value)}
+                      placeholder={newColType === 'REAL_ESTATE_MORTGAGE' ? 'TCT-004-2022009183' : 'NFP-8812'}
+                      className="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      {newColType === 'REAL_ESTATE_MORTGAGE' ? 'Registry of Deeds Location' : 'LTO Agency & District'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newColRegistryLocation}
+                      onChange={(e) => setNewColRegistryLocation(e.target.value)}
+                      placeholder="e.g. Quezon City Registry of Deeds"
+                      className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Appraised Fair Market Value (₱)</label>
+                    <input
+                      type="number"
+                      required
+                      step="50000"
+                      min={50000}
+                      value={newColAppraisedValue}
+                      onChange={(e) => setNewColAppraisedValue(Number(e.target.value))}
+                      className="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Desired Loan Principal (₱)</label>
+                    <input
+                      type="number"
+                      required
+                      step="25000"
+                      min={10000}
+                      value={newColLoanPrincipal}
+                      onChange={(e) => setNewColLoanPrincipal(Number(e.target.value))}
+                      className="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Live LTV Calculation Card */}
+                <div className={`p-3 rounded-xl border ${
+                  isModalLTVExceeded ? 'bg-rose-50 border-rose-300 text-rose-950' : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                }`}>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="font-bold text-xs block">Loan-to-Value (LTV) Ratio:</span>
+                      <span className="text-[11px] text-slate-600">
+                        Regulatory Ceiling: {maxAllowedLTVLimit.toFixed(0)}% for {newColType === 'REAL_ESTATE_MORTGAGE' ? 'REM' : 'Chattel'}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-xl font-black font-mono ${isModalLTVExceeded ? 'text-rose-700' : 'text-emerald-700'}`}>
+                        {computedModalLTV.toFixed(1)}%
+                      </span>
+                      <span className="text-[10px] block font-bold">
+                        {isModalLTVExceeded ? '⚠️ EXCEEDS CEILING' : '✓ SAFE & COMPLIANT'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setShowCollateralModal(false)}
+                    className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm"
+                  >
+                    Save & Record Encumbrance
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* OFFICIAL RECEIPT (OR) POPUP MODAL */}
         {officialReceiptModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">

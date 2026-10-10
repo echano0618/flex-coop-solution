@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -25,7 +25,71 @@ import {
   Clock,
   UserCheck,
   AlertTriangle,
+  PieChart,
+  Scale,
+  Lock,
+  Percent,
 } from 'lucide-react';
+
+const DEFAULT_LOAN_PRODUCTS = [
+  {
+    id: 'prod_regular',
+    code: 'REGULAR_LOAN',
+    name: 'Regular Member Loan',
+    type: 'REGULAR',
+    minAmount: 10000,
+    maxAmount: 100000,
+    annualInterestRate: 0.12,
+    minTermMonths: 6,
+    maxTermMonths: 24,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    serviceFeeRate: 0.015,
+    finesRateMonthly: 0.03,
+    requiresCoMaker: true,
+    minCoMakers: 1,
+    coMakerRuleDescription: 'Requires 1 active co-maker in good standing with min ₱5,000 paid-up share capital. Co-maker must key in Member ID and sign solidary undertaking.',
+    requiresCollateral: false,
+    isActive: true,
+  },
+  {
+    id: 'prod_emergency',
+    code: 'EMERGENCY_PLUS',
+    name: 'Emergency Relief Loan Plus',
+    type: 'EMERGENCY',
+    minAmount: 5000,
+    maxAmount: 50000,
+    annualInterestRate: 0.06,
+    minTermMonths: 3,
+    maxTermMonths: 12,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    serviceFeeRate: 0.005,
+    finesRateMonthly: 0.02,
+    requiresCoMaker: true,
+    minCoMakers: 1,
+    coMakerRuleDescription: 'Requires 1 co-maker who has completed PMES and has active cooperative savings.',
+    requiresCollateral: false,
+    isActive: true,
+  },
+  {
+    id: 'prod_educational',
+    code: 'EDUCATIONAL_LOAN',
+    name: 'Educational Assistance Loan',
+    type: 'EDUCATIONAL',
+    minAmount: 10000,
+    maxAmount: 50000,
+    annualInterestRate: 0.08,
+    minTermMonths: 6,
+    maxTermMonths: 18,
+    amortizationMethod: 'STRAIGHT_LINE',
+    serviceFeeRate: 0.01,
+    finesRateMonthly: 0.02,
+    requiresCoMaker: false,
+    minCoMakers: 0,
+    coMakerRuleDescription: 'Co-maker optional; borrower must submit certificate of school matriculation.',
+    requiresCollateral: false,
+    isActive: true,
+  },
+];
 
 export default function MemberPortalPage() {
   // Member Persona Switcher (Maria = Borrower, Juan = Co-Maker)
@@ -55,7 +119,7 @@ export default function MemberPortalPage() {
         idType: "Driver's License (Encrypted SPI)",
       };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
 
   // Co-Maker Endorsement Requests State
   const [endorsementRequests, setEndorsementRequests] = useState([
@@ -82,8 +146,47 @@ export default function MemberPortalPage() {
   const [solidaryAgreed, setSolidaryAgreed] = useState<boolean>(false);
   const [endorsementSuccessMsg, setEndorsementSuccessMsg] = useState<string>('');
 
+  // Cooperative Loan Products State with localStorage & API Synchronization
+  const [loanProducts, setLoanProducts] = useState<any[]>(DEFAULT_LOAN_PRODUCTS);
+  const [selectedProductId, setSelectedProductId] = useState<string>('prod_regular');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('flexcoop_loan_products');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setLoanProducts(parsed);
+            setSelectedProductId(parsed[0].id);
+          }
+        } catch (e) {
+          console.error('Failed to parse loan products:', e);
+        }
+      }
+    }
+
+    fetch('http://localhost:4000/api/v1/loan-products')
+      .then((r) => r.json())
+      .then((res) => {
+        if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+          setLoanProducts((prev) => {
+            const map = new Map();
+            res.data.forEach((p: any) => map.set(p.code || p.id, p));
+            prev.forEach((p: any) => {
+              if (!map.has(p.code || p.id)) map.set(p.code || p.id, p);
+            });
+            const merged = Array.from(map.values());
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const selectedProduct = loanProducts.find((p) => p.id === selectedProductId) || loanProducts[0] || DEFAULT_LOAN_PRODUCTS[0];
+
   // Member Loan Application State
-  const [loanProduct, setLoanProduct] = useState<'REGULAR' | 'EMERGENCY'>('REGULAR');
   const [loanAmount, setLoanAmount] = useState<number>(50000);
   const [loanTerm, setLoanTerm] = useState<number>(12);
   const [coMaker, setCoMaker] = useState<string>('Juan Perez Dela Cruz (MEM-2026-0002)');
@@ -116,10 +219,15 @@ export default function MemberPortalPage() {
     sharesAdded?: number;
   } | null>(null);
 
-  // Calculations for Loan Application
-  const annualRate = loanProduct === 'REGULAR' ? 0.12 : 0.06;
+  // Dynamic Calculations for Loan Application
+  const annualRate = selectedProduct.annualInterestRate || 0.12;
+  const minPrincipal = selectedProduct.minAmount || 5000;
+  const maxPrincipal = selectedProduct.maxAmount || 100000;
+  const requiresCoMaker = Boolean(selectedProduct.requiresCoMaker);
+  const coMakerRuleText = selectedProduct.coMakerRuleDescription || 'Requires active co-maker endorsement with joint solidary liability.';
+
   const platformFee = Math.max(loanAmount * 0.02, 100.0);
-  const coopServiceFee = loanAmount * (loanProduct === 'REGULAR' ? 0.015 : 0.005);
+  const coopServiceFee = loanAmount * (selectedProduct.serviceFeeRate || 0.015);
   const netProceeds = loanAmount - platformFee - coopServiceFee;
 
   // Monthly annuity installment
@@ -256,6 +364,8 @@ export default function MemberPortalPage() {
                   (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
                 ).length > 0,
             },
+            { id: 'surplus', label: 'Dividends & Patronage (Art. 86)', icon: PieChart, highlight: false },
+            { id: 'collateral', label: 'My Pledged Mortgages', icon: Scale, highlight: false },
             { id: 'pay', label: 'Pay via QR Ph', icon: QrCode, highlight: false },
             { id: 'documents', label: 'Truth in Lending & Promissory Note', icon: FileText, highlight: false },
             { id: 'profile', label: 'eKYC & Privacy (NPC)', icon: ShieldCheck, highlight: false },
@@ -496,33 +606,41 @@ export default function MemberPortalPage() {
                 {/* Form Controls */}
                 <div className="space-y-5">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-2">1. Select Loan Product</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setLoanProduct('REGULAR')}
-                        className={`p-4 rounded-xl border text-left transition-colors ${
-                          loanProduct === 'REGULAR'
-                            ? 'border-emerald-600 bg-emerald-50/60 font-bold text-emerald-950'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        }`}
-                      >
-                        <div className="text-sm">Regular Member Loan</div>
-                        <div className="text-xs font-normal text-slate-500 mt-1">12.0% p.a. • Up to 24 mos</div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setLoanProduct('EMERGENCY')}
-                        className={`p-4 rounded-xl border text-left transition-colors ${
-                          loanProduct === 'EMERGENCY'
-                            ? 'border-emerald-600 bg-emerald-50/60 font-bold text-emerald-950'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        }`}
-                      >
-                        <div className="text-sm">Emergency Loan</div>
-                        <div className="text-xs font-normal text-slate-500 mt-1">6.0% p.a. • Up to 12 mos</div>
-                      </button>
+                    <label className="text-xs font-bold text-slate-700 block mb-2">1. Select Loan Product / Offer</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                      {loanProducts.map((p) => {
+                        const isSelected = selectedProductId === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedProductId(p.id);
+                              if (loanAmount > p.maxAmount) setLoanAmount(p.maxAmount);
+                              if (loanAmount < p.minAmount) setLoanAmount(p.minAmount);
+                              if (loanTerm > p.maxTermMonths) setLoanTerm(p.maxTermMonths);
+                            }}
+                            className={`p-3 rounded-xl border text-left transition-colors relative ${
+                              isSelected
+                                ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 shadow-xs'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <span className="text-xs font-bold">{p.name}</span>
+                              <span className="text-[10px] font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-500">
+                                {p.code}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-normal text-slate-500 mt-1">
+                              {(p.annualInterestRate * 100).toFixed(1)}% p.a. • Up to {p.maxTermMonths} mos
+                            </div>
+                            <div className="text-[10px] text-emerald-700 font-medium mt-1">
+                              ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -533,23 +651,23 @@ export default function MemberPortalPage() {
                     </div>
                     <input
                       type="range"
-                      min={5000}
-                      max={loanProduct === 'REGULAR' ? 250000 : 50000}
+                      min={minPrincipal}
+                      max={maxPrincipal}
                       step={5000}
                       value={loanAmount}
                       onChange={(e) => setLoanAmount(Number(e.target.value))}
                       className="w-full accent-emerald-600"
                     />
                     <div className="flex justify-between text-[11px] text-slate-400 mt-1">
-                      <span>₱5,000.00</span>
-                      <span>Max ₱{loanProduct === 'REGULAR' ? '250,000.00' : '50,000.00'}</span>
+                      <span>₱{minPrincipal.toLocaleString()}.00</span>
+                      <span>Max ₱{maxPrincipal.toLocaleString()}.00</span>
                     </div>
                   </div>
 
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-2">3. Repayment Term</label>
                     <div className="flex gap-2">
-                      {[6, 12, 18, 24].filter((t) => (loanProduct === 'EMERGENCY' ? t <= 12 : true)).map((t) => (
+                      {[3, 6, 12, 18, 24, 36].filter((t) => t >= (selectedProduct.minTermMonths || 1) && t <= (selectedProduct.maxTermMonths || 36)).map((t) => (
                         <button
                           key={t}
                           type="button"
@@ -566,7 +684,7 @@ export default function MemberPortalPage() {
                     </div>
                   </div>
 
-                  {loanProduct === 'REGULAR' && (
+                  {requiresCoMaker && (
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="text-xs font-bold text-slate-700 block">4. Designated Co-Maker Member ID</label>
@@ -617,7 +735,7 @@ export default function MemberPortalPage() {
                     type="button"
                     disabled={!agreedToTerms || Boolean(coMakerError)}
                     onClick={() => {
-                      if (loanProduct === 'REGULAR') {
+                      if (requiresCoMaker) {
                         if (!coMakerMemberIdInput.trim()) {
                           setCoMakerError('Co-maker Member ID is required.');
                           return;
@@ -1144,6 +1262,268 @@ export default function MemberPortalPage() {
             </div>
           </div>
         )}
+
+        {/* TAB: ANNUAL DIVIDENDS & PATRONAGE REFUND (ART. 86 RA 9520) */}
+        {activeTab === 'surplus' && (
+          <div className="space-y-6">
+            <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+              {/* Official Voucher Header */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-slate-200 gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-black text-2xl shadow-sm">
+                    F
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900 leading-tight">
+                      Official Annual Dividend & Patronage Refund Statement
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Pursuant to Article 86 of Republic Act No. 9520 (Philippine Cooperative Code) & CDA Guidelines
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="font-mono text-xs bg-emerald-50 text-emerald-800 font-bold px-3 py-1 rounded-full border border-emerald-200 block w-fit ml-auto">
+                    {currentPersona === 'maria' ? 'Voucher: CDA-SURP-2025-001' : 'Voucher: CDA-SURP-2025-002'}
+                  </span>
+                  <span className="text-[11px] text-slate-400 mt-1 block">Fiscal Year Ended Dec 31, 2025</span>
+                </div>
+              </div>
+
+              {/* Member Identification & Statutory Tranche */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider block">Member Name:</span>
+                  <strong className="text-slate-900 text-sm block mt-0.5">{currentMember.name}</strong>
+                  <span className="text-slate-500 font-mono text-[11px]">{currentMember.memberNumber}</span>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider block">Capital Contribution:</span>
+                  <strong className="text-slate-900 text-sm block mt-0.5">
+                    ₱{currentMember.paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </strong>
+                  <span className="text-slate-500 text-[11px]">{currentMember.sharesCount} Common Shares @ ₱100 Par</span>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider block">Statutory Tranche:</span>
+                  <strong className="text-emerald-700 text-sm block mt-0.5">70.0% Distributable Pool</strong>
+                  <span className="text-slate-500 text-[11px]">30% Statutory Reserves Cleared</span>
+                </div>
+              </div>
+
+              {/* Calculation Breakdown Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="border border-slate-200 rounded-xl p-5 bg-white space-y-2">
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Interest on Share Capital (ISC)</span>
+                    <span className="bg-emerald-50 text-emerald-800 font-bold text-[10px] px-2 py-0.5 rounded">5.0% Return</span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 font-mono">
+                    ₱{currentPersona === 'maria' ? '750.00' : '500.00'}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Pro-rata dividend yield earned on paid-up common stock equity.
+                  </p>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl p-5 bg-white space-y-2">
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Patronage Refund (PR)</span>
+                    <span className="bg-amber-50 text-amber-800 font-bold text-[10px] px-2 py-0.5 rounded">3.5% Refund</span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 font-mono">
+                    ₱{currentPersona === 'maria' ? '435.75' : '343.00'}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Refund based on ₱{currentPersona === 'maria' ? '12,450.00' : '9,800.00'} total loan interest & purchases.
+                  </p>
+                </div>
+
+                <div className="border border-emerald-200 bg-emerald-50/60 rounded-xl p-5 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Total Net Surplus Payout</span>
+                    <span className="bg-emerald-200 text-emerald-900 font-bold text-[10px] px-2 py-0.5 rounded">CREDITED</span>
+                  </div>
+                  <div className="text-2xl font-black text-emerald-800 font-mono">
+                    ₱{currentPersona === 'maria' ? '1,185.75' : '843.00'}
+                  </div>
+                  <p className="text-[11px] text-emerald-700 leading-relaxed">
+                    Directly credited to Voluntary Savings Account (2-01-01) on Jan 15, 2026.
+                  </p>
+                </div>
+              </div>
+
+              {/* Statutory Disclosures */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-2">
+                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  Statutory Deductions Compliance (RA 9520 Art. 86)
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  Before distributing the net surplus, Bayani Multi-Purpose Cooperative deducted statutory reserves: General Reserve Fund (10%), Cooperative Education and Training Fund (10% - 5% Local, 5% Apex Federation), Community Development Fund (3%), and Optional Reserve Fund (7%). Pursuant to the Cooperative Code, these dividends are 100% tax-exempt.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => alert('Printing Official Dividend Statement...')}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm"
+                >
+                  <Printer className="w-4 h-4" /> Print Dividend Statement
+                </button>
+                <button
+                  type="button"
+                  onClick={() => alert('Downloading official tax-exempt voucher PDF...')}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm"
+                >
+                  <Download className="w-4 h-4" /> Download Certificate (PDF)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: MY PLEDGED MORTGAGES & COLLATERALS */}
+        {activeTab === 'collateral' && (
+          <div className="space-y-6">
+            <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-slate-200 gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-emerald-600" />
+                    My Pledged Mortgages & Collateral Registry
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Official registry of pledged Real Estate Mortgages (REM) and Chattel Mortgages securing your active cooperative credit lines.
+                  </p>
+                </div>
+
+                <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs px-3 py-1 rounded-full flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> 1 Pledged Asset Registered
+                </span>
+              </div>
+
+              {/* Pledged Asset Card */}
+              {currentPersona === 'maria' ? (
+                <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/70 space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="bg-indigo-100 text-indigo-900 text-[10px] font-bold px-2.5 py-0.5 rounded border border-indigo-200 uppercase">
+                        REAL ESTATE MORTGAGE
+                      </span>
+                      <strong className="text-base text-slate-900">
+                        180 sqm Residential Lot & 2-Storey House in Fairview, Quezon City
+                      </strong>
+                    </div>
+                    <span className="bg-emerald-100 text-emerald-900 font-bold text-[10px] px-2.5 py-0.5 rounded flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-emerald-700" /> ENCUMBERED TO COOP
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs bg-white p-4 rounded-xl border border-slate-200">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Transfer Certificate of Title</span>
+                      <strong className="font-mono text-slate-900 block mt-0.5">TCT-004-2019004812</strong>
+                      <span className="text-[11px] text-slate-500">Quezon City Registry of Deeds</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Appraised Fair Market Value</span>
+                      <strong className="font-mono text-slate-900 text-sm block mt-0.5">₱1,800,000.00</strong>
+                      <span className="text-[11px] text-emerald-700">70% Max Allowable: ₱1,260,000</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Linked Active Loan</span>
+                      <strong className="font-mono text-slate-900 block mt-0.5">LN-2026-0001 (₱1,000,000)</strong>
+                      <span className="text-[11px] text-emerald-700 font-bold">LTV: 55.6% (SAFE)</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Registry of Deeds Entry</span>
+                      <strong className="font-mono text-slate-900 block mt-0.5">Entry # 2026-0049182</strong>
+                      <span className="text-[11px] text-slate-500">Annotated Feb 15, 2026</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs text-slate-500 gap-2">
+                    <p className="text-[11px]">
+                      Owner&apos;s Duplicate Certificate of Title is deposited in the cooperative fireproof vault. Upon full settlement of your loan balance, a Cancellation of Real Estate Mortgage will be executed.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => alert('Discharge request noted. Discharge is available once the remaining balance is paid in full.')}
+                      className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs transition shrink-0"
+                    >
+                      Request Cancellation Notice
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/70 space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="bg-amber-100 text-amber-900 text-[10px] font-bold px-2.5 py-0.5 rounded border border-amber-200 uppercase">
+                        CHATTEL MORTGAGE
+                      </span>
+                      <strong className="text-base text-slate-900">
+                        2023 Isuzu D-Max 3.0 4x4 Double Cab Utility Pickup
+                      </strong>
+                    </div>
+                    <span className="bg-emerald-100 text-emerald-900 font-bold text-[10px] px-2.5 py-0.5 rounded flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-emerald-700" /> ENCUMBERED TO COOP
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs bg-white p-4 rounded-xl border border-slate-200">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Plate / MV File Number</span>
+                      <strong className="font-mono text-slate-900 block mt-0.5">NFP-8812</strong>
+                      <span className="text-[11px] text-slate-500">CR No: 1301-0098231</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Appraised Fair Market Value</span>
+                      <strong className="font-mono text-slate-900 text-sm block mt-0.5">₱1,200,000.00</strong>
+                      <span className="text-[11px] text-amber-800">60% Max Allowable: ₱720,000</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Linked Active Loan</span>
+                      <strong className="font-mono text-slate-900 block mt-0.5">LN-2026-0002 (₱650,000)</strong>
+                      <span className="text-[11px] text-emerald-700 font-bold">LTV: 54.2% (SAFE)</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">LTO Encumbrance Annotation</span>
+                      <strong className="font-mono text-slate-900 block mt-0.5">Entry # CM-2026-0812</strong>
+                      <span className="text-[11px] text-slate-500">Annotated Feb 18, 2026</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs text-slate-500 gap-2">
+                    <p className="text-[11px]">
+                      Original Certificate of Registration (CR) annotated with Chattel Mortgage in favor of Bayani Cooperative. Release of Chattel Mortgage will be executed upon loan payoff.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => alert('Chattel release notice: Available after principal settlement.')}
+                      className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs transition shrink-0"
+                    >
+                      Request Release Slip
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* SELF-SERVICE DEPOSIT & SHARE PURCHASE MODAL */}
         {depositModalType && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">

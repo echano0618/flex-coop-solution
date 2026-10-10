@@ -363,3 +363,76 @@ export interface AMLCCoveredTransactionAlert {
   flaggedAt: string;
   status: 'PENDING_REVIEW' | 'FILED_WITH_AMLC' | 'DISMISSED';
 }
+
+// ==========================================
+// 8. ANNUAL NET SURPLUS & PATRONAGE REFUND (ART. 86 RA 9520)
+// ==========================================
+export interface MemberSurplusVoucher {
+  memberId: string;
+  memberNumber: string;
+  memberName: string;
+  paidUpShareCapital: number;
+  interestPaidOnLoans: number;
+  interestOnShareCapital: number; // Dividend
+  patronageRefund: number;
+  totalSurplusPayable: number;
+}
+
+export interface SurplusDistributionResult {
+  id: string;
+  fiscalYear: number;
+  netSurplus: number;
+  // Statutory Reserve Allocations (Art. 86 RA 9520)
+  generalReserveFund: number; // Min 10%
+  cetfLocalFund: number; // 5%
+  cetfApexFund: number; // 5%
+  communityDevelopmentFund: number; // Min 3%
+  optionalFund: number; // Max 7%
+  totalStatutoryReserves: number;
+  // Distributable Portion (typically 70%)
+  distributableSurplus: number;
+  totalInterestOnShareCapital: number;
+  totalPatronageRefund: number;
+  memberAllocations: MemberSurplusVoucher[];
+  journalEntryId?: string;
+  status: 'PROPOSED' | 'POSTED_TO_GL';
+  approvedAt?: string;
+}
+
+// ==========================================
+// 9. COLLATERAL & CHATTEL MORTGAGE REGISTRY
+// ==========================================
+export type CollateralType = 'REAL_ESTATE_MORTGAGE' | 'CHATTEL_MORTGAGE' | 'DEPOSIT_HOLD';
+
+export interface CollateralItem {
+  id: string;
+  tenantId?: string;
+  memberId: string;
+  memberNumber: string;
+  memberName?: string;
+  type: CollateralType;
+  description: string;
+  appraisedValue: number;
+  assessedValue: number;
+  maxLoanToValueRatio: number; // 0.70 for REM, 0.60 for Chattel
+  maxAllowableLoanAmount: number;
+  linkedLoanId?: string;
+  linkedLoanNumber?: string;
+  encumbranceStatus: 'UNENCUMBERED' | 'REGISTERED_MORTGAGE' | 'DISCHARGED';
+  // Real Estate Mortgage details:
+  tctNumber?: string;
+  registryOfDeedsLocation?: string;
+  lotAreaSqm?: number;
+  // Chattel Mortgage details:
+  vehicleMakeModel?: string;
+  plateNumber?: string;
+  engineNumber?: string;
+  chassisNumber?: string;
+  ltoOrCrNumber?: string;
+  // Notary & Registration details:
+  notaryPublic?: string;
+  registrationDate?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
