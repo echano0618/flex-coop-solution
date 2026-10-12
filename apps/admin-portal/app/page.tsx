@@ -48,6 +48,7 @@ import {
   Square,
   User,
   Key,
+  MapPin,
   Settings,
   Activity,
   UserPlus,
@@ -1017,6 +1018,21 @@ export default function AdminDashboard() {
     kycStatus: 'VERIFIED' | 'PENDING_REVIEW' | 'INACTIVE' | string;
     idType: string;
     idNumber?: string;
+    address?: string;
+    psgcAddress?: {
+      regionCode?: string;
+      regionName?: string;
+      provinceCode?: string;
+      provinceName?: string;
+      cityMunicipalityCode?: string;
+      cityMunicipalityName?: string;
+      barangayCode?: string;
+      barangayName?: string;
+      streetAddress?: string;
+      postalCode?: string;
+      psgcCode?: string;
+      formattedAddress?: string;
+    };
     paidUpShares: number;
     sharesCount: number;
     subscribedShares?: number;
@@ -1049,6 +1065,21 @@ export default function AdminDashboard() {
       kycStatus: 'VERIFIED',
       idType: 'PhilSys National ID (Encrypted SPI)',
       idNumber: '1234-5678-9012-3456',
+      address: '128 Rizal Avenue, Zone 4, Brgy. Malasin, City of San Jose, Nueva Ecija, 3121, Region III (Central Luzon)',
+      psgcAddress: {
+        regionCode: '030000000',
+        regionName: 'Region III (Central Luzon)',
+        provinceCode: '034900000',
+        provinceName: 'Nueva Ecija',
+        cityMunicipalityCode: '034919000',
+        cityMunicipalityName: 'City of San Jose',
+        barangayCode: '034919018',
+        barangayName: 'Malasin',
+        streetAddress: '128 Rizal Avenue, Zone 4',
+        postalCode: '3121',
+        psgcCode: '034919018',
+        formattedAddress: '128 Rizal Avenue, Zone 4, Brgy. Malasin, City of San Jose, Nueva Ecija, 3121, Region III (Central Luzon)',
+      },
       paidUpShares: 15000,
       sharesCount: 150,
       subscribedShares: 150,
@@ -1075,6 +1106,21 @@ export default function AdminDashboard() {
       kycStatus: 'VERIFIED',
       idType: 'Driver\'s License (Encrypted SPI)',
       idNumber: 'N01-18-994120',
+      address: '45 Shaw Boulevard, Brgy. San Antonio, Pasig City, Metro Manila - 2nd District, 1605, National Capital Region',
+      psgcAddress: {
+        regionCode: '130000000',
+        regionName: 'National Capital Region',
+        provinceCode: '137400000',
+        provinceName: 'Metro Manila - 2nd District',
+        cityMunicipalityCode: '137404000',
+        cityMunicipalityName: 'Pasig City',
+        barangayCode: '137404022',
+        barangayName: 'San Antonio',
+        streetAddress: '45 Shaw Boulevard',
+        postalCode: '1605',
+        psgcCode: '137404022',
+        formattedAddress: '45 Shaw Boulevard, Brgy. San Antonio, Pasig City, Metro Manila - 2nd District, 1605, National Capital Region',
+      },
       paidUpShares: 10000,
       sharesCount: 100,
       subscribedShares: 100,
@@ -1101,6 +1147,21 @@ export default function AdminDashboard() {
       kycStatus: 'VERIFIED',
       idType: 'PhilHealth ID (Encrypted SPI)',
       idNumber: '09-123456789-1',
+      address: '88 Gen. Luna St., Brgy. San Guillermo, City of Laoag, Ilocos Norte, 2900, Region I (Ilocos Region)',
+      psgcAddress: {
+        regionCode: '010000000',
+        regionName: 'Region I (Ilocos Region)',
+        provinceCode: '012800000',
+        provinceName: 'Ilocos Norte',
+        cityMunicipalityCode: '012809000',
+        cityMunicipalityName: 'City of Laoag',
+        barangayCode: '012809033',
+        barangayName: 'San Guillermo',
+        streetAddress: '88 Gen. Luna St.',
+        postalCode: '2900',
+        psgcCode: '012809033',
+        formattedAddress: '88 Gen. Luna St., Brgy. San Guillermo, City of Laoag, Ilocos Norte, 2900, Region I (Ilocos Region)',
+      },
       paidUpShares: 5000,
       sharesCount: 50,
       subscribedShares: 50,
@@ -1127,6 +1188,21 @@ export default function AdminDashboard() {
       kycStatus: 'PENDING_REVIEW',
       idType: 'Passport (SPI Biometric Review)',
       idNumber: 'P8942109B',
+      address: 'Unit 802 Ayala Triangle Tower, Makati Avenue, Brgy. Poblacion, Makati City, Metro Manila - 4th District, 1210, National Capital Region',
+      psgcAddress: {
+        regionCode: '130000000',
+        regionName: 'National Capital Region',
+        provinceCode: '137600000',
+        provinceName: 'Metro Manila - 4th District',
+        cityMunicipalityCode: '137602000',
+        cityMunicipalityName: 'Makati City',
+        barangayCode: '137602023',
+        barangayName: 'Poblacion',
+        streetAddress: 'Unit 802 Ayala Triangle Tower, Makati Avenue',
+        postalCode: '1210',
+        psgcCode: '137602023',
+        formattedAddress: 'Unit 802 Ayala Triangle Tower, Makati Avenue, Brgy. Poblacion, Makati City, Metro Manila - 4th District, 1210, National Capital Region',
+      },
       paidUpShares: 0, // Requirement: Do not require members to pay Share Capital until reviewed!
       sharesCount: 0,
       subscribedShares: 30,
@@ -1153,6 +1229,21 @@ export default function AdminDashboard() {
       kycStatus: 'INACTIVE',
       idType: 'UMID Card (Encrypted SPI)',
       idNumber: 'CRN-0111-9482019-3',
+      address: '22 Independence Road, Brgy. Poblacion I-A, City of Imus, Cavite, 4103, Region IV-A (CALABARZON)',
+      psgcAddress: {
+        regionCode: '040000000',
+        regionName: 'Region IV-A (CALABARZON)',
+        provinceCode: '042100000',
+        provinceName: 'Cavite',
+        cityMunicipalityCode: '042109000',
+        cityMunicipalityName: 'City of Imus',
+        barangayCode: '042109001',
+        barangayName: 'Poblacion I-A',
+        streetAddress: '22 Independence Road',
+        postalCode: '4103',
+        psgcCode: '042109001',
+        formattedAddress: '22 Independence Road, Brgy. Poblacion I-A, City of Imus, Cavite, 4103, Region IV-A (CALABARZON)',
+      },
       paidUpShares: 2000,
       sharesCount: 20,
       subscribedShares: 20,
@@ -2365,6 +2456,44 @@ export default function AdminDashboard() {
                               </div>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* PSGC Geographic Address Verification Dossier */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 pb-2 border-b border-slate-200">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-emerald-600" />
+                          <span className="font-bold text-xs text-slate-900">
+                            PSGC Residential Address (Philippine Statistics Authority Compliant)
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
+                          PSGC Code: {selectedMemberForReview.psgcAddress?.psgcCode || '034919018'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-800 font-medium leading-relaxed">
+                        {selectedMemberForReview.address || selectedMemberForReview.psgcAddress?.formattedAddress || '128 Rizal Avenue, Zone 4, Brgy. Malasin, City of San Jose, Nueva Ecija, 3121, Region III (Central Luzon)'}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px] text-slate-600">
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block">Region:</span>
+                          <span className="font-semibold text-slate-800">{selectedMemberForReview.psgcAddress?.regionName || 'Region III (Central Luzon)'}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block">Province / District:</span>
+                          <span className="font-semibold text-slate-800">{selectedMemberForReview.psgcAddress?.provinceName || 'Nueva Ecija'}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block">City / Municipality:</span>
+                          <span className="font-semibold text-slate-800">{selectedMemberForReview.psgcAddress?.cityMunicipalityName || 'City of San Jose'}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block">Barangay & ZIP:</span>
+                          <span className="font-semibold text-slate-800">
+                            Brgy. {selectedMemberForReview.psgcAddress?.barangayName || 'Malasin'} ({selectedMemberForReview.psgcAddress?.postalCode || '3121'})
+                          </span>
                         </div>
                       </div>
                     </div>

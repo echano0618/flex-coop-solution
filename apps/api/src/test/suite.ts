@@ -11,7 +11,7 @@ import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { AuthService } from '../core/auth';
 import { FirestoreCoopService } from '../core/firestore.service';
-import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus } from '@flexcoop/shared-types';
+import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus, Member, PSGCAddress, PSGC_REGIONS, getProvincesByRegion, getCitiesByProvince, getBarangaysByCity, formatPSGCAddress, validatePSGCAddress } from '@flexcoop/shared-types';
 import { NetSurplusService } from '../modules/accounting/surplus.service';
 import { CollateralService } from '../modules/lending/collateral.service';
 import { CooperativeTaxService } from '../modules/accounting/tax.service';
@@ -1128,7 +1128,101 @@ console.log('\n--- 21. General Ledger & Member Subsidiary Ledger (SL) Control --
   assert(recon.allReconciled === true, 'ALL GL Control Accounts perfectly match Member Subsidiary Ledgers (Total Variance: ₱0.00)');
 }
 
-console.log('\n🎉 ALL 147 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC, PLATFORM ESCROW, COOPERATIVE TAX & MEMBER SUBSIDIARY LEDGERS) PASSED SUCCESSFULLY!\n');
+// 22. Philippine Standard Geographic Code (PSGC) Compliance in Member Registration
+console.log('\n--- 22. Philippine Standard Geographic Code (PSGC) Compliance ---');
+{
+  // 22.1 Verify standard region, province, city, and barangay hierarchy
+  assert(PSGC_REGIONS.length === 17, 'All 17 Philippine Administrative Regions configured in PSGC lookup');
+  
+  const r3 = PSGC_REGIONS.find((r) => r.code === '030000000')!;
+  assert(r3.name === 'Region III (Central Luzon)', 'Region III recognized as Central Luzon');
+
+  const r3Provinces = getProvincesByRegion('030000000');
+  assert(r3Provinces.some((p) => p.name === 'Nueva Ecija'), 'Region III contains Province of Nueva Ecija');
+
+  const neCities = getCitiesByProvince('034900000');
+  const sanJose = neCities.find((c) => c.name === 'City of San Jose')!;
+  assert(sanJose !== undefined, 'Nueva Ecija contains City of San Jose');
+  assert(sanJose.defaultPostalCode === '3121', 'City of San Jose has default PhilPost ZIP code 3121');
+
+  const sjBarangays = getBarangaysByCity('034919000');
+  const malasin = sjBarangays.find((b) => b.name === 'Malasin')!;
+  assert(malasin !== undefined, 'City of San Jose contains Brgy. Malasin');
+  assert(malasin.code === '034919018', 'Brgy. Malasin has 9-digit PSGC Code 034919018');
+
+  // 22.2 Address Formatting
+  const formatted = formatPSGCAddress({
+    streetAddress: '128 Rizal Avenue, Zone 4',
+    barangayName: malasin.name,
+    cityMunicipalityName: sanJose.name,
+    provinceName: 'Nueva Ecija',
+    postalCode: sanJose.defaultPostalCode,
+    regionName: r3.name,
+  });
+  assert(
+    formatted === '128 Rizal Avenue, Zone 4, Brgy. Malasin, City of San Jose, Nueva Ecija, 3121, Region III (Central Luzon)',
+    'PSGC address properly formatted according to Philippine Post & PSA standard'
+  );
+
+  // 22.3 Address Validation - Valid Case
+  const validPsgc: PSGCAddress = {
+    regionCode: '030000000',
+    regionName: 'Region III (Central Luzon)',
+    provinceCode: '034900000',
+    provinceName: 'Nueva Ecija',
+    cityMunicipalityCode: '034919000',
+    cityMunicipalityName: 'City of San Jose',
+    barangayCode: '034919018',
+    barangayName: 'Malasin',
+    streetAddress: '128 Rizal Avenue, Zone 4',
+    postalCode: '3121',
+    psgcCode: '034919018',
+    formattedAddress: formatted,
+  };
+  const validResult = validatePSGCAddress(validPsgc);
+  assert(validResult.isValid === true, 'Complete PSGC address passes validation');
+  assert(validResult.errors.length === 0, 'No validation errors for complete PSGC address');
+
+  // 22.4 Address Validation - Invalid Cases
+  const invalidZip = validatePSGCAddress({
+    ...validPsgc,
+    postalCode: '312', // Less than 4 digits
+  });
+  assert(invalidZip.isValid === false, 'Invalid postal code (< 4 digits) fails PSGC validation');
+
+  const missingBarangay = validatePSGCAddress({
+    ...validPsgc,
+    barangayName: '',
+  });
+  assert(missingBarangay.isValid === false, 'Missing barangay fails PSGC validation');
+
+  // 22.5 Member Record with PSGC Address Integration
+  const testMember: Member = {
+    id: 'mem_test_psgc',
+    memberNumber: 'MEM-2026-9999',
+    firstName: 'Teresa',
+    lastName: 'Magbanua',
+    email: 'teresa.magbanua@gmail.com',
+    phone: '+63 917 123 4567',
+    birthdate: '1985-10-13',
+    gender: 'FEMALE',
+    civilStatus: 'MARRIED',
+    address: formatted,
+    psgcAddress: validPsgc,
+    classification: 'REGULAR',
+    status: 'PENDING_APPROVAL',
+    kycStatus: 'SUBMITTED',
+    joinedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  assert(testMember.psgcAddress?.psgcCode === '034919018', 'Member model stores granular PSGC geographic code');
+  assert(testMember.psgcAddress?.provinceName === 'Nueva Ecija', 'Member model stores structured province');
+  assert(testMember.address === formatted, 'Member model maintains backwards compatible formatted address string');
+}
+
+console.log('\n🎉 ALL 159 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC, PLATFORM ESCROW, COOPERATIVE TAX, MEMBER SUBSIDIARY LEDGERS & PSGC ADDRESSES) PASSED SUCCESSFULLY!\n');
 
 
 

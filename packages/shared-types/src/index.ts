@@ -123,6 +123,7 @@ export interface Member {
   gender: 'MALE' | 'FEMALE' | 'OTHER';
   civilStatus: 'SINGLE' | 'MARRIED' | 'WIDOWED' | 'SEPARATED';
   address: string;
+  psgcAddress?: import('./psgc').PSGCAddress;
   classification: MemberClassification;
   status: MemberStatus;
   kycStatus: KYCStatus;
@@ -536,3 +537,8 @@ export interface CollateralItem {
   createdAt: string;
   updatedAt: string;
 }
+
+// ==========================================
+// 10. PHILIPPINE STANDARD GEOGRAPHIC CODE (PSGC)
+// ==========================================
+export * from './psgc';

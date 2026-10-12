@@ -21,7 +21,21 @@ import {
   HelpCircle,
   QrCode,
   DollarSign,
+  MapPin,
+  Compass,
 } from 'lucide-react';
+import {
+  PSGC_REGIONS,
+  PSGC_PROVINCES,
+  PSGC_CITIES_MUNICIPALITIES,
+  PSGC_BARANGAYS,
+  getProvincesByRegion,
+  getCitiesByProvince,
+  getBarangaysByCity,
+  formatPSGCAddress,
+  validatePSGCAddress,
+  PSGCAddress,
+} from '@flexcoop/shared-types';
 
 export default function MemberRegisterPage() {
   const router = useRouter();
@@ -44,9 +58,89 @@ export default function MemberRegisterPage() {
   const [gender, setGender] = useState<'FEMALE' | 'MALE'>('FEMALE');
   const [civilStatus, setCivilStatus] = useState<'SINGLE' | 'MARRIED' | 'WIDOWED'>('SINGLE');
   const [tin, setTin] = useState<string>('321-456-789-000');
-  const [address, setAddress] = useState<string>('Brgy. San Antonio, Pasig City, Metro Manila');
   const [occupation, setOccupation] = useState<string>('Microenterprise Retailer / Baker');
   const [monthlyIncome, setMonthlyIncome] = useState<number>(35000);
+
+  // Step 2: PSGC-Compliant Hierarchical Address State
+  // Default pre-population: Central Luzon (Region III) -> Nueva Ecija -> City of San Jose -> Malasin
+  const [psgcRegionCode, setPsgcRegionCode] = useState<string>('030000000');
+  const [psgcProvinceCode, setPsgcProvinceCode] = useState<string>('034900000');
+  const [psgcCityCode, setPsgcCityCode] = useState<string>('034919000');
+  const [psgcBarangayCode, setPsgcBarangayCode] = useState<string>('034919018');
+  const [psgcCustomBarangay, setPsgcCustomBarangay] = useState<string>('');
+  const [psgcStreetAddress, setPsgcStreetAddress] = useState<string>('128 Rizal Avenue, Zone 4');
+  const [psgcPostalCode, setPsgcPostalCode] = useState<string>('3121');
+  const [psgcAddressError, setPsgcAddressError] = useState<string | null>(null);
+
+  // Dynamic lists derived from PSGC hierarchy
+  const availableProvinces = getProvincesByRegion(psgcRegionCode);
+  const availableCities = getCitiesByProvince(psgcProvinceCode);
+  const availableBarangays = getBarangaysByCity(psgcCityCode);
+
+  const selectedRegion = PSGC_REGIONS.find((r) => r.code === psgcRegionCode) || PSGC_REGIONS[0];
+  const selectedProvince = availableProvinces.find((p) => p.code === psgcProvinceCode) || availableProvinces[0];
+  const selectedCity = availableCities.find((c) => c.code === psgcCityCode) || availableCities[0];
+  const selectedBarangay = availableBarangays.find((b) => b.code === psgcBarangayCode);
+  const activeBarangayName = psgcBarangayCode === 'OTHER' ? psgcCustomBarangay : (selectedBarangay?.name || '');
+
+  const formattedPsgcAddress = formatPSGCAddress({
+    streetAddress: psgcStreetAddress,
+    barangayName: activeBarangayName,
+    cityMunicipalityName: selectedCity?.name,
+    provinceName: selectedProvince?.name,
+    regionName: selectedRegion?.name,
+    postalCode: psgcPostalCode,
+  });
+
+  const currentPsgcCode = psgcBarangayCode !== 'OTHER' && psgcBarangayCode ? psgcBarangayCode : (psgcCityCode || psgcProvinceCode || psgcRegionCode);
+  const [address, setAddress] = useState<string>(formattedPsgcAddress);
+
+  // Cascading Selection Handlers
+  const handleRegionChange = (newRegionCode: string) => {
+    setPsgcRegionCode(newRegionCode);
+    const newProvinces = getProvincesByRegion(newRegionCode);
+    const firstProv = newProvinces[0]?.code || '';
+    setPsgcProvinceCode(firstProv);
+
+    const newCities = getCitiesByProvince(firstProv);
+    const firstCity = newCities[0];
+    setPsgcCityCode(firstCity?.code || '');
+    setPsgcPostalCode(firstCity?.defaultPostalCode || '');
+
+    const newBarangays = getBarangaysByCity(firstCity?.code || '');
+    setPsgcBarangayCode(newBarangays[0]?.code || 'OTHER');
+    setPsgcCustomBarangay('');
+  };
+
+  const handleProvinceChange = (newProvinceCode: string) => {
+    setPsgcProvinceCode(newProvinceCode);
+    const newCities = getCitiesByProvince(newProvinceCode);
+    const firstCity = newCities[0];
+    setPsgcCityCode(firstCity?.code || '');
+    setPsgcPostalCode(firstCity?.defaultPostalCode || '');
+
+    const newBarangays = getBarangaysByCity(firstCity?.code || '');
+    setPsgcBarangayCode(newBarangays[0]?.code || 'OTHER');
+    setPsgcCustomBarangay('');
+  };
+
+  const handleCityChange = (newCityCode: string) => {
+    setPsgcCityCode(newCityCode);
+    const foundCity = availableCities.find((c) => c.code === newCityCode);
+    if (foundCity?.defaultPostalCode) {
+      setPsgcPostalCode(foundCity.defaultPostalCode);
+    }
+    const newBarangays = getBarangaysByCity(newCityCode);
+    setPsgcBarangayCode(newBarangays[0]?.code || 'OTHER');
+    setPsgcCustomBarangay('');
+  };
+
+  const handleBarangayChange = (newBarangayCode: string) => {
+    setPsgcBarangayCode(newBarangayCode);
+    if (newBarangayCode !== 'OTHER') {
+      setPsgcCustomBarangay('');
+    }
+  };
 
   // Step 3: eKYC & NPC Privacy Consent
   const [idType, setIdType] = useState<string>('PHILSYS_NATIONAL_ID');
@@ -361,6 +455,26 @@ export default function MemberRegisterPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              const validation = validatePSGCAddress({
+                regionCode: psgcRegionCode,
+                regionName: selectedRegion?.name,
+                provinceCode: psgcProvinceCode,
+                provinceName: selectedProvince?.name,
+                cityMunicipalityCode: psgcCityCode,
+                cityMunicipalityName: selectedCity?.name,
+                barangayCode: psgcBarangayCode,
+                barangayName: activeBarangayName,
+                streetAddress: psgcStreetAddress,
+                postalCode: psgcPostalCode,
+              });
+
+              if (!validation.isValid) {
+                setPsgcAddressError(validation.errors[0]);
+                return;
+              }
+
+              setPsgcAddressError(null);
+              setAddress(formattedPsgcAddress);
               setStep(3);
             }}
             className="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl"
@@ -468,15 +582,183 @@ export default function MemberRegisterPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Complete Residential Address *</label>
-              <input
-                type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                required
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+            {/* Philippine Standard Geographic Code (PSGC) Compliant Address Module */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-700/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <MapPin className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <span>PSA Philippine Standard Geographic Code (PSGC) Address</span>
+                      <span className="text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                        PSA Compliant
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Standardized cascading hierarchy for CDA statutory reporting & AMLC profiling
+                    </div>
+                  </div>
+                </div>
+
+                {currentPsgcCode && (
+                  <div className="flex items-center gap-1.5 self-start sm:self-auto bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
+                    <Compass className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-[10px] text-slate-400">PSGC Code:</span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-300">{currentPsgcCode}</span>
+                  </div>
+                )}
+              </div>
+
+              {psgcAddressError && (
+                <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/50 text-xs text-red-200 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-400 shrink-0"></span>
+                  <span>{psgcAddressError}</span>
+                </div>
+              )}
+
+              {/* Cascading Selectors: Region & Province */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Region (17 Administrative Regions) *
+                  </label>
+                  <select
+                    value={psgcRegionCode}
+                    onChange={(e) => handleRegionChange(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {PSGC_REGIONS.map((reg) => (
+                      <option key={reg.code} value={reg.code}>
+                        {reg.name} ({reg.designation})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Province / Metro Manila District *
+                  </label>
+                  <select
+                    value={psgcProvinceCode}
+                    onChange={(e) => handleProvinceChange(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {availableProvinces.map((prov) => (
+                      <option key={prov.code} value={prov.code}>
+                        {prov.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Cascading Selectors: City/Municipality & Barangay */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    City / Municipality *
+                  </label>
+                  <select
+                    value={psgcCityCode}
+                    onChange={(e) => handleCityChange(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {availableCities.map((city) => (
+                      <option key={city.code} value={city.code}>
+                        {city.name} {city.isCity ? '(City)' : '(Municipality)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Barangay *
+                  </label>
+                  <select
+                    value={psgcBarangayCode}
+                    onChange={(e) => handleBarangayChange(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {availableBarangays.map((brgy) => (
+                      <option key={brgy.code} value={brgy.code}>
+                        Brgy. {brgy.name}
+                      </option>
+                    ))}
+                    <option value="OTHER">Other Barangay (Specify Manually)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Conditional Manual Barangay Input if "OTHER" selected */}
+              {psgcBarangayCode === 'OTHER' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Custom Barangay Name *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter your exact Barangay name"
+                    value={psgcCustomBarangay}
+                    onChange={(e) => setPsgcCustomBarangay(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
+
+              {/* Street Address & Postal Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Street Address (House/Lot No., Building, Street Name, Subd.) *
+                  </label>
+                  <input
+                    type="text"
+                    value={psgcStreetAddress}
+                    onChange={(e) => setPsgcStreetAddress(e.target.value)}
+                    required
+                    placeholder="e.g. 128 Rizal Avenue, Zone 4"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Philippine ZIP / Postal Code (4 Digits) *
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={psgcPostalCode}
+                    onChange={(e) => setPsgcPostalCode(e.target.value.replace(/\D/g, ''))}
+                    required
+                    placeholder="e.g. 3121"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono tracking-widest text-center"
+                  />
+                </div>
+              </div>
+
+              {/* Live PSA Formatted Address Preview Badge */}
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400 font-medium flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Standard Philippine Address Format:
+                  </span>
+                  <span className="font-mono text-[10px] text-emerald-400">PSA PSGC Standard</span>
+                </div>
+                <div className="text-xs text-emerald-200 font-medium pl-5 leading-relaxed">
+                  {formattedPsgcAddress || 'Please complete all address fields above.'}
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -864,6 +1146,33 @@ export default function MemberRegisterPage() {
                   <div className="w-4 h-4 rounded-full border-2 border-slate-600"></div>
                   <span>4. Member ID Card Issuance & Share Capital Ledger Booking</span>
                 </div>
+              </div>
+            </div>
+
+            {/* PSGC Verified Address Summary Card */}
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 text-left space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+                  PSGC-Registered Residential Address:
+                </span>
+                <span className="font-mono text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full">
+                  PSA Code: {currentPsgcCode}
+                </span>
+              </div>
+              <p className="text-xs text-emerald-300 font-mono bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+                {formattedPsgcAddress}
+              </p>
+              <div className="flex flex-wrap gap-2 text-[10px] text-slate-400 pt-1">
+                <span>Region: <strong className="text-slate-300">{selectedRegion?.designation}</strong></span>
+                <span>•</span>
+                <span>Province: <strong className="text-slate-300">{selectedProvince?.name}</strong></span>
+                <span>•</span>
+                <span>City/Mun: <strong className="text-slate-300">{selectedCity?.name}</strong></span>
+                <span>•</span>
+                <span>Barangay: <strong className="text-slate-300">{activeBarangayName}</strong></span>
+                <span>•</span>
+                <span>ZIP: <strong className="text-slate-300">{psgcPostalCode}</strong></span>
               </div>
             </div>
 

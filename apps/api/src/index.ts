@@ -14,7 +14,7 @@ import { AuthService, UserRole } from './core/auth';
 import { FirestoreCoopService } from './core/firestore.service';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
-import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult } from '@flexcoop/shared-types';
+import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult, PSGCAddress, validatePSGCAddress, formatPSGCAddress } from '@flexcoop/shared-types';
 import { NetSurplusService } from './modules/accounting/surplus.service';
 import { CollateralService } from './modules/lending/collateral.service';
 
@@ -180,6 +180,7 @@ app.post('/api/v1/auth/member/register', (req: Request, res: Response) => {
     gender,
     civilStatus,
     address,
+    psgcAddress,
     completedPMES,
     subscribedShares,
     initialPaidUpAmount,
@@ -206,8 +207,24 @@ app.post('/api/v1/auth/member/register', (req: Request, res: Response) => {
     });
   }
 
+  // PSGC Compliance Validation
+  if (psgcAddress) {
+    const psgcValidation = validatePSGCAddress(psgcAddress);
+    if (!psgcValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        error: `PSGC Address Validation Failed: ${psgcValidation.errors.join(' ')}`,
+        errors: psgcValidation.errors,
+      });
+    }
+  }
+
   const memberId = `mem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const memberNumber = `MEM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const resolvedAddress = psgcAddress
+    ? (psgcAddress.formattedAddress || formatPSGCAddress(psgcAddress))
+    : (address || 'Metro Manila, Philippines');
 
   const newMember: Member = {
     id: memberId,
@@ -220,7 +237,13 @@ app.post('/api/v1/auth/member/register', (req: Request, res: Response) => {
     birthdate,
     gender: gender || 'FEMALE',
     civilStatus: civilStatus || 'SINGLE',
-    address: address || 'Metro Manila, Philippines',
+    address: resolvedAddress,
+    psgcAddress: psgcAddress
+      ? {
+          ...psgcAddress,
+          formattedAddress: resolvedAddress,
+        }
+      : undefined,
     classification: 'REGULAR',
     status: 'PENDING_APPROVAL', // Awaiting BOD / Committee sign-off
     kycStatus: 'SUBMITTED',
