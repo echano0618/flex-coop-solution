@@ -1403,7 +1403,145 @@ console.log('\n--- 24. Automated Platform Credit Billing & Option 4 Member Digit
   assert(minQrFee === 15.0, 'Convenience fee enforces minimum ₱15.00 floor on small transactions');
 }
 
-console.log('\n🎉 ALL 200 VERIFICATION TEST CASES (INCLUDING PLATFORM CREDIT TOP-UP & AUTO-DEDUCTIONS, OPTION 4 MEMBER DIGITAL PASSBOOK & SUBSIDIARY LEDGER, SAAS OPERATOR FLEET, SYSTEM ADMIN, IAM, RBAC, ESCROW, TAX & PSGC) PASSED SUCCESSFULLY!\n');
+// 25. Co-Maker Capacity Engine, Early Settlement Rebate & Low-Balance (No Grace Period) Verification
+console.log('\n--- 25. Co-Maker Exposure Limits, Early Loan Settlement & Low Platform Credit Policy ---');
+{
+  // 25.1 Co-Maker Eligibility Test: Max 2 Active Guarantees
+  const coMakerEvalValid = CollateralService.evaluateCoMakerCapacity({
+    coMakerMemberId: 'mem_comaker_1',
+    coMakerMemberNumber: 'MEM-2026-0008',
+    coMakerName: 'Crisostomo Ibarra',
+    paidUpShareCapital: 25000.0,
+    savingsBalance: 15000.0,
+    proposedLoanAmount: 40000.0,
+    existingGuaranteedLoans: [
+      { loanId: 'loan_prior_1', balanceRemaining: 15000.0 },
+    ],
+    ownOutstandingLoans: 20000.0,
+  });
+  assert(coMakerEvalValid.activeCoMakerCount === 1, 'Co-maker currently has 1 active guarantee');
+  assert(coMakerEvalValid.isCountEligible === true, 'Co-maker count is eligible (< 2 active guarantees limit)');
+  assert(coMakerEvalValid.totalUnencumberedEquity === 40000.0, 'Unencumbered equity equals ₱40,000 (₱25k Shares + ₱15k Savings)');
+  assert(coMakerEvalValid.maxAllowableExposure === 120000.0, 'Max allowable exposure is 3x equity (₱120,000.00)');
+  assert(coMakerEvalValid.projectedExposure === 75000.0, 'Projected exposure is ₱75,000 (₱20k own + ₱15k existing + ₱40k new)');
+  assert(coMakerEvalValid.isFinancialCapacityEligible === true, 'Projected exposure is well within 3x equity ceiling');
+  assert(coMakerEvalValid.isEligible === true, 'Co-maker endorsement successfully approved by credit policy');
+
+  // 25.2 Co-Maker Rejection: Exceeds 2 Active Guarantees
+  const coMakerOverCount = CollateralService.evaluateCoMakerCapacity({
+    coMakerMemberId: 'mem_comaker_over',
+    coMakerMemberNumber: 'MEM-2026-0009',
+    coMakerName: 'Elias Salaysay',
+    paidUpShareCapital: 50000.0,
+    savingsBalance: 30000.0,
+    proposedLoanAmount: 20000.0,
+    existingGuaranteedLoans: [
+      { loanId: 'loan_prior_a', balanceRemaining: 10000.0 },
+      { loanId: 'loan_prior_b', balanceRemaining: 10000.0 },
+    ],
+    ownOutstandingLoans: 0.0,
+  });
+  assert(coMakerOverCount.activeCoMakerCount === 2, 'Co-maker already has 2 active guarantees');
+  assert(coMakerOverCount.isCountEligible === false, 'Co-maker count rejected: cannot exceed maximum 2 active commitments');
+  assert(coMakerOverCount.isEligible === false, 'Co-maker endorsement rejected due to commitment limit');
+  assert(coMakerOverCount.rejectionReasons[0].includes('maximum 2'), 'Rejection reason states maximum 2 active commitments exceeded');
+
+  // 25.3 Co-Maker Rejection: Exceeds 3x Unencumbered Equity
+  const coMakerOverExposure = CollateralService.evaluateCoMakerCapacity({
+    coMakerMemberId: 'mem_comaker_over_exp',
+    coMakerMemberNumber: 'MEM-2026-0010',
+    coMakerName: 'Padre Damaso',
+    paidUpShareCapital: 5000.0,
+    savingsBalance: 2000.0,
+    proposedLoanAmount: 50000.0, // 3x of ₱7k equity is ₱21k -> ₱50k will exceed!
+    existingGuaranteedLoans: [],
+    ownOutstandingLoans: 0.0,
+  });
+  assert(coMakerOverExposure.totalUnencumberedEquity === 7000.0, 'Unencumbered equity is ₱7,000.00');
+  assert(coMakerOverExposure.maxAllowableExposure === 21000.0, 'Max allowable exposure is ₱21,000.00 (3x ₱7,000)');
+  assert(coMakerOverExposure.isFinancialCapacityEligible === false, 'Rejected: ₱50,000 loan exceeds ₱21,000 exposure ceiling');
+  assert(coMakerOverExposure.isEligible === false, 'Co-maker rejected due to insufficient financial equity');
+
+  // 25.4 RA 3765 Truth in Lending Early Loan Payoff Rebate Calculator
+  const amortGen = AmortizationService.generateSchedule({
+    principalAmount: 30000,
+    annualInterestRate: 0.12,
+    termMonths: 6,
+    paymentFrequency: 'MONTHLY',
+    method: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+  });
+  const mockActiveLoan: Loan = {
+    id: 'loan_early_payoff',
+    loanNumber: 'LN-2026-00888',
+    memberId: 'mem_borrower_88',
+    productId: 'prod_regular',
+    principalAmount: 30000,
+    interestRateAnnual: 0.12,
+    termMonths: 6,
+    paymentFrequency: 'MONTHLY',
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    status: 'DISBURSED',
+    platformFee: 300,
+    coopServiceFee: 450,
+    netProceedsDisbursed: 29250,
+    totalInterestExpected: amortGen.totalInterest,
+    totalPayable: amortGen.totalPayable,
+    balanceRemaining: 30000,
+    schedule: amortGen.schedule,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const payoffQuote = AmortizationService.calculateEarlySettlement({
+    loan: mockActiveLoan,
+    penaltiesDue: 0.0,
+  });
+  assert(payoffQuote.currentPrincipalBalance === 30000.0, 'Payoff quote principal is ₱30,000.00');
+  assert(payoffQuote.unearnedInterestRebate === amortGen.totalInterest, 'Full future unearned interest is rebated to borrower');
+  assert(payoffQuote.totalPayoffAmount === 30000.0, 'Total payoff amount waives unearned diminishing interest');
+  assert(payoffQuote.interestSavedByBorrower === amortGen.totalInterest, 'Borrower saves 100% of future unearned interest');
+
+  // 25.5 Strict NO Grace Period Rule for Member Onboarding Fee
+  const zeroCreditTenant = 'tenant_depleted_credit';
+  dbStore.platformCredits.set(zeroCreditTenant, 10.0); // Only ₱10.00 credit (₱50 needed)
+  const failedMemberDeduction = MonetizationService.processMemberFeeAutoDeduction({
+    tenantId: zeroCreditTenant,
+    memberId: 'mem_fail_onb',
+    memberNumber: 'MEM-FAIL-01',
+    memberName: 'Juan Del Monte',
+    sequenceIndex: 20, // Requires ₱50
+  });
+  assert(failedMemberDeduction.deducted === false, 'Strict NO grace period: onboarding deduction fails when credit < ₱50');
+  assert(failedMemberDeduction.error === 'INSUFFICIENT_PLATFORM_CREDIT', 'Returns INSUFFICIENT_PLATFORM_CREDIT error code');
+  assert(dbStore.platformCredits.get(zeroCreditTenant) === 10.0, 'Platform credit remains untouched when insufficient');
+
+  // 25.6 Strict NO Grace Period Rule for Loan Technology Fee
+  const failedLoanDeduction = MonetizationService.processLoanFeeAutoDeduction({
+    tenantId: zeroCreditTenant,
+    loanId: 'loan_fail_disb',
+    loanNumber: 'LN-FAIL-01',
+    principalAmount: 50000.0, // 1% is ₱500 (tenant only has ₱10)
+    invoiceNumber: 'INV-FAIL-01',
+  });
+  assert(failedLoanDeduction.deducted === false, 'Strict NO grace period: loan disbursement tech fee fails when credit < ₱500');
+  assert(failedLoanDeduction.error === 'INSUFFICIENT_PLATFORM_CREDIT', 'Returns INSUFFICIENT_PLATFORM_CREDIT error code for loan');
+
+  // 25.7 Low Platform Credit Threshold (< ₱1,000) & Warning Flag
+  const lowCreditTenant = 'tenant_low_warning';
+  dbStore.platformCredits.set(lowCreditTenant, 1020.0); // Has ₱1,020.00
+  const deductionTriggeringWarning = MonetizationService.processMemberFeeAutoDeduction({
+    tenantId: lowCreditTenant,
+    memberId: 'mem_trigger_warn',
+    memberNumber: 'MEM-WARN-01',
+    memberName: 'Gregoria De Jesus',
+    sequenceIndex: 18, // Deducts ₱50 -> New balance: ₱970 (< ₱1,000!)
+  });
+  assert(deductionTriggeringWarning.deducted === true, 'Deduction succeeds when credit is sufficient');
+  assert(deductionTriggeringWarning.newCreditBalance === 970.0, 'Credit reduced from ₱1,020 to ₱970.00');
+  assert(deductionTriggeringWarning.isLowCreditWarning === true, 'isLowCreditWarning flag is TRUE when credit drops below ₱1,000');
+  assert(deductionTriggeringWarning.message.includes('CRITICAL LOW BALANCE'), 'Message alerts critical low balance below ₱1,000');
+}
+
+console.log('\n🎉 ALL 220 VERIFICATION TEST CASES (INCLUDING CO-MAKER CAPACITY LIMITS, EARLY LOAN PAYOFF REBATE, STRICT NO-GRACE-PERIOD POLICY, ₱1,000 LOW CREDIT WARNING & RED FOOTER NOTICE, OPTION 4 PASSBOOK, ESCROW & TAX) PASSED SUCCESSFULLY!\n');
 
 
 

@@ -150,6 +150,7 @@ export class MonetizationService {
   }) {
     // Dynamic import to prevent any circular dependency
     const { OperatorService } = require('../operator/operator.service');
+    const { dbStore } = require('../../core/store');
 
     const feeCalc = this.calculateMemberOnboardingFee(params.sequenceIndex);
     const invoice = this.generateMemberOnboardingInvoice({
@@ -172,6 +173,21 @@ export class MonetizationService {
       };
     }
 
+    // Check available credit balance: strictly NO grace period
+    const currentBalance = dbStore.platformCredits.get(params.tenantId) ?? 0;
+    if (currentBalance < feeCalc.grossFee) {
+      return {
+        deducted: false,
+        isFreeTier: false,
+        feeAmount: feeCalc.grossFee,
+        feeCalculation: feeCalc,
+        invoice,
+        currentCreditBalance: currentBalance,
+        error: 'INSUFFICIENT_PLATFORM_CREDIT',
+        message: `Insufficient platform credit balance (₱${currentBalance.toFixed(2)}). Required: ₱${feeCalc.grossFee.toFixed(2)}. No grace period permitted. Cooperative must top up Platform Credit immediately.`,
+      };
+    }
+
     // Auto-deduct ₱50 from tenant's prepaid platform credit
     const adjustResult = OperatorService.adjustPlatformCredit({
       tenantId: params.tenantId,
@@ -182,6 +198,8 @@ export class MonetizationService {
       performedBy: 'SYSTEM_BILLING_AUTOMATION',
     });
 
+    const isLowCredit = adjustResult.newBalance < 1000.0;
+
     return {
       deducted: true,
       isFreeTier: false,
@@ -190,7 +208,8 @@ export class MonetizationService {
       invoice,
       newCreditBalance: adjustResult.newBalance,
       transaction: adjustResult.transaction,
-      message: `₱${feeCalc.grossFee.toFixed(2)} platform fee automatically deducted from platform credit for Member #${params.sequenceIndex}. New balance: ₱${adjustResult.newBalance.toFixed(2)}`,
+      isLowCreditWarning: isLowCredit,
+      message: `₱${feeCalc.grossFee.toFixed(2)} platform fee automatically deducted from platform credit for Member #${params.sequenceIndex}. New balance: ₱${adjustResult.newBalance.toFixed(2)}${isLowCredit ? ' ⚠️ CRITICAL LOW BALANCE: Credit below ₱1,000 threshold!' : ''}`,
     };
   }
 
@@ -205,8 +224,22 @@ export class MonetizationService {
     invoiceNumber: string;
   }) {
     const { OperatorService } = require('../operator/operator.service');
+    const { dbStore } = require('../../core/store');
 
     const feeCalc = this.calculatePlatformFee(params.principalAmount);
+
+    // Check available credit balance: strictly NO grace period
+    const currentBalance = dbStore.platformCredits.get(params.tenantId) ?? 0;
+    if (currentBalance < feeCalc.grossFee) {
+      return {
+        deducted: false,
+        feeAmount: feeCalc.grossFee,
+        feeCalculation: feeCalc,
+        currentCreditBalance: currentBalance,
+        error: 'INSUFFICIENT_PLATFORM_CREDIT',
+        message: `Insufficient platform credit balance (₱${currentBalance.toFixed(2)}). Required: ₱${feeCalc.grossFee.toFixed(2)} for Loan ${params.loanNumber}. No grace period permitted. Cooperative must top up Platform Credit before disbursement.`,
+      };
+    }
 
     // Auto-deduct 1.0% tech fee from tenant's prepaid platform credit
     const adjustResult = OperatorService.adjustPlatformCredit({
@@ -218,13 +251,16 @@ export class MonetizationService {
       performedBy: 'SYSTEM_BILLING_AUTOMATION',
     });
 
+    const isLowCredit = adjustResult.newBalance < 1000.0;
+
     return {
       deducted: true,
       feeAmount: feeCalc.grossFee,
       feeCalculation: feeCalc,
       newCreditBalance: adjustResult.newBalance,
       transaction: adjustResult.transaction,
-      message: `₱${feeCalc.grossFee.toFixed(2)} (1.0% technology fee) automatically deducted from platform credit for Loan ${params.loanNumber}. New balance: ₱${adjustResult.newBalance.toFixed(2)}`,
+      isLowCreditWarning: isLowCredit,
+      message: `₱${feeCalc.grossFee.toFixed(2)} (1.0% technology fee) automatically deducted from platform credit for Loan ${params.loanNumber}. New balance: ₱${adjustResult.newBalance.toFixed(2)}${isLowCredit ? ' ⚠️ CRITICAL LOW BALANCE: Credit below ₱1,000 threshold!' : ''}`,
     };
   }
 }

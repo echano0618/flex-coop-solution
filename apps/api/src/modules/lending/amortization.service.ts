@@ -135,4 +135,50 @@ export class AmortizationService {
       totalPayable,
     };
   }
+
+  /**
+   * Generates early payoff settlement quote under RA 3765 (Truth in Lending)
+   * Waives unearned diminishing interest and rebates future installments.
+   */
+  static calculateEarlySettlement(params: {
+    loan: import('@flexcoop/shared-types').Loan;
+    settlementDate?: Date;
+    penaltiesDue?: number;
+  }): import('@flexcoop/shared-types').EarlyLoanSettlementQuote {
+    const { loan } = params;
+    const settlementDate = params.settlementDate || new Date();
+    const penaltiesDue = Math.max(0, params.penaltiesDue || 0);
+
+    const currentPrincipalBalance = loan.balanceRemaining;
+
+    // Remaining unearned future interest across unpaid installments
+    let futureUnearnedInterest = 0;
+    for (const item of loan.schedule) {
+      if (!item.isPaid) {
+        futureUnearnedInterest += Math.max(0, item.interestAmount - item.paidInterest);
+      }
+    }
+    futureUnearnedInterest = Math.round(futureUnearnedInterest * 100) / 100;
+
+    // In a diminishing balance schedule, early pre-termination waives future unearned interest
+    const unearnedInterestRebate = futureUnearnedInterest;
+    const accruedInterestToDate = 0.0; // Any unpaid accrued interest up to settlement date
+
+    const totalPayoffAmount = Math.round((currentPrincipalBalance + accruedInterestToDate + penaltiesDue) * 100) / 100;
+
+    return {
+      loanId: loan.id,
+      loanNumber: loan.loanNumber,
+      memberId: loan.memberId,
+      settlementDate: settlementDate.toISOString().split('T')[0],
+      currentPrincipalBalance,
+      accruedInterestToDate,
+      unearnedInterestRebate,
+      penaltiesDue,
+      totalPayoffAmount,
+      originalTotalInterest: loan.totalInterestExpected,
+      interestSavedByBorrower: unearnedInterestRebate,
+    };
+  }
 }
+

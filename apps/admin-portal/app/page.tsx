@@ -7052,7 +7052,7 @@ export default function AdminDashboard() {
                     Prepaid Platform Wallet
                   </span>
                   <span className="text-xs font-bold text-slate-900">
-                    {coopPlatformCredit < 500 ? '⚠️ Low Credit Warning' : '✓ Credit Active & Auto-Debiting'}
+                    {coopPlatformCredit < 1000 ? '⚠️ Critical Low Credit Warning' : '✓ Credit Active & Auto-Debiting'}
                   </span>
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight">
@@ -7898,7 +7898,67 @@ export default function AdminDashboard() {
           </div>
         )}
         </main>
+
+        {/* Global Footer with Automated Low-Balance Red Notice (Credit < ₱1,000) */}
+        <footer className="w-full bg-slate-900 border-t border-slate-800 text-slate-400 py-3 px-4 sm:px-6 z-20">
+          <div className="max-w-7xl mx-auto space-y-2">
+            {coopPlatformCredit < 1000 && (
+              <div
+                data-testid="low-credit-red-notice"
+                className="bg-red-600/95 border-2 border-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-pulse"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-xs uppercase tracking-wider bg-red-950/80 px-2 py-0.5 rounded text-red-200">
+                        CRITICAL PLATFORM CREDIT ALERT
+                      </span>
+                      <span className="font-mono font-bold text-xs">
+                        Current Balance: ₱{coopPlatformCredit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-red-100 font-medium mt-0.5">
+                      Platform Credit has dropped below the statutory threshold of <strong>₱1,000.00</strong>. Strictly <strong>NO grace period</strong> is permitted. Member onboarding (₱50/member) and loan disbursements (1.0% tech fee) will be blocked if balance is depleted. Please top up immediately.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreditTopupModal(true)}
+                  className="px-4 py-2 bg-white text-red-700 hover:bg-red-50 rounded-xl font-black text-xs shadow-md transition shrink-0 flex items-center gap-1.5"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>Top-Up Credit Now</span>
+                </button>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-2 pt-1">
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-slate-300">Flex Coop Solution Cloud ERP</span>
+                <span>•</span>
+                <span>CDA MC 2015-06 & RA 9520 Standard</span>
+                <span>•</span>
+                <span>BIR CTE Compliant</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${coopPlatformCredit < 1000 ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
+                  <span className="font-mono text-slate-300">
+                    Platform Credit: ₱{coopPlatformCredit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </span>
+                </span>
+                <span>•</span>
+                <span>Subdomain: bayani-coop.tuntongtech.com</span>
+              </div>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
   );
 }
+

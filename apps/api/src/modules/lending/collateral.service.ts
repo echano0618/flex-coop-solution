@@ -145,4 +145,72 @@ export class CollateralService {
       updatedAt: new Date().toISOString(),
     };
   }
+
+  /**
+   * Evaluates Co-Maker Capacity under Cooperative Credit Risk Policy:
+   * 1. Max 2 active co-maker commitments per member
+   * 2. Total Direct & Guaranteed exposure cannot exceed 3x (Paid-Up Capital + Savings)
+   */
+  public static evaluateCoMakerCapacity(params: {
+    coMakerMemberId: string;
+    coMakerMemberNumber: string;
+    coMakerName: string;
+    paidUpShareCapital: number;
+    savingsBalance: number;
+    proposedLoanAmount: number;
+    existingGuaranteedLoans?: Array<{ loanId: string; balanceRemaining: number }>;
+    ownOutstandingLoans?: number;
+    maxAllowedCoMakers?: number;
+  }): import('@flexcoop/shared-types').CoMakerCapacityEvaluation {
+    const maxAllowedCoMakerCount = params.maxAllowedCoMakers ?? 2;
+    const activeGuarantees = params.existingGuaranteedLoans || [];
+    const activeCoMakerCount = activeGuarantees.length;
+    const isCountEligible = activeCoMakerCount < maxAllowedCoMakerCount;
+
+    const guaranteedLoansBalance = activeGuarantees.reduce((acc, g) => acc + g.balanceRemaining, 0);
+    const ownOutstandingLoans = params.ownOutstandingLoans || 0;
+    const totalDirectAndContingentExposure = Math.round((ownOutstandingLoans + guaranteedLoansBalance) * 100) / 100;
+
+    const totalUnencumberedEquity = Math.round((params.paidUpShareCapital + params.savingsBalance) * 100) / 100;
+    const maxAllowableExposure = Math.round(totalUnencumberedEquity * 3 * 100) / 100;
+
+    const projectedExposure = Math.round((totalDirectAndContingentExposure + params.proposedLoanAmount) * 100) / 100;
+    const isFinancialCapacityEligible = projectedExposure <= maxAllowableExposure;
+
+    const rejectionReasons: string[] = [];
+    if (!isCountEligible) {
+      rejectionReasons.push(
+        `Co-maker already has ${activeCoMakerCount} active guaranteed loans (Cooperative policy allows maximum ${maxAllowedCoMakerCount}).`
+      );
+    }
+    if (!isFinancialCapacityEligible) {
+      rejectionReasons.push(
+        `Projected exposure of ₱${projectedExposure.toLocaleString('en-PH', { minimumFractionDigits: 2 })} exceeds 3x unencumbered equity limit of ₱${maxAllowableExposure.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (Paid-Up: ₱${params.paidUpShareCapital.toLocaleString()}, Savings: ₱${params.savingsBalance.toLocaleString()}).`
+      );
+    }
+
+    const isEligible = isCountEligible && isFinancialCapacityEligible;
+
+    return {
+      coMakerMemberId: params.coMakerMemberId,
+      coMakerMemberNumber: params.coMakerMemberNumber,
+      coMakerName: params.coMakerName,
+      activeCoMakerCount,
+      maxAllowedCoMakerCount,
+      ownOutstandingLoans,
+      guaranteedLoansBalance,
+      totalDirectAndContingentExposure,
+      paidUpShareCapital: params.paidUpShareCapital,
+      savingsBalance: params.savingsBalance,
+      totalUnencumberedEquity,
+      maxAllowableExposure,
+      proposedLoanAmount: params.proposedLoanAmount,
+      projectedExposure,
+      isCountEligible,
+      isFinancialCapacityEligible,
+      isEligible,
+      rejectionReasons,
+    };
+  }
 }
+

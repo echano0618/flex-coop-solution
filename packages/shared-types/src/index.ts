@@ -197,6 +197,41 @@ export interface CoMakerEndorsement {
   jointSolidaryAgreementAccepted: boolean;
 }
 
+export interface CoMakerCapacityEvaluation {
+  coMakerMemberId: string;
+  coMakerMemberNumber: string;
+  coMakerName: string;
+  activeCoMakerCount: number;
+  maxAllowedCoMakerCount: number;
+  ownOutstandingLoans: number;
+  guaranteedLoansBalance: number;
+  totalDirectAndContingentExposure: number;
+  paidUpShareCapital: number;
+  savingsBalance: number;
+  totalUnencumberedEquity: number;
+  maxAllowableExposure: number; // 3x totalUnencumberedEquity
+  proposedLoanAmount: number;
+  projectedExposure: number;
+  isCountEligible: boolean;
+  isFinancialCapacityEligible: boolean;
+  isEligible: boolean;
+  rejectionReasons: string[];
+}
+
+export interface EarlyLoanSettlementQuote {
+  loanId: string;
+  loanNumber: string;
+  memberId: string;
+  settlementDate: string;
+  currentPrincipalBalance: number;
+  accruedInterestToDate: number;
+  unearnedInterestRebate: number;
+  penaltiesDue: number;
+  totalPayoffAmount: number;
+  originalTotalInterest: number;
+  interestSavedByBorrower: number;
+}
+
 export interface LoanProduct {
   id: string;
   tenantId?: string;

@@ -121,8 +121,8 @@ export class OperatorService {
       let healthScore = 98;
       if (tenant.status === 'SUSPENDED') {
         healthScore = 40;
-      } else if (creditBalance < 500) {
-        healthScore = 82; // Low credit warning
+      } else if (creditBalance < 1000) {
+        healthScore = 82; // Low credit warning (< ₱1,000 threshold)
       }
 
       summaries.push({
@@ -182,7 +182,7 @@ export class OperatorService {
 
     const totalStorageUsedMb = fleet.reduce((sum, t) => sum + t.storageUsedMb, 0);
     const totalStorageUsedGb = Math.round((totalStorageUsedMb / 1024) * 100) / 100;
-    const lowCreditTenantsCount = fleet.filter((t) => t.platformCreditBalance < 500).length;
+    const lowCreditTenantsCount = fleet.filter((t) => t.platformCreditBalance < 1000).length;
 
     return {
       totalTenants,
