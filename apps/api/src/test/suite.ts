@@ -26,22 +26,20 @@ function assert(condition: boolean, message: string) {
 
 console.log('🧪 RUNNING COMPREHENSIVE FLEX COOP SOLUTION VERIFICATION SUITE\n');
 
-// 1. Monetization & Dual Fee Tests
-console.log('--- 1. Monetization & Pass-Through Loan Processing Fee ---');
+// 1. Monetization & Single Platform Billing Model Tests
+console.log('--- 1. Monetization & Single Platform Technology Fee (1.0%) ---');
 {
-  // Escrow Mode: ₱1,000 (2% is ₱20, floor ₱100 applies)
-  const calcSmall = MonetizationService.calculatePlatformFee(1000, 'PLATFORM_ESCROW');
-  assert(calcSmall.grossFee === 100.0, 'Platform Escrow small loan (₱1,000) applies ₱100 minimum floor');
-  assert(calcSmall.vatAmount > 0, `VAT calculated on ₱100: ₱${calcSmall.vatAmount}`);
+  // Single Model: ₱1,000 (1% is ₱10.00)
+  const calcSmall = MonetizationService.calculatePlatformFee(1000);
+  assert(calcSmall.grossFee === 10.0, 'Platform applies flat 1.0% technology fee on small loan (₱1,000 -> ₱10.00)');
+  assert(calcSmall.vatAmount > 0, `VAT calculated on ₱10: ₱${calcSmall.vatAmount}`);
   assert(calcSmall.grossFee === calcSmall.netPlatformRevenue + calcSmall.vatAmount, 'Gross Fee equals Net Revenue + 12% Output VAT');
 
-  // Escrow Mode: ₱50,000 (2% is ₱1,000, > ₱100)
-  const calcLarge = MonetizationService.calculatePlatformFee(50000, 'PLATFORM_ESCROW');
-  assert(calcLarge.grossFee === 1000.0, 'Platform Escrow ₱50,000 loan charges 2% (₱1,000.00)');
-
-  // Coop-Owned Merchant Mode: 0.5%
-  const calcMerchant = MonetizationService.calculatePlatformFee(50000, 'COOP_MERCHANT');
-  assert(calcMerchant.grossFee === 250.0, 'Coop-owned merchant loan charges 0.5% (₱250.00)');
+  // Single Model: ₱50,000 (1% is ₱500.00)
+  const calcLarge = MonetizationService.calculatePlatformFee(50000);
+  assert(calcLarge.grossFee === 500.0, 'Platform applies flat 1.0% technology fee on ₱50,000 loan (₱500.00)');
+  assert(calcLarge.netPlatformRevenue === 446.43, 'Net platform revenue decomposed to ₱446.43 (₱500 / 1.12)');
+  assert(calcLarge.vatAmount === 53.57, '12% Output VAT decomposed to ₱53.57 (₱446.43 + ₱53.57 = ₱500.00)');
 
   // Electronic VAT Invoice generation
   const invoice = MonetizationService.generatePlatformInvoice({
@@ -49,11 +47,11 @@ console.log('--- 1. Monetization & Pass-Through Loan Processing Fee ---');
     loanId: 'loan_test',
     disbursementReference: 'REF-001',
     loanAmount: 50000,
-    billingMode: 'PLATFORM_ESCROW',
     tenantTin: '123-456-789-000',
   });
-  assert(invoice.grossFeeAmount === 1000.0, 'Invoice contains gross fee');
-  assert(invoice.vatAmount > 0, 'Invoice contains 12% Output VAT');
+  assert(invoice.grossFeeAmount === 500.0, 'Invoice contains 1% gross fee (₱500.00)');
+  assert(invoice.vatAmount === 53.57, 'Invoice contains 12% Output VAT (₱53.57)');
+  assert(invoice.netRevenue === 446.43, 'Invoice contains net revenue (₱446.43)');
   assert(invoice.status === 'DEDUCTED', 'Invoice is marked as DEDUCTED upfront');
 }
 
@@ -413,20 +411,28 @@ console.log('\n--- 13. Dynamic Subdomain Tenant Resolution (tuntongtech.com) ---
     const cleanHost = hostHeader.split(':')[0].toLowerCase();
 
     // Root platform domain
-    if (cleanHost === 'flexcoop.tuntongtech.com' || cleanHost === 'localhost') {
+    if (cleanHost === 'coop.tuntongtech.com' || cleanHost === 'flexcoop.tuntongtech.com' || cleanHost === 'localhost') {
       return null;
     }
 
-    // Production tenant subdomain: <tenant>-flexcoop.tuntongtech.com
-    const prodSuffix = '-flexcoop.tuntongtech.com';
+    // Production tenant subdomain: <tenant>-coop.tuntongtech.com (primary) or <tenant>-flexcoop.tuntongtech.com (legacy)
+    const prodSuffix = '-coop.tuntongtech.com';
     if (cleanHost.endsWith(prodSuffix)) {
       return cleanHost.slice(0, -prodSuffix.length);
     }
+    const legacyProdSuffix = '-flexcoop.tuntongtech.com';
+    if (cleanHost.endsWith(legacyProdSuffix)) {
+      return cleanHost.slice(0, -legacyProdSuffix.length);
+    }
 
-    // Local dev tenant subdomain: <tenant>-flexcoop.localhost or <tenant>.localhost
-    const devSuffix = '-flexcoop.localhost';
+    // Local dev tenant subdomain: <tenant>-coop.localhost or <tenant>.localhost
+    const devSuffix = '-coop.localhost';
     if (cleanHost.endsWith(devSuffix)) {
       return cleanHost.slice(0, -devSuffix.length);
+    }
+    const legacyDevSuffix = '-flexcoop.localhost';
+    if (cleanHost.endsWith(legacyDevSuffix)) {
+      return cleanHost.slice(0, -legacyDevSuffix.length);
     }
     if (cleanHost.endsWith('.localhost')) {
       return cleanHost.slice(0, -'.localhost'.length);
@@ -435,22 +441,26 @@ console.log('\n--- 13. Dynamic Subdomain Tenant Resolution (tuntongtech.com) ---
     return null;
   }
 
-  // 13.1 Production Tenant Subdomains
-  const slugBayani = resolveTenantFromHost('bayani-flexcoop.tuntongtech.com');
-  assert(slugBayani === 'bayani', 'Extracts tenant slug from bayani-flexcoop.tuntongtech.com');
+  // 13.1 Production Tenant Subdomains (-coop.tuntongtech.com)
+  const slugBayani = resolveTenantFromHost('bayani-coop.tuntongtech.com');
+  assert(slugBayani === 'bayani', 'Extracts tenant slug from bayani-coop.tuntongtech.com');
 
-  const slugSanJose = resolveTenantFromHost('san-jose-flexcoop.tuntongtech.com:443');
-  assert(slugSanJose === 'san-jose', 'Extracts hyphenated tenant slug ignoring port');
+  const slugSanJose = resolveTenantFromHost('san-jose-coop.tuntongtech.com:443');
+  assert(slugSanJose === 'san-jose', 'Extracts hyphenated tenant slug ignoring port from -coop.tuntongtech.com');
 
   // 13.2 Master Platform Domain (Root)
-  const masterSlug = resolveTenantFromHost('flexcoop.tuntongtech.com');
-  assert(masterSlug === null, 'Identifies root platform domain flexcoop.tuntongtech.com without tenant scoping');
+  const masterSlug = resolveTenantFromHost('coop.tuntongtech.com');
+  assert(masterSlug === null, 'Identifies root platform domain coop.tuntongtech.com without tenant scoping');
 
-  // 13.3 Local Dev Subdomains
-  const localSlug = resolveTenantFromHost('bayani-flexcoop.localhost:3000');
-  assert(localSlug === 'bayani', 'Resolves local development subdomain bayani-flexcoop.localhost');
+  // 13.3 Local Dev Subdomains (-coop.localhost)
+  const localSlug = resolveTenantFromHost('bayani-coop.localhost:3000');
+  assert(localSlug === 'bayani', 'Resolves local development subdomain bayani-coop.localhost');
 
-  // 13.4 Tenant Store Lookup Mapping
+  // 13.4 Backward Compatibility with Legacy Subdomain
+  const legacySlug = resolveTenantFromHost('bayani-flexcoop.tuntongtech.com');
+  assert(legacySlug === 'bayani', 'Gracefully supports legacy -flexcoop.tuntongtech.com subdomain');
+
+  // 13.5 Tenant Store Lookup Mapping
   const matchedTenant = Array.from(dbStore.tenants.values()).find(
     (t) => t.slug === slugBayani || t.slug.replace(/_/g, '-') === slugBayani
   );
@@ -753,22 +763,33 @@ console.log('\n--- 18. Membership Underwriting, Deferred CBU, ₱15 Onboarding F
   );
   assert(isBlocked, 'Incomplete review checklist strictly blocks member approval and activation');
 
-  // 18.2 Platform Onboarding Fee: Charge Coop ₱15 per approved member
-  const onboardingFee = MonetizationService.calculateMemberOnboardingFee();
-  assert(onboardingFee.grossFee === 15.0, 'Platform charges cooperative exactly ₱15.00 per approved member');
-  assert(onboardingFee.netPlatformRevenue === 13.39, 'Net platform revenue decomposed to ₱13.39 (₱15 / 1.12)');
-  assert(onboardingFee.vatAmount === 1.61, '12% Output VAT decomposed to ₱1.61 (₱13.39 + ₱1.61 = ₱15.00)');
+  // 18.2 Platform Onboarding Fee: Free for first 15 members, ₱50 per member after first 15 members
+  const onboardingFee5 = MonetizationService.calculateMemberOnboardingFee(5);
+  assert(onboardingFee5.isFreeTier === true, 'Member within first 15 members (e.g. #5) has isFreeTier=true');
+  assert(onboardingFee5.grossFee === 0.0, 'Platform charges ₱0.00 for member within first 15 members');
 
-  const onboardingInvoice = MonetizationService.generateMemberOnboardingInvoice({
+  const onboardingFee15 = MonetizationService.calculateMemberOnboardingFee(15);
+  assert(onboardingFee15.isFreeTier === true && onboardingFee15.grossFee === 0.0, '15th member is still within free onboarding tier (₱0.00)');
+
+  const onboardingFee16 = MonetizationService.calculateMemberOnboardingFee(16);
+  assert(onboardingFee16.isFreeTier === false, '16th member exceeds free tier (isFreeTier=false)');
+  assert(onboardingFee16.grossFee === 50.0, 'Platform charges exactly ₱50.00 for new member after first 15 members');
+  assert(onboardingFee16.netPlatformRevenue === 44.64, 'Net platform revenue decomposed to ₱44.64 (₱50 / 1.12)');
+  assert(onboardingFee16.vatAmount === 5.36, '12% Output VAT decomposed to ₱5.36 (₱44.64 + ₱5.36 = ₱50.00)');
+
+  const onboardingInvoice16 = MonetizationService.generateMemberOnboardingInvoice({
     tenantId: 'tenant_bayani_001',
-    memberId: 'mem_4',
-    memberNumber: 'MEM-2026-0004',
+    memberId: 'mem_16',
+    memberNumber: 'MEM-2026-0016',
     memberName: 'Gabriela Silang Reyes',
     tenantTin: '992-182-384-000',
+    memberSequenceIndex: 16,
   });
-  assert(onboardingInvoice.grossFeeAmount === 15.0, 'Invoice reflects ₱15.00 billed to cooperative');
-  assert(onboardingInvoice.status === 'BILLED_TO_COOP', 'Invoice status set to BILLED_TO_COOP');
-  assert(onboardingInvoice.invoiceNumber.startsWith('INV-ONB-'), 'Invoice generated with INV-ONB prefix');
+  assert(onboardingInvoice16.grossFeeAmount === 50.0, 'Invoice reflects ₱50.00 billed to cooperative for 16th member');
+  assert(onboardingInvoice16.vatAmount === 5.36, 'Invoice reflects ₱5.36 12% Output VAT');
+  assert(onboardingInvoice16.netRevenue === 44.64, 'Invoice reflects ₱44.64 net platform base');
+  assert(onboardingInvoice16.status === 'BILLED_TO_COOP', 'Invoice status set to BILLED_TO_COOP');
+  assert(onboardingInvoice16.invoiceNumber.startsWith('INV-ONB-'), 'Invoice generated with INV-ONB prefix');
 
   // 18.3 Deferred Share Capital: Application submitted with ₱0 paid-up capital
   const pendingMemberApplication = {

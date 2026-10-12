@@ -1222,24 +1222,32 @@ export default function AdminDashboard() {
     const { action, member, notes } = memberConfirmModal;
 
     if (action === 'APPROVE') {
-      // Requirement: Charge the coop ₱15 for every approved member!
-      const onboardingFee = 15.00;
-      const vatOnboarding = Math.round((onboardingFee - (onboardingFee / 1.12)) * 100) / 100;
-      const netOnboarding = Math.round((onboardingFee - vatOnboarding) * 100) / 100;
+      // Platform Billing Model: Free for first 15 members, ₱50 for every new member after first 15 members
+      const previouslyApprovedCount = members.filter((m) => m.kycStatus === 'VERIFIED').length;
+      const currentMemberSequence = previouslyApprovedCount + 1;
+      const isFreeTier = currentMemberSequence <= 15;
+      const onboardingFee = isFreeTier ? 0.0 : 50.0;
+      const vatOnboarding = isFreeTier ? 0.0 : 5.36;
+      const netOnboarding = isFreeTier ? 0.0 : 44.64;
 
       const newInvoice = {
         id: `INV-ONB-2026-${Math.floor(1000 + Math.random() * 9000)}`,
         memberNo: member.memberNo,
         memberName: member.name,
-        description: `Member Onboarding Platform Fee (CDA MC 2015-06 Review Cleared: ${member.name})`,
+        description: isFreeTier
+          ? `Member Onboarding (Free Tier: Member #${currentMemberSequence} of first 15 free members)`
+          : `Member Onboarding Platform Fee (Member #${currentMemberSequence} - ₱50 billed to coop)`,
         feeAmount: onboardingFee,
         vatAmount: vatOnboarding,
         netAmount: netOnboarding,
+        isFreeTier,
         date: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
-        status: 'BILLED_TO_COOP',
+        status: isFreeTier ? 'FREE_TIER' : 'BILLED_TO_COOP',
       };
 
-      setCoopOnboardingFeesTotal((prev) => prev + onboardingFee);
+      if (!isFreeTier) {
+        setCoopOnboardingFeesTotal((prev) => prev + onboardingFee);
+      }
       setOnboardingInvoices((prev) => [newInvoice, ...prev]);
 
       setMembers((prev) =>
@@ -1258,7 +1266,7 @@ export default function AdminDashboard() {
       );
 
       setMemberActionNotification(
-        `Member ${member.memberNo} (${member.name}) APPROVED! Coop charged ₱15.00 onboarding fee to Bayani Cooperative (Invoice ${newInvoice.id}). Member can now pay initial Share Capital (₱${(member.initialPledge || 3000).toLocaleString()}) via OTC (₱0 fee) or QR Ph (1.5% fee).`
+        `Member ${member.memberNo} (${member.name}) APPROVED! ${isFreeTier ? `Free onboarding tier (Member #${currentMemberSequence} of 15 free).` : `Coop charged ₱50.00 onboarding fee (Member #${currentMemberSequence}, Invoice ${newInvoice.id}).`} Member can now pay initial Share Capital (₱${(member.initialPledge || 3000).toLocaleString()}) via OTC (₱0 fee) or QR Ph (1.5% fee).`
       );
     } else {
       setMembers((prev) =>
@@ -1381,13 +1389,10 @@ export default function AdminDashboard() {
   const [calcRate, setCalcRate] = useState<number>(12);
   const [calcTerm, setCalcTerm] = useState<number>(12);
   const [calcMethod, setCalcMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
-  const [calcBillingMode, setCalcBillingMode] = useState<'PLATFORM_ESCROW' | 'COOP_MERCHANT'>('PLATFORM_ESCROW');
+  const [calcBillingMode, setCalcBillingMode] = useState<string>('STANDARD_UNIFIED');
 
-  // Pass-through platform fee math
-  const platformFee =
-    calcBillingMode === 'PLATFORM_ESCROW'
-      ? Math.max(calcAmount * 0.02, 100)
-      : calcAmount * 0.005;
+  // Single Unified Platform Billing Model: Flat 1.0% technology fee for approved loans
+  const platformFee = Math.round(calcAmount * 0.01 * 100) / 100;
   const netPlatformRevenue = Math.round((platformFee / 1.12) * 100) / 100;
   const vatAmount = Math.round((platformFee - netPlatformRevenue) * 100) / 100;
   const coopServiceFee = Math.round(calcAmount * 0.015 * 100) / 100;
@@ -1926,7 +1931,7 @@ export default function AdminDashboard() {
                 <div className="text-xl font-black text-rose-950 font-mono">
                   ₱{coopOnboardingFeesTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                 </div>
-                <div className="text-[10px] text-rose-700">₱15.00 billed per approved member</div>
+                <div className="text-[10px] text-rose-700">₱50.00 billed per new member after first 15 free</div>
               </div>
             </div>
 
@@ -3924,15 +3929,11 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Monetization Channel</label>
-                  <select
-                    value={calcBillingMode}
-                    onChange={(e) => setCalcBillingMode(e.target.value as any)}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                  >
-                    <option value="PLATFORM_ESCROW">Platform Escrow (2% of loan or ₱100 floor)</option>
-                    <option value="COOP_MERCHANT">Coop-Owned Merchant Account (0.5%)</option>
-                  </select>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Platform Billing Model</label>
+                  <div className="w-full border border-indigo-200 bg-indigo-50/60 rounded-lg px-3 py-2 text-xs font-semibold text-indigo-950 flex items-center justify-between">
+                    <span>Unified SaaS Plan: 1.0% Technology Fee</span>
+                    <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">Standard Tier</span>
+                  </div>
                 </div>
 
                 <div>
@@ -3958,9 +3959,9 @@ export default function AdminDashboard() {
                     <span className="font-semibold text-slate-900">₱{calcAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                   </div>
 
-                  <div className="flex justify-between text-emerald-700">
+                  <div className="flex justify-between text-indigo-700">
                     <span>
-                      Pass-Through Platform Fee ({calcBillingMode === 'PLATFORM_ESCROW' ? '2% / min ₱100' : '0.5%'}):
+                      Loan Technology Fee (1.0% Unified Rate):
                     </span>
                     <span className="font-semibold">- ₱{platformFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                   </div>
@@ -6828,7 +6829,7 @@ export default function AdminDashboard() {
                 </div>
                 <h2 className="text-xl font-black text-slate-900 tracking-tight">Platform Escrow Balance & Detailed Utilization</h2>
                 <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-                  Real-time visibility into Platform Escrow balances held across PayMongo QR Ph member deposits, automated platform onboarding fee billing (₱15/member), and Treasury Sweep operations to the cooperative mother bank.
+                  Real-time visibility into Platform Escrow balances held across PayMongo QR Ph member deposits, automated platform onboarding fee billing (₱50/member after first 15 free), 1% loan technology fees, and Treasury Sweep operations to the cooperative mother bank.
                 </p>
               </div>
 
@@ -6901,7 +6902,7 @@ export default function AdminDashboard() {
                   ₱825.00
                 </div>
                 <div className="text-[11px] text-slate-500 mt-1">
-                  ₱15/member onboarding + 1.5% QR fees
+                  ₱50/member (&gt;15 free) + 1% loan tech fee
                 </div>
               </div>
 
@@ -6944,7 +6945,7 @@ export default function AdminDashboard() {
                     <span>Automated Fee Deduction</span>
                   </span>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Upon membership approval, the system charges ₱15.00 (₱13.39 net + ₱1.61 12% EVAT), creating an electronic BIR billing voucher to the cooperative.
+                    Upon membership approval after the first 15 free members, system charges ₱50.00 (₱44.64 net + ₱5.36 12% EVAT). On loans, charges flat 1% technology fee.
                   </p>
                 </div>
 
@@ -6977,7 +6978,7 @@ export default function AdminDashboard() {
                     <option value="ALL">All Transactions</option>
                     <option value="INFLOW_SHARE_CAPITAL">Share Capital Deposits</option>
                     <option value="INFLOW_REPAYMENT">Loan Repayments</option>
-                    <option value="PLATFORM_ONBOARDING_FEE">Platform Onboarding Fees (₱15)</option>
+                    <option value="PLATFORM_ONBOARDING_FEE">Platform Onboarding Fees (₱50 after 15 free)</option>
                     <option value="TREASURY_SWEEP">Treasury Sweeps</option>
                   </select>
                 </div>

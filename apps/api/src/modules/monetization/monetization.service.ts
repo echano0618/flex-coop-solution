@@ -1,38 +1,21 @@
-import { PlatformFeeCalculation, PlatformInvoice, TenantBillingMode } from '@flexcoop/shared-types';
+import { MemberOnboardingFeeCalculation, PlatformFeeCalculation, PlatformInvoice, TenantBillingMode } from '@flexcoop/shared-types';
 
 export class MonetizationService {
   /**
-   * Calculates the platform pass-through loan processing fee based on tenant's billing mode.
-   * Rule:
-   * - Platform Escrow: max(2.0% of loan amount, ₱100.00)
-   * - Coop-Owned Merchant: 0.5% of loan amount
+   * Calculates the platform technology fee for an approved/disbursed loan.
+   * Single Platform Billing Model Rule:
+   * - 1.0% Technology Fee for every approved loan
    * Tax:
-   * - 12% Output VAT decomposed (BIR Official Invoice Standard)
+   * - 12% Output VAT decomposed (BIR Official Electronic Invoice Standard)
    */
-  static calculatePlatformFee(loanAmount: number, billingMode: TenantBillingMode): PlatformFeeCalculation {
+  static calculatePlatformFee(loanAmount: number, billingMode: TenantBillingMode = 'STANDARD_UNIFIED'): PlatformFeeCalculation {
     if (loanAmount <= 0) {
       throw new Error('Loan amount must be greater than zero');
     }
 
-    let feePercentage: number;
-    let minimumFee: number;
-    let grossFee: number;
-    let formula: string;
-
-    if (billingMode === 'PLATFORM_ESCROW') {
-      feePercentage = 0.02; // 2.0%
-      minimumFee = 100.0; // ₱100 floor
-      const calculated = loanAmount * feePercentage;
-      grossFee = Math.max(calculated, minimumFee);
-      formula = `max(2.0% × ₱${loanAmount.toFixed(2)}, ₱100.00) = ₱${grossFee.toFixed(2)}`;
-    } else {
-      feePercentage = 0.005; // 0.5%
-      minimumFee = 0.0;
-      grossFee = loanAmount * feePercentage;
-      formula = `0.5% × ₱${loanAmount.toFixed(2)} = ₱${grossFee.toFixed(2)}`;
-    }
-
-    grossFee = Math.round(grossFee * 100) / 100;
+    const feePercentage = 0.01; // Flat 1.0% Technology Fee
+    let grossFee = Math.round(loanAmount * feePercentage * 100) / 100;
+    const formula = `1.0% × ₱${loanAmount.toFixed(2)} = ₱${grossFee.toFixed(2)}`;
 
     // BIR Tax Decomposition (Gross inclusive of 12% Output VAT)
     // Net Base = Gross / 1.12
@@ -44,7 +27,7 @@ export class MonetizationService {
       loanAmount,
       billingMode,
       feePercentage,
-      minimumFee,
+      minimumFee: 0.0,
       grossFee,
       vatAmount,
       netPlatformRevenue,
@@ -53,17 +36,18 @@ export class MonetizationService {
   }
 
   /**
-   * Generates a BIR-compliant electronic Sales Invoice / Billing Statement for the platform fee
+   * Generates a BIR-compliant electronic Sales Invoice / Billing Statement for the loan platform fee
    */
   static generatePlatformInvoice(params: {
     tenantId: string;
     loanId: string;
     disbursementReference: string;
     loanAmount: number;
-    billingMode: TenantBillingMode;
+    billingMode?: TenantBillingMode;
     tenantTin: string;
   }): PlatformInvoice {
-    const fee = this.calculatePlatformFee(params.loanAmount, params.billingMode);
+    const billingMode = params.billingMode || 'STANDARD_UNIFIED';
+    const fee = this.calculatePlatformFee(params.loanAmount, billingMode);
     const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     return {
@@ -72,7 +56,7 @@ export class MonetizationService {
       invoiceNumber,
       loanId: params.loanId,
       disbursementReference: params.disbursementReference,
-      billingMode: params.billingMode,
+      billingMode,
       grossLoanAmount: params.loanAmount,
       grossFeeAmount: fee.grossFee,
       vatAmount: fee.vatAmount,
@@ -84,17 +68,39 @@ export class MonetizationService {
   }
 
   /**
-   * Calculates the platform fee charged to the cooperative per approved member (₱15.00).
+   * Calculates the platform fee charged to the cooperative per member.
+   * Single Platform Billing Model Rule:
+   * - First 15 members: FREE (₱0.00)
+   * - After first 15 members (sequence > 15): ₱50.00 per new member
    * BIR Output VAT decomposition:
-   * Gross = ₱15.00
-   * Net Platform Base = ₱15.00 / 1.12 = ₱13.39
-   * 12% Output VAT = ₱1.61
+   * Gross = ₱50.00
+   * Net Platform Base = ₱50.00 / 1.12 = ₱44.64
+   * 12% Output VAT = ₱5.36
    */
-  static calculateMemberOnboardingFee(): { grossFee: number; vatAmount: number; netPlatformRevenue: number } {
-    const grossFee = 15.0;
+  static calculateMemberOnboardingFee(memberSequenceIndex: number = 16): MemberOnboardingFeeCalculation {
+    if (memberSequenceIndex <= 15) {
+      return {
+        memberSequenceIndex,
+        isFreeTier: true,
+        grossFee: 0.0,
+        vatAmount: 0.0,
+        netPlatformRevenue: 0.0,
+        formula: `Member #${memberSequenceIndex} within first 15 free members tier: ₱0.00`,
+      };
+    }
+
+    const grossFee = 50.0;
     const netPlatformRevenue = Math.round((grossFee / 1.12) * 100) / 100;
     const vatAmount = Math.round((grossFee - netPlatformRevenue) * 100) / 100;
-    return { grossFee, vatAmount, netPlatformRevenue };
+
+    return {
+      memberSequenceIndex,
+      isFreeTier: false,
+      grossFee,
+      vatAmount,
+      netPlatformRevenue,
+      formula: `Member #${memberSequenceIndex} exceeds free tier: ₱50.00 (₱44.64 Net Base + ₱5.36 12% Output VAT)`,
+    };
   }
 
   /**
@@ -106,8 +112,9 @@ export class MonetizationService {
     memberNumber: string;
     memberName: string;
     tenantTin: string;
+    memberSequenceIndex?: number;
   }) {
-    const fee = this.calculateMemberOnboardingFee();
+    const fee = this.calculateMemberOnboardingFee(params.memberSequenceIndex ?? 16);
     const invoiceNumber = `INV-ONB-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     return {
@@ -120,6 +127,7 @@ export class MonetizationService {
       grossFeeAmount: fee.grossFee,
       vatAmount: fee.vatAmount,
       netRevenue: fee.netPlatformRevenue,
+      isFreeTier: fee.isFreeTier,
       birTin: params.tenantTin,
       status: 'BILLED_TO_COOP',
       issuedAt: new Date().toISOString(),

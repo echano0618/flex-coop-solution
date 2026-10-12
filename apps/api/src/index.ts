@@ -14,7 +14,7 @@ import { AuthService, UserRole } from './core/auth';
 import { FirestoreCoopService } from './core/firestore.service';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
-import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, CollateralItem, SurplusDistributionResult } from '@flexcoop/shared-types';
+import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult } from '@flexcoop/shared-types';
 import { NetSurplusService } from './modules/accounting/surplus.service';
 import { CollateralService } from './modules/lending/collateral.service';
 
@@ -30,20 +30,28 @@ export function resolveTenantFromHost(hostHeader?: string): string | null {
   const cleanHost = hostHeader.split(':')[0].toLowerCase();
 
   // Root platform domain
-  if (cleanHost === 'flexcoop.tuntongtech.com' || cleanHost === 'localhost') {
+  if (cleanHost === 'coop.tuntongtech.com' || cleanHost === 'flexcoop.tuntongtech.com' || cleanHost === 'localhost') {
     return null;
   }
 
-  // Production tenant subdomain: <tenant>-flexcoop.tuntongtech.com
-  const prodSuffix = '-flexcoop.tuntongtech.com';
+  // Production tenant subdomain: <tenant>-coop.tuntongtech.com (primary) or <tenant>-flexcoop.tuntongtech.com (legacy)
+  const prodSuffix = '-coop.tuntongtech.com';
   if (cleanHost.endsWith(prodSuffix)) {
     return cleanHost.slice(0, -prodSuffix.length);
   }
+  const legacyProdSuffix = '-flexcoop.tuntongtech.com';
+  if (cleanHost.endsWith(legacyProdSuffix)) {
+    return cleanHost.slice(0, -legacyProdSuffix.length);
+  }
 
-  // Local dev tenant subdomain: <tenant>-flexcoop.localhost or <tenant>.localhost
-  const devSuffix = '-flexcoop.localhost';
+  // Local dev tenant subdomain: <tenant>-coop.localhost or <tenant>.localhost
+  const devSuffix = '-coop.localhost';
   if (cleanHost.endsWith(devSuffix)) {
     return cleanHost.slice(0, -devSuffix.length);
+  }
+  const legacyDevSuffix = '-flexcoop.localhost';
+  if (cleanHost.endsWith(legacyDevSuffix)) {
+    return cleanHost.slice(0, -legacyDevSuffix.length);
   }
   if (cleanHost.endsWith('.localhost')) {
     return cleanHost.slice(0, -'.localhost'.length);
@@ -59,7 +67,7 @@ export function resolveTenantId(req: Request): string {
     return headerTenant;
   }
 
-  // 2. Subdomain resolution: <tenantname>-flexcoop.tuntongtech.com
+  // 2. Subdomain resolution: <tenantname>-coop.tuntongtech.com
   const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
   const slugFromHost = resolveTenantFromHost(host);
   if (slugFromHost) {
@@ -290,7 +298,20 @@ app.get('/api/v1/tenants', (_req: Request, res: Response) => {
 });
 
 app.post('/api/v1/tenants', (req: Request, res: Response) => {
-  const { name, slug, cdaRegistrationNumber, tin, contactEmail, contactPhone, address, billingMode } = req.body;
+  const {
+    name,
+    slug,
+    cdaRegistrationNumber,
+    tin,
+    contactEmail,
+    contactPhone,
+    address,
+    billingMode,
+    adminFirstName,
+    adminMiddleName,
+    adminLastName,
+    validIdUrl,
+  } = req.body;
 
   if (!name || !slug || !cdaRegistrationNumber || !tin) {
     return res.status(400).json({ success: false, error: 'Missing required tenant metadata' });
@@ -305,8 +326,12 @@ app.post('/api/v1/tenants', (req: Request, res: Response) => {
     tin,
     contactEmail: contactEmail || 'admin@coop.ph',
     contactPhone: contactPhone || '+63 900 000 0000',
+    adminFirstName,
+    adminMiddleName,
+    adminLastName,
+    validIdUrl,
     address: address || 'Philippines',
-    billingMode: billingMode === 'COOP_MERCHANT' ? 'COOP_MERCHANT' : 'PLATFORM_ESCROW',
+    billingMode: (billingMode as TenantBillingMode) || 'STANDARD_UNIFIED',
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

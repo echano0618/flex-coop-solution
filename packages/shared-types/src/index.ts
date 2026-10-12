@@ -7,16 +7,20 @@
 // ==========================================
 export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'PROVISIONING' | 'DEACTIVATED';
 
-export type TenantBillingMode = 'PLATFORM_ESCROW' | 'COOP_MERCHANT';
+export type TenantBillingMode = 'STANDARD_UNIFIED' | 'PLATFORM_ESCROW' | 'COOP_MERCHANT';
 
 export interface Tenant {
   id: string;
   name: string;
-  slug: string; // Used for tenant_<slug> schema and <slug>.flexcoop.ph
+  slug: string; // Used for tenant_<slug> schema and <slug>-coop.tuntongtech.com
   cdaRegistrationNumber: string;
   tin: string;
   contactEmail: string;
-  contactPhone: string;
+  contactPhone?: string;
+  adminFirstName?: string;
+  adminMiddleName?: string;
+  adminLastName?: string;
+  validIdUrl?: string;
   address: string;
   billingMode: TenantBillingMode;
   merchantAccountId?: string; // Connected PayMongo / Gateway ID if COOP_MERCHANT
@@ -27,13 +31,22 @@ export interface Tenant {
 
 export interface PlatformFeeCalculation {
   loanAmount: number;
-  billingMode: TenantBillingMode;
-  feePercentage: number; // 2.0% for Escrow, 0.5% for Coop Merchant
-  minimumFee: number; // 100 for Escrow, 0 for Coop Merchant
-  grossFee: number; // The higher of percentage or minFee
+  billingMode?: TenantBillingMode;
+  feePercentage: number; // Single model: 1.0% technology fee for approved loans
+  minimumFee?: number; // Optional floor
+  grossFee: number; // 1.0% of loan amount
   vatAmount: number; // 12% Output VAT on the fee
   netPlatformRevenue: number; // Gross fee less VAT
   calculationFormula: string;
+}
+
+export interface MemberOnboardingFeeCalculation {
+  memberSequenceIndex: number;
+  isFreeTier: boolean;
+  grossFee: number; // ₱0.00 if sequence <= 15, else ₱50.00
+  vatAmount: number; // 12% Output VAT: ₱5.36 if > 15, else ₱0.00
+  netPlatformRevenue: number; // ₱44.64 if > 15, else ₱0.00
+  formula: string;
 }
 
 export interface PlatformInvoice {
