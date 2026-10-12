@@ -1595,6 +1595,19 @@ export default function AdminDashboard() {
 
         {/* Drawer Footer Utilities */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
+          {currentStaff.role === 'SYSTEM_ADMIN' && (
+            <Link
+              href="/operator"
+              className="flex items-center justify-between p-2 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/70 border border-indigo-700/60 text-indigo-300 transition text-[11px] font-bold shadow-sm"
+            >
+              <div className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                <span>SaaS Operator Fleet Portal</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
+
           <Link
             href="/member"
             className="flex items-center justify-between p-2 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-800/50 text-emerald-300 transition text-[11px] font-semibold"
@@ -1673,6 +1686,20 @@ export default function AdminDashboard() {
 
             {/* Mobile Drawer Footer Utilities */}
             <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
+              {currentStaff.role === 'SYSTEM_ADMIN' && (
+                <Link
+                  href="/operator"
+                  onClick={() => setIsMobileDrawerOpen(false)}
+                  className="flex items-center justify-between p-2 rounded-lg bg-indigo-950/70 border border-indigo-700/60 text-indigo-300 transition text-[11px] font-bold"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>SaaS Operator Fleet Portal</span>
+                  </div>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              )}
+
               <Link
                 href="/member"
                 onClick={() => setIsMobileDrawerOpen(false)}

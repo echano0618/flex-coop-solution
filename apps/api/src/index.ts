@@ -17,6 +17,7 @@ import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult, PSGCAddress, validatePSGCAddress, formatPSGCAddress } from '@flexcoop/shared-types';
 import { NetSurplusService } from './modules/accounting/surplus.service';
 import { CollateralService } from './modules/lending/collateral.service';
+import { OperatorService } from './modules/operator/operator.service';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -377,6 +378,88 @@ app.post('/api/v1/tenants', (req: Request, res: Response) => {
     data: tenant,
     schemaName,
   });
+});
+
+// ==========================================
+// 2.1 SAAS OPERATOR CONTROL PLANE (TUNTONG TECH SOLUTION)
+// ==========================================
+app.get('/api/v1/operator/overview', (_req: Request, res: Response) => {
+  const metrics = OperatorService.getOperatorOverviewMetrics();
+  res.json({ success: true, data: metrics });
+});
+
+app.get('/api/v1/operator/tenants', (_req: Request, res: Response) => {
+  const fleet = OperatorService.getTenantFleetSummaries();
+  res.json({ success: true, count: fleet.length, data: fleet });
+});
+
+app.post('/api/v1/operator/tenants/:id/credit/adjust', (req: Request, res: Response) => {
+  const tenantId = req.params.id;
+  const { amount, type, reference, notes, performedBy } = req.body;
+
+  if (amount === undefined || isNaN(Number(amount))) {
+    return res.status(400).json({ success: false, error: 'Valid adjustment amount is required.' });
+  }
+
+  const result = OperatorService.adjustPlatformCredit({
+    tenantId,
+    amount: Number(amount),
+    type: type || 'ADJUSTMENT',
+    reference: reference || `OP-ADJ-${Date.now()}`,
+    notes: notes || 'Operator credit adjustment',
+    performedBy: performedBy || 'Operator Admin',
+  });
+
+  res.json({
+    success: true,
+    message: `Platform credit updated for tenant. New balance: ₱${result.newBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+    data: result,
+  });
+});
+
+app.post('/api/v1/operator/tenants/:id/status', (req: Request, res: Response) => {
+  const tenantId = req.params.id;
+  const { status, reason } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ success: false, error: 'Status is required.' });
+  }
+
+  const updated = OperatorService.updateTenantStatus(tenantId, status, reason);
+  if (!updated) {
+    return res.status(404).json({ success: false, error: 'Tenant not found.' });
+  }
+
+  res.json({
+    success: true,
+    message: `Tenant status updated to '${status}'.`,
+    tenantId,
+    status,
+  });
+});
+
+app.get('/api/v1/operator/broadcasts', (_req: Request, res: Response) => {
+  const broadcasts = OperatorService.getActiveBroadcasts();
+  res.json({ success: true, count: broadcasts.length, data: broadcasts });
+});
+
+app.post('/api/v1/operator/broadcasts', (req: Request, res: Response) => {
+  const { title, message, severity, targetTenantIds, expiresAt, createdBy } = req.body;
+  if (!title || !message) {
+    return res.status(400).json({ success: false, error: 'Title and message are required.' });
+  }
+
+  const broadcast = OperatorService.createBroadcast({
+    title,
+    message,
+    severity: severity || 'INFO',
+    targetTenantIds: targetTenantIds || [],
+    isActive: true,
+    expiresAt: expiresAt || new Date(Date.now() + 86400000 * 7).toISOString(),
+    createdBy: createdBy || 'SaaS Operator',
+  });
+
+  res.status(201).json({ success: true, data: broadcast });
 });
 
 // ==========================================

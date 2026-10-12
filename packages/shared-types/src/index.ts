@@ -542,3 +542,8 @@ export interface CollateralItem {
 // 10. PHILIPPINE STANDARD GEOGRAPHIC CODE (PSGC)
 // ==========================================
 export * from './psgc';
+
+// ==========================================
+// 11. SAAS OPERATOR & CONTROL PLANE
+// ==========================================
+export * from './operator';

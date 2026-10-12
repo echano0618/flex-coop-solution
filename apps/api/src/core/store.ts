@@ -12,6 +12,8 @@ import {
   Tenant,
   CollateralItem,
   SurplusDistributionResult,
+  PlatformCreditTransaction,
+  SystemBroadcast,
 } from '@flexcoop/shared-types';
 import { AmortizationService } from '../modules/lending/amortization.service';
 import { MonetizationService } from '../modules/monetization/monetization.service';
@@ -32,6 +34,9 @@ export class AppDataStore {
   public amlcAlerts: AMLCCoveredTransactionAlert[] = [];
   public collaterals: Map<string, CollateralItem[]> = new Map();
   public surplusDistributions: Map<string, SurplusDistributionResult[]> = new Map();
+  public platformCredits: Map<string, number> = new Map(); // tenantId -> available credit
+  public creditTransactions: PlatformCreditTransaction[] = [];
+  public systemBroadcasts: SystemBroadcast[] = [];
 
   constructor() {
     this.seedInitialTenantData();

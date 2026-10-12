@@ -15,6 +15,7 @@ import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus, Member, PSGCAddress,
 import { NetSurplusService } from '../modules/accounting/surplus.service';
 import { CollateralService } from '../modules/lending/collateral.service';
 import { CooperativeTaxService } from '../modules/accounting/tax.service';
+import { OperatorService } from '../modules/operator/operator.service';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -1222,7 +1223,82 @@ console.log('\n--- 22. Philippine Standard Geographic Code (PSGC) Compliance ---
   assert(testMember.address === formatted, 'Member model maintains backwards compatible formatted address string');
 }
 
-console.log('\n🎉 ALL 159 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC, PLATFORM ESCROW, COOPERATIVE TAX, MEMBER SUBSIDIARY LEDGERS & PSGC ADDRESSES) PASSED SUCCESSFULLY!\n');
+// 23. SaaS Operator Control Plane, Multi-Tenant Fleet & Platform Credit Operations
+console.log('\n--- 23. SaaS Operator Fleet Monitor & Platform Credit Operations ---');
+{
+  // 23.1 Operator Fleet Summary & Telemetry
+  const fleet = OperatorService.getTenantFleetSummaries();
+  assert(fleet.length >= 3, `Fleet contains active cooperative instances (count: ${fleet.length})`);
+
+  const bayaniFleet = fleet.find((t) => t.id === 'tenant_bayani_001')!;
+  assert(bayaniFleet.subdomain === 'bayani-coop.tuntongtech.com', 'Subdomain adheres to <slug>-coop.tuntongtech.com');
+  assert(bayaniFleet.databaseSchema === 'tenant_bayani', 'Isolated PostgreSQL schema mapped to tenant_bayani');
+  assert(bayaniFleet.storageQuotaMb === 10240, 'Default cloud storage quota configured to 10 GB (10,240 MB)');
+
+  // 23.2 Member Census & Free Tier Calculation (15 Free vs ₱50/Member)
+  assert(bayaniFleet.freeTierMembers <= 15, 'Free tier capped at first 15 members');
+  assert(bayaniFleet.billedMembers === Math.max(0, bayaniFleet.totalMembers - 15), 'Billed members strictly tracks count exceeding 15 members');
+
+  // 23.3 Platform Credit Adjustment & Audit Ledger
+  const initialCredit = bayaniFleet.platformCreditBalance;
+  const topUpResult = OperatorService.adjustPlatformCredit({
+    tenantId: 'tenant_bayani_001',
+    amount: 2500.0,
+    type: 'TOP_UP',
+    reference: 'BDO-DEP-2026-TEST',
+    notes: 'Prepaid technology credit refill test',
+    performedBy: 'Lex (Platform Operator)',
+  });
+  assert(topUpResult.success === true, 'Platform credit adjustment executes successfully');
+  assert(topUpResult.newBalance === initialCredit + 2500.0, 'Platform credit balance strictly incremented');
+  assert(topUpResult.transaction.type === 'TOP_UP', 'Transaction ledger logs TOP_UP action type');
+  assert(topUpResult.transaction.reference === 'BDO-DEP-2026-TEST', 'Transaction retains financial reference');
+
+  // Fee deduction test
+  const feeDeductResult = OperatorService.adjustPlatformCredit({
+    tenantId: 'tenant_bayani_001',
+    amount: -150.0,
+    type: 'FEE_DEDUCTION',
+    reference: 'INV-ONB-TEST',
+    notes: 'Auto-debit onboarding fees',
+    performedBy: 'System Auto-Billing',
+  });
+  assert(feeDeductResult.newBalance === topUpResult.newBalance - 150.0, 'Fee deduction decreases platform credit balance');
+
+  // 23.4 Tenant Lifecycle & Kill-Switch
+  const suspendOk = OperatorService.updateTenantStatus('tenant_bayani_001', 'SUSPENDED', 'Compliance audit hold');
+  assert(suspendOk === true, 'Operator can suspend cooperative instance');
+  const suspendedTenant = dbStore.tenants.get('tenant_bayani_001')!;
+  assert(suspendedTenant.status === 'SUSPENDED', 'Tenant status reflects SUSPENDED state');
+
+  const reactivateOk = OperatorService.updateTenantStatus('tenant_bayani_001', 'ACTIVE', 'Reactivation approved');
+  assert(reactivateOk === true, 'Operator can reactivate cooperative instance');
+  assert(dbStore.tenants.get('tenant_bayani_001')?.status === 'ACTIVE', 'Tenant status restored to ACTIVE');
+
+  // 23.5 Global Operator Overview Aggregates
+  const metrics = OperatorService.getOperatorOverviewMetrics();
+  assert(metrics.totalTenants >= 3, 'Overview tracks total fleet tenant count');
+  assert(metrics.totalPlatformCreditPool > 0, 'Overview aggregates total platform credit pool');
+  assert(metrics.monthlyTechFeeRevenue > 0, 'Overview computes net monthly technology fee revenue');
+  assert(metrics.monthlyOutputVatPayable > 0, 'Overview computes 12% BIR Output VAT payable');
+  assert(metrics.totalStorageUsedGb >= 0, 'Overview tracks total fleet KYC/selfie storage consumption');
+
+  // 23.6 System Broadcast Dispatch
+  const broadcast = OperatorService.createBroadcast({
+    title: 'Emergency Advisory Test',
+    message: 'Testing system broadcast dispatch across fleet',
+    severity: 'WARNING',
+    targetTenantIds: [],
+    isActive: true,
+    expiresAt: new Date(Date.now() + 86400000).toISOString(),
+    createdBy: 'Lex (Platform Operator)',
+  });
+  assert(broadcast.id.startsWith('bc_'), 'Broadcast created with unique bc_ identifier');
+  const activeBroadcasts = OperatorService.getActiveBroadcasts();
+  assert(activeBroadcasts.some((b) => b.title === 'Emergency Advisory Test'), 'Active broadcast visible across tenancies');
+}
+
+console.log('\n🎉 ALL 178 VERIFICATION TEST CASES (INCLUDING SAAS OPERATOR PORTAL, FLEET TELEMETRY, PLATFORM CREDITS, SYSTEM ADMIN, IAM, RBAC, ESCROW, TAX & PSGC) PASSED SUCCESSFULLY!\n');
 
 
 
