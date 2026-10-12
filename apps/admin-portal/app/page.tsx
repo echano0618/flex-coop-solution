@@ -710,6 +710,23 @@ export default function AdminDashboard() {
   const [sweepAmount, setSweepAmount] = useState<number>(40000);
   const [platformUsageNotification, setPlatformUsageNotification] = useState<string | null>(null);
 
+  // Cooperative Prepaid Platform Credit State
+  const [coopPlatformCredit, setCoopPlatformCredit] = useState<number>(4250.0);
+  const [showCreditTopupModal, setShowCreditTopupModal] = useState<boolean>(false);
+  const [creditTopupAmount, setCreditTopupAmount] = useState<number>(2500);
+  const [creditTopupMethod, setCreditTopupMethod] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
+
+  const handleExecuteCreditTopup = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (creditTopupAmount <= 0) return;
+    const newBal = Math.round((coopPlatformCredit + creditTopupAmount) * 100) / 100;
+    setCoopPlatformCredit(newBal);
+    setShowCreditTopupModal(false);
+    setPlatformUsageNotification(
+      `Prepaid Platform Credit refilled with ₱${creditTopupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} via ${creditTopupMethod === 'PAYMONGO_QRPH' ? 'PayMongo QR Ph Rail' : 'Bank Depository'}. New Available Balance: ₱${newBal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+    );
+  };
+
   const handleExecuteTreasurySweep = (e: React.FormEvent) => {
     e.preventDefault();
     if (sweepAmount <= 0) return;
@@ -6992,6 +7009,15 @@ export default function AdminDashboard() {
               <div className="flex items-center gap-2.5">
                 <button
                   type="button"
+                  onClick={() => setShowCreditTopupModal(true)}
+                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-black text-xs shadow-md shadow-amber-950/10 flex items-center gap-1.5 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Top-Up Platform Credit</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setShowSweepModal(true)}
                   className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-950/10 flex items-center gap-2 transition"
                 >
@@ -7017,6 +7043,37 @@ export default function AdminDashboard() {
                 </button>
               </div>
             )}
+
+            {/* Cooperative Platform Credit Wallet Banner */}
+            <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 text-slate-950 p-6 rounded-3xl shadow-lg border border-amber-400/80 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-950 text-amber-300">
+                    Prepaid Platform Wallet
+                  </span>
+                  <span className="text-xs font-bold text-slate-900">
+                    {coopPlatformCredit < 500 ? '⚠️ Low Credit Warning' : '✓ Credit Active & Auto-Debiting'}
+                  </span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight">
+                  Available Platform Credit: ₱{coopPlatformCredit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </h3>
+                <p className="text-xs text-amber-950/90 max-w-xl font-medium leading-relaxed">
+                  Single Platform Billing Model: Member onboarding fees (₱50/member after first 15 free) and loan technology fees (1.0% on approved loans) are automatically deducted from this credit balance.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowCreditTopupModal(true)}
+                  className="px-5 py-3 bg-slate-950 hover:bg-slate-900 text-white rounded-2xl font-black text-xs shadow-xl transition flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  <span>Refill Platform Credit</span>
+                </button>
+              </div>
+            </div>
 
             {/* Top 4 Escrow & Billing Metric Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -7390,6 +7447,144 @@ export default function AdminDashboard() {
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md shadow-emerald-950/10"
                   >
                     Confirm & Sweep Float
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 3: REFILL PREPAID PLATFORM CREDIT */}
+        {showCreditTopupModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm shadow">
+                    ₱
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Refill Platform Credit</h3>
+                    <p className="text-xs text-slate-500">Prepaid balance for automated member & technology fee billing.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreditTopupModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleExecuteCreditTopup} className="space-y-4 text-xs">
+                {/* Current Balance Notice */}
+                <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 text-amber-950 flex justify-between items-center">
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-amber-800">Current Available Credit</div>
+                    <div className="text-xl font-black font-mono mt-0.5">
+                      ₱{coopPlatformCredit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-mono">
+                    Auto-Debit Active
+                  </span>
+                </div>
+
+                {/* Preset Amount Pills */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1.5">Select Top-Up Amount (₱)</label>
+                  <div className="grid grid-cols-4 gap-2 mb-2">
+                    {[1000, 2500, 5000, 10000].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setCreditTopupAmount(amt)}
+                        className={`py-2 rounded-xl border text-xs font-bold transition font-mono ${
+                          creditTopupAmount === amt
+                            ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-sm'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        +₱{amt.toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    type="number"
+                    min="500"
+                    step="100"
+                    required
+                    value={creditTopupAmount}
+                    onChange={(e) => setCreditTopupAmount(Number(e.target.value))}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+
+                {/* Fulfillment Channel */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1.5">Payment Rail / Method</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCreditTopupMethod('PAYMONGO_QRPH')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        creditTopupMethod === 'PAYMONGO_QRPH'
+                          ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1 font-bold">
+                        <QrCode className="w-3.5 h-3.5 text-amber-600" />
+                        <span>PayMongo QR Ph</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-normal">Instant settlement via GCash / Maya / Banks</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCreditTopupMethod('BANK_TRANSFER')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        creditTopupMethod === 'BANK_TRANSFER'
+                          ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1 font-bold">
+                        <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                        <span>LandBank Wire</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-normal">Direct Clearing Acct #0012-9981-22</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1 text-[11px] text-slate-600">
+                  <div className="flex justify-between">
+                    <span>Credit to be Added:</span>
+                    <strong className="font-mono text-slate-900">₱{creditTopupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Est. New Available Credit:</span>
+                    <strong className="font-mono text-emerald-700">₱{(coopPlatformCredit + creditTopupAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreditTopupModal(false)}
+                    className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl font-semibold hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-black shadow-md shadow-amber-950/10 flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Confirm & Refill Credit</span>
                   </button>
                 </div>
               </form>

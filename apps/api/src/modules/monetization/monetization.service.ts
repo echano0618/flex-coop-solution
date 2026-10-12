@@ -133,4 +133,98 @@ export class MonetizationService {
       issuedAt: new Date().toISOString(),
     };
   }
+
+  /**
+   * Automatically executes member onboarding fee deduction from tenant's platform credit
+   * Rules:
+   * - First 15 members: FREE (₱0.00)
+   * - 16th and subsequent members: ₱50.00 auto-deducted from platform credit
+   */
+  static processMemberFeeAutoDeduction(params: {
+    tenantId: string;
+    memberId: string;
+    memberNumber: string;
+    memberName: string;
+    sequenceIndex: number;
+    tenantTin?: string;
+  }) {
+    // Dynamic import to prevent any circular dependency
+    const { OperatorService } = require('../operator/operator.service');
+
+    const feeCalc = this.calculateMemberOnboardingFee(params.sequenceIndex);
+    const invoice = this.generateMemberOnboardingInvoice({
+      tenantId: params.tenantId,
+      memberId: params.memberId,
+      memberNumber: params.memberNumber,
+      memberName: params.memberName,
+      tenantTin: params.tenantTin || '000-000-000-000',
+      memberSequenceIndex: params.sequenceIndex,
+    });
+
+    if (feeCalc.isFreeTier || feeCalc.grossFee <= 0) {
+      return {
+        deducted: false,
+        isFreeTier: true,
+        feeAmount: 0.0,
+        feeCalculation: feeCalc,
+        invoice,
+        message: `Member #${params.sequenceIndex} falls within the first 15 free members tier. No credit deducted.`,
+      };
+    }
+
+    // Auto-deduct ₱50 from tenant's prepaid platform credit
+    const adjustResult = OperatorService.adjustPlatformCredit({
+      tenantId: params.tenantId,
+      amount: -feeCalc.grossFee,
+      type: 'FEE_DEDUCTION',
+      reference: invoice.invoiceNumber,
+      notes: `Platform Onboarding Fee (₱50.00) for Member #${params.sequenceIndex} (${params.memberName})`,
+      performedBy: 'SYSTEM_BILLING_AUTOMATION',
+    });
+
+    return {
+      deducted: true,
+      isFreeTier: false,
+      feeAmount: feeCalc.grossFee,
+      feeCalculation: feeCalc,
+      invoice,
+      newCreditBalance: adjustResult.newBalance,
+      transaction: adjustResult.transaction,
+      message: `₱${feeCalc.grossFee.toFixed(2)} platform fee automatically deducted from platform credit for Member #${params.sequenceIndex}. New balance: ₱${adjustResult.newBalance.toFixed(2)}`,
+    };
+  }
+
+  /**
+   * Automatically executes 1.0% loan technology fee deduction from tenant's platform credit upon loan disbursement
+   */
+  static processLoanFeeAutoDeduction(params: {
+    tenantId: string;
+    loanId: string;
+    loanNumber: string;
+    principalAmount: number;
+    invoiceNumber: string;
+  }) {
+    const { OperatorService } = require('../operator/operator.service');
+
+    const feeCalc = this.calculatePlatformFee(params.principalAmount);
+
+    // Auto-deduct 1.0% tech fee from tenant's prepaid platform credit
+    const adjustResult = OperatorService.adjustPlatformCredit({
+      tenantId: params.tenantId,
+      amount: -feeCalc.grossFee,
+      type: 'FEE_DEDUCTION',
+      reference: params.invoiceNumber,
+      notes: `1.0% Loan Technology Fee for Loan ${params.loanNumber} (Principal: ₱${params.principalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
+      performedBy: 'SYSTEM_BILLING_AUTOMATION',
+    });
+
+    return {
+      deducted: true,
+      feeAmount: feeCalc.grossFee,
+      feeCalculation: feeCalc,
+      newCreditBalance: adjustResult.newBalance,
+      transaction: adjustResult.transaction,
+      message: `₱${feeCalc.grossFee.toFixed(2)} (1.0% technology fee) automatically deducted from platform credit for Loan ${params.loanNumber}. New balance: ₱${adjustResult.newBalance.toFixed(2)}`,
+    };
+  }
 }

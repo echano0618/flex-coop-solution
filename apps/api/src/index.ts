@@ -305,11 +305,23 @@ app.post('/api/v1/auth/member/register', (req: Request, res: Response) => {
   shareAccounts.push(shareAccount);
   dbStore.shareAccounts.set(tenantId, shareAccounts);
 
+  // 4. Platform Billing Auto-Deduction (First 15 free, ₱50/member sequence > 15)
+  const tenant = dbStore.tenants.get(tenantId);
+  const feeDeduction = MonetizationService.processMemberFeeAutoDeduction({
+    tenantId,
+    memberId,
+    memberNumber,
+    memberName: `${newMember.firstName} ${newMember.lastName}`.trim(),
+    sequenceIndex: members.length,
+    tenantTin: tenant?.tin,
+  });
+
   res.status(201).json({
     success: true,
     message: `Application submitted successfully. Member ${memberNumber} is in the Board/Committee approval queue.`,
     member: newMember,
     shareAccount,
+    feeDeduction,
   });
 });
 
@@ -463,6 +475,65 @@ app.post('/api/v1/operator/broadcasts', (req: Request, res: Response) => {
 });
 
 // ==========================================
+// 2.2 COOPERATIVE PLATFORM CREDIT & TOP-UP WALLET
+// ==========================================
+app.get('/api/v1/billing/credit', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  OperatorService.ensureInitialized();
+  const tenant = dbStore.tenants.get(tenantId);
+  const currentCredit = dbStore.platformCredits.get(tenantId) ?? 0;
+  const members = dbStore.members.get(tenantId) || [];
+  const freeTierCount = Math.min(15, members.length);
+  const billedCount = Math.max(0, members.length - 15);
+  const transactions = dbStore.creditTransactions.filter((tx) => tx.tenantId === tenantId);
+
+  res.json({
+    success: true,
+    data: {
+      tenantId,
+      tenantName: tenant?.name || tenantId,
+      creditBalance: currentCredit,
+      totalMembers: members.length,
+      freeTierMembers: freeTierCount,
+      billedMembers: billedCount,
+      billingMode: tenant?.billingMode || 'STANDARD_UNIFIED',
+      transactions,
+    },
+  });
+});
+
+app.post('/api/v1/billing/credit/topup', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { amount, paymentMethod, reference, notes, performedBy } = req.body;
+
+  if (!amount || Number(amount) <= 0) {
+    return res.status(400).json({ success: false, error: 'Valid top-up amount is required.' });
+  }
+
+  const topupAmount = Number(amount);
+  const ref = reference || `TOPUP-${Date.now().toString(36).toUpperCase()}`;
+  const method = paymentMethod || 'PAYMONGO_QRPH';
+
+  const result = OperatorService.adjustPlatformCredit({
+    tenantId,
+    amount: topupAmount,
+    type: 'TOP_UP',
+    reference: ref,
+    notes: notes || `Prepaid Platform Credit Top-Up via ${method}`,
+    performedBy: performedBy || 'Cooperative Admin',
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Platform Credit of ₱${topupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} credited successfully via ${method}.`,
+    data: {
+      newBalance: result.newBalance,
+      transaction: result.transaction,
+    },
+  });
+});
+
+// ==========================================
 // 3. MEMBERSHIP & eKYC (NPC COMPLIANCE)
 // ==========================================
 app.get('/api/v1/members', (req: Request, res: Response) => {
@@ -524,7 +595,18 @@ app.post('/api/v1/members', (req: Request, res: Response) => {
   });
   dbStore.npcConsents.set(tenantId, consents);
 
-  res.status(201).json({ success: true, data: newMember });
+  // Platform Billing Auto-Deduction (First 15 free, ₱50/member sequence > 15)
+  const tenant = dbStore.tenants.get(tenantId);
+  const feeDeduction = MonetizationService.processMemberFeeAutoDeduction({
+    tenantId,
+    memberId,
+    memberNumber,
+    memberName: `${newMember.firstName} ${newMember.lastName}`.trim(),
+    sequenceIndex: members.length,
+    tenantTin: tenant?.tin,
+  });
+
+  res.status(201).json({ success: true, data: newMember, feeDeduction });
 });
 
 app.post('/api/v1/members/:id/kyc/review', (req: Request, res: Response) => {
@@ -1254,13 +1336,23 @@ app.post('/api/v1/loans/:id/disburse', (req: Request, res: Response) => {
     dbStore.amlcAlerts.push(amlcAlert);
   }
 
+  // 5. Auto-Deduct 1.0% Technology Fee from cooperative's prepaid platform credit
+  const creditDeduction = MonetizationService.processLoanFeeAutoDeduction({
+    tenantId,
+    loanId: loan.id,
+    loanNumber: loan.loanNumber,
+    principalAmount: loan.principalAmount,
+    invoiceNumber: invoice.invoiceNumber,
+  });
+
   res.json({
     success: true,
-    message: `Loan ${loan.loanNumber} disbursed successfully. Platform fee of ₱${feeCalc.grossFee.toFixed(2)} deducted upfront.`,
+    message: `Loan ${loan.loanNumber} disbursed successfully. Platform fee of ₱${feeCalc.grossFee.toFixed(2)} deducted upfront from platform credit.`,
     loan,
     invoice,
     journalEntry,
     amlcAlert,
+    creditDeduction,
   });
 });
 

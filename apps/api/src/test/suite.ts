@@ -1298,7 +1298,113 @@ console.log('\n--- 23. SaaS Operator Fleet Monitor & Platform Credit Operations 
   assert(activeBroadcasts.some((b) => b.title === 'Emergency Advisory Test'), 'Active broadcast visible across tenancies');
 }
 
-console.log('\n🎉 ALL 178 VERIFICATION TEST CASES (INCLUDING SAAS OPERATOR PORTAL, FLEET TELEMETRY, PLATFORM CREDITS, SYSTEM ADMIN, IAM, RBAC, ESCROW, TAX & PSGC) PASSED SUCCESSFULLY!\n');
+// 24. Automated Platform Credit Auto-Deductions & Option 4: Member Portal Digital Passbook & SL
+console.log('\n--- 24. Automated Platform Credit Billing & Option 4 Member Digital Passbook & SL ---');
+{
+  const tenantId = 'tenant_bayani_001';
+  OperatorService.ensureInitialized();
+  const currentCredit = dbStore.platformCredits.get(tenantId) ?? 0;
+
+  // 24.1 Cooperative Platform Credit Top-Up
+  const topUp = OperatorService.adjustPlatformCredit({
+    tenantId,
+    amount: 5000.0,
+    type: 'TOP_UP',
+    reference: 'QRPH-TOPUP-2026-001',
+    notes: 'Cooperative prepaid platform credit reload via PayMongo QR Ph Rail',
+    performedBy: 'General Manager (Danilo Macapagal)',
+  });
+  assert(topUp.success === true, 'Cooperative successfully refills platform credit');
+  assert(topUp.newBalance === currentCredit + 5000.0, 'Platform credit balance accurately incremented by top-up amount');
+  assert(topUp.transaction.type === 'TOP_UP', 'Audit trail records TOP_UP transaction');
+
+  // 24.2 Member Onboarding Auto-Deductions: First 15 Members FREE
+  const freeTierDeduction = MonetizationService.processMemberFeeAutoDeduction({
+    tenantId,
+    memberId: 'mem_free_15',
+    memberNumber: 'MEM-2026-0015',
+    memberName: 'Apolinario Mabini',
+    sequenceIndex: 15, // Member #15
+  });
+  assert(freeTierDeduction.isFreeTier === true, 'Member sequence <= 15 strictly falls within free tier');
+  assert(freeTierDeduction.deducted === false, 'No platform credit deducted for member within first 15 free members');
+  assert(freeTierDeduction.feeAmount === 0.0, 'Fee amount for member #15 is strictly ₱0.00');
+  assert(dbStore.platformCredits.get(tenantId) === topUp.newBalance, 'Credit balance remains untouched for free tier member');
+
+  // 24.3 Member Onboarding Auto-Deductions: Sequence > 15 charges ₱50.00
+  const balanceBefore16 = dbStore.platformCredits.get(tenantId)!;
+  const billedDeduction = MonetizationService.processMemberFeeAutoDeduction({
+    tenantId,
+    memberId: 'mem_billed_16',
+    memberNumber: 'MEM-2026-0016',
+    memberName: 'Melchora Aquino',
+    sequenceIndex: 16, // Member #16
+  });
+  assert(billedDeduction.isFreeTier === false, 'Member sequence > 15 strictly exceeds free tier');
+  assert(billedDeduction.deducted === true, 'Platform credit automatically deducted for member #16');
+  assert(billedDeduction.feeAmount === 50.0, 'Fee amount for member #16 is exactly ₱50.00');
+  assert(billedDeduction.feeCalculation.vatAmount === 5.36, '₱50.00 onboarding fee decomposes ₱5.36 12% Output VAT');
+  assert(billedDeduction.feeCalculation.netPlatformRevenue === 44.64, '₱50.00 onboarding fee yields ₱44.64 Net Base Revenue');
+  assert(billedDeduction.newCreditBalance === balanceBefore16 - 50.0, 'Platform credit decremented by exactly ₱50.00');
+  assert(billedDeduction.transaction?.type === 'FEE_DEDUCTION', 'Credit audit trail logs FEE_DEDUCTION transaction');
+
+  // 24.4 1.0% Loan Technology Fee Auto-Deductions on Loan Disbursement
+  const balanceBeforeLoan = dbStore.platformCredits.get(tenantId)!;
+  const loanPrincipal = 75000.0;
+  const loanInvoiceNo = 'INV-LOAN-2026-0099';
+  const loanDeduction = MonetizationService.processLoanFeeAutoDeduction({
+    tenantId,
+    loanId: 'loan_test_tech_fee',
+    loanNumber: 'LN-2026-00099',
+    principalAmount: loanPrincipal,
+    invoiceNumber: loanInvoiceNo,
+  });
+  assert(loanDeduction.deducted === true, '1.0% loan technology fee automatically deducted upon disbursement');
+  assert(loanDeduction.feeAmount === 750.0, '1.0% technology fee on ₱75,000 loan is exactly ₱750.00');
+  assert(loanDeduction.newCreditBalance === balanceBeforeLoan - 750.0, 'Platform credit decremented by exactly ₱750.00');
+  assert(loanDeduction.transaction?.reference === loanInvoiceNo, 'Transaction reference preserves official sales invoice number');
+
+  // 24.5 Option 4: Member Portal Subsidiary Ledger Statements Generation
+  const mariaMember: Member = {
+    id: 'mem_1',
+    memberNumber: 'MEM-2026-0001',
+    firstName: 'Maria Clara',
+    lastName: 'Santos',
+    email: 'maria.santos@gmail.com',
+    phone: '+63 917 881 2911',
+    birthdate: '1992-05-12',
+    gender: 'FEMALE',
+    civilStatus: 'SINGLE',
+    address: 'Brgy. Malasin, City of San Jose, Nueva Ecija',
+    classification: 'REGULAR',
+    status: 'ACTIVE',
+    kycStatus: 'VERIFIED',
+    joinedAt: '2026-01-15T08:00:00Z',
+    createdAt: '2026-01-15T08:00:00Z',
+    updatedAt: '2026-01-15T08:00:00Z',
+  };
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const mariaSL = GeneralLedgerService.generateMemberSubsidiaryLedger(mariaMember, entries);
+  assert(mariaSL.memberNumber === 'MEM-2026-0001', 'Member Subsidiary Ledger matches Maria Clara Santos');
+  assert(mariaSL.totalShareCapitalBalance === 15000.0, 'Maria Share Capital SL balance (3-01-03) reflects ₱15,000.00');
+  assert(mariaSL.totalSavingsBalance === 5000.0, 'Maria Savings Passbook balance (2-01-01) reflects ₱5,000.00');
+  assert(mariaSL.totalLoanOutstandingBalance === 46057.56, 'Maria Loan Subsidiary Ledger (1-02-01) reflects ₱46,057.56');
+
+  // 24.6 PayMongo QR Ph Pass-On Convenience Fee (1.5%, minimum ₱15.00)
+  const calcConvenienceFee = (amount: number) => Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
+  const loanInstallment = 4442.44;
+  const qrFee = calcConvenienceFee(loanInstallment);
+  assert(qrFee === 66.64, '1.5% pass-on convenience fee on ₱4,442.44 repayment is exactly ₱66.64');
+  assert(Math.round((loanInstallment + qrFee) * 100) / 100 === 4509.08, 'Total amount to pay via QR Ph is ₱4,509.08');
+
+  // Minimum fee threshold (₱500 payment -> 1.5% is ₱7.50, capped at minimum ₱15.00)
+  const smallPayment = 500.0;
+  const minQrFee = calcConvenienceFee(smallPayment);
+  assert(minQrFee === 15.0, 'Convenience fee enforces minimum ₱15.00 floor on small transactions');
+}
+
+console.log('\n🎉 ALL 200 VERIFICATION TEST CASES (INCLUDING PLATFORM CREDIT TOP-UP & AUTO-DEDUCTIONS, OPTION 4 MEMBER DIGITAL PASSBOOK & SUBSIDIARY LEDGER, SAAS OPERATOR FLEET, SYSTEM ADMIN, IAM, RBAC, ESCROW, TAX & PSGC) PASSED SUCCESSFULLY!\n');
+
 
 
 

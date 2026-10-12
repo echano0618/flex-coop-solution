@@ -122,7 +122,7 @@ export default function MemberPortalPage() {
         idType: "Driver's License (Encrypted SPI)",
       };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
 
   // Co-Maker Endorsement Requests State
   const [endorsementRequests, setEndorsementRequests] = useState([
@@ -262,6 +262,270 @@ export default function MemberPortalPage() {
     setLoanBalance((prev) => Math.max(0, Math.round((prev - (repayAmount - 500)) * 100) / 100)); // principal reduction
   };
 
+  // Option 4: Digital Passbook & Subsidiary Ledger State
+  const [passbookSubTab, setPassbookSubTab] = useState<'shares' | 'savings' | 'loan'>('shares');
+  const [showPassbookStatementModal, setShowPassbookStatementModal] = useState<boolean>(false);
+  const [passbookPayModal, setPassbookPayModal] = useState<{
+    open: boolean;
+    type: 'LOAN' | 'SAVINGS' | 'SHARES';
+    amount: number;
+    description: string;
+  }>({
+    open: false,
+    type: 'LOAN',
+    amount: 4442.44,
+    description: 'Monthly Loan Amortization Installment #2',
+  });
+  const [passbookReceipt, setPassbookReceipt] = useState<{
+    orNumber: string;
+    date: string;
+    time: string;
+    accountCode: string;
+    accountName: string;
+    baseAmount: number;
+    convenienceFee: number;
+    totalAmount: number;
+    newBalance: number;
+    reference: string;
+    description: string;
+  } | null>(null);
+
+  // Dynamic Subsidiary Ledger Entries State
+  const [mariaShareLedger, setMariaShareLedger] = useState([
+    {
+      date: '2026-01-15',
+      ref: 'OR-2026-0012',
+      particulars: 'Initial Subscription & Paid-Up Capital (PMES Admission)',
+      shares: 100,
+      debit: 0,
+      credit: 10000,
+      balance: 10000,
+    },
+    {
+      date: '2026-02-15',
+      ref: 'OR-2026-0199',
+      particulars: 'Voluntary Capital Build-Up (50 Shares @ ₱100 Par)',
+      shares: 50,
+      debit: 0,
+      credit: 5000,
+      balance: 15000,
+    },
+  ]);
+
+  const [mariaSavingsLedger, setMariaSavingsLedger] = useState([
+    {
+      date: '2026-01-15',
+      ref: 'OR-2026-0013',
+      particulars: 'Opening Compulsory Savings Account (2-01-01)',
+      debit: 0,
+      credit: 2000,
+      balance: 2000,
+    },
+    {
+      date: '2026-02-01',
+      ref: 'OR-2026-0341',
+      particulars: 'Monthly PMES Mandatory Savings Deposit',
+      debit: 0,
+      credit: 1000,
+      balance: 3000,
+    },
+    {
+      date: '2026-02-15',
+      ref: 'OR-2026-0498',
+      particulars: 'Voluntary Savings Top-Up via PayMongo QR Ph Rail',
+      debit: 0,
+      credit: 2000,
+      balance: 5000,
+    },
+  ]);
+
+  const [mariaLoanLedger, setMariaLoanLedger] = useState([
+    {
+      date: '2026-01-20',
+      ref: 'DISB-TX-LN001',
+      particulars: 'Disbursement of Regular Member Loan (12 Mos @ 12% p.a.)',
+      principal: 50000,
+      interest: 0,
+      debit: 50000,
+      credit: 0,
+      balance: 50000,
+    },
+    {
+      date: '2026-02-20',
+      ref: 'OR-2026-0992181',
+      particulars: 'Installment #1 Repayment via QR Ph (Principal ₱3,942.44 + Interest ₱500)',
+      principal: 3942.44,
+      interest: 500,
+      debit: 0,
+      credit: 3942.44,
+      balance: 46057.56,
+    },
+  ]);
+
+  const [juanShareLedger, setJuanShareLedger] = useState([
+    {
+      date: '2026-01-18',
+      ref: 'OR-2026-0035',
+      particulars: 'Initial Subscription & Paid-Up Capital (100 Shares)',
+      shares: 100,
+      debit: 0,
+      credit: 10000,
+      balance: 10000,
+    },
+  ]);
+
+  const [juanSavingsLedger, setJuanSavingsLedger] = useState([
+    {
+      date: '2026-01-18',
+      ref: 'OR-2026-0036',
+      particulars: 'Opening Compulsory Savings Account (2-01-01)',
+      debit: 0,
+      credit: 2000,
+      balance: 2000,
+    },
+  ]);
+
+  // Convenience Fee Calculator for PayMongo QR Ph (1.5%, minimum ₱15.00)
+  const calculateConvenienceFee = (amount: number) => {
+    return Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
+  };
+
+  const handleExecutePassbookPayment = (type: 'LOAN' | 'SAVINGS' | 'SHARES', amount: number) => {
+    const fee = calculateConvenienceFee(amount);
+    const total = Math.round((amount + fee) * 100) / 100;
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString();
+    const orNum = `OR-${now.getFullYear()}-QR${Math.floor(10000 + Math.random() * 90000)}`;
+
+    if (type === 'LOAN') {
+      const interestPart = 460.58;
+      const principalPart = Math.max(0, Math.round((amount - interestPart) * 100) / 100);
+      const newBal = Math.max(0, Math.round((loanBalance - principalPart) * 100) / 100);
+      setLoanBalance(newBal);
+
+      setMariaLoanLedger((prev) => [
+        ...prev,
+        {
+          date: dateStr,
+          ref: orNum,
+          particulars: `Installment #2 Repayment via PayMongo QR Ph (Principal ₱${principalPart.toFixed(2)} + Interest ₱${interestPart.toFixed(2)})`,
+          principal: principalPart,
+          interest: interestPart,
+          debit: 0,
+          credit: principalPart,
+          balance: newBal,
+        },
+      ]);
+
+      setPassbookReceipt({
+        orNumber: orNum,
+        date: dateStr,
+        time: timeStr,
+        accountCode: '1-02-01',
+        accountName: 'Loans Receivable - Regular',
+        baseAmount: amount,
+        convenienceFee: fee,
+        totalAmount: total,
+        newBalance: newBal,
+        reference: 'LN-2026-00001',
+        description: 'Monthly Loan Amortization Payment',
+      });
+    } else if (type === 'SAVINGS') {
+      const newBal = Math.round((savingsBalance + amount) * 100) / 100;
+      setSavingsBalance(newBal);
+
+      if (currentPersona === 'maria') {
+        setMariaSavingsLedger((prev) => [
+          ...prev,
+          {
+            date: dateStr,
+            ref: orNum,
+            particulars: `Voluntary Savings Deposit via PayMongo QR Ph Rail`,
+            debit: 0,
+            credit: amount,
+            balance: newBal,
+          },
+        ]);
+      } else {
+        setJuanSavingsLedger((prev) => [
+          ...prev,
+          {
+            date: dateStr,
+            ref: orNum,
+            particulars: `Voluntary Savings Deposit via PayMongo QR Ph Rail`,
+            debit: 0,
+            credit: amount,
+            balance: newBal,
+          },
+        ]);
+      }
+
+      setPassbookReceipt({
+        orNumber: orNum,
+        date: dateStr,
+        time: timeStr,
+        accountCode: '2-01-01',
+        accountName: 'Savings Deposits - Voluntary',
+        baseAmount: amount,
+        convenienceFee: fee,
+        totalAmount: total,
+        newBalance: newBal,
+        reference: currentPersona === 'maria' ? 'SAV-2026-0001' : 'SAV-2026-0002',
+        description: 'Voluntary Member Savings Deposit',
+      });
+    } else if (type === 'SHARES') {
+      const newShares = Math.floor(amount / 100);
+      const newPaidUp = Math.round((paidUpCapital + amount) * 100) / 100;
+      setPaidUpCapital(newPaidUp);
+      setSharesCount((prev) => prev + newShares);
+
+      if (currentPersona === 'maria') {
+        setMariaShareLedger((prev) => [
+          ...prev,
+          {
+            date: dateStr,
+            ref: orNum,
+            particulars: `Capital Build-Up (+${newShares} Shares @ ₱100 Par) via QR Ph`,
+            shares: newShares,
+            debit: 0,
+            credit: amount,
+            balance: newPaidUp,
+          },
+        ]);
+      } else {
+        setJuanShareLedger((prev) => [
+          ...prev,
+          {
+            date: dateStr,
+            ref: orNum,
+            particulars: `Capital Build-Up (+${newShares} Shares @ ₱100 Par) via QR Ph`,
+            shares: newShares,
+            debit: 0,
+            credit: amount,
+            balance: newPaidUp,
+          },
+        ]);
+      }
+
+      setPassbookReceipt({
+        orNumber: orNum,
+        date: dateStr,
+        time: timeStr,
+        accountCode: '3-01-03',
+        accountName: 'Paid-Up Share Capital - Common',
+        baseAmount: amount,
+        convenienceFee: fee,
+        totalAmount: total,
+        newBalance: newPaidUp,
+        reference: currentPersona === 'maria' ? 'SC-2026-0001' : 'SC-2026-0002',
+        description: 'Paid-Up Share Capital Build-Up Deposit',
+      });
+    }
+
+    setPassbookPayModal({ open: false, type: 'LOAN', amount: 0, description: '' });
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Top Header */}
@@ -360,6 +624,7 @@ export default function MemberPortalPage() {
         <div className="flex space-x-2 border-b border-slate-200 pb-4 mb-6 overflow-x-auto">
           {[
             { id: 'home', label: 'My Portfolio', icon: Wallet, highlight: false },
+            { id: 'passbook', label: 'Digital Passbook & SL', icon: BookOpen, highlight: true },
             { id: 'apply', label: 'Apply for Loan', icon: CreditCard, highlight: false },
             {
               id: 'comaker',
@@ -563,6 +828,569 @@ export default function MemberPortalPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: DIGITAL PASSBOOK & MEMBER SUBSIDIARY LEDGER (OPTION 4) */}
+        {activeTab === 'passbook' && (
+          <div className="space-y-6">
+            {/* CDA Certified Digital Passbook Header */}
+            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-700 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10 border-b border-slate-700/60 pb-6">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-400 text-slate-950 uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Certified CDA Digital Passbook</span>
+                    </span>
+                    <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>PhilSys KYC Verified</span>
+                    </span>
+                    <span className="text-slate-400 text-xs font-mono">
+                      CDA Reg: CDA-NCR-2024-00921 • TIN: 004-912-340-000
+                    </span>
+                  </div>
+
+                  <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                    {currentMember.name}&apos;s Official Subsidiary Ledger
+                  </h1>
+                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                    Compliant with CDA Standard Chart of Accounts (MC 2015-06) and Republic Act No. 9520. All share capital, savings liabilities, and loan amortizations are verified against the cooperative general ledger.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowPassbookStatementModal(true)}
+                    className="px-4 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-100 rounded-xl font-bold text-xs border border-slate-600 shadow-sm flex items-center gap-1.5 transition"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span>Official Statement (SOA)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (passbookSubTab === 'loan') {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'LOAN',
+                          amount: 4442.44,
+                          description: 'Monthly Loan Amortization Installment #2',
+                        });
+                      } else if (passbookSubTab === 'savings') {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'SAVINGS',
+                          amount: 1000,
+                          description: 'Voluntary Savings Deposit',
+                        });
+                      } else {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'SHARES',
+                          amount: 1000,
+                          description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
+                        });
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-950/20 flex items-center gap-1.5 transition"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    <span>Pay via QR Ph Rail</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Passbook Identification Matrix */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6 text-xs text-slate-300">
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Passbook Number:</span>
+                  <span className="font-mono font-bold text-white text-sm">
+                    {currentPersona === 'maria' ? 'PB-2026-0001' : 'PB-2026-0002'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Member ID:</span>
+                  <span className="font-mono font-bold text-emerald-300 text-sm">{currentMember.memberNumber}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Membership Class:</span>
+                  <span className="font-semibold text-white">Regular (Good Standing)</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Registered PSGC Address:</span>
+                  <span className="font-semibold text-white truncate block">Region III • San Jose, Nueva Ecija</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3 Subsidiary Ledger Balances Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Card 1: Share Capital SL (3-01-03) */}
+              <div
+                onClick={() => setPassbookSubTab('shares')}
+                className={`p-6 rounded-2xl border transition cursor-pointer ${
+                  passbookSubTab === 'shares'
+                    ? 'bg-amber-50/50 border-amber-400 shadow-md ring-2 ring-amber-400/20'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                  <span>Paid-Up Share Capital</span>
+                  <span className="font-mono text-[10px] bg-amber-100 text-amber-900 px-2 py-0.5 rounded">
+                    GL 3-01-03
+                  </span>
+                </div>
+                <div className="text-3xl font-black font-mono text-slate-900 mt-2">
+                  ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 flex justify-between">
+                  <span>{sharesCount} shares @ ₱100.00 par</span>
+                  <span className="text-amber-800 font-bold">Dividend Eligible</span>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-amber-900 font-semibold">
+                  <span>Click to view ledger</span>
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </div>
+
+              {/* Card 2: Savings Passbook (2-01-01) */}
+              <div
+                onClick={() => setPassbookSubTab('savings')}
+                className={`p-6 rounded-2xl border transition cursor-pointer ${
+                  passbookSubTab === 'savings'
+                    ? 'bg-emerald-50/50 border-emerald-400 shadow-md ring-2 ring-emerald-400/20'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                  <span>Savings Deposits Passbook</span>
+                  <span className="font-mono text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
+                    GL 2-01-01
+                  </span>
+                </div>
+                <div className="text-3xl font-black font-mono text-slate-900 mt-2">
+                  ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 flex justify-between">
+                  <span>Compulsory + Voluntary</span>
+                  <span className="text-emerald-700 font-bold">3.0% p.a. Interest</span>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-emerald-900 font-semibold">
+                  <span>Click to view passbook</span>
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </div>
+
+              {/* Card 3: Loans Receivable (1-02-01) */}
+              <div
+                onClick={() => setPassbookSubTab('loan')}
+                className={`p-6 rounded-2xl border transition cursor-pointer ${
+                  passbookSubTab === 'loan'
+                    ? 'bg-indigo-50/50 border-indigo-400 shadow-md ring-2 ring-indigo-400/20'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                  <span>Outstanding Loan Balance</span>
+                  <span className="font-mono text-[10px] bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded">
+                    GL 1-02-01
+                  </span>
+                </div>
+                <div className="text-3xl font-black font-mono text-slate-900 mt-2">
+                  ₱{currentPersona === 'maria' ? loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '0.00'}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 flex justify-between">
+                  <span>{currentPersona === 'maria' ? 'LN-2026-00001 (Regular Loan)' : 'No Active Borrowings'}</span>
+                  <span className={currentPersona === 'maria' ? 'text-indigo-700 font-bold' : 'text-emerald-700 font-bold'}>
+                    {currentPersona === 'maria' ? 'Installment Due: Mar 20' : 'Clean Credit'}
+                  </span>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-indigo-900 font-semibold">
+                  <span>Click to view amortization</span>
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-Ledger Detailed Statements Panel */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+              {/* Sub-ledger Tabs Navigation */}
+              <div className="border-b border-slate-200 bg-slate-50/70 p-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setPassbookSubTab('shares')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                      passbookSubTab === 'shares'
+                        ? 'bg-amber-600 text-white shadow-sm'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>Share Capital Ledger (3-01-03)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPassbookSubTab('savings')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                      passbookSubTab === 'savings'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <PiggyBank className="w-3.5 h-3.5" />
+                    <span>Savings Passbook (2-01-01)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPassbookSubTab('loan')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                      passbookSubTab === 'loan'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Loan Amortization & SL (1-02-01)</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (passbookSubTab === 'loan') {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'LOAN',
+                          amount: 4442.44,
+                          description: 'Monthly Loan Amortization Installment #2',
+                        });
+                      } else if (passbookSubTab === 'savings') {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'SAVINGS',
+                          amount: 1000,
+                          description: 'Voluntary Savings Deposit',
+                        });
+                      } else {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'SHARES',
+                          amount: 1000,
+                          description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
+                        });
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>
+                      {passbookSubTab === 'shares'
+                        ? 'Purchase Shares (+QR Ph)'
+                        : passbookSubTab === 'savings'
+                        ? 'Deposit Savings (+QR Ph)'
+                        : 'Pay Installment (+QR Ph)'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* SUB-LEDGER 1: SHARE CAPITAL (3-01-03) */}
+              {passbookSubTab === 'shares' && (
+                <div className="p-6 space-y-6">
+                  {/* Share Capital Target & Subscription Summary */}
+                  <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
+                    <div>
+                      <div className="font-bold text-amber-950 text-sm flex items-center gap-2">
+                        <span>Paid-Up Common Stock Subscription</span>
+                        <span className="bg-amber-200 text-amber-900 text-[10px] px-2 py-0.5 rounded font-mono">
+                          ₱100.00 Par Value
+                        </span>
+                      </div>
+                      <p className="text-amber-800 mt-1">
+                        Subscribed Shares: <strong>{(sharesCount + 50)} shares (₱{((sharesCount + 50) * 100).toLocaleString()}.00)</strong> • Paid-Up: <strong>{sharesCount} shares (₱{paidUpCapital.toLocaleString()}.00)</strong>
+                      </p>
+                    </div>
+
+                    <div className="sm:text-right shrink-0">
+                      <div className="text-[10px] font-bold text-amber-900 uppercase">Paid-Up Ratio</div>
+                      <div className="text-xl font-black text-amber-900 font-mono">
+                        {Math.round((paidUpCapital / ((sharesCount + 50) * 100)) * 100)}%
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Share Capital Ledger Table */}
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="p-3.5">Posting Date</th>
+                          <th className="p-3.5">OR / Ref No.</th>
+                          <th className="p-3.5">Transaction Particulars</th>
+                          <th className="p-3.5 text-center">Shares</th>
+                          <th className="p-3.5 text-right">Debit (DR)</th>
+                          <th className="p-3.5 text-right">Credit (CR)</th>
+                          <th className="p-3.5 text-right">Running Paid-Up Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                        {(currentPersona === 'maria' ? mariaShareLedger : juanShareLedger).map((tx, idx) => (
+                          <tr key={idx} className="hover:bg-amber-50/20 transition">
+                            <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                            <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                            <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                            <td className="p-3.5 text-center font-bold text-amber-800">+{tx.shares}</td>
+                            <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
+                            <td className="p-3.5 text-right font-bold text-emerald-700">
+                              ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3.5 text-right font-black text-slate-900">
+                              ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center justify-between">
+                    <div>
+                      💡 <strong>Statutory Note (RA 9520 Art. 86):</strong> Interest on Share Capital (ISC) is calculated based on the monthly average paid-up share capital balance and is 100% exempt from Philippine withholding tax.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-LEDGER 2: SAVINGS PASSBOOK (2-01-01) */}
+              {passbookSubTab === 'savings' && (
+                <div className="p-6 space-y-6">
+                  {/* Savings Account Summary */}
+                  <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
+                    <div>
+                      <div className="font-bold text-emerald-950 text-sm flex items-center gap-2">
+                        <span>Deposit Liabilities Account (2-01-01)</span>
+                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 rounded font-mono">
+                          Active & Earning
+                        </span>
+                      </div>
+                      <p className="text-emerald-800 mt-1">
+                        Annual Yield: <strong>3.0% per annum</strong> compounded quarterly • Acts as <strong>3x Loan Leverage</strong>
+                      </p>
+                    </div>
+
+                    <div className="sm:text-right shrink-0">
+                      <div className="text-[10px] font-bold text-emerald-900 uppercase">Available Withdrawable</div>
+                      <div className="text-xl font-black text-emerald-900 font-mono">
+                        ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Savings Passbook Table */}
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="p-3.5">Posting Date</th>
+                          <th className="p-3.5">OR / Ref No.</th>
+                          <th className="p-3.5">Transaction Particulars</th>
+                          <th className="p-3.5 text-right">Debit (Withdrawal)</th>
+                          <th className="p-3.5 text-right">Credit (Deposit)</th>
+                          <th className="p-3.5 text-right">Running Savings Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                        {(currentPersona === 'maria' ? mariaSavingsLedger : juanSavingsLedger).map((tx, idx) => (
+                          <tr key={idx} className="hover:bg-emerald-50/20 transition">
+                            <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                            <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                            <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                            <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
+                            <td className="p-3.5 text-right font-bold text-emerald-700">
+                              ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3.5 text-right font-black text-slate-900">
+                              ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600">
+                    💡 <strong>Cooperative Security:</strong> Savings deposits can be directly top-up via PayMongo QR Ph (InstaPay/GCash/Maya) with instant credit and official electronic receipt.
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-LEDGER 3: LOANS RECEIVABLE & AMORTIZATION (1-02-01) */}
+              {passbookSubTab === 'loan' && (
+                <div className="p-6 space-y-6">
+                  {currentPersona === 'maria' ? (
+                    <>
+                      {/* Active Loan Details Card */}
+                      <div className="p-5 bg-indigo-50/70 border border-indigo-200 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-xs">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono bg-indigo-200 text-indigo-950 font-bold px-2 py-0.5 rounded text-[11px]">
+                              LN-2026-00001
+                            </span>
+                            <strong className="text-sm text-slate-900">Regular Member Loan (12 Mos @ 12.0% p.a.)</strong>
+                          </div>
+                          <p className="text-slate-600 mt-1">
+                            Disbursed: Jan 20, 2026 • Maturity: Jan 20, 2027 • Diminishing Balance Equal Monthly Installment
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                          <div>
+                            <div className="text-[10px] text-slate-500 uppercase font-bold">Monthly Installment</div>
+                            <div className="text-base font-black text-indigo-900 font-mono">₱4,442.44</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-slate-500 uppercase font-bold">Remaining Principal</div>
+                            <div className="text-base font-black text-indigo-900 font-mono">
+                              ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Loan Subsidiary Ledger Transactions Table */}
+                      <div>
+                        <h3 className="text-xs font-bold text-slate-900 mb-2 uppercase tracking-wider">
+                          Subsidiary Ledger Activity (1-02-01)
+                        </h3>
+                        <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                              <tr>
+                                <th className="p-3.5">Posting Date</th>
+                                <th className="p-3.5">Ref No.</th>
+                                <th className="p-3.5">Particulars</th>
+                                <th className="p-3.5 text-right">Debit (Disbursement)</th>
+                                <th className="p-3.5 text-right">Credit (Principal Repaid)</th>
+                                <th className="p-3.5 text-right">Principal Outstanding Balance</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                              {mariaLoanLedger.map((tx, idx) => (
+                                <tr key={idx} className="hover:bg-indigo-50/20 transition">
+                                  <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                                  <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                                  <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                                  <td className="p-3.5 text-right font-bold text-rose-700">
+                                    {tx.debit > 0 ? `₱${tx.debit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00'}
+                                  </td>
+                                  <td className="p-3.5 text-right font-bold text-emerald-700">
+                                    {tx.credit > 0 ? `₱${tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00'}
+                                  </td>
+                                  <td className="p-3.5 text-right font-black text-slate-900">
+                                    ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Complete 12-Month Amortization Schedule Table */}
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                            Full Diminishing Balance Amortization Schedule
+                          </h3>
+                          <span className="text-[11px] text-slate-500 font-medium">12.0% Annual Rate (1.0% / month)</span>
+                        </div>
+                        <div className="overflow-x-auto border border-slate-200 rounded-2xl max-h-80 overflow-y-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                              <tr>
+                                <th className="p-3">#</th>
+                                <th className="p-3">Due Date</th>
+                                <th className="p-3 text-right">Principal</th>
+                                <th className="p-3 text-right">Interest (1%)</th>
+                                <th className="p-3 text-right">Total Installment</th>
+                                <th className="p-3 text-right">Ending Principal</th>
+                                <th className="p-3 text-center">Payment Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                              {[
+                                { seq: 1, due: '2026-02-20', pr: 3942.44, in: 500.0, tot: 4442.44, bal: 46057.56, status: 'PAID' },
+                                { seq: 2, due: '2026-03-20', pr: 3981.86, in: 460.58, tot: 4442.44, bal: 42075.7, status: loanBalance < 46000 ? 'PAID' : 'DUE_NOW' },
+                                { seq: 3, due: '2026-04-20', pr: 4021.68, in: 420.76, tot: 4442.44, bal: 38054.02, status: 'UPCOMING' },
+                                { seq: 4, due: '2026-05-20', pr: 4061.9, in: 380.54, tot: 4442.44, bal: 33992.12, status: 'UPCOMING' },
+                                { seq: 5, due: '2026-06-20', pr: 4102.52, in: 339.92, tot: 4442.44, bal: 29889.6, status: 'UPCOMING' },
+                                { seq: 6, due: '2026-07-20', pr: 4143.55, in: 298.9, tot: 4442.44, bal: 25746.05, status: 'UPCOMING' },
+                                { seq: 7, due: '2026-08-20', pr: 4184.99, in: 257.46, tot: 4442.44, bal: 21561.06, status: 'UPCOMING' },
+                                { seq: 8, due: '2026-09-20', pr: 4226.84, in: 215.61, tot: 4442.44, bal: 17334.22, status: 'UPCOMING' },
+                                { seq: 9, due: '2026-10-20', pr: 4269.11, in: 173.34, tot: 4442.44, bal: 13065.11, status: 'UPCOMING' },
+                                { seq: 10, due: '2026-11-20', pr: 4311.8, in: 130.65, tot: 4442.44, bal: 8753.31, status: 'UPCOMING' },
+                                { seq: 11, due: '2026-12-20', pr: 4354.92, in: 87.53, tot: 4442.44, bal: 4398.39, status: 'UPCOMING' },
+                                { seq: 12, due: '2027-01-20', pr: 4398.39, in: 43.98, tot: 4442.37, bal: 0.0, status: 'UPCOMING' },
+                              ].map((row) => (
+                                <tr key={row.seq} className={row.status === 'DUE_NOW' ? 'bg-amber-50/50 font-bold' : ''}>
+                                  <td className="p-3 text-slate-500 font-sans">{row.seq}</td>
+                                  <td className="p-3 font-sans font-medium text-slate-900">{row.due}</td>
+                                  <td className="p-3 text-right">₱{row.pr.toFixed(2)}</td>
+                                  <td className="p-3 text-right text-amber-700">₱{row.in.toFixed(2)}</td>
+                                  <td className="p-3 text-right font-black text-slate-900">₱{row.tot.toFixed(2)}</td>
+                                  <td className="p-3 text-right text-slate-600">₱{row.bal.toFixed(2)}</td>
+                                  <td className="p-3 text-center">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                        row.status === 'PAID'
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : row.status === 'DUE_NOW'
+                                          ? 'bg-amber-200 text-amber-950 animate-pulse'
+                                          : 'bg-slate-100 text-slate-500'
+                                      }`}
+                                    >
+                                      {row.status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    /* Juan Has Zero Loans */
+                    <div className="p-12 text-center bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                      <CreditCard className="w-12 h-12 text-slate-400 mx-auto" />
+                      <h3 className="font-bold text-base text-slate-800">Zero Active Borrowings</h3>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        Juan Perez Dela Cruz ({currentMember.memberNumber}) has clean credit standing with no outstanding loan obligations. Juan is eligible to co-make or apply for up to 3x his share capital.
+                      </p>
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('apply')}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition"
+                        >
+                          Apply for New Loan
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1851,6 +2679,420 @@ export default function MemberPortalPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 1: PASSBOOK DYNAMIC QR PH PAYMENT MODAL */}
+        {passbookPayModal.open && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="bg-slate-900 text-white p-6 relative">
+                <button
+                  type="button"
+                  onClick={() => setPassbookPayModal({ open: false, type: 'LOAN', amount: 0, description: '' })}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow">
+                    F
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base tracking-tight leading-tight">
+                      PayMongo QR Ph Repayment & Deposit Terminal
+                    </h3>
+                    <div className="text-[11px] text-slate-300">
+                      Bayani Multi-Purpose Cooperative • Member: <strong>{currentMember.name}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-5 text-xs">
+                {/* Account Selection */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                    Payment Destination:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPassbookPayModal((prev) => ({
+                          ...prev,
+                          type: 'LOAN',
+                          amount: 4442.44,
+                          description: 'Monthly Loan Amortization Installment #2',
+                        }))
+                      }
+                      className={`p-3 rounded-xl border text-center transition ${
+                        passbookPayModal.type === 'LOAN'
+                          ? 'border-indigo-600 bg-indigo-50/80 font-bold text-indigo-950 ring-2 ring-indigo-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <CreditCard className="w-4 h-4 mx-auto mb-1 text-indigo-600" />
+                      <span>Loan Repayment</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPassbookPayModal((prev) => ({
+                          ...prev,
+                          type: 'SAVINGS',
+                          amount: 1000,
+                          description: 'Voluntary Member Savings Deposit',
+                        }))
+                      }
+                      className={`p-3 rounded-xl border text-center transition ${
+                        passbookPayModal.type === 'SAVINGS'
+                          ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <PiggyBank className="w-4 h-4 mx-auto mb-1 text-emerald-600" />
+                      <span>Savings Deposit</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPassbookPayModal((prev) => ({
+                          ...prev,
+                          type: 'SHARES',
+                          amount: 1000,
+                          description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
+                        }))
+                      }
+                      className={`p-3 rounded-xl border text-center transition ${
+                        passbookPayModal.type === 'SHARES'
+                          ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <BookOpen className="w-4 h-4 mx-auto mb-1 text-amber-600" />
+                      <span>Share Capital</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Amount Input */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Amount to Credit (₱):
+                  </label>
+                  <input
+                    type="number"
+                    min="100"
+                    step="100"
+                    value={passbookPayModal.amount}
+                    onChange={(e) =>
+                      setPassbookPayModal((prev) => ({
+                        ...prev,
+                        amount: Math.max(100, Number(e.target.value)),
+                      }))
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 font-bold font-mono text-base text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+
+                {/* Dynamic Fee Calculation Breakdown */}
+                {(() => {
+                  const fee = calculateConvenienceFee(passbookPayModal.amount);
+                  const total = Math.round((passbookPayModal.amount + fee) * 100) / 100;
+
+                  return (
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                      <div className="flex justify-between text-slate-600">
+                        <span>Net Account Credit:</span>
+                        <span className="font-mono font-bold text-slate-900">
+                          ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-amber-800">
+                        <span className="flex items-center gap-1">
+                          <span>Pass-On QR Ph Convenience Fee (1.5%):</span>
+                          <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-bold">Min ₱15</span>
+                        </span>
+                        <span className="font-mono font-bold">+ ₱{fee.toFixed(2)}</span>
+                      </div>
+                      <div className="border-t border-slate-200 pt-2 flex justify-between items-center text-sm font-black text-slate-900">
+                        <span>Total to Scan & Pay:</span>
+                        <span className="font-mono text-emerald-700 text-base">₱{total.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* QR Graphic and Payload Simulation */}
+                <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50/50 flex flex-col items-center justify-center text-center">
+                  <div className="w-40 h-40 bg-white border-2 border-emerald-600 rounded-2xl p-3 shadow-md flex flex-col items-center justify-center">
+                    <div className="w-32 h-32 bg-slate-950 rounded-xl flex items-center justify-center text-white text-[10px] font-mono p-2 text-center">
+                      [PayMongo QR Ph]
+                      <br />
+                      ₱{(passbookPayModal.amount + calculateConvenienceFee(passbookPayModal.amount)).toFixed(2)}
+                      <br />
+                      InstaPay / GCash
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-2">
+                    Scan with GCash, Maya, BDO, BPI, UnionBank, or any InstaPay-enabled mobile banking app.
+                  </div>
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleExecutePassbookPayment(passbookPayModal.type, passbookPayModal.amount)}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Execute Instant PayMongo QR Ph Payment</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 2: OFFICIAL CDA & BIR ELECTRONIC RECEIPT */}
+        {passbookReceipt && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Receipt Header */}
+              <div className="bg-emerald-800 text-white p-6 text-center space-y-1">
+                <div className="w-12 h-12 bg-white/20 text-white rounded-full flex items-center justify-center mx-auto mb-2">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <div className="text-[10px] uppercase font-bold tracking-widest text-emerald-200">
+                  Republic of the Philippines • CDA Registered
+                </div>
+                <h3 className="font-black text-lg">Official Electronic Receipt</h3>
+                <div className="text-xs text-emerald-100 font-mono">
+                  Bayani Multi-Purpose Cooperative • TIN: 004-912-340-000
+                </div>
+              </div>
+
+              {/* Receipt Content */}
+              <div className="p-6 space-y-4 text-xs">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                  <span className="text-slate-500">Official Receipt No:</span>
+                  <span className="font-mono font-black text-slate-900 text-sm">{passbookReceipt.orNumber}</span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Date & Timestamp:</span>
+                  <span className="font-medium text-slate-800 font-mono">{passbookReceipt.date} {passbookReceipt.time}</span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Member Name:</span>
+                  <strong className="text-slate-900">{currentMember.name}</strong>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Member Number:</span>
+                  <span className="font-mono text-slate-700">{currentMember.memberNumber}</span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Credited CDA Account:</span>
+                  <span className="font-mono text-indigo-700 font-bold">
+                    {passbookReceipt.accountCode} ({passbookReceipt.accountName})
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 font-mono">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Base Amount:</span>
+                    <span>₱{passbookReceipt.baseAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-amber-800">
+                    <span>Convenience Fee (1.5%):</span>
+                    <span>₱{passbookReceipt.convenienceFee.toFixed(2)}</span>
+                  </div>
+                  <div className="border-t border-slate-200 pt-1.5 flex justify-between font-black text-sm text-slate-900">
+                    <span>Total Amount Paid:</span>
+                    <span className="text-emerald-700">₱{passbookReceipt.totalAmount.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center space-y-1">
+                  <div className="text-[11px] text-emerald-800 font-bold">New Account Running Balance:</div>
+                  <div className="text-xl font-black font-mono text-emerald-950">
+                    ₱{passbookReceipt.newBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-400 text-center leading-relaxed">
+                  This electronic receipt is issued pursuant to BIR Revenue Regulations and Cooperative Development Authority Memorandum Circular 2015-06. Retain for official record.
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => alert(`Official Receipt ${passbookReceipt.orNumber} saved to PDF.`)}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPassbookReceipt(null)}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 3: CERTIFIED CDA MEMBER STATEMENT OF ACCOUNT (SOA) */}
+        {showPassbookStatementModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+              {/* Statement Toolbar */}
+              <div className="bg-slate-900 text-white p-4 px-6 flex justify-between items-center sticky top-0 z-20">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-emerald-400" />
+                  <span className="font-bold text-xs uppercase tracking-wider">Certified Member Statement of Account</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Print
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassbookStatementModal(false)}
+                    className="text-slate-400 hover:text-white p-1 rounded-lg"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Certificate Sheet */}
+              <div className="p-8 sm:p-10 space-y-6 text-slate-800 text-xs">
+                {/* Official Letterhead */}
+                <div className="text-center border-b border-slate-300 pb-6 space-y-1">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                    Republic of the Philippines • Cooperative Development Authority
+                  </div>
+                  <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">
+                    Bayani Multi-Purpose Cooperative
+                  </h2>
+                  <div className="text-slate-600 text-xs font-medium">
+                    CDA Registration: <strong>CDA-NCR-2024-00921</strong> • BIR TIN: <strong>004-912-340-000</strong>
+                  </div>
+                  <div className="text-slate-500 text-[11px]">
+                    Main Office: 456 Katipunan Avenue, Loyola Heights, Quezon City, Metro Manila
+                  </div>
+                </div>
+
+                {/* Document Title Banner */}
+                <div className="bg-slate-100 p-3 rounded-xl border border-slate-200 text-center">
+                  <div className="text-xs font-black uppercase text-slate-900 tracking-wider">
+                    Official Member Subsidiary Ledger Statement of Account
+                  </div>
+                  <div className="text-[11px] text-slate-600 font-mono mt-0.5">
+                    As of October 12, 2026 • Reference: SOA-2026-{currentMember.memberNumber.replace('MEM-', '')}
+                  </div>
+                </div>
+
+                {/* Member Profile Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Member Name:</span>
+                    <strong className="text-slate-900 text-sm block mt-0.5">{currentMember.name}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Member ID:</span>
+                    <span className="font-mono font-bold text-slate-900 text-sm block mt-0.5">{currentMember.memberNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Classification:</span>
+                    <span className="font-semibold text-emerald-800 block mt-0.5">Regular Member (Good Standing)</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">PhilSys KYC Status:</span>
+                    <span className="font-semibold text-emerald-700 block mt-0.5">Verified Compliant</span>
+                  </div>
+                </div>
+
+                {/* Financial Position Matrix */}
+                <div className="border border-slate-300 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900 text-white font-bold">
+                      <tr>
+                        <th className="p-3">CDA Account Classification</th>
+                        <th className="p-3">Account Code</th>
+                        <th className="p-3">Sub-Ledger Balance</th>
+                        <th className="p-3">Statutory Standing</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 font-mono">
+                      <tr>
+                        <td className="p-3 font-sans font-bold text-slate-900">Paid-Up Share Capital (Common)</td>
+                        <td className="p-3 text-slate-600">3-01-03</td>
+                        <td className="p-3 font-bold text-slate-900">
+                          ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 font-sans text-emerald-700 font-bold">{sharesCount} Shares @ ₱100 Par (Dividend Active)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-sans font-bold text-slate-900">Deposit Liabilities (Savings)</td>
+                        <td className="p-3 text-slate-600">2-01-01</td>
+                        <td className="p-3 font-bold text-slate-900">
+                          ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 font-sans text-emerald-700 font-bold">3.0% Annual Interest Compounded</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-sans font-bold text-slate-900">Loans Receivable (Regular)</td>
+                        <td className="p-3 text-slate-600">1-02-01</td>
+                        <td className="p-3 font-bold text-indigo-900">
+                          ₱{currentPersona === 'maria' ? loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '0.00'}
+                        </td>
+                        <td className="p-3 font-sans text-indigo-700 font-bold">
+                          {currentPersona === 'maria' ? 'Installment Due: Mar 20, 2026' : 'No Active Obligations'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Certification Affirmation */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-[11px] leading-relaxed">
+                  I hereby certify that the foregoing balances are true and correct transcripts of the Subsidiary Ledgers of Bayani Multi-Purpose Cooperative as maintained under the Standard Chart of Accounts prescribed by the Cooperative Development Authority.
+                </div>
+
+                {/* Signatories Block */}
+                <div className="grid grid-cols-3 gap-6 pt-8 border-t border-slate-300 text-center text-xs">
+                  <div>
+                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">{currentMember.name}</div>
+                    <div className="text-[10px] text-slate-500 uppercase mt-1">Cooperative Member</div>
+                  </div>
+                  <div>
+                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">Danilo Macapagal</div>
+                    <div className="text-[10px] text-slate-500 uppercase mt-1">General Manager</div>
+                  </div>
+                  <div>
+                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">Corazon Aquino-Santos, CPA</div>
+                    <div className="text-[10px] text-slate-500 uppercase mt-1">Chief Accountant</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
