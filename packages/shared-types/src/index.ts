@@ -306,6 +306,10 @@ export interface JournalEntryLine {
   debit: number;
   credit: number;
   memo?: string;
+  memberId?: string;
+  memberNumber?: string;
+  memberName?: string;
+  subledgerType?: 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN' | 'ACCOUNTS_RECEIVABLE' | 'ACCOUNTS_PAYABLE';
 }
 
 export interface JournalEntry {
@@ -321,6 +325,89 @@ export interface JournalEntry {
   isBalanced: boolean;
   createdByUserId: string;
   postedAt: string;
+}
+
+// ==========================================
+// 6.1 MEMBER SUBSIDIARY LEDGER (SL) & GENERAL LEDGER (GL) CONTROL
+// ==========================================
+export type SubsidiaryLedgerType = 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN' | 'OTHER';
+
+export interface SubsidiaryLedgerTransaction {
+  id: string;
+  journalEntryId: string;
+  entryNumber: string;
+  postingDate: string;
+  referenceType: string;
+  referenceId?: string;
+  accountCode: string;
+  accountName: string;
+  subledgerType: SubsidiaryLedgerType;
+  description: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+  postedAt: string;
+}
+
+export interface MemberAccountLedgerSummary {
+  accountCode: string;
+  accountName: string;
+  subledgerType: SubsidiaryLedgerType;
+  accountReferenceNumber?: string;
+  totalDebit: number;
+  totalCredit: number;
+  currentBalance: number;
+  transactions: SubsidiaryLedgerTransaction[];
+}
+
+export interface MemberSubsidiaryLedger {
+  memberId: string;
+  memberNumber: string;
+  memberName: string;
+  classification: MemberClassification;
+  status: MemberStatus;
+  accounts: MemberAccountLedgerSummary[];
+  totalShareCapitalBalance: number;
+  totalSavingsBalance: number;
+  totalLoanOutstandingBalance: number;
+  lastActivityDate?: string;
+}
+
+export interface GeneralLedgerAccountStatement {
+  accountCode: string;
+  accountName: string;
+  category: CDAAccountCategory;
+  normalBalance: NormalBalance;
+  beginningBalance: number;
+  totalDebit: number;
+  totalCredit: number;
+  endingBalance: number;
+  entries: {
+    journalEntryId: string;
+    entryNumber: string;
+    postingDate: string;
+    referenceType: string;
+    referenceId?: string;
+    description: string;
+    debit: number;
+    credit: number;
+    runningBalance: number;
+    memo?: string;
+    memberId?: string;
+    memberNumber?: string;
+    memberName?: string;
+  }[];
+}
+
+export interface GLSLReconciliationItem {
+  accountCode: string;
+  accountName: string;
+  category: CDAAccountCategory;
+  glBalance: number;
+  slTotalBalance: number;
+  variance: number;
+  isReconciled: boolean;
+  memberCount: number;
 }
 
 // ==========================================

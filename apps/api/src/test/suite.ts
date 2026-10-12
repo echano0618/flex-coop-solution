@@ -1040,7 +1040,74 @@ console.log('\n--- 20. Statutory Cooperative Tax Profile & Exemption Rules (RA 9
   assert(bir1702Ex.birCertTaxExemptionAttached === true, 'BIR Form 1702-EX attaches BIR Certificate of Tax Exemption');
 }
 
-console.log('\n🎉 ALL 130 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC, PLATFORM ESCROW & COOPERATIVE TAX RULES UNDER RA 9520) PASSED SUCCESSFULLY!\n');
+// 21. General Ledger & Member Subsidiary Ledger (SL) Architecture
+console.log('\n--- 21. General Ledger & Member Subsidiary Ledger (SL) Control ---');
+{
+  const tenantId = 'tenant_bayani_001';
+  const members = dbStore.members.get(tenantId)!;
+  const entries = dbStore.journalEntries.get(tenantId)!;
+
+  // 21.1 Generate Member Subsidiary Ledger for Maria Clara Santos
+  const maria = members.find((m) => m.memberNumber === 'MEM-2026-0001')!;
+  const mariaSL = GeneralLedgerService.generateMemberSubsidiaryLedger(maria, entries);
+
+  assert(mariaSL.memberNumber === 'MEM-2026-0001', 'Member SL corresponds to Maria Clara Santos');
+  assert(mariaSL.accounts.length >= 3, 'Maria has SL records across Share Capital, Savings, and Loan');
+  assert(mariaSL.totalShareCapitalBalance === 15000.0, 'Maria Share Capital SL balance equals ₱15,000.00');
+  assert(mariaSL.totalSavingsBalance === 5000.0, 'Maria Compulsory Savings SL balance equals ₱5,000.00');
+  const loanRecord = dbStore.loans.get(tenantId)!.find((l) => l.memberId === maria.id)!;
+  assert(mariaSL.totalLoanOutstandingBalance === loanRecord.balanceRemaining, `Maria Regular Loan SL balance equals remaining loan balance (₱${loanRecord.balanceRemaining.toLocaleString()})`);
+
+  // Verify running balance calculation on Share Capital (Credit normal balance)
+  const mariaShareAcc = mariaSL.accounts.find((a) => a.accountCode === '3-01-03')!;
+  assert(mariaShareAcc.transactions.length >= 1, 'Share Capital SL tracks granular credit transactions');
+  assert(mariaShareAcc.transactions[0].runningBalance === 15000.0, 'Share Capital running balance increases on credit');
+
+  // Verify running balance calculation on Loans Receivable (Debit normal balance)
+  const mariaLoanAcc = mariaSL.accounts.find((a) => a.accountCode === '1-02-01')!;
+  assert(mariaLoanAcc.transactions.length >= 2, 'Loan SL tracks both initial disbursement (DR) and repayment (CR)');
+  assert(mariaLoanAcc.transactions[0].runningBalance === 50000.0, 'Initial loan disbursement establishes ₱50,000 debit balance');
+  assert(mariaLoanAcc.transactions[1].credit > 0, 'Subsequent repayment applies credit to reduce loan principal');
+  assert(mariaLoanAcc.transactions[1].runningBalance === loanRecord.balanceRemaining, 'Final transaction running balance equals loan ending balance');
+
+  // 21.2 Generate Member Subsidiary Ledger for Juan Perez Dela Cruz
+  const juan = members.find((m) => m.memberNumber === 'MEM-2026-0002')!;
+  const juanSL = GeneralLedgerService.generateMemberSubsidiaryLedger(juan, entries);
+  assert(juanSL.totalShareCapitalBalance === 10000.0, 'Juan Share Capital SL balance equals ₱10,000.00');
+
+  // 21.3 Generate General Ledger Account Statement for 3-01-03 (Paid-Up Share Capital)
+  const shareGLStatement = GeneralLedgerService.generateGeneralLedgerStatement('3-01-03', entries);
+  assert(shareGLStatement !== null, 'GL Statement generated for Paid-Up Share Capital (3-01-03)');
+  assert(shareGLStatement?.normalBalance === 'CREDIT', 'Share Capital has CREDIT normal balance');
+  assert(shareGLStatement?.endingBalance === 25000.0, 'GL Ending Balance for 3-01-03 equals ₱25,000.00 (₱15k Maria + ₱10k Juan)');
+  assert((shareGLStatement?.entries?.length || 0) >= 2, 'GL Statement contains entries for both members');
+
+  // 21.4 Generate General Ledger Account Statement for 1-02-01 (Loans Receivable - Regular)
+  const loanGLStatement = GeneralLedgerService.generateGeneralLedgerStatement('1-02-01', entries);
+  assert(loanGLStatement !== null, 'GL Statement generated for Loans Receivable (1-02-01)');
+  assert(loanGLStatement?.endingBalance === loanRecord.balanceRemaining, `GL Ending Balance for 1-02-01 equals remaining principal (₱${loanRecord.balanceRemaining.toLocaleString()})`);
+
+  // 21.5 GL vs SL Control Reconciliation Audit
+  const recon = GeneralLedgerService.generateGLSLReconciliation(members, entries);
+  assert(recon.items.length === 4, 'Reconciles all 4 key member control accounts (Loans, Compulsory Savings, Voluntary Savings, Paid-Up Shares)');
+  
+  const shareRecon = recon.items.find((i) => i.accountCode === '3-01-03')!;
+  assert(shareRecon.isReconciled === true, 'Control Account 3-01-03 is strictly reconciled (GL ₱25,000 == SL ₱25,000)');
+  assert(shareRecon.variance === 0.0, 'Variance for Paid-Up Share Capital is exactly ₱0.00');
+  assert(shareRecon.memberCount === 2, 'Share Capital SL aggregates across 2 participating members');
+
+  const loanRecon = recon.items.find((i) => i.accountCode === '1-02-01')!;
+  assert(loanRecon.isReconciled === true, `Control Account 1-02-01 is strictly reconciled (GL ₱${loanRecord.balanceRemaining} == SL ₱${loanRecord.balanceRemaining})`);
+  assert(loanRecon.variance === 0.0, 'Variance for Loans Receivable is exactly ₱0.00');
+
+  const savRecon = recon.items.find((i) => i.accountCode === '2-01-01')!;
+  assert(savRecon.isReconciled === true, 'Control Account 2-01-01 is strictly reconciled (GL ₱5,000 == SL ₱5,000)');
+  assert(savRecon.variance === 0.0, 'Variance for Compulsory Savings is exactly ₱0.00');
+
+  assert(recon.allReconciled === true, 'ALL GL Control Accounts perfectly match Member Subsidiary Ledgers (Total Variance: ₱0.00)');
+}
+
+console.log('\n🎉 ALL 147 VERIFICATION TEST CASES (INCLUDING SYSTEM ADMIN, IAM, RBAC, PLATFORM ESCROW, COOPERATIVE TAX & MEMBER SUBSIDIARY LEDGERS) PASSED SUCCESSFULLY!\n');
 
 
 

@@ -1,4 +1,15 @@
-import { CDAAccount, JournalEntry, JournalEntryLine } from '@flexcoop/shared-types';
+import {
+  CDAAccount,
+  JournalEntry,
+  JournalEntryLine,
+  Member,
+  MemberSubsidiaryLedger,
+  MemberAccountLedgerSummary,
+  SubsidiaryLedgerTransaction,
+  SubsidiaryLedgerType,
+  GeneralLedgerAccountStatement,
+  GLSLReconciliationItem,
+} from '@flexcoop/shared-types';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 
 export interface TrialBalanceItem {
@@ -60,6 +71,9 @@ export class GeneralLedgerService {
     netProceeds: number;
     disbursementChannel: 'PLATFORM_ESCROW' | 'BANK' | 'CASH';
     userId: string;
+    memberId?: string;
+    memberNumber?: string;
+    memberName?: string;
   }): Omit<JournalEntry, 'id'> {
     const cashAccountCode =
       params.disbursementChannel === 'PLATFORM_ESCROW'
@@ -80,6 +94,10 @@ export class GeneralLedgerService {
         debit: params.grossPrincipal,
         credit: 0,
         memo: `Gross loan receivable - ${params.loanNumber}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'LOAN',
       },
       {
         accountCode: cashAccount.code,
@@ -87,6 +105,9 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.netProceeds,
         memo: `Net proceeds disbursed to member`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
       },
     ];
 
@@ -143,6 +164,9 @@ export class GeneralLedgerService {
     passOnFee: number;
     channel: 'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER';
     userId: string;
+    memberId?: string;
+    memberNumber?: string;
+    memberName?: string;
   }): Omit<JournalEntry, 'id'> {
     const cashCode = params.channel === 'PAYMONGO_QRPH' ? '1-01-05' : '1-01-01';
     const cashAccount = CDACoAManager.findByCode(cashCode)!;
@@ -157,6 +181,9 @@ export class GeneralLedgerService {
         debit: params.grossReceived,
         credit: 0,
         memo: `Collection received via ${params.channel}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
       },
     ];
 
@@ -167,6 +194,10 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.principalPortion,
         memo: `Principal reduction - ${params.loanNumber}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'LOAN',
       });
     }
 
@@ -177,6 +208,9 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.interestPortion,
         memo: `Interest earned on loan`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
       });
     }
 
@@ -187,6 +221,9 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.penaltyPortion,
         memo: `Fines and penalty charges`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
       });
     }
 
@@ -227,6 +264,7 @@ export class GeneralLedgerService {
   static buildShareDepositEntry(params: {
     memberId: string;
     memberNumber: string;
+    memberName?: string;
     amount: number;
     channel?: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' | 'BANK_TRANSFER';
     passOnFee?: number;
@@ -251,6 +289,9 @@ export class GeneralLedgerService {
         debit: totalDebit,
         credit: 0,
         memo: `Share capital contribution from member ${params.memberNumber} via ${params.channel || 'IN_PERSON_CASHIER'}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
       },
       {
         accountCode: shareAccount.code,
@@ -258,6 +299,10 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.amount,
         memo: `Paid-up share capital common contribution`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'SHARE_CAPITAL',
       },
     ];
 
@@ -294,6 +339,7 @@ export class GeneralLedgerService {
   static buildSavingsDepositEntry(params: {
     memberId: string;
     memberNumber: string;
+    memberName?: string;
     amount: number;
     savingsType?: 'COMPULSORY' | 'VOLUNTARY' | 'TIME_DEPOSIT';
     channel?: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' | 'BANK_TRANSFER';
@@ -325,6 +371,9 @@ export class GeneralLedgerService {
         debit: totalDebit,
         credit: 0,
         memo: `Savings deposit from member ${params.memberNumber} via ${params.channel || 'IN_PERSON_CASHIER'}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
       },
       {
         accountCode: savingsAccount.code,
@@ -332,6 +381,10 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.amount,
         memo: `Member savings deposit (${params.savingsType || 'VOLUNTARY'})`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'SAVINGS',
       },
     ];
 
@@ -480,6 +533,299 @@ export class GeneralLedgerService {
         expenses: { items: expenses, total: totalExpenses },
         netSurplus,
       },
+    };
+  }
+
+  /**
+   * Generates Member Subsidiary Ledger (SL) for a specific member from posted journal entries
+   */
+  static generateMemberSubsidiaryLedger(
+    member: Member,
+    entries: JournalEntry[]
+  ): MemberSubsidiaryLedger {
+    // Sort entries chronologically
+    const sortedEntries = [...entries].sort(
+      (a, b) => new Date(a.postingDate).getTime() - new Date(b.postingDate).getTime()
+    );
+
+    const accountLedgersMap = new Map<string, {
+      accountCode: string;
+      accountName: string;
+      subledgerType: SubsidiaryLedgerType;
+      transactions: SubsidiaryLedgerTransaction[];
+      normalBalance: 'DEBIT' | 'CREDIT';
+      totalDebit: number;
+      totalCredit: number;
+    }>();
+
+    let lastActivityDate: string | undefined;
+
+    for (const entry of sortedEntries) {
+      for (const line of entry.lines) {
+        // Check if line is tagged for this member (by id or memberNumber)
+        const isTargetMember =
+          line.memberId === member.id ||
+          line.memberNumber === member.memberNumber ||
+          (entry.referenceId === member.id && (line.accountCode.startsWith('3-01-') || line.accountCode.startsWith('2-01-')));
+
+        if (!isTargetMember) continue;
+
+        const coa = CDACoAManager.findByCode(line.accountCode);
+        if (!coa) continue;
+
+        // Classify SL category
+        let slType: SubsidiaryLedgerType = 'OTHER';
+        if (line.subledgerType) {
+          slType = line.subledgerType as SubsidiaryLedgerType;
+        } else if (line.accountCode.startsWith('3-01-')) {
+          slType = 'SHARE_CAPITAL';
+        } else if (line.accountCode.startsWith('2-01-')) {
+          slType = 'SAVINGS';
+        } else if (line.accountCode.startsWith('1-02-')) {
+          slType = 'LOAN';
+        }
+
+        const mapKey = `${line.accountCode}_${slType}`;
+        let accLedger = accountLedgersMap.get(mapKey);
+        if (!accLedger) {
+          accLedger = {
+            accountCode: line.accountCode,
+            accountName: coa.name,
+            subledgerType: slType,
+            transactions: [],
+            normalBalance: coa.normalBalance,
+            totalDebit: 0,
+            totalCredit: 0,
+          };
+          accountLedgersMap.set(mapKey, accLedger);
+        }
+
+        const debit = line.debit || 0;
+        const credit = line.credit || 0;
+        accLedger.totalDebit += debit;
+        accLedger.totalCredit += credit;
+
+        // Calculate running balance based on normal balance
+        const prevBal = accLedger.transactions.length > 0
+          ? accLedger.transactions[accLedger.transactions.length - 1].runningBalance
+          : 0;
+
+        let runningBalance = prevBal;
+        if (coa.normalBalance === 'CREDIT') {
+          // Liabilities & Equity increase with credit, decrease with debit
+          runningBalance = Math.round((prevBal + credit - debit) * 100) / 100;
+        } else {
+          // Assets (Loans) increase with debit, decrease with credit
+          runningBalance = Math.round((prevBal + debit - credit) * 100) / 100;
+        }
+
+        accLedger.transactions.push({
+          id: `sl_tx_${entry.id}_${accLedger.transactions.length + 1}`,
+          journalEntryId: entry.id,
+          entryNumber: entry.entryNumber,
+          postingDate: entry.postingDate,
+          referenceType: entry.referenceType,
+          referenceId: entry.referenceId,
+          accountCode: line.accountCode,
+          accountName: coa.name,
+          subledgerType: slType,
+          description: line.memo || entry.description,
+          debit,
+          credit,
+          runningBalance,
+          postedAt: entry.postedAt,
+        });
+
+        lastActivityDate = entry.postingDate;
+      }
+    }
+
+    const accounts: MemberAccountLedgerSummary[] = [];
+    let totalShareCapitalBalance = 0;
+    let totalSavingsBalance = 0;
+    let totalLoanOutstandingBalance = 0;
+
+    for (const item of accountLedgersMap.values()) {
+      const currentBalance = item.transactions.length > 0
+        ? item.transactions[item.transactions.length - 1].runningBalance
+        : 0;
+
+      accounts.push({
+        accountCode: item.accountCode,
+        accountName: item.accountName,
+        subledgerType: item.subledgerType,
+        totalDebit: Math.round(item.totalDebit * 100) / 100,
+        totalCredit: Math.round(item.totalCredit * 100) / 100,
+        currentBalance: Math.round(currentBalance * 100) / 100,
+        transactions: item.transactions,
+      });
+
+      if (item.subledgerType === 'SHARE_CAPITAL') {
+        totalShareCapitalBalance += currentBalance;
+      } else if (item.subledgerType === 'SAVINGS') {
+        totalSavingsBalance += currentBalance;
+      } else if (item.subledgerType === 'LOAN') {
+        totalLoanOutstandingBalance += currentBalance;
+      }
+    }
+
+    return {
+      memberId: member.id,
+      memberNumber: member.memberNumber,
+      memberName: `${member.firstName} ${member.middleName ? member.middleName + ' ' : ''}${member.lastName}`.trim(),
+      classification: member.classification,
+      status: member.status,
+      accounts: accounts.sort((a, b) => a.accountCode.localeCompare(b.accountCode)),
+      totalShareCapitalBalance: Math.round(totalShareCapitalBalance * 100) / 100,
+      totalSavingsBalance: Math.round(totalSavingsBalance * 100) / 100,
+      totalLoanOutstandingBalance: Math.round(totalLoanOutstandingBalance * 100) / 100,
+      lastActivityDate,
+    };
+  }
+
+  /**
+   * Generates all Member Subsidiary Ledgers across all active members in the cooperative
+   */
+  static getAllMemberSubsidiaryLedgers(
+    members: Member[],
+    entries: JournalEntry[]
+  ): MemberSubsidiaryLedger[] {
+    return members.map((m) => this.generateMemberSubsidiaryLedger(m, entries));
+  }
+
+  /**
+   * Generates a detailed General Ledger Account Statement for any CDA Account code
+   */
+  static generateGeneralLedgerStatement(
+    accountCode: string,
+    entries: JournalEntry[]
+  ): GeneralLedgerAccountStatement | null {
+    const coa = CDACoAManager.findByCode(accountCode);
+    if (!coa) return null;
+
+    const sortedEntries = [...entries].sort(
+      (a, b) => new Date(a.postingDate).getTime() - new Date(b.postingDate).getTime()
+    );
+
+    let runningBalance = 0;
+    let totalDebit = 0;
+    let totalCredit = 0;
+    const lineEntries: GeneralLedgerAccountStatement['entries'] = [];
+
+    for (const entry of sortedEntries) {
+      for (const line of entry.lines) {
+        if (line.accountCode === accountCode) {
+          const debit = line.debit || 0;
+          const credit = line.credit || 0;
+          totalDebit += debit;
+          totalCredit += credit;
+
+          if (coa.normalBalance === 'DEBIT') {
+            runningBalance = Math.round((runningBalance + debit - credit) * 100) / 100;
+          } else {
+            runningBalance = Math.round((runningBalance + credit - debit) * 100) / 100;
+          }
+
+          lineEntries.push({
+            journalEntryId: entry.id,
+            entryNumber: entry.entryNumber,
+            postingDate: entry.postingDate,
+            referenceType: entry.referenceType,
+            referenceId: entry.referenceId,
+            description: entry.description,
+            debit,
+            credit,
+            runningBalance,
+            memo: line.memo,
+            memberId: line.memberId,
+            memberNumber: line.memberNumber,
+            memberName: line.memberName,
+          });
+        }
+      }
+    }
+
+    return {
+      accountCode: coa.code,
+      accountName: coa.name,
+      category: coa.category,
+      normalBalance: coa.normalBalance,
+      beginningBalance: 0,
+      totalDebit: Math.round(totalDebit * 100) / 100,
+      totalCredit: Math.round(totalCredit * 100) / 100,
+      endingBalance: Math.round(runningBalance * 100) / 100,
+      entries: lineEntries,
+    };
+  }
+
+  /**
+   * Reconciles General Ledger (GL) Control Accounts against Member Subsidiary Ledgers (SL)
+   * Essential internal control audit: Sum of all Member SL balances must match GL Control Account exactly!
+   */
+  static generateGLSLReconciliation(
+    members: Member[],
+    entries: JournalEntry[]
+  ): {
+    items: GLSLReconciliationItem[];
+    allReconciled: boolean;
+    totalVariance: number;
+  } {
+    const memberLedgers = this.getAllMemberSubsidiaryLedgers(members, entries);
+    const tb = this.generateTrialBalance(entries);
+
+    // Target Control Accounts that must reconcile with Member SL:
+    // 1-02-01: Loans Receivable - Regular
+    // 2-01-01: Savings Deposits - Compulsory
+    // 2-01-02: Savings Deposits - Voluntary
+    // 3-01-03: Paid-Up Share Capital - Common
+    const controlAccountCodes = ['1-02-01', '2-01-01', '2-01-02', '3-01-03'];
+
+    const items: GLSLReconciliationItem[] = [];
+    let grandVariance = 0;
+
+    for (const code of controlAccountCodes) {
+      const coa = CDACoAManager.findByCode(code);
+      if (!coa) continue;
+
+      const tbItem = tb.items.find((i) => i.accountCode === code);
+      let glBalance = 0;
+      if (tbItem) {
+        glBalance = coa.normalBalance === 'DEBIT' ? tbItem.netDebit : tbItem.netCredit;
+      }
+
+      // Sum across all member subsidiary ledgers
+      let slTotal = 0;
+      let memberCount = 0;
+
+      for (const mSL of memberLedgers) {
+        const accSummary = mSL.accounts.find((a) => a.accountCode === code);
+        if (accSummary && accSummary.currentBalance !== 0) {
+          slTotal += accSummary.currentBalance;
+          memberCount++;
+        }
+      }
+
+      slTotal = Math.round(slTotal * 100) / 100;
+      glBalance = Math.round(glBalance * 100) / 100;
+      const variance = Math.round(Math.abs(glBalance - slTotal) * 100) / 100;
+      grandVariance += variance;
+
+      items.push({
+        accountCode: code,
+        accountName: coa.name,
+        category: coa.category,
+        glBalance,
+        slTotalBalance: slTotal,
+        variance,
+        isReconciled: variance === 0,
+        memberCount,
+      });
+    }
+
+    return {
+      items,
+      allReconciled: grandVariance === 0,
+      totalVariance: Math.round(grandVariance * 100) / 100,
     };
   }
 }

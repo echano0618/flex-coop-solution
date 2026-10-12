@@ -268,18 +268,41 @@ export class AppDataStore {
       netProceeds,
       disbursementChannel: 'PLATFORM_ESCROW',
       userId: 'usr_admin_001',
-    });
-
-    const shareJournal = GeneralLedgerService.buildShareDepositEntry({
       memberId: member1.id,
       memberNumber: member1.memberNumber,
+      memberName: `${member1.firstName} ${member1.lastName}`,
+    });
+
+    const shareJournal1 = GeneralLedgerService.buildShareDepositEntry({
+      memberId: member1.id,
+      memberNumber: member1.memberNumber,
+      memberName: `${member1.firstName} ${member1.lastName}`,
       amount: 15000,
+      userId: 'usr_teller_001',
+    });
+
+    const shareJournal2 = GeneralLedgerService.buildShareDepositEntry({
+      memberId: member2.id,
+      memberNumber: member2.memberNumber,
+      memberName: `${member2.firstName} ${member2.lastName}`,
+      amount: 10000,
+      userId: 'usr_teller_001',
+    });
+
+    const savingsJournal1 = GeneralLedgerService.buildSavingsDepositEntry({
+      memberId: member1.id,
+      memberNumber: member1.memberNumber,
+      memberName: `${member1.firstName} ${member1.lastName}`,
+      amount: 5000,
+      savingsType: 'COMPULSORY',
       userId: 'usr_teller_001',
     });
 
     this.journalEntries.set(tenantId, [
       { id: 'je_disb_001', ...disbJournal },
-      { id: 'je_share_001', ...shareJournal },
+      { id: 'je_share_001', ...shareJournal1 },
+      { id: 'je_share_002', ...shareJournal2 },
+      { id: 'je_sav_001', ...savingsJournal1 },
     ]);
 
     // 10. Seed Collaterals (Real Estate Mortgage & Chattel Mortgage)

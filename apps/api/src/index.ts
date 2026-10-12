@@ -477,10 +477,15 @@ app.post('/api/v1/shares/deposit', (req: Request, res: Response) => {
 
   const receiptNumber = `OR-SHR-${Date.now().toString(36).toUpperCase()}`;
 
+  const member = (dbStore.members.get(tenantId) || []).find((m) => m.id === memberId);
+  const memberName = member ? `${member.firstName} ${member.lastName}` : undefined;
+  const memberNumber = member ? member.memberNumber : account.accountNumber;
+
   // Automatic balanced CDA journal entry
   const journalData = GeneralLedgerService.buildShareDepositEntry({
     memberId,
-    memberNumber: account.accountNumber,
+    memberNumber,
+    memberName,
     amount: depositNum,
     channel: channel === 'PAYMONGO_QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
     passOnFee: Number(passOnFee || 0),
@@ -550,11 +555,15 @@ app.post('/api/v1/savings/deposit', (req: Request, res: Response) => {
   account.balance += depositNum;
   account.updatedAt = new Date().toISOString();
 
+  const member = (dbStore.members.get(tenantId) || []).find((m) => m.id === memberId);
+  const memberName = member ? `${member.firstName} ${member.lastName}` : undefined;
+  const memberNumber = member ? member.memberNumber : account.accountNumber;
   const receiptNumber = `OR-SAV-${Date.now().toString(36).toUpperCase()}`;
 
   const journalData = GeneralLedgerService.buildSavingsDepositEntry({
     memberId,
-    memberNumber: account.accountNumber,
+    memberNumber,
+    memberName,
     amount: depositNum,
     savingsType: account.type,
     channel: channel === 'PAYMONGO_QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
@@ -1204,6 +1213,11 @@ app.post('/api/v1/payments/cashier', (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
 
+  const payMemberId = memberId || loan.memberId;
+  const member = (dbStore.members.get(tenantId) || []).find((m) => m.id === payMemberId);
+  const memberName = member ? `${member.firstName} ${member.lastName}` : undefined;
+  const memberNumber = member ? member.memberNumber : undefined;
+
   // Post Balanced CDA Journal Entry
   const jeData = GeneralLedgerService.buildRepaymentEntry({
     loanId: loan.id,
@@ -1215,6 +1229,9 @@ app.post('/api/v1/payments/cashier', (req: Request, res: Response) => {
     passOnFee,
     channel: paymentChannel,
     userId: 'usr_cashier',
+    memberId: payMemberId,
+    memberNumber,
+    memberName,
   });
 
   const entries = dbStore.journalEntries.get(tenantId) || [];
@@ -1294,6 +1311,56 @@ app.get('/api/v1/accounting/financial-statements', (req: Request, res: Response)
   const entries = dbStore.journalEntries.get(tenantId) || [];
   const statements = GeneralLedgerService.generateFinancialStatements(entries);
   res.json({ success: true, data: statements });
+});
+
+// GET /api/v1/accounting/gl-statement/:accountCode - Full Account Ledger with Chronological Running Balances
+app.get('/api/v1/accounting/gl-statement/:accountCode', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { accountCode } = req.params;
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const statement = GeneralLedgerService.generateGeneralLedgerStatement(accountCode, entries);
+
+  if (!statement) {
+    return res.status(404).json({ success: false, error: `CDA Account '${accountCode}' not found.` });
+  }
+
+  res.json({ success: true, data: statement });
+});
+
+// GET /api/v1/accounting/member-subsidiary-ledgers - All members' SL summaries
+app.get('/api/v1/accounting/member-subsidiary-ledgers', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const members = dbStore.members.get(tenantId) || [];
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const ledgers = GeneralLedgerService.getAllMemberSubsidiaryLedgers(members, entries);
+  res.json({ success: true, count: ledgers.length, data: ledgers });
+});
+
+// GET /api/v1/accounting/member-subsidiary-ledgers/:memberIdOrNumber - Specific Member's SL Statement
+app.get('/api/v1/accounting/member-subsidiary-ledgers/:memberIdOrNumber', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberIdOrNumber } = req.params;
+  const members = dbStore.members.get(tenantId) || [];
+  const member = members.find(
+    (m) => m.id === memberIdOrNumber || m.memberNumber.toLowerCase() === memberIdOrNumber.toLowerCase()
+  );
+
+  if (!member) {
+    return res.status(404).json({ success: false, error: `Member '${memberIdOrNumber}' not found.` });
+  }
+
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const sl = GeneralLedgerService.generateMemberSubsidiaryLedger(member, entries);
+  res.json({ success: true, data: sl });
+});
+
+// GET /api/v1/accounting/gl-sl-reconciliation - Control Accounts Audit (GL vs Sum of SL)
+app.get('/api/v1/accounting/gl-sl-reconciliation', (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const members = dbStore.members.get(tenantId) || [];
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const reconciliation = GeneralLedgerService.generateGLSLReconciliation(members, entries);
+  res.json({ success: true, data: reconciliation });
 });
 
 // ==========================================

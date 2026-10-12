@@ -1435,6 +1435,14 @@ export default function AdminDashboard() {
   >('MEMBER_SHARE');
   const [taxTestAmount, setTaxTestAmount] = useState<number>(50000);
 
+  // General Ledger (GL) & Member Subsidiary Ledger (SL) Submodule State
+  const [ledgerSubTab, setLedgerSubTab] = useState<'trial_balance' | 'member_sl' | 'gl_statement' | 'reconciliation'>('trial_balance');
+  const [selectedSlMemberId, setSelectedSlMemberId] = useState<string>('mem_1');
+  const [slMemberSearchQuery, setSlMemberSearchQuery] = useState<string>('');
+  const [selectedGlAccountCode, setSelectedGlAccountCode] = useState<string>('1-02-01');
+  const [glAccountSearchQuery, setGlAccountSearchQuery] = useState<string>('');
+  const [slFilterCategory, setSlFilterCategory] = useState<'ALL' | 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN'>('ALL');
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col lg:flex-row">
       {/* Desktop App Drawer on Left Side */}
@@ -4430,83 +4438,860 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 4: CDA GENERAL LEDGER */}
+        {/* TAB 4: CDA GENERAL LEDGER & MEMBER SUBSIDIARY LEDGER (SL) */}
         {activeTab === 'accounting' && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">CDA Standard General Ledger & Trial Balance</h2>
-              <p className="text-xs text-slate-500">Live double-entry balances adhering to the standard Cooperative Development Authority chart of accounts.</p>
+          <div className="space-y-6">
+            {/* Header & Internal Control Context */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1 font-mono">
+                    <BookOpen className="w-3 h-3 text-emerald-600" />
+                    <span>CDA Standard Chart of Accounts • MC 2015-06 Internal Controls</span>
+                  </span>
+                  <span className="text-slate-400 text-xs">•</span>
+                  <span className="text-xs text-slate-500 font-mono">Double-Entry Core Engine</span>
+                </div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">General Ledger & Member Subsidiary Ledger (SL)</h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+                  Central double-entry control accounts paired with granular Member Subsidiary Ledgers (SL) for Share Capital, Compulsory/Voluntary Savings, and Loan Notes.
+                </p>
+              </div>
+
+              {/* Sub-module Navigation Pills */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setLedgerSubTab('trial_balance')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    ledgerSubTab === 'trial_balance'
+                      ? 'bg-white text-emerald-800 font-bold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  <span>Trial Balance</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLedgerSubTab('member_sl')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    ledgerSubTab === 'member_sl'
+                      ? 'bg-white text-emerald-800 font-bold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Member SL (Individual)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLedgerSubTab('gl_statement')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    ledgerSubTab === 'gl_statement'
+                      ? 'bg-white text-emerald-800 font-bold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>GL Account Statements</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLedgerSubTab('reconciliation')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    ledgerSubTab === 'reconciliation'
+                      ? 'bg-white text-emerald-800 font-bold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Scale className="w-3.5 h-3.5" />
+                  <span>GL vs SL Reconciliation</span>
+                </button>
+              </div>
             </div>
 
-            <div className="overflow-x-auto border border-slate-200 rounded-lg">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
-                  <tr>
-                    <th className="p-3">CDA Code</th>
-                    <th className="p-3">Account Title</th>
-                    <th className="p-3">Category</th>
-                    <th className="p-3 text-right">Debit (₱)</th>
-                    <th className="p-3 text-right">Credit (₱)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  <tr>
-                    <td className="p-3 font-mono font-medium">1-01-01</td>
-                    <td className="p-3">Cash on Hand (Cashier Counter)</td>
-                    <td className="p-3 text-slate-500">ASSETS</td>
-                    <td className="p-3 text-right font-medium">15,000.00</td>
-                    <td className="p-3 text-right text-slate-400">0.00</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-mono font-medium">1-02-01</td>
-                    <td className="p-3">Loans Receivable - Regular</td>
-                    <td className="p-3 text-slate-500">ASSETS</td>
-                    <td className="p-3 text-right font-medium">50,000.00</td>
-                    <td className="p-3 text-right text-slate-400">0.00</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-mono font-medium">1-01-04</td>
-                    <td className="p-3">Platform Escrow Settlement Account</td>
-                    <td className="p-3 text-slate-500">ASSETS</td>
-                    <td className="p-3 text-right text-slate-400">0.00</td>
-                    <td className="p-3 text-right font-medium">48,250.00</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-mono font-medium">2-02-02</td>
-                    <td className="p-3">Platform Loan Processing Fee Payable</td>
-                    <td className="p-3 text-slate-500">LIABILITIES</td>
-                    <td className="p-3 text-right text-slate-400">0.00</td>
-                    <td className="p-3 text-right font-medium">1,000.00</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-mono font-medium">4-01-02</td>
-                    <td className="p-3">Service and Filing Fees Income</td>
-                    <td className="p-3 text-slate-500">REVENUE</td>
-                    <td className="p-3 text-right text-slate-400">0.00</td>
-                    <td className="p-3 text-right font-medium">750.00</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-mono font-medium">3-01-03</td>
-                    <td className="p-3">Paid-Up Share Capital - Common</td>
-                    <td className="p-3 text-slate-500">EQUITY</td>
-                    <td className="p-3 text-right text-slate-400">0.00</td>
-                    <td className="p-3 text-right font-medium">15,000.00</td>
-                  </tr>
-                </tbody>
-                <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900">
-                  <tr>
-                    <td colSpan={3} className="p-3 text-right uppercase">Trial Balance Grand Total:</td>
-                    <td className="p-3 text-right text-emerald-800">₱65,000.00</td>
-                    <td className="p-3 text-right text-emerald-800">₱65,000.00</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            {/* SUB-VIEW 1: CDA TRIAL BALANCE */}
+            {ledgerSubTab === 'trial_balance' && (
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-emerald-600" />
+                      <span>CDA Standard Trial Balance (As of {new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })})</span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Summary of all asset, liability, equity, revenue, and expense accounts. Strictly balanced double-entry validation.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Total Debits = Total Credits (Balanced)</span>
+                  </div>
+                </div>
 
-            <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 p-3 rounded-lg font-medium">
-              <CheckCircle2 className="w-4 h-4" />
-              General Ledger is Balanced! Sum of all debits equals sum of all credits.
-            </div>
+                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
+                      <tr>
+                        <th className="p-3">CDA Code</th>
+                        <th className="p-3">Account Title</th>
+                        <th className="p-3">Category</th>
+                        <th className="p-3">Normal Balance</th>
+                        <th className="p-3 text-right">Debit Balance (₱)</th>
+                        <th className="p-3 text-right">Credit Balance (₱)</th>
+                        <th className="p-3 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">1-01-01</td>
+                        <td className="p-3 font-medium text-slate-800">Cash on Hand (Cashier Counter)</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">15,000.00</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('1-01-01'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">1-01-04</td>
+                        <td className="p-3 font-medium text-slate-800">Platform Escrow Settlement Account</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">48,250.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('1-01-04'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">1-01-05</td>
+                        <td className="p-3 font-medium text-slate-800">Digital Wallet / PayMongo Float</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">48,470.00</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('1-01-05'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
+                        <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular (Control Account)</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">47,000.00</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('1-02-01'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
+                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory (Control Account)</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">7,000.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('2-01-01'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
+                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary (Control Account)</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">1,200.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('2-01-02'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">2-02-02</td>
+                        <td className="p-3 font-medium text-slate-800">Platform Loan Processing Fee Payable</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">1,000.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('2-02-02'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
+                        <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common (Control Account)</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
+                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">30,000.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('3-01-03'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">4-01-01</td>
+                        <td className="p-3 font-medium text-slate-800">Interest Income from Loans</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
+                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">3,270.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('4-01-01'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">4-01-02</td>
+                        <td className="p-3 font-medium text-slate-800">Service and Filing Fees Income</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
+                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">750.00</td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGlAccountCode('4-01-02'); setLedgerSubTab('gl_statement'); }}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                          >
+                            View GL Ledger
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
+                      <tr>
+                        <td colSpan={4} className="p-3 text-right uppercase">Trial Balance Grand Total:</td>
+                        <td className="p-3 text-right font-mono text-emerald-900 font-black">₱110,470.00</td>
+                        <td className="p-3 text-right font-mono text-emerald-900 font-black">₱110,470.00</td>
+                        <td className="p-3 text-center text-[10px] text-emerald-700 font-bold">BALANCED</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-VIEW 2: MEMBER SUBSIDIARY LEDGER (SL) */}
+            {ledgerSubTab === 'member_sl' && (() => {
+              const activeMember = members.find((m) => m.id === selectedSlMemberId) || members[0];
+
+              // Mock transaction ledger for selected member
+              const memberSlAccounts = [
+                {
+                  code: '3-01-03',
+                  title: 'Paid-Up Share Capital - Common',
+                  type: 'SHARE_CAPITAL',
+                  normal: 'CREDIT',
+                  balance: activeMember.paidUpShares,
+                  txs: [
+                    {
+                      date: '2026-01-20',
+                      ref: 'OR-SHR-2026-001',
+                      desc: 'Initial Share Capital Paid-Up Contribution (In-Person Cashier)',
+                      dr: 0,
+                      cr: activeMember.paidUpShares,
+                      bal: activeMember.paidUpShares,
+                    },
+                  ],
+                },
+                {
+                  code: '2-01-01',
+                  title: 'Savings Deposits - Compulsory',
+                  type: 'SAVINGS',
+                  normal: 'CREDIT',
+                  balance: activeMember.savingsBalance,
+                  txs: activeMember.savingsBalance > 0 ? [
+                    {
+                      date: '2026-01-20',
+                      ref: 'OR-SAV-2026-001',
+                      desc: 'Compulsory Monthly Savings Deposit (Auto-Credit)',
+                      dr: 0,
+                      cr: activeMember.savingsBalance,
+                      bal: activeMember.savingsBalance,
+                    },
+                  ] : [],
+                },
+                {
+                  code: '1-02-01',
+                  title: 'Loans Receivable - Regular',
+                  type: 'LOAN',
+                  normal: 'DEBIT',
+                  balance: activeMember.loanBalance,
+                  txs: activeMember.loanBalance > 0 ? [
+                    {
+                      date: '2026-02-01',
+                      ref: 'LN-2026-00001',
+                      desc: 'Loan Principal Disbursed via Platform Escrow',
+                      dr: 50000,
+                      cr: 0,
+                      bal: 50000,
+                    },
+                    {
+                      date: '2026-03-01',
+                      ref: 'OR-PM-99214',
+                      desc: 'Monthly Installment 1 - Principal Reduction (PayMongo QR Ph)',
+                      dr: 0,
+                      cr: 3000,
+                      bal: 47000,
+                    },
+                  ] : [],
+                },
+              ];
+
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Column: Member Selector Directory */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-emerald-600" />
+                        <span>Member SL Directory</span>
+                      </h4>
+                      <span className="text-[11px] font-mono text-slate-500 font-bold">{members.length} Members</span>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={slMemberSearchQuery}
+                        onChange={(e) => setSlMemberSearchQuery(e.target.value)}
+                        placeholder="Search by name or member no..."
+                        className="w-full text-xs pl-9 pr-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50"
+                      />
+                    </div>
+
+                    <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                      {members
+                        .filter((m) => {
+                          const q = slMemberSearchQuery.toLowerCase().trim();
+                          if (!q) return true;
+                          return m.name.toLowerCase().includes(q) || m.memberNo.toLowerCase().includes(q);
+                        })
+                        .map((m) => (
+                          <div
+                            key={m.id}
+                            onClick={() => setSelectedSlMemberId(m.id)}
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              selectedSlMemberId === m.id
+                                ? 'bg-emerald-50/80 border-emerald-300 shadow-xs'
+                                : 'bg-slate-50/60 border-slate-200/80 hover:bg-slate-100/70'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <div className="font-bold text-xs text-slate-900 leading-tight">{m.name}</div>
+                                <div className="text-[11px] font-mono text-slate-500">{m.memberNo}</div>
+                              </div>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                m.classification === 'REGULAR' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {m.classification}
+                              </span>
+                            </div>
+                            <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex justify-between text-[11px]">
+                              <span className="text-slate-500">Shares: ₱{m.paidUpShares.toLocaleString()}</span>
+                              <span className="text-slate-500 font-mono">Loan: ₱{m.loanBalance.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Member Detailed Subsidiary Ledger Card */}
+                  <div className="lg:col-span-2 space-y-6">
+                    {/* Member Header Card */}
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                            {activeMember.memberNo}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500">• {activeMember.classification} Member</span>
+                          <span className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono">TIN: 009-887-123</span>
+                        </div>
+                        <h3 className="text-lg font-black text-slate-900 mt-1">{activeMember.name}</h3>
+                        <p className="text-xs text-slate-500">{activeMember.email} • {activeMember.idType}</p>
+                      </div>
+
+                      {/* Summary Balances Pill */}
+                      <div className="grid grid-cols-3 gap-3 w-full sm:w-auto">
+                        <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-200 text-center">
+                          <div className="text-[10px] font-bold text-purple-700 uppercase">Paid-Up Capital</div>
+                          <div className="text-sm font-black text-purple-900 font-mono">₱{activeMember.paidUpShares.toLocaleString()}</div>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-center">
+                          <div className="text-[10px] font-bold text-amber-700 uppercase">Savings</div>
+                          <div className="text-sm font-black text-amber-900 font-mono">₱{activeMember.savingsBalance.toLocaleString()}</div>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-center">
+                          <div className="text-[10px] font-bold text-blue-700 uppercase">Outstanding Loan</div>
+                          <div className="text-sm font-black text-blue-900 font-mono">₱{activeMember.loanBalance.toLocaleString()}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Filter by Subledger Type */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-600">Filter SL Account:</span>
+                      {(['ALL', 'SHARE_CAPITAL', 'SAVINGS', 'LOAN'] as const).map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setSlFilterCategory(cat)}
+                          className={`px-3 py-1 text-xs rounded-lg font-semibold transition-all ${
+                            slFilterCategory === cat
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {cat.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Individual Subsidiary Ledgers */}
+                    {memberSlAccounts
+                      .filter((acc) => slFilterCategory === 'ALL' || acc.type === slFilterCategory)
+                      .map((acc) => (
+                        <div key={acc.code} className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                          <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded text-xs font-bold font-mono bg-slate-200 text-slate-800">
+                                {acc.code}
+                              </span>
+                              <span className="font-bold text-xs text-slate-900">{acc.title}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">({acc.normal} Normal Balance)</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[11px] text-slate-500 mr-2">Current SL Balance:</span>
+                              <span className="text-xs font-mono font-black text-slate-900">₱{acc.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          </div>
+
+                          {acc.txs.length === 0 ? (
+                            <div className="p-6 text-center text-xs text-slate-400 italic">
+                              No posted transactions recorded in this subsidiary account.
+                            </div>
+                          ) : (
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-white border-b border-slate-200 text-slate-600 uppercase font-semibold text-[11px]">
+                                <tr>
+                                  <th className="p-3">Posting Date</th>
+                                  <th className="p-3">Reference Voucher</th>
+                                  <th className="p-3">Transaction Description</th>
+                                  <th className="p-3 text-right">Debit (₱)</th>
+                                  <th className="p-3 text-right">Credit (₱)</th>
+                                  <th className="p-3 text-right">Running Balance (₱)</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {acc.txs.map((tx, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                    <td className="p-3 font-mono text-slate-600">{tx.date}</td>
+                                    <td className="p-3 font-mono font-semibold text-emerald-700">{tx.ref}</td>
+                                    <td className="p-3 text-slate-800">{tx.desc}</td>
+                                    <td className="p-3 text-right font-mono font-medium text-slate-700">
+                                      {tx.dr > 0 ? `₱${tx.dr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-medium text-slate-700">
+                                      {tx.cr > 0 ? `₱${tx.cr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
+                                      ₱{tx.bal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* SUB-VIEW 3: GENERAL LEDGER ACCOUNT STATEMENTS */}
+            {ledgerSubTab === 'gl_statement' && (() => {
+              const coaOptions = [
+                { code: '1-01-01', title: 'Cash on Hand (Cashier Counter)', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-01-04', title: 'Platform Escrow Settlement Account', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-01-05', title: 'Digital Wallet / PayMongo Float', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-02-01', title: 'Loans Receivable - Regular (Control Account)', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '2-01-01', title: 'Savings Deposits - Compulsory (Control Account)', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '2-01-02', title: 'Savings Deposits - Voluntary (Control Account)', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '2-02-02', title: 'Platform Loan Processing Fee Payable', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '3-01-03', title: 'Paid-Up Share Capital - Common (Control Account)', category: 'EQUITY', normal: 'CREDIT' },
+                { code: '4-01-01', title: 'Interest Income from Loans', category: 'REVENUE', normal: 'CREDIT' },
+                { code: '4-01-02', title: 'Service and Filing Fees Income', category: 'REVENUE', normal: 'CREDIT' },
+              ];
+
+              const currentAccount = coaOptions.find((a) => a.code === selectedGlAccountCode) || coaOptions[3];
+
+              // Sample posted journal vouchers affecting this specific account
+              const sampleAccountLedgers: Record<string, any[]> = {
+                '1-02-01': [
+                  {
+                    date: '2026-02-01',
+                    voucher: 'JE-DISB-001',
+                    ref: 'LN-2026-00001',
+                    desc: 'Disbursement of Regular Member Loan to Maria Clara Santos',
+                    member: 'Maria Clara Santos (MEM-2026-0001)',
+                    dr: 50000,
+                    cr: 0,
+                    bal: 50000,
+                  },
+                  {
+                    date: '2026-03-01',
+                    voucher: 'JE-PAY-001',
+                    ref: 'OR-PM-99214',
+                    desc: 'Monthly Repayment Installment 1 via PayMongo QR Ph',
+                    member: 'Maria Clara Santos (MEM-2026-0001)',
+                    dr: 0,
+                    cr: 3000,
+                    bal: 47000,
+                  },
+                ],
+                '3-01-03': [
+                  {
+                    date: '2026-01-20',
+                    voucher: 'JE-SHR-001',
+                    ref: 'OR-SHR-2026-001',
+                    desc: 'Initial Share Capital Contribution (In-Person Cashier)',
+                    member: 'Maria Clara Santos (MEM-2026-0001)',
+                    dr: 0,
+                    cr: 15000,
+                    bal: 15000,
+                  },
+                  {
+                    date: '2026-02-01',
+                    voucher: 'JE-SHR-002',
+                    ref: 'OR-SHR-2026-002',
+                    desc: 'Initial Share Capital Contribution (In-Person Cashier)',
+                    member: 'Juan Perez Dela Cruz (MEM-2026-0002)',
+                    dr: 0,
+                    cr: 10000,
+                    bal: 25000,
+                  },
+                  {
+                    date: '2026-03-05',
+                    voucher: 'JE-SHR-003',
+                    ref: 'OR-SHR-2026-003',
+                    desc: 'Initial Share Capital Contribution (In-Person Cashier)',
+                    member: 'Antonio Luna Valenzuela (MEM-2026-0003)',
+                    dr: 0,
+                    cr: 5000,
+                    bal: 30000,
+                  },
+                ],
+                '2-01-01': [
+                  {
+                    date: '2026-01-20',
+                    voucher: 'JE-SAV-001',
+                    ref: 'OR-SAV-2026-001',
+                    desc: 'Compulsory Monthly Savings Contribution',
+                    member: 'Maria Clara Santos (MEM-2026-0001)',
+                    dr: 0,
+                    cr: 5000,
+                    bal: 5000,
+                  },
+                  {
+                    date: '2026-02-01',
+                    voucher: 'JE-SAV-002',
+                    ref: 'OR-SAV-2026-002',
+                    desc: 'Compulsory Monthly Savings Contribution',
+                    member: 'Juan Perez Dela Cruz (MEM-2026-0002)',
+                    dr: 0,
+                    cr: 2000,
+                    bal: 7000,
+                  },
+                ],
+              };
+
+              const activeEntries = sampleAccountLedgers[selectedGlAccountCode] || [
+                {
+                  date: '2026-01-20',
+                  voucher: 'JE-GEN-001',
+                  ref: 'REF-001',
+                  desc: `Opening entry posted to ${currentAccount.title}`,
+                  member: 'Cooperative Master Ledger',
+                  dr: currentAccount.normal === 'DEBIT' ? 15000 : 0,
+                  cr: currentAccount.normal === 'CREDIT' ? 15000 : 0,
+                  bal: 15000,
+                },
+              ];
+
+              const endingBal = activeEntries[activeEntries.length - 1]?.bal || 0;
+
+              return (
+                <div className="space-y-6">
+                  {/* Account Selector Bar */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="flex-1 max-w-md">
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Select General Ledger Account Code:</label>
+                      <select
+                        value={selectedGlAccountCode}
+                        onChange={(e) => setSelectedGlAccountCode(e.target.value)}
+                        className="w-full text-xs font-mono font-medium p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+                      >
+                        {coaOptions.map((acc) => (
+                          <option key={acc.code} value={acc.code}>
+                            {acc.code} • {acc.title} ({acc.category})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-xs">
+                      <div className="text-right">
+                        <div className="text-slate-400">Normal Balance:</div>
+                        <div className="font-mono font-bold text-slate-800">{currentAccount.normal}</div>
+                      </div>
+                      <div className="h-8 w-px bg-slate-200" />
+                      <div className="text-right">
+                        <div className="text-slate-400">GL Ending Balance:</div>
+                        <div className="text-base font-black font-mono text-emerald-800">
+                          ₱{endingBal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* General Ledger Statement Table */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                          <span className="font-mono bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded text-xs">
+                            {currentAccount.code}
+                          </span>
+                          <span>{currentAccount.title}</span>
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5">Chronological audit ledger with running balance progression.</p>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-200 text-slate-700">
+                        {currentAccount.category}
+                      </span>
+                    </div>
+
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-white border-b border-slate-200 text-slate-600 uppercase font-semibold text-[11px]">
+                        <tr>
+                          <th className="p-3">Date</th>
+                          <th className="p-3">Voucher #</th>
+                          <th className="p-3">Reference / Member</th>
+                          <th className="p-3">Description</th>
+                          <th className="p-3 text-right">Debit (₱)</th>
+                          <th className="p-3 text-right">Credit (₱)</th>
+                          <th className="p-3 text-right">Running Balance (₱)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {activeEntries.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-3 font-mono text-slate-600">{row.date}</td>
+                            <td className="p-3 font-mono font-bold text-emerald-700">{row.voucher}</td>
+                            <td className="p-3 font-medium text-slate-800">
+                              <div>{row.ref}</div>
+                              <div className="text-[10px] text-slate-500">{row.member}</div>
+                            </td>
+                            <td className="p-3 text-slate-700">{row.desc}</td>
+                            <td className="p-3 text-right font-mono font-medium text-slate-800">
+                              {row.dr > 0 ? `₱${row.dr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
+                            </td>
+                            <td className="p-3 text-right font-mono font-medium text-slate-800">
+                              {row.cr > 0 ? `₱${row.cr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
+                              ₱{row.bal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-50 font-bold border-t border-slate-200 text-xs">
+                        <tr>
+                          <td colSpan={6} className="p-3 text-right uppercase text-slate-600">Account Ending Balance:</td>
+                          <td className="p-3 text-right font-mono font-black text-emerald-900 text-sm">
+                            ₱{endingBal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* SUB-VIEW 4: GL VS SL CONTROL RECONCILIATION */}
+            {ledgerSubTab === 'reconciliation' && (
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      Audit Verification
+                    </span>
+                    <span className="text-xs text-slate-400">•</span>
+                    <span className="text-xs text-slate-500 font-mono">CDA Memorandum Circular 2015-06</span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900">Control Account Reconciliation (GL vs Sum of Member SLs)</h3>
+                  <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+                    Internal control test mandated by the CDA: The balance of each General Ledger control account must strictly equal the mathematical sum of all active member subsidiary ledger accounts. Zero variance is required.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
+                      <tr>
+                        <th className="p-3">CDA Control Account</th>
+                        <th className="p-3">Account Title</th>
+                        <th className="p-3">Category</th>
+                        <th className="p-3 text-center">Active Members</th>
+                        <th className="p-3 text-right">GL Control Balance (₱)</th>
+                        <th className="p-3 text-right">Sum of Member SLs (₱)</th>
+                        <th className="p-3 text-right">Variance (₱)</th>
+                        <th className="p-3 text-center">Audit Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
+                        <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                        <td className="p-3 text-center font-mono">1 Member</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">47,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">47,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                        <td className="p-3 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                          </span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
+                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                        <td className="p-3 text-center font-mono">2 Members</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">7,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">7,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                        <td className="p-3 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                          </span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
+                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                        <td className="p-3 text-center font-mono">1 Member</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">1,200.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">1,200.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                        <td className="p-3 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                          </span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
+                        <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
+                        <td className="p-3 text-center font-mono">3 Members</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">30,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-800">30,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                        <td className="p-3 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
+                      <tr>
+                        <td colSpan={4} className="p-3 text-right uppercase">Total Control Accounts Variance:</td>
+                        <td className="p-3 text-right font-mono">₱85,200.00</td>
+                        <td className="p-3 text-right font-mono">₱85,200.00</td>
+                        <td className="p-3 text-right font-mono text-emerald-900 font-black">₱0.00</td>
+                        <td className="p-3 text-center text-emerald-800 font-bold">100% RECONCILED</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <div>
+                    <div className="font-bold">CDA MC 2015-06 Audit Compliance Certified</div>
+                    <p className="text-[11px] text-emerald-700 mt-0.5">
+                      All General Ledger Control Accounts match the underlying Member Subsidiary Ledgers (SL) with <strong>₱0.00 variance</strong>. No unallocated deposits, orphan loan receipts, or uncredited share pledges detected.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

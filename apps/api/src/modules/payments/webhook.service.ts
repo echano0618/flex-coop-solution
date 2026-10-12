@@ -167,6 +167,7 @@ export class PayMongoWebhookService {
     };
 
     // 5. Post Balanced CDA Journal Entry
+    const member = (dbStore.members.get(params.tenantId) || []).find((m) => m.id === loan.memberId);
     const jeData = GeneralLedgerService.buildRepaymentEntry({
       loanId: loan.id,
       loanNumber: loan.loanNumber,
@@ -177,6 +178,9 @@ export class PayMongoWebhookService {
       passOnFee: feePesos,
       channel: 'PAYMONGO_QRPH',
       userId: 'usr_paymongo_webhook',
+      memberId: loan.memberId,
+      memberNumber: member?.memberNumber,
+      memberName: member ? `${member.firstName} ${member.lastName}` : undefined,
     });
 
     const entries = dbStore.journalEntries.get(params.tenantId) || [];
