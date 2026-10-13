@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -23,6 +23,9 @@ import {
   DollarSign,
   MapPin,
   Compass,
+  Phone,
+  Briefcase,
+  Calendar,
 } from 'lucide-react';
 import {
   PSGC_REGIONS,
@@ -35,6 +38,8 @@ import {
   formatPSGCAddress,
   validatePSGCAddress,
   PSGCAddress,
+  MemberRegistrationFieldConfig,
+  DEFAULT_MEMBER_REGISTRATION_FIELDS,
 } from '@flexcoop/shared-types';
 
 export default function MemberRegisterPage() {
@@ -48,18 +53,58 @@ export default function MemberRegisterPage() {
   const [pmesQuiz2, setPmesQuiz2] = useState<string>('');
   const [pmesCertified, setPmesCertified] = useState<boolean>(false);
 
-  // Step 2: Personal Details
+  // Step 2: Configurable Registration Fields (System Admin Controlled)
+  const [fieldConfigs, setFieldConfigs] = useState<MemberRegistrationFieldConfig[]>(DEFAULT_MEMBER_REGISTRATION_FIELDS);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('flexcoop_registration_fields');
+      if (saved) {
+        try {
+          setFieldConfigs(JSON.parse(saved));
+        } catch {
+          // fallback to default
+        }
+      }
+    }
+  }, []);
+
+  const getFieldConfig = (key: string): MemberRegistrationFieldConfig => {
+    return (
+      fieldConfigs.find((f) => f.fieldKey === key) || {
+        id: `field_${key}`,
+        fieldKey: key,
+        label: key,
+        category: 'PERSONAL',
+        type: 'TEXT',
+        enabled: true,
+        required: false,
+      }
+    );
+  };
+
+  // Step 2: Personal & Contact Details
   const [firstName, setFirstName] = useState<string>('Clara');
   const [middleName, setMiddleName] = useState<string>('Bautista');
   const [lastName, setLastName] = useState<string>('Magdalo');
   const [email, setEmail] = useState<string>('clara.magdalo@gmail.com');
   const [phone, setPhone] = useState<string>('09191234567');
+  const [landline, setLandline] = useState<string>('(044) 940-2819');
   const [birthdate, setBirthdate] = useState<string>('1994-08-15');
   const [gender, setGender] = useState<'FEMALE' | 'MALE'>('FEMALE');
   const [civilStatus, setCivilStatus] = useState<'SINGLE' | 'MARRIED' | 'WIDOWED'>('SINGLE');
+
+  // Step 2: Employment & Institutional Details (New Fields)
+  const [employeeIdNumber, setEmployeeIdNumber] = useState<string>('EMP-2026-0814');
+  const [position, setPosition] = useState<string>('Senior Administrative Officer');
+  const [officeUnitSection, setOfficeUnitSection] = useState<string>('Budget & Treasury Management Division');
+  const [dateOfAppointment, setDateOfAppointment] = useState<string>('2021-03-15');
+
+  // Government & Livelihood
   const [tin, setTin] = useState<string>('321-456-789-000');
-  const [occupation, setOccupation] = useState<string>('Microenterprise Retailer / Baker');
-  const [monthlyIncome, setMonthlyIncome] = useState<number>(35000);
+  const [occupation, setOccupation] = useState<string>('Government Employee / Civil Servant');
+  const [monthlyIncome, setMonthlyIncome] = useState<number>(45000);
+
 
   // Step 2: PSGC-Compliant Hierarchical Address State
   // Default pre-population: Central Luzon (Region III) -> Nueva Ecija -> City of San Jose -> Malasin
@@ -559,28 +604,155 @@ export default function MemberRegisterPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Mobile Number (+63) *</label>
-                <input
-                  type="text"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Email Address *</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {getFieldConfig('phone').enabled && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    {getFieldConfig('phone').label} {getFieldConfig('phone').required && '*'}
+                  </label>
+                  <input
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required={getFieldConfig('phone').required}
+                    placeholder={getFieldConfig('phone').placeholder}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                </div>
+              )}
+
+              {getFieldConfig('landline').enabled && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    {getFieldConfig('landline').label} {getFieldConfig('landline').required && '*'}
+                  </label>
+                  <input
+                    type="text"
+                    value={landline}
+                    onChange={(e) => setLandline(e.target.value)}
+                    required={getFieldConfig('landline').required}
+                    placeholder={getFieldConfig('landline').placeholder}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Office / Residence Landline</span>
+                </div>
+              )}
+
+              {getFieldConfig('email').enabled && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    {getFieldConfig('email').label} {getFieldConfig('email').required && '*'}
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required={getFieldConfig('email').required}
+                    placeholder={getFieldConfig('email').placeholder}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
             </div>
+
+            {/* Institutional & Employment Details Section (New Configurable Fields) */}
+            {(getFieldConfig('employeeIdNumber').enabled ||
+              getFieldConfig('position').enabled ||
+              getFieldConfig('officeUnitSection').enabled ||
+              getFieldConfig('dateOfAppointment').enabled) && (
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-700/80 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                      <Briefcase className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        <span>Workplace & Institutional Employment Profile</span>
+                        <span className="text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-2 py-0.5 rounded-full font-bold">
+                          Coop Payroll Link
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Required for payroll deduction authorization, tenure assessment, and co-maker eligibility
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {getFieldConfig('employeeIdNumber').enabled && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        {getFieldConfig('employeeIdNumber').label} {getFieldConfig('employeeIdNumber').required && '*'}
+                      </label>
+                      <input
+                        type="text"
+                        value={employeeIdNumber}
+                        onChange={(e) => setEmployeeIdNumber(e.target.value)}
+                        required={getFieldConfig('employeeIdNumber').required}
+                        placeholder={getFieldConfig('employeeIdNumber').placeholder}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">{getFieldConfig('employeeIdNumber').description}</span>
+                    </div>
+                  )}
+
+                  {getFieldConfig('position').enabled && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        {getFieldConfig('position').label} {getFieldConfig('position').required && '*'}
+                      </label>
+                      <input
+                        type="text"
+                        value={position}
+                        onChange={(e) => setPosition(e.target.value)}
+                        required={getFieldConfig('position').required}
+                        placeholder={getFieldConfig('position').placeholder}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">{getFieldConfig('position').description}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {getFieldConfig('officeUnitSection').enabled && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        {getFieldConfig('officeUnitSection').label} {getFieldConfig('officeUnitSection').required && '*'}
+                      </label>
+                      <input
+                        type="text"
+                        value={officeUnitSection}
+                        onChange={(e) => setOfficeUnitSection(e.target.value)}
+                        required={getFieldConfig('officeUnitSection').required}
+                        placeholder={getFieldConfig('officeUnitSection').placeholder}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">{getFieldConfig('officeUnitSection').description}</span>
+                    </div>
+                  )}
+
+                  {getFieldConfig('dateOfAppointment').enabled && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        {getFieldConfig('dateOfAppointment').label} {getFieldConfig('dateOfAppointment').required && '*'}
+                      </label>
+                      <input
+                        type="date"
+                        value={dateOfAppointment}
+                        onChange={(e) => setDateOfAppointment(e.target.value)}
+                        required={getFieldConfig('dateOfAppointment').required}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">{getFieldConfig('dateOfAppointment').description}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
 
             {/* Philippine Standard Geographic Code (PSGC) Compliant Address Module */}
             <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-700/80 space-y-4">
@@ -1175,6 +1347,39 @@ export default function MemberRegisterPage() {
                 <span>ZIP: <strong className="text-slate-300">{psgcPostalCode}</strong></span>
               </div>
             </div>
+
+            {/* Institutional / Employment Details Summary Card */}
+            {(employeeIdNumber || position || officeUnitSection) && (
+              <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 text-left space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                    <Briefcase className="w-3.5 h-3.5 text-indigo-400" />
+                    Institutional Employment Profile:
+                  </span>
+                  <span className="font-mono text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-2 py-0.5 rounded-full">
+                    {employeeIdNumber || 'N/A'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 bg-slate-950/60 rounded border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Position / Title</span>
+                    <strong className="text-slate-200">{position || 'N/A'}</strong>
+                  </div>
+                  <div className="p-2 bg-slate-950/60 rounded border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Office / Unit / Section</span>
+                    <strong className="text-slate-200">{officeUnitSection || 'N/A'}</strong>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3 text-[10px] text-slate-400 pt-1">
+                  <span>Appointed: <strong className="text-slate-300">{dateOfAppointment || 'N/A'}</strong></span>
+                  <span>•</span>
+                  <span>Landline: <strong className="text-slate-300">{landline || 'N/A'}</strong></span>
+                  <span>•</span>
+                  <span>Mobile: <strong className="text-slate-300">{phone}</strong></span>
+                </div>
+              </div>
+            )}
+
 
             {/* Quick Demo Fast-Track Button */}
             <div className="pt-4 space-y-3">

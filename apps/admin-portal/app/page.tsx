@@ -63,7 +63,12 @@ import {
   Mail,
   BadgeCheck,
   Trash2,
+  Edit3,
 } from 'lucide-react';
+import {
+  MemberRegistrationFieldConfig,
+  DEFAULT_MEMBER_REGISTRATION_FIELDS,
+} from '@flexcoop/shared-types';
 
 type StaffRole =
   | 'SYSTEM_ADMIN'
@@ -614,6 +619,84 @@ export default function AdminDashboard() {
     ]);
     setIamNotification(`${targetUser.name} access status is now ${newStatus}.`);
     setTimeout(() => setIamNotification(null), 3000);
+  };
+
+  // Membership Registration Fields Configuration State (System Admin Control)
+  const [registrationFields, setRegistrationFields] = useState<MemberRegistrationFieldConfig[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('flexcoop_registration_fields');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          // fallback to default
+        }
+      }
+    }
+    return DEFAULT_MEMBER_REGISTRATION_FIELDS;
+  });
+
+  const [editingField, setEditingField] = useState<MemberRegistrationFieldConfig | null>(null);
+  const [fieldsNotification, setFieldsNotification] = useState<string | null>(null);
+
+  // Sync registration fields to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('flexcoop_registration_fields', JSON.stringify(registrationFields));
+    }
+  }, [registrationFields]);
+
+  const handleToggleFieldEnabled = (fieldId: string) => {
+    setRegistrationFields((prev) =>
+      prev.map((f) => {
+        if (f.id === fieldId) {
+          if (f.isSystemCore) {
+            alert(`The field "${f.label}" is a core statutory identification field and cannot be disabled.`);
+            return f;
+          }
+          const updated = { ...f, enabled: !f.enabled };
+          setFieldsNotification(`Field "${f.label}" is now ${updated.enabled ? 'ENABLED' : 'DISABLED'} for member registration.`);
+          setTimeout(() => setFieldsNotification(null), 3500);
+          return updated;
+        }
+        return f;
+      })
+    );
+  };
+
+  const handleToggleFieldRequired = (fieldId: string) => {
+    setRegistrationFields((prev) =>
+      prev.map((f) => {
+        if (f.id === fieldId) {
+          if (f.isSystemCore) {
+            alert(`The field "${f.label}" is a statutory requirement and must remain required.`);
+            return f;
+          }
+          const updated = { ...f, required: !f.required };
+          setFieldsNotification(`Field "${f.label}" is now ${updated.required ? 'MANDATORY (*)' : 'OPTIONAL'} on registration.`);
+          setTimeout(() => setFieldsNotification(null), 3500);
+          return updated;
+        }
+        return f;
+      })
+    );
+  };
+
+  const handleSaveFieldEdit = (updatedField: MemberRegistrationFieldConfig) => {
+    setRegistrationFields((prev) =>
+      prev.map((f) => (f.id === updatedField.id ? updatedField : f))
+    );
+    setEditingField(null);
+    setFieldsNotification(`Field settings for "${updatedField.label}" updated successfully.`);
+    setTimeout(() => setFieldsNotification(null), 3500);
+  };
+
+  const handleResetRegistrationFields = () => {
+    if (confirm('Reset all membership registration fields to standard cooperative defaults?')) {
+      setRegistrationFields(DEFAULT_MEMBER_REGISTRATION_FIELDS);
+      setFieldsNotification('Registration fields reset to default template.');
+      setTimeout(() => setFieldsNotification(null), 3500);
+    }
   };
 
   // Platform Escrow & Usage State
@@ -6803,8 +6886,315 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
+
+            {/* SYSTEM ADMIN: MEMBERSHIP REGISTRATION FORM FIELDS CONFIGURATOR */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
+                      <Sliders className="w-3 h-3 text-red-600" />
+                      <span>System Admin Field Engine</span>
+                    </span>
+                    <span className="text-slate-400 text-xs">•</span>
+                    <span className="text-xs text-slate-500 font-mono">
+                      Active Fields: {registrationFields.filter((f) => f.enabled).length} of {registrationFields.length} Enabled
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                    Membership Registration Dynamic Fields Configuration
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+                    Configure institutional, employment, personal, and contact fields captured during member self-registration (<code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">/member/register</code>). System Admins can enable, disable, require, or customize field labels and placeholders in real time.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetRegistrationFields}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Fields</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Notification Banner */}
+              {fieldsNotification && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="font-semibold">{fieldsNotification}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFieldsNotification(null)}
+                    className="text-emerald-700 hover:text-emerald-900"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Category Legend & Guidance */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl">
+                  <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">Employment & Institutional</span>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Employee ID No, Position, Office/Unit/Section, Date of Appointment. Ideal for institutional and occupational cooperatives.
+                  </p>
+                </div>
+                <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl">
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Contact & Residence</span>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Mobile Phone (+63), Landline, Email, PSGC 9-digit standardized geographic address.
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-50/50 border border-amber-100 rounded-xl">
+                  <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">Statutory Core</span>
+                  <p className="text-xs text-slate-600 mt-1">
+                    First Name, Last Name, Birthdate, Gender, and Civil Status are protected core fields per CDA MC 2015-06.
+                  </p>
+                </div>
+              </div>
+
+              {/* Fields Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3.5">Field Label & Identification</th>
+                      <th className="p-3.5">Category</th>
+                      <th className="p-3.5">Data Type</th>
+                      <th className="p-3.5 text-center">Visibility / Status</th>
+                      <th className="p-3.5 text-center">Mandatory (*)</th>
+                      <th className="p-3.5 text-right">Field Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {registrationFields.map((field) => (
+                      <tr key={field.id} className="hover:bg-slate-50/80 transition">
+                        <td className="p-3.5">
+                          <div className="font-bold text-slate-900 flex items-center gap-2">
+                            <span>{field.label}</span>
+                            {field.isSystemCore && (
+                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono font-bold">
+                                CORE
+                              </span>
+                            )}
+                            {['employeeIdNumber', 'position', 'officeUnitSection', 'dateOfAppointment', 'landline'].includes(field.fieldKey) && (
+                              <span className="text-[9px] bg-indigo-100 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-mono font-bold">
+                                NEW FIELD
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 font-mono">
+                            Key: <code className="text-indigo-600 bg-indigo-50 px-1 py-0.2 rounded">{field.fieldKey}</code>
+                          </div>
+                          {field.description && (
+                            <div className="text-[11px] text-slate-400 mt-0.5">{field.description}</div>
+                          )}
+                        </td>
+
+                        <td className="p-3.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              field.category === 'EMPLOYMENT'
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                : field.category === 'CONTACT'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : field.category === 'GOVERNMENT'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}
+                          >
+                            {field.category}
+                          </span>
+                        </td>
+
+                        <td className="p-3.5 font-mono text-[11px] text-slate-600">
+                          {field.type}
+                        </td>
+
+                        <td className="p-3.5 text-center">
+                          <button
+                            type="button"
+                            disabled={field.isSystemCore}
+                            onClick={() => handleToggleFieldEnabled(field.id)}
+                            className={`px-3 py-1 rounded-xl text-[11px] font-bold transition border inline-flex items-center gap-1.5 ${
+                              field.enabled
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
+                            } ${field.isSystemCore ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+                          >
+                            {field.enabled ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>ENABLED</span>
+                              </>
+                            ) : (
+                              <>
+                                <Ban className="w-3.5 h-3.5 text-slate-400" />
+                                <span>DISABLED</span>
+                              </>
+                            )}
+                          </button>
+                        </td>
+
+                        <td className="p-3.5 text-center">
+                          <button
+                            type="button"
+                            disabled={field.isSystemCore || !field.enabled}
+                            onClick={() => handleToggleFieldRequired(field.id)}
+                            className={`px-3 py-1 rounded-xl text-[11px] font-bold transition border inline-flex items-center gap-1.5 ${
+                              field.required
+                                ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                                : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                            } ${field.isSystemCore || !field.enabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+                          >
+                            {field.required ? (
+                              <>
+                                <span className="text-rose-600 font-bold">*</span>
+                                <span>REQUIRED</span>
+                              </>
+                            ) : (
+                              <span>OPTIONAL</span>
+                            )}
+                          </button>
+                        </td>
+
+                        <td className="p-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setEditingField(field)}
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs inline-flex items-center gap-1.5 transition shadow-xs"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit Field</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Field Edit Modal for System Admin */}
+            {editingField && (
+              <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+                <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-900 p-5 text-white flex justify-between items-center">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-red-600/30 rounded-xl border border-red-500/40">
+                        <Sliders className="w-5 h-5 text-red-400" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-base">Edit Registration Field</h4>
+                        <span className="text-xs text-slate-400 font-mono">Field Key: {editingField.fieldKey}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingField(null)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSaveFieldEdit(editingField);
+                    }}
+                    className="p-6 space-y-4 text-xs"
+                  >
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">Field Label *</label>
+                      <input
+                        type="text"
+                        value={editingField.label}
+                        onChange={(e) => setEditingField({ ...editingField, label: e.target.value })}
+                        required
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">Placeholder Text</label>
+                      <input
+                        type="text"
+                        value={editingField.placeholder || ''}
+                        onChange={(e) => setEditingField({ ...editingField, placeholder: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-red-500 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">Description / Subtext for Applicant</label>
+                      <textarea
+                        rows={2}
+                        value={editingField.description || ''}
+                        onChange={(e) => setEditingField({ ...editingField, description: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-2">
+                      <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
+                        <input
+                          type="checkbox"
+                          disabled={editingField.isSystemCore}
+                          checked={editingField.enabled}
+                          onChange={(e) => setEditingField({ ...editingField, enabled: e.target.checked })}
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                        />
+                        <div>
+                          <strong className="block text-slate-900">Enable Field</strong>
+                          <span className="text-[10px] text-slate-500">Visible on registration</span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
+                        <input
+                          type="checkbox"
+                          disabled={editingField.isSystemCore || !editingField.enabled}
+                          checked={editingField.required}
+                          onChange={(e) => setEditingField({ ...editingField, required: e.target.checked })}
+                          className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                        />
+                        <div>
+                          <strong className="block text-slate-900">Required Field (*)</strong>
+                          <span className="text-[10px] text-slate-500">Cannot be left blank</span>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 -mx-6 -mb-6 mt-6">
+                      <button
+                        type="button"
+                        onClick={() => setEditingField(null)}
+                        className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 font-bold hover:bg-slate-100 transition"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition shadow-md"
+                      >
+                        Save Field Changes
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
 
         {/* TAB 13: ROLE-BASED ACCESS CONTROL (RBAC) */}
         {activeTab === 'rbac' && (

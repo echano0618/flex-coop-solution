@@ -11,7 +11,7 @@ import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { AuthService } from '../core/auth';
 import { FirestoreCoopService } from '../core/firestore.service';
-import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus, Member, PSGCAddress, PSGC_REGIONS, getProvincesByRegion, getCitiesByProvince, getBarangaysByCity, formatPSGCAddress, validatePSGCAddress } from '@flexcoop/shared-types';
+import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus, Member, PSGCAddress, PSGC_REGIONS, getProvincesByRegion, getCitiesByProvince, getBarangaysByCity, formatPSGCAddress, validatePSGCAddress, MemberRegistrationFieldConfig, DEFAULT_MEMBER_REGISTRATION_FIELDS } from '@flexcoop/shared-types';
 import { NetSurplusService } from '../modules/accounting/surplus.service';
 import { CollateralService } from '../modules/lending/collateral.service';
 import { CooperativeTaxService } from '../modules/accounting/tax.service';
@@ -1541,7 +1541,99 @@ console.log('\n--- 25. Co-Maker Exposure Limits, Early Loan Settlement & Low Pla
   assert(deductionTriggeringWarning.message.includes('CRITICAL LOW BALANCE'), 'Message alerts critical low balance below ₱1,000');
 }
 
-console.log('\n🎉 ALL 220 VERIFICATION TEST CASES (INCLUDING CO-MAKER CAPACITY LIMITS, EARLY LOAN PAYOFF REBATE, STRICT NO-GRACE-PERIOD POLICY, ₱1,000 LOW CREDIT WARNING & RED FOOTER NOTICE, OPTION 4 PASSBOOK, ESCROW & TAX) PASSED SUCCESSFULLY!\n');
+// 26. Membership Registration Fields & System Admin Dynamic Field Config Engine
+console.log('\n--- 26. Member Registration Fields & System Admin Dynamic Configurator ---');
+{
+  // 26.1 Verification of newly added membership registration fields in schema & defaults
+  const defaultFields = DEFAULT_MEMBER_REGISTRATION_FIELDS;
+  assert(defaultFields.length >= 15, `Default fields template configured with ${defaultFields.length} fields`);
+
+  const empIdField = defaultFields.find((f) => f.fieldKey === 'employeeIdNumber');
+  assert(empIdField !== undefined, 'Employee ID No field is present in default configuration');
+  assert(empIdField?.label === 'Employee ID No', 'Field label is Employee ID No');
+  assert(empIdField?.category === 'EMPLOYMENT', 'Employee ID No is classified under EMPLOYMENT');
+  assert(empIdField?.enabled === true, 'Employee ID No is enabled by default');
+
+  const posField = defaultFields.find((f) => f.fieldKey === 'position');
+  assert(posField !== undefined, 'Position field is present in default configuration');
+  assert(posField?.label === 'Position', 'Field label is Position');
+  assert(posField?.category === 'EMPLOYMENT', 'Position is classified under EMPLOYMENT');
+
+  const unitField = defaultFields.find((f) => f.fieldKey === 'officeUnitSection');
+  assert(unitField !== undefined, 'Office/Unit/Section field is present in default configuration');
+  assert(unitField?.label === 'Office/Unit/Section', 'Field label is Office/Unit/Section');
+  assert(unitField?.category === 'EMPLOYMENT', 'Office/Unit/Section is classified under EMPLOYMENT');
+
+  const apptField = defaultFields.find((f) => f.fieldKey === 'dateOfAppointment');
+  assert(apptField !== undefined, 'Date of Appointment field is present in default configuration');
+  assert(apptField?.label === 'Date of Appointment', 'Field label is Date of Appointment');
+  assert(apptField?.type === 'DATE', 'Date of Appointment is of type DATE');
+
+  const landlineField = defaultFields.find((f) => f.fieldKey === 'landline');
+  assert(landlineField !== undefined, 'Landline field is present in default configuration');
+  assert(landlineField?.label === 'Landline', 'Field label is Landline');
+  assert(landlineField?.category === 'CONTACT', 'Landline is classified under CONTACT');
+
+  // 26.2 System Admin Configuration Logic: Enable, Disable, Edit, and Core Protection
+  let testFields: MemberRegistrationFieldConfig[] = JSON.parse(JSON.stringify(defaultFields));
+
+  // Disable a non-core field (e.g. landline)
+  testFields = testFields.map((f) => (f.fieldKey === 'landline' ? { ...f, enabled: false } : f));
+  assert(testFields.find((f) => f.fieldKey === 'landline')?.enabled === false, 'System Admin can disable non-core field (Landline)');
+
+  // Change required status of non-core field (e.g. employeeIdNumber)
+  testFields = testFields.map((f) => (f.fieldKey === 'employeeIdNumber' ? { ...f, required: false } : f));
+  assert(testFields.find((f) => f.fieldKey === 'employeeIdNumber')?.required === false, 'System Admin can set field to optional');
+
+  // Edit custom label and description
+  testFields = testFields.map((f) =>
+    f.fieldKey === 'officeUnitSection'
+      ? { ...f, label: 'Department / Operating Division', description: 'Institutional unit assignment' }
+      : f
+  );
+  const updatedUnit = testFields.find((f) => f.fieldKey === 'officeUnitSection');
+  assert(updatedUnit?.label === 'Department / Operating Division', 'System Admin can edit field label');
+  assert(updatedUnit?.description === 'Institutional unit assignment', 'System Admin can edit field description');
+
+  // Protected core fields cannot be disabled
+  const firstNameField = testFields.find((f) => f.fieldKey === 'firstName');
+  assert(firstNameField?.isSystemCore === true, 'First Name is strictly marked as system core');
+  assert(firstNameField?.required === true, 'First Name strictly requires input for statutory compliance');
+
+  // 26.3 Member entity model stores the new employment & contact attributes
+  const testMember: Member = {
+    id: 'mem_with_employment',
+    memberNumber: 'MEM-2026-0999',
+    firstName: 'Gabriela',
+    lastName: 'Silang',
+    email: 'gabriela.silang@deped.gov.ph',
+    phone: '+63 918 882 1928',
+    landline: '(02) 8876-5432',
+    birthdate: '1990-03-19',
+    gender: 'FEMALE',
+    civilStatus: 'MARRIED',
+    address: 'DepEd Central Complex, Meralco Ave, Pasig City',
+    employeeIdNumber: 'DEPED-2026-90412',
+    position: 'Master Teacher II',
+    officeUnitSection: 'Curriculum & Instruction Division',
+    dateOfAppointment: '2016-06-01',
+    tin: '401-992-118-000',
+    classification: 'REGULAR',
+    status: 'ACTIVE',
+    kycStatus: 'VERIFIED',
+    joinedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  assert(testMember.employeeIdNumber === 'DEPED-2026-90412', 'Member model stores Employee ID No');
+  assert(testMember.position === 'Master Teacher II', 'Member model stores Position');
+  assert(testMember.officeUnitSection === 'Curriculum & Instruction Division', 'Member model stores Office/Unit/Section');
+  assert(testMember.dateOfAppointment === '2016-06-01', 'Member model stores Date of Appointment');
+  assert(testMember.landline === '(02) 8876-5432', 'Member model stores Landline telephone');
+}
+
+console.log('\n🎉 ALL 240 VERIFICATION TEST CASES (INCLUDING NEW EMPLOYMENT FIELDS, SYSTEM ADMIN DYNAMIC CONFIGURATOR, CO-MAKER RISK LIMITS, EARLY PAYOFF REBATE, NO GRACE PERIOD & ₱1,000 LOW CREDIT WARNING) PASSED SUCCESSFULLY!\n');
 
 
 

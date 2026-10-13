@@ -110,6 +110,20 @@ export interface KYCDocument {
   createdAt: string;
 }
 
+export interface MemberRegistrationFieldConfig {
+  id: string;
+  fieldKey: string;
+  label: string;
+  category: 'PERSONAL' | 'EMPLOYMENT' | 'CONTACT' | 'GOVERNMENT' | 'ADDRESS';
+  type: 'TEXT' | 'DATE' | 'SELECT' | 'NUMBER';
+  enabled: boolean;
+  required: boolean;
+  description?: string;
+  placeholder?: string;
+  options?: string[]; // If type is SELECT
+  isSystemCore?: boolean; // Core fields like firstName, lastName, etc. cannot be disabled
+}
+
 export interface Member {
   id: string;
   memberNumber: string;
@@ -119,11 +133,20 @@ export interface Member {
   suffix?: string;
   email: string;
   phone: string;
+  landline?: string;
   birthdate: string;
   gender: 'MALE' | 'FEMALE' | 'OTHER';
   civilStatus: 'SINGLE' | 'MARRIED' | 'WIDOWED' | 'SEPARATED';
   address: string;
   psgcAddress?: import('./psgc').PSGCAddress;
+  // Institutional / Workplace & Employment Details
+  employeeIdNumber?: string;
+  position?: string;
+  officeUnitSection?: string;
+  dateOfAppointment?: string;
+  tin?: string;
+  occupation?: string;
+  monthlyIncome?: number;
   classification: MemberClassification;
   status: MemberStatus;
   kycStatus: KYCStatus;
@@ -131,6 +154,190 @@ export interface Member {
   createdAt: string;
   updatedAt: string;
 }
+
+// Default Membership Registration Configurable Fields
+export const DEFAULT_MEMBER_REGISTRATION_FIELDS: MemberRegistrationFieldConfig[] = [
+  {
+    id: 'field_first_name',
+    fieldKey: 'firstName',
+    label: 'First Name',
+    category: 'PERSONAL',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: 'e.g. Clara',
+    isSystemCore: true,
+    description: 'Statutory given name of the applicant member.',
+  },
+  {
+    id: 'field_middle_name',
+    fieldKey: 'middleName',
+    label: 'Middle Name',
+    category: 'PERSONAL',
+    type: 'TEXT',
+    enabled: true,
+    required: false,
+    placeholder: 'e.g. Bautista',
+    isSystemCore: false,
+    description: 'Applicant middle name / maternal surname.',
+  },
+  {
+    id: 'field_last_name',
+    fieldKey: 'lastName',
+    label: 'Last Name',
+    category: 'PERSONAL',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: 'e.g. Magdalo',
+    isSystemCore: true,
+    description: 'Family or surname of the member.',
+  },
+  {
+    id: 'field_employee_id',
+    fieldKey: 'employeeIdNumber',
+    label: 'Employee ID No',
+    category: 'EMPLOYMENT',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: 'e.g. EMP-2026-0814',
+    isSystemCore: false,
+    description: 'Institutional or agency employee identification number.',
+  },
+  {
+    id: 'field_position',
+    fieldKey: 'position',
+    label: 'Position',
+    category: 'EMPLOYMENT',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: 'e.g. Senior Administrative Officer',
+    isSystemCore: false,
+    description: 'Current job position or rank in the institution.',
+  },
+  {
+    id: 'field_office_unit',
+    fieldKey: 'officeUnitSection',
+    label: 'Office/Unit/Section',
+    category: 'EMPLOYMENT',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: 'e.g. Finance & Accounting Division - Treasury Unit',
+    isSystemCore: false,
+    description: 'Assigned division, bureau, department, or operating section.',
+  },
+  {
+    id: 'field_date_appointment',
+    fieldKey: 'dateOfAppointment',
+    label: 'Date of Appointment',
+    category: 'EMPLOYMENT',
+    type: 'DATE',
+    enabled: true,
+    required: true,
+    placeholder: 'YYYY-MM-DD',
+    isSystemCore: false,
+    description: 'Official date of tenure or appointment to current position.',
+  },
+  {
+    id: 'field_landline',
+    fieldKey: 'landline',
+    label: 'Landline',
+    category: 'CONTACT',
+    type: 'TEXT',
+    enabled: true,
+    required: false,
+    placeholder: 'e.g. (02) 8812-4500 or (044) 940-1234',
+    isSystemCore: false,
+    description: 'Office or residence telephone / landline contact number.',
+  },
+  {
+    id: 'field_mobile_phone',
+    fieldKey: 'phone',
+    label: 'Mobile Number (+63)',
+    category: 'CONTACT',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: '09191234567',
+    isSystemCore: true,
+    description: 'Mobile phone number for OTP and loan transaction alerts.',
+  },
+  {
+    id: 'field_email',
+    fieldKey: 'email',
+    label: 'Email Address',
+    category: 'CONTACT',
+    type: 'TEXT',
+    enabled: true,
+    required: true,
+    placeholder: 'name@organization.gov.ph',
+    isSystemCore: true,
+    description: 'Official or personal email address for e-statements.',
+  },
+  {
+    id: 'field_birthdate',
+    fieldKey: 'birthdate',
+    label: 'Date of Birth',
+    category: 'PERSONAL',
+    type: 'DATE',
+    enabled: true,
+    required: true,
+    placeholder: 'YYYY-MM-DD',
+    isSystemCore: true,
+    description: 'Member birth date for legal age and insurance verification.',
+  },
+  {
+    id: 'field_gender',
+    fieldKey: 'gender',
+    label: 'Gender',
+    category: 'PERSONAL',
+    type: 'SELECT',
+    enabled: true,
+    required: true,
+    options: ['FEMALE', 'MALE'],
+    isSystemCore: true,
+    description: 'Legal gender for CDA statistical reporting.',
+  },
+  {
+    id: 'field_civil_status',
+    fieldKey: 'civilStatus',
+    label: 'Civil Status',
+    category: 'PERSONAL',
+    type: 'SELECT',
+    enabled: true,
+    required: true,
+    options: ['SINGLE', 'MARRIED', 'WIDOWED', 'SEPARATED'],
+    isSystemCore: true,
+    description: 'Marital status for beneficiary and estate management.',
+  },
+  {
+    id: 'field_tin',
+    fieldKey: 'tin',
+    label: 'Tax Identification Number (TIN)',
+    category: 'GOVERNMENT',
+    type: 'TEXT',
+    enabled: true,
+    required: false,
+    placeholder: '000-000-000-000',
+    isSystemCore: false,
+    description: 'BIR TIN for dividend and withholding tax reporting.',
+  },
+  {
+    id: 'field_monthly_income',
+    fieldKey: 'monthlyIncome',
+    label: 'Est. Monthly Income (₱)',
+    category: 'EMPLOYMENT',
+    type: 'NUMBER',
+    enabled: true,
+    required: false,
+    placeholder: '35000',
+    isSystemCore: false,
+    description: 'Gross monthly compensation or business income.',
+  },
+];
 
 // ==========================================
 // 3. SHARE CAPITAL & SAVINGS
