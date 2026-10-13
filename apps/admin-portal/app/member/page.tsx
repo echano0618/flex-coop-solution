@@ -29,6 +29,11 @@ import {
   Scale,
   Lock,
   Percent,
+  LayoutDashboard,
+  Menu,
+  ArrowLeft,
+  Smartphone,
+  Sparkles,
 } from 'lucide-react';
 
 const DEFAULT_LOAN_PRODUCTS = [
@@ -122,7 +127,37 @@ export default function MemberPortalPage() {
         idType: "Driver's License (Encrypted SPI)",
       };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
+
+  // PWA Installation Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredPrompt) {
+      alert('To install on iOS: tap the Share icon in Safari (box with up arrow) and select "Add to Home Screen". On Android/Chrome: tap browser menu (⋮) and select "Install App".');
+      return;
+    }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstallable(false);
+    }
+    setDeferredPrompt(null);
+  };
 
   // Co-Maker Endorsement Requests State
   const [endorsementRequests, setEndorsementRequests] = useState([
@@ -560,7 +595,23 @@ export default function MemberPortalPage() {
               <ExternalLink className="w-3.5 h-3.5" />
             </Link>
 
-            {/* Persona Switcher Pill */}
+            {/* Mobile Persona Switcher Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentPersona(currentPersona === 'maria' ? 'juan' : 'maria');
+                setEndorsementSuccessMsg('');
+              }}
+              className="sm:hidden text-[11px] font-bold px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg border border-slate-200 flex items-center gap-1 transition"
+              title="Toggle between Maria (Borrower) and Juan (Co-Maker)"
+            >
+              <span>{currentPersona === 'maria' ? '👤 Maria' : '👤 Juan'}</span>
+              {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === 'MEM-2026-0002' && r.status === 'PENDING') && (
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+              )}
+            </button>
+
+            {/* Persona Switcher Pill (Tablet & Desktop) */}
             <div className="hidden sm:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
               <span className="text-slate-500 font-semibold px-2">Account:</span>
               <button
@@ -598,8 +649,8 @@ export default function MemberPortalPage() {
               </button>
             </div>
 
-            <div className="flex items-center space-x-2 pl-3 border-l border-slate-200">
-              <div className="w-8 h-8 rounded-full bg-emerald-700 text-white font-bold text-xs flex items-center justify-center">
+            <div className="flex items-center space-x-2 pl-2 sm:pl-3 border-l border-slate-200">
+              <div className="w-8 h-8 rounded-full bg-emerald-700 text-white font-bold text-xs flex items-center justify-center shrink-0">
                 {currentMember.initials}
               </div>
               <div className="hidden sm:block text-left">
@@ -609,7 +660,7 @@ export default function MemberPortalPage() {
               <Link
                 href="/member/login"
                 title="Sign out of Member Portal"
-                className="ml-1 text-[11px] text-rose-600 hover:text-rose-700 font-semibold px-2 py-1 rounded bg-rose-50 border border-rose-200 transition-colors"
+                className="text-[11px] text-rose-600 hover:text-rose-700 font-semibold px-2 py-1 rounded bg-rose-50 border border-rose-200 transition-colors"
               >
                 Sign Out
               </Link>
@@ -618,59 +669,8 @@ export default function MemberPortalPage() {
         </div>
       </header>
 
-      {/* Main Body */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        {/* Navigation Tabs */}
-        <div className="flex space-x-2 border-b border-slate-200 pb-4 mb-6 overflow-x-auto">
-          {[
-            { id: 'home', label: 'My Portfolio', icon: Wallet, highlight: false },
-            { id: 'passbook', label: 'Digital Passbook & SL', icon: BookOpen, highlight: true },
-            { id: 'apply', label: 'Apply for Loan', icon: CreditCard, highlight: false },
-            {
-              id: 'comaker',
-              label: `Co-Maker Endorsements ${
-                endorsementRequests.filter(
-                  (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
-                ).length > 0
-                  ? `(${
-                      endorsementRequests.filter(
-                        (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
-                      ).length
-                    })`
-                  : ''
-              }`,
-              icon: Users,
-              highlight:
-                endorsementRequests.filter(
-                  (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
-                ).length > 0,
-            },
-            { id: 'surplus', label: 'Dividends & Patronage (Art. 86)', icon: PieChart, highlight: false },
-            { id: 'collateral', label: 'My Pledged Mortgages', icon: Scale, highlight: false },
-            { id: 'pay', label: 'Pay via QR Ph', icon: QrCode, highlight: false },
-            { id: 'documents', label: 'Truth in Lending & Promissory Note', icon: FileText, highlight: false },
-            { id: 'profile', label: 'eKYC & Privacy (NPC)', icon: ShieldCheck, highlight: false },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shrink-0 ${
-                  isActive
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : tab.highlight
-                    ? 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold'
-                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Main Body with Safe Bottom Padding for Mobile Navigation Bar */}
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-4 pb-28 sm:pb-32">
 
         {/* TAB 1: MY PORTFOLIO */}
         {activeTab === 'home' && (
@@ -1397,7 +1397,15 @@ export default function MemberPortalPage() {
 
         {/* TAB 2: APPLY FOR LOAN */}
         {activeTab === 'apply' && (
-          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
             <div>
               <h2 className="text-xl font-bold text-slate-900">Digital Loan Application & Amortization Calculator</h2>
               <p className="text-xs text-slate-500">Transparent pass-through loan processing fee deduction and net member disbursement preview.</p>
@@ -1664,7 +1672,15 @@ export default function MemberPortalPage() {
 
         {/* TAB: CO-MAKER ENDORSEMENTS */}
         {activeTab === 'comaker' && (
-          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Co-Maker Endorsements & Solidary Guarantees</h2>
@@ -1864,7 +1880,15 @@ export default function MemberPortalPage() {
 
         {/* TAB 3: PAY VIA PAYMONGO QR PH */}
         {activeTab === 'pay' && (
-          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
             <div>
               <h2 className="text-xl font-bold text-slate-900">Loan Repayment & PayMongo QR Ph Terminal</h2>
               <p className="text-xs text-slate-500">Fast, secure payments via GCash, Maya, BDO, BPI, or over-the-counter branch teller.</p>
@@ -2005,8 +2029,16 @@ export default function MemberPortalPage() {
 
         {/* TAB 4: TRUTH IN LENDING & PROMISSORY NOTE */}
         {activeTab === 'documents' && (
-          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex justify-between items-start">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Republic Act No. 3765 • Truth in Lending Disclosure</h2>
                 <p className="text-xs text-slate-500">Statutory loan disclosure statement & legally binding promissory note.</p>
@@ -2072,7 +2104,15 @@ export default function MemberPortalPage() {
 
         {/* TAB 5: PROFILE & PRIVACY */}
         {activeTab === 'profile' && (
-          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
             <div>
               <h2 className="text-xl font-bold text-slate-900">Member Profile & NPC Data Privacy Compliance</h2>
               <p className="text-xs text-slate-500">Identity credentials protected with AES-256-GCM encryption pursuant to RA 10173.</p>
@@ -2116,6 +2156,14 @@ export default function MemberPortalPage() {
         {/* TAB: ANNUAL DIVIDENDS & PATRONAGE REFUND (ART. 86 RA 9520) */}
         {activeTab === 'surplus' && (
           <div className="space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
             <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
               {/* Official Voucher Header */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-slate-200 gap-4">
@@ -2241,6 +2289,14 @@ export default function MemberPortalPage() {
         {/* TAB: MY PLEDGED MORTGAGES & COLLATERALS */}
         {activeTab === 'collateral' && (
           <div className="space-y-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab('more')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to More Services
+            </button>
             <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-slate-200 gap-4">
                 <div>
@@ -2370,6 +2426,302 @@ export default function MemberPortalPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: MORE SERVICES & ACCOUNT (Mobile PWA Hub) */}
+        {activeTab === 'more' && (
+          <div className="space-y-6">
+            {/* Member Profile Quick Card */}
+            <div className="bg-gradient-to-r from-emerald-800 to-slate-900 text-white rounded-2xl p-6 shadow-md">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-extrabold text-xl flex items-center justify-center shrink-0 shadow-inner">
+                  {currentMember.initials}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider">Member Account</span>
+                    <span className="bg-emerald-500/30 text-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/40">
+                      CDA Good Standing
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-bold truncate text-white">{currentMember.name}</h2>
+                  <p className="text-xs text-slate-300 font-mono mt-0.5">
+                    {currentMember.memberNumber} • Regular Member
+                  </p>
+                </div>
+              </div>
+
+              {/* Financial Quick Glance */}
+              <div className="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-emerald-700/50 text-center">
+                <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
+                  <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Share Capital</div>
+                  <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
+                    ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                </div>
+                <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
+                  <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Savings</div>
+                  <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
+                    ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                </div>
+                <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
+                  <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Loan Balance</div>
+                  <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
+                    ₱{(currentPersona === 'maria' ? loanBalance : 0).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Services Grid */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Cooperative Services & Tools
+                </h3>
+                <span className="text-[11px] text-slate-400">All Modules</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Apply for Loan */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('apply')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <CreditCard className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        Apply for Loan
+                      </h4>
+                      <p className="text-[11px] text-slate-500">Amortization calculator & net proceeds preview</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
+                {/* Co-Maker Endorsements */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('comaker')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-amber-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-11 h-11 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                      <Users className="w-5 h-5" />
+                      {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
+                        <span className="absolute -top-1 -right-1 bg-amber-500 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
+                          1
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-amber-700 transition-colors">
+                          Co-Maker Endorsements
+                        </h4>
+                        {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
+                          <span className="bg-amber-100 text-amber-900 font-bold text-[10px] px-1.5 py-0.2 rounded-full">
+                            Action Req.
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Review pending solidary undertakings (RA 9520)</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-amber-600 transition-colors shrink-0" />
+                </button>
+
+                {/* Annual Dividends & Patronage (Art. 86) */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('surplus')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <PieChart className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        Dividends & Patronage (Art. 86)
+                      </h4>
+                      <p className="text-[11px] text-slate-500">Statutory net surplus distribution statement</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
+                {/* My Pledged Mortgages & Collateral Registry */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('collateral')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <Scale className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-indigo-700 transition-colors">
+                        My Pledged Mortgages
+                      </h4>
+                      <p className="text-[11px] text-slate-500">Registry of pledged REM and Chattel Mortgages</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-indigo-600 transition-colors shrink-0" />
+                </button>
+
+                {/* Pay via QR Ph Terminal */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('pay')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <QrCode className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        Pay via QR Ph
+                      </h4>
+                      <p className="text-[11px] text-slate-500">Instant repayment via GCash, Maya, or Bank Apps</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
+                {/* Statutory Documents & Promissory Note */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('documents')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        Truth in Lending Documents
+                      </h4>
+                      <p className="text-[11px] text-slate-500">RA 3765 statutory disclosure & promissory note</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
+                {/* eKYC & Privacy Profile */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('profile')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        eKYC & Privacy Profile
+                      </h4>
+                      <p className="text-[11px] text-slate-500">National ID encryption & NPC compliance record</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+              </div>
+            </div>
+
+            {/* PWA Mobile App Card */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h4 className="font-bold text-sm text-emerald-950">Install Progressive Web App (PWA)</h4>
+                    <span className="bg-emerald-200 text-emerald-900 text-[10px] font-bold px-1.5 py-0.2 rounded">Fast & Offline</span>
+                  </div>
+                  <p className="text-xs text-emerald-800 mt-0.5">
+                    Add Flex Coop to your mobile home screen for instant biometric login and offline passbook access.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleInstallPwa}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-colors shadow-sm shrink-0 flex items-center gap-1.5 w-full sm:w-auto justify-center"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-200" />
+                {isInstallable ? 'Install to Home Screen' : 'Install App Guide'}
+              </button>
+            </div>
+
+            {/* Persona Switcher & Admin Links */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Account & Navigation Settings
+              </h3>
+
+              <div className="space-y-2">
+                <div className="text-xs text-slate-600 font-medium">Switch Active Persona (Demo):</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPersona('maria')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 ${
+                      currentPersona === 'maria'
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    Maria Clara (Borrower)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPersona('juan')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 ${
+                      currentPersona === 'juan'
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                    Juan Dela Cruz (Co-Maker)
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row gap-2.5">
+                <Link
+                  href="/member/register"
+                  className="flex-1 py-2.5 px-3 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold text-center transition"
+                >
+                  + Apply for New Membership
+                </Link>
+                <Link
+                  href="/admin"
+                  className="flex-1 py-2.5 px-3 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold text-center transition"
+                >
+                  Switch to Admin Portal
+                </Link>
+                <Link
+                  href="/member/login"
+                  className="py-2.5 px-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold text-center transition"
+                >
+                  Sign Out
+                </Link>
+              </div>
             </div>
           </div>
         )}
@@ -3097,6 +3449,72 @@ export default function MemberPortalPage() {
           </div>
         )}
       </div>
+
+      {/* FIXED BOTTOM NAVIGATION BAR (Mobile PWA) */}
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl pt-2 px-4"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
+      >
+        <div className="max-w-md mx-auto grid grid-cols-3 gap-2">
+          {/* 1. Dashboard (My Portfolio) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('home');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition-all ${
+              activeTab === 'home'
+                ? 'text-emerald-700 font-bold bg-emerald-50/80'
+                : 'text-slate-500 hover:text-slate-900 font-medium'
+            }`}
+          >
+            <LayoutDashboard className={`w-6 h-6 mb-1 ${activeTab === 'home' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+            <span className="text-[11px] leading-tight">Dashboard</span>
+          </button>
+
+          {/* 2. Passbook (Digital Passbook & SL) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('passbook');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition-all ${
+              activeTab === 'passbook'
+                ? 'text-emerald-700 font-bold bg-emerald-50/80'
+                : 'text-slate-500 hover:text-slate-900 font-medium'
+            }`}
+          >
+            <BookOpen className={`w-6 h-6 mb-1 ${activeTab === 'passbook' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+            <span className="text-[11px] leading-tight">Passbook</span>
+          </button>
+
+          {/* 3. More (All Other Services & Settings) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('more');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition-all ${
+              activeTab !== 'home' && activeTab !== 'passbook'
+                ? 'text-emerald-700 font-bold bg-emerald-50/80'
+                : 'text-slate-500 hover:text-slate-900 font-medium'
+            }`}
+          >
+            <div className="relative">
+              <Menu className={`w-6 h-6 mb-1 ${activeTab !== 'home' && activeTab !== 'passbook' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+              {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
+                <span className="absolute -top-1 -right-2 bg-amber-500 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
+                  1
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] leading-tight">More</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }
