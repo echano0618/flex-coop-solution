@@ -94,6 +94,7 @@ type TabType =
   | 'reports'
   | 'iam'
   | 'rbac'
+  | 'system_config'
   | 'platform_usage';
 
 interface StaffAccount {
@@ -108,8 +109,8 @@ interface StaffAccount {
 }
 
 const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
-  SYSTEM_ADMIN: ['overview', 'iam', 'rbac', 'platform_usage', 'reports'],
-  GENERAL_MANAGER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'platform_usage'],
+  SYSTEM_ADMIN: ['overview', 'iam', 'rbac', 'system_config', 'platform_usage', 'reports'],
+  GENERAL_MANAGER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'system_config', 'platform_usage'],
   LOAN_OFFICER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral'],
   CREDIT_COMMITTEE: ['overview', 'products', 'los', 'calculator', 'collateral'],
   BOD: ['overview', 'products', 'los', 'calculator', 'collateral', 'surplus', 'reports'],
@@ -126,8 +127,8 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     name: 'Engr. Alex V. Mercer',
     initials: 'AM',
     color: 'bg-red-600',
-    description: 'Root platform administrative access, IAM user provisioning, RBAC configuration, and Platform Escrow monitoring.',
-    allowedTabs: ['overview', 'iam', 'rbac', 'platform_usage', 'reports'],
+    description: 'Root platform administrative access, IAM user provisioning, RBAC configuration, System Configuration, and Platform Escrow monitoring.',
+    allowedTabs: ['overview', 'iam', 'rbac', 'system_config', 'platform_usage', 'reports'],
   },
   {
     id: 'usr_gm_01',
@@ -136,8 +137,8 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     name: 'Atty. Roberto Dela Rosa',
     initials: 'RD',
     color: 'bg-indigo-600',
-    description: 'Full statutory administrative & override access across all cooperative modules and Platform Escrow.',
-    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'platform_usage'],
+    description: 'Full statutory administrative & override access across all cooperative modules, System Configuration, and Platform Escrow.',
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'system_config', 'platform_usage'],
   },
   {
     id: 'usr_lo_01',
@@ -335,6 +336,7 @@ export default function AdminDashboard() {
     { id: 'reports', label: 'CDA & CIC Mandatory Reports', icon: ShieldCheck, category: 'Governance' },
     { id: 'iam', label: 'Identity & Access (IAM)', icon: Key, category: 'Administration' },
     { id: 'rbac', label: 'Role-Based Access (RBAC)', icon: Shield, category: 'Administration' },
+    { id: 'system_config', label: 'System Configuration', icon: Settings, category: 'Administration' },
     { id: 'platform_usage', label: 'Platform Escrow & Usage', icon: Activity, category: 'Administration' },
   ];
 
@@ -342,6 +344,9 @@ export default function AdminDashboard() {
   const [rolePermissions, setRolePermissions] = useState<Record<StaffRole, TabType[]>>(DEFAULT_ROLE_PERMISSIONS);
   const [rbacSelectedRole, setRbacSelectedRole] = useState<StaffRole>('LOAN_OFFICER');
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
+
+  // System Configuration Sub-Section State
+  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies'>('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -384,12 +389,15 @@ export default function AdminDashboard() {
     name: string;
     email: string;
     role: StaffRole;
-    status: 'ACTIVE' | 'SUSPENDED' | 'INVITED';
+    status: 'ACTIVE' | 'SUSPENDED' | 'INVITED' | 'LOCKED_OUT';
     branch: string;
     lastLogin: string;
     mfaEnabled: boolean;
     assignedBy: string;
     assignedAt: string;
+    failedLoginAttempts: number;
+    lockedUntil?: string;
+    lockoutReason?: string;
   }
 
   const [portalUsers, setPortalUsers] = useState<PortalUser[]>([
@@ -404,6 +412,7 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'ROOT_PROVISIONER',
       assignedAt: '2026-01-01',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_gm_01',
@@ -416,6 +425,7 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'Engr. Alex V. Mercer',
       assignedAt: '2026-01-15',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_lo_01',
@@ -428,6 +438,7 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'Atty. Roberto Dela Rosa',
       assignedAt: '2026-02-01',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_cashier_01',
@@ -440,6 +451,7 @@ export default function AdminDashboard() {
       mfaEnabled: false,
       assignedBy: 'Atty. Roberto Dela Rosa',
       assignedAt: '2026-02-10',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_acct_01',
@@ -452,6 +464,7 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'Atty. Roberto Dela Rosa',
       assignedAt: '2026-02-15',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_crecom_01',
@@ -464,6 +477,7 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'Atty. Roberto Dela Rosa',
       assignedAt: '2026-01-20',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_dpo_01',
@@ -476,6 +490,7 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'Atty. Roberto Dela Rosa',
       assignedAt: '2026-01-25',
+      failedLoginAttempts: 0,
     },
     {
       id: 'usr_bod_01',
@@ -488,6 +503,22 @@ export default function AdminDashboard() {
       mfaEnabled: true,
       assignedBy: 'Atty. Roberto Dela Rosa',
       assignedAt: '2026-01-10',
+      failedLoginAttempts: 0,
+    },
+    {
+      id: 'usr_locked_01',
+      name: 'Engr. Derrick Tan',
+      email: 'derrick.tan@bayanicoop.ph',
+      role: 'LOAN_OFFICER',
+      status: 'LOCKED_OUT',
+      branch: 'Credit & Loans Dept - West District',
+      lastLogin: 'Failed attempt 20 mins ago',
+      mfaEnabled: true,
+      assignedBy: 'Atty. Roberto Dela Rosa',
+      assignedAt: '2026-02-18',
+      failedLoginAttempts: 5,
+      lockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      lockoutReason: 'Exceeded maximum 5 consecutive failed login attempts (24-hour security lockout enforced).',
     },
     {
       id: 'usr_pending_01',
@@ -500,6 +531,7 @@ export default function AdminDashboard() {
       mfaEnabled: false,
       assignedBy: 'Engr. Alex V. Mercer',
       assignedAt: '2026-03-01',
+      failedLoginAttempts: 0,
     },
   ]);
 
@@ -513,6 +545,11 @@ export default function AdminDashboard() {
   const [inviteBranch, setInviteBranch] = useState<string>('Main Branch - Head Office');
   const [inviteMfa, setInviteMfa] = useState<boolean>(true);
   const [iamNotification, setIamNotification] = useState<string | null>(null);
+
+  // IAM Account Unlock Modal State (System Admin Control)
+  const [unlockModalUser, setUnlockModalUser] = useState<PortalUser | null>(null);
+  const [unlockJustification, setUnlockJustification] = useState<string>('');
+  const [unlockError, setUnlockError] = useState<string | null>(null);
 
   const [iamAuditLogs, setIamAuditLogs] = useState<{ id: string; timestamp: string; actor: string; action: string; target: string }[]>([
     {
@@ -536,7 +573,110 @@ export default function AdminDashboard() {
       action: 'MFA_ENFORCED',
       target: 'Enforced hardware/TOTP MFA on Felipe Santos, CPA',
     },
+    {
+      id: 'audit_04',
+      timestamp: '2026-03-02 16:40:05',
+      actor: 'IAM_SECURITY_DAEMON',
+      action: 'ACCOUNT_LOCKED_OUT',
+      target: 'Enforced 24-hour lockout on Engr. Derrick Tan (derrick.tan@bayanicoop.ph) following 5 consecutive failed login attempts',
+    },
   ]);
+
+  const handleOpenUnlockModal = (user: PortalUser) => {
+    setUnlockModalUser(user);
+    setUnlockJustification('');
+    setUnlockError(null);
+  };
+
+  const handleConfirmUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!unlockModalUser) return;
+    if (!unlockJustification.trim()) {
+      setUnlockError('A formal justification note is mandatory to unlock access under CDA IAM guidelines.');
+      return;
+    }
+
+    if (currentStaff.role !== 'SYSTEM_ADMIN' && currentStaff.role !== 'GENERAL_MANAGER') {
+      setUnlockError('Only System Administrator or General Manager can authorize account unlocking.');
+      return;
+    }
+
+    const targetUser = unlockModalUser;
+    setPortalUsers((prev) =>
+      prev.map((u) => {
+        if (u.id === targetUser.id) {
+          return {
+            ...u,
+            status: 'ACTIVE',
+            failedLoginAttempts: 0,
+            lockedUntil: undefined,
+            lockoutReason: undefined,
+            lastLogin: 'Account unlocked by System Admin',
+          };
+        }
+        return u;
+      })
+    );
+
+    setIamAuditLogs([
+      {
+        id: `audit_${Date.now()}`,
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        actor: `${currentStaff.name} (${currentStaff.role})`,
+        action: 'ACCOUNT_UNLOCKED',
+        target: `Unlocked locked-out account for ${targetUser.name} (${targetUser.email}). Justification: ${unlockJustification.trim()}`,
+      },
+      ...iamAuditLogs,
+    ]);
+
+    setIamNotification(`Account ${targetUser.name} successfully unlocked. Login attempts reset to 0/5.`);
+    setTimeout(() => setIamNotification(null), 4000);
+    setUnlockModalUser(null);
+    setUnlockJustification('');
+    setUnlockError(null);
+  };
+
+  const handleSimulateFailedLogin = (userId: string) => {
+    const user = portalUsers.find((u) => u.id === userId);
+    if (!user) return;
+    const currentAttempts = user.failedLoginAttempts || 0;
+    const newAttempts = currentAttempts + 1;
+    const isNowLocked = newAttempts >= 5;
+    const lockoutExpiry = isNowLocked ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined;
+
+    setPortalUsers((prev) =>
+      prev.map((u) => {
+        if (u.id === userId) {
+          return {
+            ...u,
+            failedLoginAttempts: isNowLocked ? 5 : newAttempts,
+            status: isNowLocked ? 'LOCKED_OUT' : u.status,
+            lockedUntil: lockoutExpiry,
+            lockoutReason: isNowLocked ? '5 consecutive failed login attempts exhausted. 24-hour security lockout enforced.' : undefined,
+            lastLogin: `Failed attempt ${newAttempts}/5 (${new Date().toLocaleTimeString()})`,
+          };
+        }
+        return u;
+      })
+    );
+
+    if (isNowLocked) {
+      setIamAuditLogs([
+        {
+          id: `audit_${Date.now()}`,
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          actor: 'IAM_SECURITY_DAEMON',
+          action: 'ACCOUNT_LOCKED_OUT',
+          target: `Security lockout (24 hours) enforced for ${user.name} (${user.email}) after 5 failed login attempts. Locked until ${lockoutExpiry}`,
+        },
+        ...iamAuditLogs,
+      ]);
+      setIamNotification(`ALERT: ${user.name} reached 5 failed login attempts. 24-hour lockout enforced!`);
+    } else {
+      setIamNotification(`Failed login attempt registered for ${user.name} (${newAttempts}/5).`);
+    }
+    setTimeout(() => setIamNotification(null), 4000);
+  };
 
   const handleInvitePortalUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -552,6 +692,7 @@ export default function AdminDashboard() {
       mfaEnabled: inviteMfa,
       assignedBy: `${currentStaff.name} (${currentStaff.role})`,
       assignedAt: new Date().toISOString().substring(0, 10),
+      failedLoginAttempts: 0,
     };
     setPortalUsers([newUser, ...portalUsers]);
     setIamAuditLogs([
@@ -6643,7 +6784,7 @@ export default function AdminDashboard() {
             )}
 
             {/* Quick IAM Directory Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
               <div className="bg-white p-4 rounded-xl border border-slate-200">
                 <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Portal Users</div>
                 <div className="text-2xl font-black text-slate-900 mt-1 font-mono">{portalUsers.length}</div>
@@ -6656,6 +6797,16 @@ export default function AdminDashboard() {
                   {portalUsers.filter((u) => u.status === 'ACTIVE').length}
                 </div>
                 <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">Authorized for live portal access</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Security Lockouts</div>
+                <div className={`text-2xl font-black mt-1 font-mono ${portalUsers.filter((u) => u.status === 'LOCKED_OUT').length > 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                  {portalUsers.filter((u) => u.status === 'LOCKED_OUT').length}
+                </div>
+                <div className={`text-[10px] font-semibold mt-0.5 ${portalUsers.filter((u) => u.status === 'LOCKED_OUT').length > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                  5/5 Attempts • 24h Duration
+                </div>
               </div>
 
               <div className="bg-white p-4 rounded-xl border border-slate-200">
@@ -6672,6 +6823,31 @@ export default function AdminDashboard() {
                   {portalUsers.filter((u) => u.status === 'INVITED').length}
                 </div>
                 <div className="text-[10px] text-amber-600 font-semibold mt-0.5">Awaiting activation sign-off</div>
+              </div>
+            </div>
+
+            {/* CDA MC 2015-06 Authentication & Lockout Security Policy Banner */}
+            <div className="bg-slate-900 text-white p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500/20 text-red-400 rounded-lg shrink-0">
+                  <ShieldAlert className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <div className="font-bold flex items-center gap-2">
+                    <span>IAM Authentication Security Policy</span>
+                    <span className="px-2 py-0.5 bg-red-500 text-white rounded text-[10px] font-mono">5 Attempts Limit</span>
+                    <span className="px-2 py-0.5 bg-amber-500 text-slate-950 rounded text-[10px] font-mono">24-Hour Lockout</span>
+                  </div>
+                  <div className="text-slate-300 text-[11px] mt-0.5">
+                    Accounts are automatically locked for 24 hours upon 5 consecutive failed login attempts. System Admins can unlock locked accounts with mandatory justification recorded in the CDA IAM Audit Trail.
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-slate-400 font-mono">Active Operator:</span>
+                <span className="px-2 py-1 bg-slate-800 rounded text-slate-200 font-bold font-mono text-[11px]">
+                  {currentStaff.role}
+                </span>
               </div>
             </div>
 
@@ -6713,6 +6889,7 @@ export default function AdminDashboard() {
                 >
                   <option value="ALL">All Statuses</option>
                   <option value="ACTIVE">Active Only</option>
+                  <option value="LOCKED_OUT">Locked Out (5/5 Attempts)</option>
                   <option value="SUSPENDED">Suspended</option>
                   <option value="INVITED">Invited</option>
                 </select>
@@ -6794,26 +6971,49 @@ export default function AdminDashboard() {
                             </td>
 
                             <td className="p-3.5">
-                              <span
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                                  user.status === 'ACTIVE'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : user.status === 'SUSPENDED'
-                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                                }`}
-                              >
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    user.status === 'ACTIVE'
-                                      ? 'bg-emerald-500'
-                                      : user.status === 'SUSPENDED'
-                                      ? 'bg-rose-500'
-                                      : 'bg-amber-500'
-                                  }`}
-                                ></span>
-                                <span>{user.status}</span>
-                              </span>
+                              {user.status === 'LOCKED_OUT' ? (
+                                <div className="space-y-1">
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border bg-rose-100 text-rose-800 border-rose-300 shadow-xs">
+                                    <Lock className="w-3 h-3 text-rose-600" />
+                                    <span>LOCKED OUT</span>
+                                  </span>
+                                  <div className="text-[10px] font-bold text-rose-700 flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    <span>24h Lockout Active</span>
+                                  </div>
+                                  <div className="text-[9px] font-mono text-slate-600">
+                                    {user.failedLoginAttempts}/5 Failed Attempts
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <span
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                                      user.status === 'ACTIVE'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : user.status === 'SUSPENDED'
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${
+                                        user.status === 'ACTIVE'
+                                          ? 'bg-emerald-500'
+                                          : user.status === 'SUSPENDED'
+                                          ? 'bg-rose-500'
+                                          : 'bg-amber-500'
+                                      }`}
+                                    ></span>
+                                    <span>{user.status}</span>
+                                  </span>
+                                  {user.failedLoginAttempts > 0 && (
+                                    <div className="text-[9px] font-semibold text-amber-600">
+                                      {user.failedLoginAttempts}/5 Failed Attempts
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </td>
 
                             <td className="p-3.5">
@@ -6836,18 +7036,42 @@ export default function AdminDashboard() {
                             </td>
 
                             <td className="p-3.5 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleUserStatus(user.id)}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
-                                    user.status === 'ACTIVE'
-                                      ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-                                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                                  }`}
-                                >
-                                  {user.status === 'ACTIVE' ? 'Suspend Access' : 'Reactivate'}
-                                </button>
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                {user.status === 'LOCKED_OUT' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenUnlockModal(user)}
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold transition border bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-xs flex items-center gap-1"
+                                    title="Unlock locked-out account with justification note"
+                                  >
+                                    <Unlock className="w-3 h-3" />
+                                    <span>Unlock Account</span>
+                                  </button>
+                                ) : (
+                                  <>
+                                    {user.status === 'ACTIVE' && (
+                                      <button
+                                        type="button"
+                                        title="Simulate failed login attempt (5th attempt enforces 24-hour lockout)"
+                                        onClick={() => handleSimulateFailedLogin(user.id)}
+                                        className="px-2 py-1 rounded-lg text-[10px] font-medium border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 transition"
+                                      >
+                                        Fail Attempt (+1)
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleUserStatus(user.id)}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                                        user.status === 'ACTIVE'
+                                          ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                      }`}
+                                    >
+                                      {user.status === 'ACTIVE' ? 'Suspend Access' : 'Reactivate'}
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -6874,7 +7098,15 @@ export default function AdminDashboard() {
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-[10px] font-bold text-slate-500">{log.timestamp}</span>
-                        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-800 font-mono">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[9px] font-bold font-mono ${
+                            log.action === 'ACCOUNT_UNLOCKED'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : log.action === 'ACCOUNT_LOCKED_OUT'
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                              : 'bg-slate-200 text-slate-800'
+                          }`}
+                        >
                           {log.action}
                         </span>
                       </div>
@@ -6887,305 +7119,102 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* SYSTEM ADMIN: MEMBERSHIP REGISTRATION FORM FIELDS CONFIGURATOR */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
-                      <Sliders className="w-3 h-3 text-red-600" />
-                      <span>System Admin Field Engine</span>
-                    </span>
-                    <span className="text-slate-400 text-xs">•</span>
-                    <span className="text-xs text-slate-500 font-mono">
-                      Active Fields: {registrationFields.filter((f) => f.enabled).length} of {registrationFields.length} Enabled
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                    Membership Registration Dynamic Fields Configuration
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
-                    Configure institutional, employment, personal, and contact fields captured during member self-registration (<code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">/member/register</code>). System Admins can enable, disable, require, or customize field labels and placeholders in real time.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleResetRegistrationFields}
-                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reset Fields</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Notification Banner */}
-              {fieldsNotification && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="font-semibold">{fieldsNotification}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setFieldsNotification(null)}
-                    className="text-emerald-700 hover:text-emerald-900"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-
-              {/* Category Legend & Guidance */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl">
-                  <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">Employment & Institutional</span>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Employee ID No, Position, Office/Unit/Section, Date of Appointment. Ideal for institutional and occupational cooperatives.
-                  </p>
-                </div>
-                <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl">
-                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Contact & Residence</span>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Mobile Phone (+63), Landline, Email, PSGC 9-digit standardized geographic address.
-                  </p>
-                </div>
-                <div className="p-3 bg-amber-50/50 border border-amber-100 rounded-xl">
-                  <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">Statutory Core</span>
-                  <p className="text-xs text-slate-600 mt-1">
-                    First Name, Last Name, Birthdate, Gender, and Civil Status are protected core fields per CDA MC 2015-06.
-                  </p>
-                </div>
-              </div>
-
-              {/* Fields Table */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                    <tr>
-                      <th className="p-3.5">Field Label & Identification</th>
-                      <th className="p-3.5">Category</th>
-                      <th className="p-3.5">Data Type</th>
-                      <th className="p-3.5 text-center">Visibility / Status</th>
-                      <th className="p-3.5 text-center">Mandatory (*)</th>
-                      <th className="p-3.5 text-right">Field Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {registrationFields.map((field) => (
-                      <tr key={field.id} className="hover:bg-slate-50/80 transition">
-                        <td className="p-3.5">
-                          <div className="font-bold text-slate-900 flex items-center gap-2">
-                            <span>{field.label}</span>
-                            {field.isSystemCore && (
-                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono font-bold">
-                                CORE
-                              </span>
-                            )}
-                            {['employeeIdNumber', 'position', 'officeUnitSection', 'dateOfAppointment', 'landline'].includes(field.fieldKey) && (
-                              <span className="text-[9px] bg-indigo-100 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-mono font-bold">
-                                NEW FIELD
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-0.5 font-mono">
-                            Key: <code className="text-indigo-600 bg-indigo-50 px-1 py-0.2 rounded">{field.fieldKey}</code>
-                          </div>
-                          {field.description && (
-                            <div className="text-[11px] text-slate-400 mt-0.5">{field.description}</div>
-                          )}
-                        </td>
-
-                        <td className="p-3.5">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                              field.category === 'EMPLOYMENT'
-                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                : field.category === 'CONTACT'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : field.category === 'GOVERNMENT'
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                : 'bg-slate-100 text-slate-700 border border-slate-200'
-                            }`}
-                          >
-                            {field.category}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 font-mono text-[11px] text-slate-600">
-                          {field.type}
-                        </td>
-
-                        <td className="p-3.5 text-center">
-                          <button
-                            type="button"
-                            disabled={field.isSystemCore}
-                            onClick={() => handleToggleFieldEnabled(field.id)}
-                            className={`px-3 py-1 rounded-xl text-[11px] font-bold transition border inline-flex items-center gap-1.5 ${
-                              field.enabled
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
-                                : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
-                            } ${field.isSystemCore ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
-                          >
-                            {field.enabled ? (
-                              <>
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>ENABLED</span>
-                              </>
-                            ) : (
-                              <>
-                                <Ban className="w-3.5 h-3.5 text-slate-400" />
-                                <span>DISABLED</span>
-                              </>
-                            )}
-                          </button>
-                        </td>
-
-                        <td className="p-3.5 text-center">
-                          <button
-                            type="button"
-                            disabled={field.isSystemCore || !field.enabled}
-                            onClick={() => handleToggleFieldRequired(field.id)}
-                            className={`px-3 py-1 rounded-xl text-[11px] font-bold transition border inline-flex items-center gap-1.5 ${
-                              field.required
-                                ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
-                                : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
-                            } ${field.isSystemCore || !field.enabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
-                          >
-                            {field.required ? (
-                              <>
-                                <span className="text-rose-600 font-bold">*</span>
-                                <span>REQUIRED</span>
-                              </>
-                            ) : (
-                              <span>OPTIONAL</span>
-                            )}
-                          </button>
-                        </td>
-
-                        <td className="p-3.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setEditingField(field)}
-                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs inline-flex items-center gap-1.5 transition shadow-xs"
-                          >
-                            <Edit3 className="w-3 h-3" />
-                            <span>Edit Field</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Field Edit Modal for System Admin */}
-            {editingField && (
-              <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-                <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
-                  <div className="bg-slate-900 p-5 text-white flex justify-between items-center">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 bg-red-600/30 rounded-xl border border-red-500/40">
-                        <Sliders className="w-5 h-5 text-red-400" />
+            {/* SYSTEM ADMIN: UNLOCK ACCOUNT JUSTIFICATION MODAL */}
+            {unlockModalUser && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden">
+                  <div className="p-5 bg-amber-50 border-b border-amber-100 flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-amber-100 text-amber-800 rounded-xl">
+                        <Unlock className="w-5 h-5 text-amber-700" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-base">Edit Registration Field</h4>
-                        <span className="text-xs text-slate-400 font-mono">Field Key: {editingField.fieldKey}</span>
+                        <h3 className="text-base font-black text-slate-900">Unlock Staff Portal Account</h3>
+                        <p className="text-xs text-amber-800 font-medium">
+                          24-Hour Security Lockout Resolution (5/5 Failed Attempts)
+                        </p>
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setEditingField(null)}
-                      className="text-slate-400 hover:text-white"
+                      onClick={() => setUnlockModalUser(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
                     >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleSaveFieldEdit(editingField);
-                    }}
-                    className="p-6 space-y-4 text-xs"
-                  >
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1">Field Label *</label>
-                      <input
-                        type="text"
-                        value={editingField.label}
-                        onChange={(e) => setEditingField({ ...editingField, label: e.target.value })}
-                        required
-                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-hidden focus:ring-2 focus:ring-red-500"
-                      />
+                  <form onSubmit={handleConfirmUnlock} className="p-6 space-y-4">
+                    {/* User Details Callout */}
+                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">User Name:</span>
+                        <span className="font-bold text-slate-900">{unlockModalUser.name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Email / Account:</span>
+                        <span className="font-mono text-slate-800">{unlockModalUser.email}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Designation / Role:</span>
+                        <span className="font-semibold text-slate-900">{unlockModalUser.role}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Lockout Duration:</span>
+                        <span className="font-bold text-rose-600">24 Hours (Active)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-medium">Failed Attempts:</span>
+                        <span className="font-bold text-rose-600">{unlockModalUser.failedLoginAttempts} / 5</span>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-slate-700 font-bold mb-1">Placeholder Text</label>
-                      <input
-                        type="text"
-                        value={editingField.placeholder || ''}
-                        onChange={(e) => setEditingField({ ...editingField, placeholder: e.target.value })}
-                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-red-500 font-mono"
-                      />
+                    {/* Warning & Policy Notice */}
+                    <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-start gap-2.5">
+                      <ShieldAlert className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div className="text-[11px] leading-relaxed">
+                        <strong>CDA Security Compliance (Rule MC 2015-06):</strong> Unlocking a locked-out staff account resets the counter to 0 and restores access immediately. A justification note is mandatory and will be permanently recorded in the <strong>IAM Administrative Audit Trail</strong>.
+                      </div>
                     </div>
 
+                    {/* Justification Note Input */}
                     <div>
-                      <label className="block text-slate-700 font-bold mb-1">Description / Subtext for Applicant</label>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Justification Note for Unlocking <span className="text-rose-500">*</span>
+                      </label>
                       <textarea
-                        rows={2}
-                        value={editingField.description || ''}
-                        onChange={(e) => setEditingField({ ...editingField, description: e.target.value })}
-                        className="w-full border border-slate-300 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                        required
+                        rows={3}
+                        value={unlockJustification}
+                        onChange={(e) => {
+                          setUnlockJustification(e.target.value);
+                          if (unlockError) setUnlockError(null);
+                        }}
+                        placeholder="e.g., Staff identity verified via phone with branch head; password reset credentials issued; confirmed no unauthorized compromise."
+                        className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
                       />
+                      {unlockError && (
+                        <p className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>{unlockError}</span>
+                        </p>
+                      )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 pt-2">
-                      <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
-                        <input
-                          type="checkbox"
-                          disabled={editingField.isSystemCore}
-                          checked={editingField.enabled}
-                          onChange={(e) => setEditingField({ ...editingField, enabled: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <div>
-                          <strong className="block text-slate-900">Enable Field</strong>
-                          <span className="text-[10px] text-slate-500">Visible on registration</span>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
-                        <input
-                          type="checkbox"
-                          disabled={editingField.isSystemCore || !editingField.enabled}
-                          checked={editingField.required}
-                          onChange={(e) => setEditingField({ ...editingField, required: e.target.checked })}
-                          className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
-                        />
-                        <div>
-                          <strong className="block text-slate-900">Required Field (*)</strong>
-                          <span className="text-[10px] text-slate-500">Cannot be left blank</span>
-                        </div>
-                      </label>
-                    </div>
-
-                    <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 -mx-6 -mb-6 mt-6">
+                    <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
                       <button
                         type="button"
-                        onClick={() => setEditingField(null)}
-                        className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 font-bold hover:bg-slate-100 transition"
+                        onClick={() => setUnlockModalUser(null)}
+                        className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition shadow-md"
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-md flex items-center gap-1.5"
                       >
-                        Save Field Changes
+                        <Unlock className="w-3.5 h-3.5" />
+                        <span>Confirm & Unlock Account</span>
                       </button>
                     </div>
                   </form>
@@ -7376,7 +7405,452 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 14: PLATFORM USAGE & ESCROW MODULE */}
+        {/* TAB 14: SYSTEM CONFIGURATION MODULE */}
+        {activeTab === 'system_config' && (
+          <div className="space-y-6">
+            {/* Header & Module Information */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-200 flex items-center gap-1">
+                    <Settings className="w-3 h-3 text-slate-700" />
+                    <span>Platform Administration</span>
+                  </span>
+                  <span className="text-slate-400 text-xs">•</span>
+                  <span className="text-xs text-slate-500 font-mono">Tenant Operational Parameters</span>
+                </div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">System Configuration</h2>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  Configure tenant-wide operational parameters, member self-service onboarding field schemas, administrative security policies, and institutional workflow rules.
+                </p>
+              </div>
+
+              {systemConfigSection === 'membership_registration' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetRegistrationFields}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Field Defaults</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Sub-Section Navigation / Module Selector */}
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+              <button
+                type="button"
+                onClick={() => setSystemConfigSection('membership_registration')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'membership_registration'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Membership Registration</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'membership_registration' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {registrationFields.filter((f) => f.enabled).length} Active
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSystemConfigSection('security_policies')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'security_policies'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Security & IAM Policies</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'security_policies' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  5 Attempts / 24h Lockout
+                </span>
+              </button>
+            </div>
+
+            {/* SUB-SECTION 1: MEMBERSHIP REGISTRATION DYNAMIC FIELDS */}
+            {systemConfigSection === 'membership_registration' && (
+              <div className="space-y-5">
+                {/* SYSTEM ADMIN: MEMBERSHIP REGISTRATION FORM FIELDS CONFIGURATOR */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
+                          <Sliders className="w-3 h-3 text-red-600" />
+                          <span>System Admin Field Engine</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">
+                          Active Fields: {registrationFields.filter((f) => f.enabled).length} of {registrationFields.length} Enabled
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                        Membership Registration Dynamic Fields Configuration
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+                        Configure institutional, employment, personal, and contact fields captured during member self-registration (<code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">/member/register</code>). System Admins can enable, disable, require, or customize field labels and placeholders in real time.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetRegistrationFields}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset Fields</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notification Banner */}
+                  {fieldsNotification && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{fieldsNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setFieldsNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Category Legend & Guidance */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl">
+                      <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">Employment & Institutional</span>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Employee ID No, Position, Office/Unit/Section, Date of Appointment. Ideal for institutional and occupational cooperatives.
+                      </p>
+                    </div>
+                    <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl">
+                      <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Contact & Residence</span>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Mobile Phone (+63), Landline, Email, PSGC 9-digit standardized geographic address.
+                      </p>
+                    </div>
+                    <div className="p-3 bg-amber-50/50 border border-amber-100 rounded-xl">
+                      <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">Statutory Core</span>
+                      <p className="text-xs text-slate-600 mt-1">
+                        First Name, Last Name, Birthdate, Gender, and Civil Status are protected core fields per CDA MC 2015-06.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Fields Table */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                        <tr>
+                          <th className="p-3.5">Field Label & Identification</th>
+                          <th className="p-3.5">Category</th>
+                          <th className="p-3.5">Data Type</th>
+                          <th className="p-3.5 text-center">Visibility / Status</th>
+                          <th className="p-3.5 text-center">Mandatory (*)</th>
+                          <th className="p-3.5 text-right">Field Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {registrationFields.map((field) => (
+                          <tr key={field.id} className="hover:bg-slate-50/80 transition">
+                            <td className="p-3.5">
+                              <div className="font-bold text-slate-900 flex items-center gap-2">
+                                <span>{field.label}</span>
+                                {field.isSystemCore && (
+                                  <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono font-bold">
+                                    CORE
+                                  </span>
+                                )}
+                                {['employeeIdNumber', 'position', 'officeUnitSection', 'dateOfAppointment', 'landline'].includes(field.fieldKey) && (
+                                  <span className="text-[9px] bg-indigo-100 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-mono font-bold">
+                                    NEW FIELD
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5 font-mono">
+                                Key: <code className="text-indigo-600 bg-indigo-50 px-1 py-0.2 rounded">{field.fieldKey}</code>
+                              </div>
+                              {field.description && (
+                                <div className="text-[11px] text-slate-400 mt-0.5">{field.description}</div>
+                              )}
+                            </td>
+
+                            <td className="p-3.5">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  field.category === 'EMPLOYMENT'
+                                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                    : field.category === 'CONTACT'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : field.category === 'GOVERNMENT'
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+                                }}`}
+                              >
+                                {field.category}
+                              </span>
+                            </td>
+
+                            <td className="p-3.5 font-mono text-[11px] text-slate-600">
+                              {field.type}
+                            </td>
+
+                            <td className="p-3.5 text-center">
+                              <button
+                                type="button"
+                                disabled={field.isSystemCore}
+                                onClick={() => handleToggleFieldEnabled(field.id)}
+                                className={`px-3 py-1 rounded-xl text-[11px] font-bold transition border inline-flex items-center gap-1.5 ${
+                                  field.enabled
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                                    : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
+                                } ${field.isSystemCore ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+                              >
+                                {field.enabled ? (
+                                  <>
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>ENABLED</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Ban className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>DISABLED</span>
+                                  </>
+                                )}
+                              </button>
+                            </td>
+
+                            <td className="p-3.5 text-center">
+                              <button
+                                type="button"
+                                disabled={field.isSystemCore || !field.enabled}
+                                onClick={() => handleToggleFieldRequired(field.id)}
+                                className={`px-3 py-1 rounded-xl text-[11px] font-bold transition border inline-flex items-center gap-1.5 ${
+                                  field.required
+                                    ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                                } ${field.isSystemCore || !field.enabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+                              >
+                                {field.required ? (
+                                  <>
+                                    <span className="text-rose-600 font-bold">*</span>
+                                    <span>REQUIRED</span>
+                                  </>
+                                ) : (
+                                  <span>OPTIONAL</span>
+                                )}
+                              </button>
+                            </td>
+
+                            <td className="p-3.5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => setEditingField(field)}
+                                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs inline-flex items-center gap-1.5 transition shadow-xs"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit Field</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Field Edit Modal for System Admin */}
+                {editingField && (
+                  <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+                    <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+                      <div className="bg-slate-900 p-5 text-white flex justify-between items-center">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-red-600/30 rounded-xl border border-red-500/40">
+                            <Sliders className="w-5 h-5 text-red-400" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-base">Edit Registration Field</h4>
+                            <span className="text-xs text-slate-400 font-mono">Field Key: {editingField.fieldKey}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditingField(null)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          handleSaveFieldEdit(editingField);
+                        }}
+                        className="p-6 space-y-4 text-xs"
+                      >
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Field Label *</label>
+                          <input
+                            type="text"
+                            value={editingField.label}
+                            onChange={(e) => setEditingField({ ...editingField, label: e.target.value })}
+                            required
+                            className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Placeholder Text</label>
+                          <input
+                            type="text"
+                            value={editingField.placeholder || ''}
+                            onChange={(e) => setEditingField({ ...editingField, placeholder: e.target.value })}
+                            className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-red-500 font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-700 font-bold mb-1">Description / Subtext for Applicant</label>
+                          <textarea
+                            rows={2}
+                            value={editingField.description || ''}
+                            onChange={(e) => setEditingField({ ...editingField, description: e.target.value })}
+                            className="w-full border border-slate-300 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
+                            <input
+                              type="checkbox"
+                              disabled={editingField.isSystemCore}
+                              checked={editingField.enabled}
+                              onChange={(e) => setEditingField({ ...editingField, enabled: e.target.checked })}
+                              className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                            />
+                            <div>
+                              <strong className="block text-slate-900">Enable Field</strong>
+                              <span className="text-[10px] text-slate-500">Visible on registration</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
+                            <input
+                              type="checkbox"
+                              disabled={editingField.isSystemCore || !editingField.enabled}
+                              checked={editingField.required}
+                              onChange={(e) => setEditingField({ ...editingField, required: e.target.checked })}
+                              className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                            />
+                            <div>
+                              <strong className="block text-slate-900">Required Field (*)</strong>
+                              <span className="text-[10px] text-slate-500">Cannot be left blank</span>
+                            </div>
+                          </label>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 -mx-6 -mb-6 mt-6">
+                          <button
+                            type="button"
+                            onClick={() => setEditingField(null)}
+                            className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 font-bold hover:bg-slate-100 transition"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition shadow-md"
+                          >
+                            Save Field Changes
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SUB-SECTION 2: SECURITY & IAM POLICIES */}
+            {systemConfigSection === 'security_policies' && (
+              <div className="space-y-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                    <div className="p-2.5 bg-red-100 text-red-700 rounded-xl">
+                      <Lock className="w-5 h-5 text-red-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">Statutory Authentication & Lockout Rules</h3>
+                      <p className="text-xs text-slate-500">CDA Governance MC 2015-06 & National Privacy Commission Cyber Resilience Standards</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">Failed Login Attempt Threshold</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 font-mono">Enforced</span>
+                      </div>
+                      <div className="text-2xl font-black text-slate-900 font-mono">5 Attempts</div>
+                      <p className="text-xs text-slate-500">
+                        Consecutive failed login attempts immediately trigger an automatic credential suspension and lockout.
+                      </p>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">Lockout Duration Period</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 font-mono">Enforced</span>
+                      </div>
+                      <div className="text-2xl font-black text-slate-900 font-mono">24 Hours</div>
+                      <p className="text-xs text-slate-500">
+                        System automatically locks account for exactly 24 hours to prevent brute-force attacks and credential stuffing.
+                      </p>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">Administrative Override</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 font-mono">Fiduciary</span>
+                      </div>
+                      <div className="text-base font-black text-slate-900">System Admin Sign-off</div>
+                      <p className="text-xs text-slate-500">
+                        Only System Administrator can unlock locked accounts prior to 24 hours with mandatory justification logged in IAM Audit Trail.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs flex items-start gap-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong>Audit Trail Integrity Protocol:</strong> All account unlocks require the entry of a verified administrative justification note. Unlocking is recorded with the operator's timestamp, operator identity, target account, and justification in the immutable audit log under CDA Article 52 regulations.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 15: PLATFORM USAGE & ESCROW MODULE */}
         {activeTab === 'platform_usage' && (
           <div className="space-y-6">
             {/* Header & Platform Usage Info */}

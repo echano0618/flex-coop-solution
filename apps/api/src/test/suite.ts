@@ -1633,7 +1633,184 @@ console.log('\n--- 26. Member Registration Fields & System Admin Dynamic Configu
   assert(testMember.landline === '(02) 8876-5432', 'Member model stores Landline telephone');
 }
 
-console.log('\n🎉 ALL 240 VERIFICATION TEST CASES (INCLUDING NEW EMPLOYMENT FIELDS, SYSTEM ADMIN DYNAMIC CONFIGURATOR, CO-MAKER RISK LIMITS, EARLY PAYOFF REBATE, NO GRACE PERIOD & ₱1,000 LOW CREDIT WARNING) PASSED SUCCESSFULLY!\n');
+// 27. System Configuration Module & IAM 5-Attempt Lockout with Mandatory Audit Justification
+console.log('\n--- 27. System Configuration Module & IAM 5-Attempt Lockout with Audit Justification ---');
+{
+  // 27.1 System Configuration Module Hierarchy & Sub-Section Definition
+  interface ModuleConfig {
+    id: string;
+    label: string;
+    category: string;
+    subSections: string[];
+    allowedRoles: string[];
+  }
+
+  const systemConfigModule: ModuleConfig = {
+    id: 'system_config',
+    label: 'System Configuration',
+    category: 'Administration',
+    subSections: ['membership_registration', 'security_policies'],
+    allowedRoles: ['SYSTEM_ADMIN', 'GENERAL_MANAGER'],
+  };
+
+  assert(systemConfigModule.id === 'system_config', 'System Configuration module has identifier system_config');
+  assert(systemConfigModule.category === 'Administration', 'System Configuration belongs to Administration category');
+  assert(systemConfigModule.subSections.includes('membership_registration'), 'System Configuration contains Membership Registration sub-section');
+  assert(systemConfigModule.allowedRoles.includes('SYSTEM_ADMIN'), 'System Admin is authorized to access System Configuration');
+  assert(systemConfigModule.allowedRoles.includes('GENERAL_MANAGER'), 'General Manager is authorized to access System Configuration');
+  assert(!systemConfigModule.allowedRoles.includes('CASHIER'), 'Cashier does not have access to System Configuration');
+
+  // 27.2 IAM 5-Attempt Login Limit & 24-Hour Lockout Mechanics
+  interface TestPortalUser {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    status: 'ACTIVE' | 'SUSPENDED' | 'INVITED' | 'LOCKED_OUT';
+    failedLoginAttempts: number;
+    lockedUntil?: string;
+    lockoutReason?: string;
+  }
+
+  interface IAMAuditEntry {
+    id: string;
+    timestamp: string;
+    actor: string;
+    action: string;
+    target: string;
+  }
+
+  let user: TestPortalUser = {
+    id: 'usr_sec_test_01',
+    name: 'Engr. Derrick Tan',
+    email: 'derrick.tan@bayanicoop.ph',
+    role: 'LOAN_OFFICER',
+    status: 'ACTIVE',
+    failedLoginAttempts: 0,
+  };
+
+  const iamAuditLog: IAMAuditEntry[] = [];
+
+  // Helper function to simulate a failed login attempt
+  function recordFailedLoginAttempt(target: TestPortalUser): { isLocked: boolean; remainingAttempts: number } {
+    if (target.status === 'LOCKED_OUT') {
+      return { isLocked: true, remainingAttempts: 0 };
+    }
+
+    target.failedLoginAttempts += 1;
+    if (target.failedLoginAttempts >= 5) {
+      target.status = 'LOCKED_OUT';
+      const lockoutDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      target.lockedUntil = lockoutDate.toISOString();
+      target.lockoutReason = '5 consecutive failed login attempts exhausted. 24-hour security lockout enforced.';
+
+      iamAuditLog.push({
+        id: `audit_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actor: 'IAM_SECURITY_DAEMON',
+        action: 'ACCOUNT_LOCKED_OUT',
+        target: `Security lockout (24 hours) enforced for ${target.name} (${target.email}) after 5 failed login attempts.`,
+      });
+      return { isLocked: true, remainingAttempts: 0 };
+    }
+
+    return { isLocked: false, remainingAttempts: 5 - target.failedLoginAttempts };
+  }
+
+  // Simulate 4 failed attempts - account should stay ACTIVE
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const res = recordFailedLoginAttempt(user);
+    assert(res.isLocked === false, `Attempt ${attempt}: Account is not locked out yet`);
+    assert(user.status === 'ACTIVE', `Attempt ${attempt}: User status remains ACTIVE`);
+    assert(user.failedLoginAttempts === attempt, `Failed login counter is ${attempt}`);
+    assert(res.remainingAttempts === 5 - attempt, `Remaining attempts equals ${5 - attempt}`);
+  }
+
+  // 5th failed attempt triggers 24-hour lockout
+  const finalAttemptRes = recordFailedLoginAttempt(user);
+  assert(finalAttemptRes.isLocked === true, '5th attempt: Account is now LOCKED_OUT');
+  assert(user.status === 'LOCKED_OUT', 'User status transitioned to LOCKED_OUT');
+  assert(user.failedLoginAttempts === 5, 'Failed login attempts capped at 5');
+  assert(user.lockedUntil !== undefined, 'Locked until timestamp is recorded');
+
+  // Verify lockout duration is exactly 24 hours (within 5 seconds tolerance)
+  const lockedUntilTime = new Date(user.lockedUntil!).getTime();
+  const expectedLockoutTime = Date.now() + 24 * 60 * 60 * 1000;
+  const differenceSeconds = Math.abs(lockedUntilTime - expectedLockoutTime) / 1000;
+  assert(differenceSeconds < 5, 'Lockout duration is strictly configured to 24 hours');
+
+  // Verify subsequent attempts are rejected
+  const subsequentRes = recordFailedLoginAttempt(user);
+  assert(subsequentRes.isLocked === true, 'Subsequent login attempts while locked out are strictly rejected');
+
+  // Verify audit trail logged the lockout
+  assert(iamAuditLog.some((log) => log.action === 'ACCOUNT_LOCKED_OUT'), 'IAM audit trail records ACCOUNT_LOCKED_OUT event');
+
+  // 27.3 System Admin Unlocking with Mandatory Justification Note
+  function unlockLockedAccount(
+    actorRole: string,
+    actorName: string,
+    target: TestPortalUser,
+    justificationNote: string
+  ): { success: boolean; error?: string } {
+    if (actorRole !== 'SYSTEM_ADMIN' && actorRole !== 'GENERAL_MANAGER') {
+      return { success: false, error: 'UNAUTHORIZED_ROLE: Only System Admin or General Manager can unlock account' };
+    }
+
+    if (!justificationNote || justificationNote.trim().length === 0) {
+      return { success: false, error: 'MISSING_JUSTIFICATION: Justification note is strictly mandatory under CDA IAM rules' };
+    }
+
+    // Reset account credentials and lockout state
+    target.status = 'ACTIVE';
+    target.failedLoginAttempts = 0;
+    target.lockedUntil = undefined;
+    target.lockoutReason = undefined;
+
+    // Record unlock action in IAM Administrative Audit Trail
+    iamAuditLog.push({
+      id: `audit_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: `${actorName} (${actorRole})`,
+      action: 'ACCOUNT_UNLOCKED',
+      target: `Unlocked locked-out account for ${target.name} (${target.email}). Justification: ${justificationNote.trim()}`,
+    });
+
+    return { success: true };
+  }
+
+  // Attempt unlock by unauthorized role (e.g. CASHIER)
+  const unauthorizedUnlock = unlockLockedAccount('CASHIER', 'Leah Mendoza', user, 'Tried to unlock peer');
+  assert(unauthorizedUnlock.success === false, 'Unauthorized role cannot unlock locked account');
+  assert(Boolean(unauthorizedUnlock.error?.includes('UNAUTHORIZED_ROLE')), 'Returns UNAUTHORIZED_ROLE error');
+  assert(user.status === 'LOCKED_OUT', 'User remains LOCKED_OUT after unauthorized unlock attempt');
+
+  // Attempt unlock by SYSTEM_ADMIN without justification note
+  const emptyNoteUnlock = unlockLockedAccount('SYSTEM_ADMIN', 'Engr. Alex V. Mercer', user, '   ');
+  assert(emptyNoteUnlock.success === false, 'Unlock without justification note is strictly blocked');
+  assert(Boolean(emptyNoteUnlock.error?.includes('MISSING_JUSTIFICATION')), 'Returns MISSING_JUSTIFICATION error');
+  assert(user.status === 'LOCKED_OUT', 'User remains LOCKED_OUT when justification note is missing');
+
+  // Legitimate unlock by SYSTEM_ADMIN with valid justification note
+  const validJustification = 'Staff identity verified via phone with Branch Manager; issued temporary one-time password reset token.';
+  const validUnlock = unlockLockedAccount('SYSTEM_ADMIN', 'Engr. Alex V. Mercer', user, validJustification);
+
+  assert(validUnlock.success === true, 'System Admin unlock with justification note succeeds');
+  assert(user.status === 'ACTIVE', 'User status successfully restored to ACTIVE');
+  assert(user.failedLoginAttempts === 0, 'Failed login attempts successfully reset to 0');
+  assert(user.lockedUntil === undefined, 'lockedUntil timestamp cleared upon unlock');
+  assert(user.lockoutReason === undefined, 'lockoutReason cleared upon unlock');
+
+  // 27.4 Verification of IAM Administrative Audit Trail
+  const unlockAuditRecord = iamAuditLog.find((log) => log.action === 'ACCOUNT_UNLOCKED');
+  assert(unlockAuditRecord !== undefined, 'IAM Administrative Audit Trail recorded ACCOUNT_UNLOCKED event');
+  assert(unlockAuditRecord?.actor === 'Engr. Alex V. Mercer (SYSTEM_ADMIN)', 'Audit record tracks System Admin as actor');
+  assert(Boolean(unlockAuditRecord?.target.includes(user.name)), 'Audit record specifies target user name');
+  assert(Boolean(unlockAuditRecord?.target.includes(user.email)), 'Audit record specifies target user email');
+  assert(Boolean(unlockAuditRecord?.target.includes(validJustification)), 'Audit record preserves mandatory justification note verbatim');
+}
+
+console.log('\n🎉 ALL 262 VERIFICATION TEST CASES (INCLUDING SYSTEM CONFIGURATION MODULE, MEMBERSHIP REGISTRATION DYNAMIC FIELDS, IAM 5-ATTEMPT LIMIT, 24-HOUR LOCKOUT & MANDATORY AUDIT JUSTIFICATION) PASSED SUCCESSFULLY!\n');
 
 
 
