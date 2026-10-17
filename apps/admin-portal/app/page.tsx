@@ -8,6 +8,7 @@ import {
   CreditCard,
   Calculator,
   Calendar,
+  Coins,
   QrCode,
   BookOpen,
   FileText,
@@ -1722,6 +1723,7 @@ export default function AdminDashboard() {
   const [calcRate, setCalcRate] = useState<number>(12);
   const [calcTerm, setCalcTerm] = useState<number>(12);
   const [calcMethod, setCalcMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
+  const [calcAdvanceInterest, setCalcAdvanceInterest] = useState<'NONE' | 'FIRST_YEAR' | 'ENTIRE_LOAN'>('NONE');
 
   // Optional Fees (Up to 5)
   const [optionalFees, setOptionalFees] = useState<Array<{
@@ -1760,27 +1762,6 @@ export default function AdminDashboard() {
     }
     return Math.max(0, Math.round((Number(fee.value) || 0) * 100) / 100);
   };
-
-  const totalOptionalFees = optionalFees.reduce((acc, fee) => acc + calculateFeeAmount(fee), 0);
-  const platformFee = Math.round(calcAmount * 0.01 * 100) / 100;
-  const coopServiceFee = Math.round(calcAmount * 0.015 * 100) / 100;
-  const totalDeductions = platformFee + coopServiceFee + totalOptionalFees;
-  const netDisbursed = Math.max(0, Math.round((calcAmount - totalDeductions) * 100) / 100);
-
-  // Monthly Amortization Calculation
-  const monthlyRate = (calcRate / 100) / 12.0;
-  let monthlyInstallment = 0;
-  let totalInterest = 0;
-  if (calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
-    const factor = Math.pow(1.0 + monthlyRate, calcTerm);
-    monthlyInstallment = factor > 1
-      ? Math.round(((calcAmount * (monthlyRate * factor)) / (factor - 1.0)) * 100) / 100
-      : Math.round((calcAmount / calcTerm) * 100) / 100;
-    totalInterest = Math.round(((monthlyInstallment * calcTerm) - calcAmount) * 100) / 100;
-  } else {
-    totalInterest = Math.round((calcAmount * (calcRate / 100) * (calcTerm / 12.0)) * 100) / 100;
-    monthlyInstallment = Math.round(((calcAmount + totalInterest) / calcTerm) * 100) / 100;
-  }
 
   // Detailed Amortization Schedule State & Logic
   const [calcStartDate, setCalcStartDate] = useState<string>('2026-10-20');
@@ -1822,6 +1803,9 @@ export default function AdminDashboard() {
       interestPayment: number;
       totalInstallment: number;
       endingBalance: number;
+      isPrepaid: boolean;
+      cashInterestDue: number;
+      cashInstallmentDue: number;
     }> = [];
 
     const safeAmount = Math.max(1000, Number(calcAmount) || 0);
@@ -1858,6 +1842,10 @@ export default function AdminDashboard() {
           installment = Math.round((principal + interest) * 100) / 100;
         }
 
+        const isPrepaid = (calcAdvanceInterest === 'ENTIRE_LOAN') || (calcAdvanceInterest === 'FIRST_YEAR' && i <= 12);
+        const cashInterest = isPrepaid ? 0 : interest;
+        const cashInstallment = Math.round((principal + cashInterest) * 100) / 100;
+
         remainingPrincipal = endBal;
 
         rows.push({
@@ -1868,6 +1856,9 @@ export default function AdminDashboard() {
           interestPayment: interest,
           totalInstallment: installment,
           endingBalance: endBal,
+          isPrepaid,
+          cashInterestDue: cashInterest,
+          cashInstallmentDue: cashInstallment,
         });
       }
     } else {
@@ -1892,6 +1883,10 @@ export default function AdminDashboard() {
         }
 
         const installment = Math.round((principal + interest) * 100) / 100;
+        const isPrepaid = (calcAdvanceInterest === 'ENTIRE_LOAN') || (calcAdvanceInterest === 'FIRST_YEAR' && i <= 12);
+        const cashInterest = isPrepaid ? 0 : interest;
+        const cashInstallment = Math.round((principal + cashInterest) * 100) / 100;
+
         remainingPrincipal = endBal;
 
         rows.push({
@@ -1902,12 +1897,15 @@ export default function AdminDashboard() {
           interestPayment: interest,
           totalInstallment: installment,
           endingBalance: endBal,
+          isPrepaid,
+          cashInterestDue: cashInterest,
+          cashInstallmentDue: cashInstallment,
         });
       }
     }
 
     return rows;
-  }, [calcAmount, calcTerm, calcRate, calcMethod, calcStartDate]);
+  }, [calcAmount, calcTerm, calcRate, calcMethod, calcStartDate, calcAdvanceInterest]);
 
   const scheduleTotals = useMemo(() => {
     return amortizationSchedule.reduce(
@@ -1915,10 +1913,34 @@ export default function AdminDashboard() {
         totalPrincipal: Math.round((acc.totalPrincipal + r.principalPayment) * 100) / 100,
         totalInterest: Math.round((acc.totalInterest + r.interestPayment) * 100) / 100,
         totalInstallment: Math.round((acc.totalInstallment + r.totalInstallment) * 100) / 100,
+        totalCashInstallment: Math.round((acc.totalCashInstallment + r.cashInstallmentDue) * 100) / 100,
+        prepaidInterest: Math.round((acc.prepaidInterest + (r.isPrepaid ? r.interestPayment : 0)) * 100) / 100,
+        remainingInterest: Math.round((acc.remainingInterest + (!r.isPrepaid ? r.interestPayment : 0)) * 100) / 100,
       }),
-      { totalPrincipal: 0, totalInterest: 0, totalInstallment: 0 }
+      { totalPrincipal: 0, totalInterest: 0, totalInstallment: 0, totalCashInstallment: 0, prepaidInterest: 0, remainingInterest: 0 }
     );
   }, [amortizationSchedule]);
+
+  const advanceInterestAmount = scheduleTotals.prepaidInterest;
+  const totalInterest = scheduleTotals.totalInterest;
+
+  const totalOptionalFees = optionalFees.reduce((acc, fee) => acc + calculateFeeAmount(fee), 0);
+  const platformFee = Math.round(calcAmount * 0.01 * 100) / 100;
+  const coopServiceFee = Math.round(calcAmount * 0.015 * 100) / 100;
+  const totalDeductions = Math.round((platformFee + coopServiceFee + totalOptionalFees + advanceInterestAmount) * 100) / 100;
+  const netDisbursed = Math.max(0, Math.round((calcAmount - totalDeductions) * 100) / 100);
+
+  // Monthly Amortization Calculation for reference
+  const monthlyRate = (calcRate / 100) / 12.0;
+  let monthlyInstallment = 0;
+  if (calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+    const factor = Math.pow(1.0 + monthlyRate, calcTerm);
+    monthlyInstallment = factor > 1
+      ? Math.round(((calcAmount * (monthlyRate * factor)) / (factor - 1.0)) * 100) / 100
+      : Math.round((calcAmount / calcTerm) * 100) / 100;
+  } else {
+    monthlyInstallment = Math.round(((calcAmount + totalInterest) / calcTerm) * 100) / 100;
+  }
 
   const maturityDate = amortizationSchedule.length > 0
     ? formatScheduleDate(amortizationSchedule[amortizationSchedule.length - 1].dueDate)
@@ -4533,6 +4555,74 @@ export default function AdminDashboard() {
                   </select>
                 </div>
 
+                {/* Advance Interest Deduction Option */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Coins className="w-4 h-4 text-emerald-600" />
+                      <span>Advance Interest Deduction</span>
+                    </label>
+                    {calcAdvanceInterest !== 'NONE' && (
+                      <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        Deducted at Disbursement
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Optionally deduct interest upfront from loan disbursement proceeds.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setCalcAdvanceInterest('NONE')}
+                      className={`p-2.5 rounded-lg border text-left transition ${
+                        calcAdvanceInterest === 'NONE'
+                          ? 'border-emerald-500 bg-emerald-50/80 text-emerald-950 ring-1 ring-emerald-500 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-bold text-xs">No Advance Interest</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">Amortized monthly across term</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCalcAdvanceInterest('FIRST_YEAR')}
+                      className={`p-2.5 rounded-lg border text-left transition ${
+                        calcAdvanceInterest === 'FIRST_YEAR'
+                          ? 'border-emerald-500 bg-emerald-50/80 text-emerald-950 ring-1 ring-emerald-500 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-bold text-xs flex items-center justify-between">
+                        <span>First Year Interest</span>
+                        {calcTerm <= 12 && (
+                          <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-normal">Full Term</span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        {calcTerm <= 12 ? `Deduct all ${calcTerm} mos upfront` : 'Deduct first 12 mos upfront'}
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCalcAdvanceInterest('ENTIRE_LOAN')}
+                      className={`p-2.5 rounded-lg border text-left transition ${
+                        calcAdvanceInterest === 'ENTIRE_LOAN'
+                          ? 'border-emerald-500 bg-emerald-50/80 text-emerald-950 ring-1 ring-emerald-500 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-bold text-xs">Entire Loan Interest</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        Deduct 100% of interest upfront ({calcTerm} mos)
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Optional Fees Section (Up to 5 Optional Fees) */}
                 <div className="pt-4 border-t border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
@@ -4704,14 +4794,34 @@ export default function AdminDashboard() {
                       );
                     })}
 
-                    {optionalFees.length > 0 && (
-                      <div className="flex justify-between text-slate-700 text-xs pt-1.5 border-t border-slate-200 font-medium">
-                        <span>Total Fees & Deductions:</span>
-                        <span className="font-bold text-rose-600">
-                          - ₱{totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    {/* Advance Interest Deduction Item */}
+                    {calcAdvanceInterest !== 'NONE' && (
+                      <div className="flex justify-between items-center text-rose-700 bg-rose-50/80 p-2.5 rounded-lg border border-rose-200 text-xs">
+                        <div>
+                          <span className="font-bold flex items-center gap-1">
+                            <Coins className="w-3.5 h-3.5 text-rose-600" />
+                            Advance Interest Deduction (
+                            {calcAdvanceInterest === 'FIRST_YEAR'
+                              ? (calcTerm <= 12 ? `All ${calcTerm} Mos` : 'First 12 Mos')
+                              : `Entire ${calcTerm} Mos`}
+                            ):
+                          </span>
+                          <span className="text-[10px] text-rose-600/90 block">
+                            Withheld upfront from loan disbursement proceeds
+                          </span>
+                        </div>
+                        <span className="font-mono font-bold text-sm">
+                          - ₱{advanceInterestAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     )}
+
+                    <div className="flex justify-between text-slate-700 text-xs pt-1.5 border-t border-slate-200 font-medium">
+                      <span>Total Deductions at Disbursement:</span>
+                      <span className="font-bold text-rose-600">
+                        - ₱{totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="p-4 bg-emerald-100/70 border border-emerald-300 rounded-xl">
@@ -4725,6 +4835,13 @@ export default function AdminDashboard() {
                       Direct payout via Platform Escrow or Cash Counter
                     </div>
                   </div>
+
+                  {netDisbursed <= 0 && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-lg text-rose-800 text-[11px] flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                      <span>Warning: Total upfront deductions equal or exceed gross loan amount. Adjust amount or fees.</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Monthly Amortization Schedule Card */}
@@ -4733,27 +4850,86 @@ export default function AdminDashboard() {
                     <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
                       Amortization Schedule Preview
                     </span>
-                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
-                      {calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
-                        ? 'Equal Installment / Annuity'
-                        : 'Straight-Line'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {calcAdvanceInterest !== 'NONE' && (
+                        <span className="text-[10px] bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold">
+                          Advance Interest Active
+                        </span>
+                      )}
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                        {calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
+                          ? 'Equal Installment / Annuity'
+                          : 'Straight-Line'}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    <div className="flex justify-between items-baseline">
-                      <span className="text-slate-600">Monthly Installment:</span>
-                      <span className="font-mono font-bold text-slate-900 text-base text-emerald-700">
-                        ₱{monthlyInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
-                      </span>
-                    </div>
+                    {calcAdvanceInterest === 'NONE' ? (
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-slate-600">Monthly Installment:</span>
+                        <span className="font-mono font-bold text-slate-900 text-base text-emerald-700">
+                          ₱{monthlyInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                        </span>
+                      </div>
+                    ) : calcAdvanceInterest === 'ENTIRE_LOAN' || calcTerm <= 12 ? (
+                      <div className="space-y-0.5">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-slate-600">Monthly Cash Installment:</span>
+                          <span className="font-mono font-bold text-slate-900 text-base text-emerald-700">
+                            ₱{(scheduleTotals.totalCashInstallment / calcTerm).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-emerald-700 font-medium text-right">
+                          Principal Only (100% Interest Prepaid at Disbursement)
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-slate-600">Months 1–12 (Year 1):</span>
+                          <span className="font-mono font-bold text-emerald-700 text-sm">
+                            ₱{(amortizationSchedule[0]?.cashInstallmentDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-emerald-600 pl-2">
+                          ↳ Principal Only (Interest prepaid upfront)
+                        </div>
+                        <div className="flex justify-between items-baseline pt-1">
+                          <span className="text-slate-600">Months 13–{calcTerm}:</span>
+                          <span className="font-mono font-bold text-slate-800 text-sm">
+                            ₱{(amortizationSchedule[12]?.cashInstallmentDue || monthlyInstallment).toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 pl-2">
+                          ↳ Regular Installment (Principal + Monthly Interest)
+                        </div>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">Total Interest Payable:</span>
+                    <div className="flex justify-between pt-1">
+                      <span className="text-slate-600">Total Interest Accrued:</span>
                       <span className="font-mono font-semibold text-slate-800">
                         ₱{totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
+
+                    {calcAdvanceInterest !== 'NONE' && (
+                      <div className="bg-slate-50 p-2 rounded-lg space-y-1 text-[11px] border border-slate-100">
+                        <div className="flex justify-between text-rose-700">
+                          <span>• Deducted Upfront at Disbursement:</span>
+                          <span className="font-mono font-bold">
+                            ₱{advanceInterestAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-slate-600">
+                          <span>• Remaining Collected Monthly:</span>
+                          <span className="font-mono font-bold">
+                            ₱{scheduleTotals.remainingInterest.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex justify-between pt-2 border-t border-slate-100 font-semibold text-slate-800">
                       <span>Total Repayment ({calcTerm} Months):</span>
@@ -4818,15 +4994,19 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Total Interest</div>
-                  <div className="font-mono font-bold text-amber-800 text-sm mt-0.5">
-                    ₱{scheduleTotals.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                    {calcAdvanceInterest !== 'NONE' ? 'Advance Interest (Disbursed)' : 'Total Interest'}
+                  </div>
+                  <div className={`font-mono font-bold text-sm mt-0.5 ${calcAdvanceInterest !== 'NONE' ? 'text-rose-700' : 'text-amber-800'}`}>
+                    ₱{(calcAdvanceInterest !== 'NONE' ? advanceInterestAmount : scheduleTotals.totalInterest).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Total Repayment</div>
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                    {calcAdvanceInterest !== 'NONE' ? 'Monthly Cash Collections' : 'Total Repayment'}
+                  </div>
                   <div className="font-mono font-bold text-emerald-800 text-sm mt-0.5">
-                    ₱{scheduleTotals.totalInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    ₱{(calcAdvanceInterest !== 'NONE' ? scheduleTotals.totalCashInstallment : scheduleTotals.totalInstallment).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                   </div>
                 </div>
                 <div>
@@ -4881,11 +5061,33 @@ export default function AdminDashboard() {
                             <td className="p-3 text-right text-emerald-800 font-semibold">
                               ₱{row.principalPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            <td className="p-3 text-right text-amber-700">
-                              ₱{row.interestPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <td className="p-3 text-right">
+                              {row.isPrepaid ? (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-slate-400 line-through text-[11px]">
+                                    ₱{row.interestPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                  <span className="inline-flex items-center text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 mt-0.5">
+                                    Prepaid Upfront
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-amber-700">
+                                  ₱{row.interestPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              )}
                             </td>
                             <td className="p-3 text-right font-bold text-slate-900">
-                              ₱{row.totalInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <div className="flex flex-col items-end">
+                                <span>
+                                  ₱{row.cashInstallmentDue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                {row.isPrepaid && (
+                                  <span className="text-[10px] text-emerald-700 font-medium">
+                                    Principal Only
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="p-3 text-right font-bold text-slate-900">
                               ₱{row.endingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -4906,10 +5108,24 @@ export default function AdminDashboard() {
                           ₱{scheduleTotals.totalPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 text-right text-amber-800">
-                          ₱{scheduleTotals.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <div className="flex flex-col items-end">
+                            <span>₱{scheduleTotals.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            {calcAdvanceInterest !== 'NONE' && (
+                              <span className="text-[10px] text-rose-600 font-normal">
+                                (₱{advanceInterestAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} Prepaid)
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-3 text-right text-slate-950 text-sm">
-                          ₱{scheduleTotals.totalInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <div className="flex flex-col items-end">
+                            <span>₱{scheduleTotals.totalCashInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            {calcAdvanceInterest !== 'NONE' && (
+                              <span className="text-[10px] text-emerald-700 font-normal">
+                                Cash Collections
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-3 text-right text-emerald-700 font-sans text-[11px]">
                           ₱0.00 at Maturity
