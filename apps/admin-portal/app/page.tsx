@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Building2,
   Users,
   CreditCard,
   Calculator,
+  Calendar,
   QrCode,
   BookOpen,
   FileText,
@@ -1780,6 +1781,148 @@ export default function AdminDashboard() {
     totalInterest = Math.round((calcAmount * (calcRate / 100) * (calcTerm / 12.0)) * 100) / 100;
     monthlyInstallment = Math.round(((calcAmount + totalInterest) / calcTerm) * 100) / 100;
   }
+
+  // Detailed Amortization Schedule State & Logic
+  const [calcStartDate, setCalcStartDate] = useState<string>('2026-10-20');
+
+  const getDueDate = (startDateStr: string, monthOffset: number) => {
+    try {
+      const parts = startDateStr.split('-').map(Number);
+      if (parts.length === 3) {
+        const [year, month, day] = parts;
+        const targetDate = new Date(year, month - 1 + monthOffset, day);
+        return targetDate.toISOString().split('T')[0];
+      }
+    } catch {
+      // fallback
+    }
+    return `Month +${monthOffset}`;
+  };
+
+  const formatScheduleDate = (dateStr: string) => {
+    try {
+      const parts = dateStr.split('-').map(Number);
+      if (parts.length === 3) {
+        const [year, month, day] = parts;
+        const d = new Date(year, month - 1, day);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch {
+      // fallback
+    }
+    return dateStr;
+  };
+
+  const amortizationSchedule = useMemo(() => {
+    const rows: Array<{
+      period: number;
+      dueDate: string;
+      beginningBalance: number;
+      principalPayment: number;
+      interestPayment: number;
+      totalInstallment: number;
+      endingBalance: number;
+    }> = [];
+
+    const safeAmount = Math.max(1000, Number(calcAmount) || 0);
+    const safeTerm = Math.max(1, Math.min(120, Math.round(Number(calcTerm) || 12)));
+    const safeRate = Math.max(0, Number(calcRate) || 0);
+    const mRate = (safeRate / 100) / 12.0;
+
+    let remainingPrincipal = safeAmount;
+
+    if (calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+      const factor = Math.pow(1.0 + mRate, safeTerm);
+      const targetMonthlyPmt = factor > 1
+        ? Math.round(((safeAmount * (mRate * factor)) / (factor - 1.0)) * 100) / 100
+        : Math.round((safeAmount / safeTerm) * 100) / 100;
+
+      for (let i = 1; i <= safeTerm; i++) {
+        const begBal = remainingPrincipal;
+        const interest = Math.round(begBal * mRate * 100) / 100;
+
+        let principal = 0;
+        let installment = 0;
+        let endBal = 0;
+
+        if (i === safeTerm) {
+          principal = begBal;
+          installment = Math.round((principal + interest) * 100) / 100;
+          endBal = 0;
+        } else {
+          principal = Math.round((targetMonthlyPmt - interest) * 100) / 100;
+          if (principal > begBal) {
+            principal = begBal;
+          }
+          endBal = Math.max(0, Math.round((begBal - principal) * 100) / 100);
+          installment = Math.round((principal + interest) * 100) / 100;
+        }
+
+        remainingPrincipal = endBal;
+
+        rows.push({
+          period: i,
+          dueDate: getDueDate(calcStartDate, i),
+          beginningBalance: begBal,
+          principalPayment: principal,
+          interestPayment: interest,
+          totalInstallment: installment,
+          endingBalance: endBal,
+        });
+      }
+    } else {
+      // Straight-Line Method
+      const totInterest = Math.round((safeAmount * (safeRate / 100) * (safeTerm / 12.0)) * 100) / 100;
+      const monthlyInt = Math.round((totInterest / safeTerm) * 100) / 100;
+      const baseMonthlyPrincipal = Math.round((safeAmount / safeTerm) * 100) / 100;
+
+      for (let i = 1; i <= safeTerm; i++) {
+        const begBal = remainingPrincipal;
+        let principal = baseMonthlyPrincipal;
+        let interest = monthlyInt;
+        let endBal = 0;
+
+        if (i === safeTerm) {
+          principal = begBal;
+          const priorInterestTotal = rows.reduce((acc, r) => acc + r.interestPayment, 0);
+          interest = Math.max(0, Math.round((totInterest - priorInterestTotal) * 100) / 100);
+          endBal = 0;
+        } else {
+          endBal = Math.max(0, Math.round((begBal - principal) * 100) / 100);
+        }
+
+        const installment = Math.round((principal + interest) * 100) / 100;
+        remainingPrincipal = endBal;
+
+        rows.push({
+          period: i,
+          dueDate: getDueDate(calcStartDate, i),
+          beginningBalance: begBal,
+          principalPayment: principal,
+          interestPayment: interest,
+          totalInstallment: installment,
+          endingBalance: endBal,
+        });
+      }
+    }
+
+    return rows;
+  }, [calcAmount, calcTerm, calcRate, calcMethod, calcStartDate]);
+
+  const scheduleTotals = useMemo(() => {
+    return amortizationSchedule.reduce(
+      (acc, r) => ({
+        totalPrincipal: Math.round((acc.totalPrincipal + r.principalPayment) * 100) / 100,
+        totalInterest: Math.round((acc.totalInterest + r.interestPayment) * 100) / 100,
+        totalInstallment: Math.round((acc.totalInstallment + r.totalInstallment) * 100) / 100,
+      }),
+      { totalPrincipal: 0, totalInterest: 0, totalInstallment: 0 }
+    );
+  }, [amortizationSchedule]);
+
+  const maturityDate = amortizationSchedule.length > 0
+    ? formatScheduleDate(amortizationSchedule[amortizationSchedule.length - 1].dueDate)
+    : '';
 
   // Cashier Multi-Transaction State
   const [cashierTxCategory, setCashierTxCategory] = useState<'LOAN_REPAYMENT' | 'SHARE_PURCHASE' | 'SAVINGS_DEPOSIT'>('SHARE_PURCHASE');
@@ -4619,6 +4762,161 @@ export default function AdminDashboard() {
                       </span>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed Month-by-Month Amortization Schedule Table */}
+            <div className="pt-6 border-t border-slate-200 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-emerald-600" />
+                      <span>Detailed Amortization Schedule</span>
+                    </h3>
+                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      {calcTerm} Monthly Installments
+                    </span>
+                    <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      Maturity: {maturityDate}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Month-by-month principal balance reduction, interest per month, and total installments until maturity date.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 shadow-2xs">
+                    <span className="font-semibold text-slate-500">First Due Date:</span>
+                    <input
+                      type="date"
+                      value={calcStartDate}
+                      onChange={(e) => setCalcStartDate(e.target.value)}
+                      className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-700 outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-lg border border-slate-200 transition"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Schedule</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Schedule Summary Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Gross Principal</div>
+                  <div className="font-mono font-bold text-slate-900 text-sm mt-0.5">
+                    ₱{calcAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Total Interest</div>
+                  <div className="font-mono font-bold text-amber-800 text-sm mt-0.5">
+                    ₱{scheduleTotals.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Total Repayment</div>
+                  <div className="font-mono font-bold text-emerald-800 text-sm mt-0.5">
+                    ₱{scheduleTotals.totalInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Maturity Date</div>
+                  <div className="font-semibold text-indigo-900 text-sm mt-0.5">
+                    {maturityDate}
+                  </div>
+                </div>
+              </div>
+
+              {/* Schedule Table Container */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900 text-white font-bold sticky top-0 z-10">
+                      <tr>
+                        <th className="p-3 text-center w-12">#</th>
+                        <th className="p-3">Payment Due Date</th>
+                        <th className="p-3 text-right">Beginning Principal</th>
+                        <th className="p-3 text-right">Principal Repayment</th>
+                        <th className="p-3 text-right">Interest per Month</th>
+                        <th className="p-3 text-right">Monthly Installment</th>
+                        <th className="p-3 text-right">Ending Principal Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                      {amortizationSchedule.map((row) => {
+                        const isMaturity = row.period === calcTerm;
+                        return (
+                          <tr
+                            key={row.period}
+                            className={`hover:bg-slate-50 transition ${
+                              isMaturity ? 'bg-emerald-50/60 font-semibold' : ''
+                            }`}
+                          >
+                            <td className="p-3 text-center text-slate-500 font-sans">
+                              {row.period}
+                            </td>
+                            <td className="p-3 font-sans whitespace-nowrap">
+                              <span className="font-semibold text-slate-900">
+                                {formatScheduleDate(row.dueDate)}
+                              </span>
+                              {isMaturity && (
+                                <span className="ml-2 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase font-sans">
+                                  Maturity
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right text-slate-600">
+                              ₱{row.beginningBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-right text-emerald-800 font-semibold">
+                              ₱{row.principalPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-right text-amber-700">
+                              ₱{row.interestPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-right font-bold text-slate-900">
+                              ₱{row.totalInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-right font-bold text-slate-900">
+                              ₱{row.endingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300 font-mono text-xs sticky bottom-0 z-10 shadow-inner">
+                      <tr>
+                        <td colSpan={2} className="p-3 font-sans text-slate-800 uppercase tracking-wider text-[11px]">
+                          Total Amortization Breakdown
+                        </td>
+                        <td className="p-3 text-right font-sans text-slate-500 text-[11px]">
+                          Principal: ₱{calcAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right text-emerald-800">
+                          ₱{scheduleTotals.totalPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right text-amber-800">
+                          ₱{scheduleTotals.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right text-slate-950 text-sm">
+                          ₱{scheduleTotals.totalInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right text-emerald-700 font-sans text-[11px]">
+                          ₱0.00 at Maturity
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
               </div>
             </div>
