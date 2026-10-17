@@ -1721,14 +1721,65 @@ export default function AdminDashboard() {
   const [calcRate, setCalcRate] = useState<number>(12);
   const [calcTerm, setCalcTerm] = useState<number>(12);
   const [calcMethod, setCalcMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
-  const [calcBillingMode, setCalcBillingMode] = useState<string>('STANDARD_UNIFIED');
 
-  // Single Unified Platform Billing Model: Flat 1.0% technology fee for approved loans
+  // Optional Fees (Up to 5)
+  const [optionalFees, setOptionalFees] = useState<Array<{
+    id: string;
+    name: string;
+    type: 'FIXED' | 'PERCENTAGE';
+    value: number;
+  }>>([
+    { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+    { id: 'opt_fee_2', name: 'Insurance Premium', type: 'FIXED', value: 500 },
+  ]);
+
+  const handleAddOptionalFee = () => {
+    if (optionalFees.length >= 5) return;
+    const newId = `opt_fee_${Date.now()}`;
+    setOptionalFees((prev) => [
+      ...prev,
+      { id: newId, name: `Optional Fee #${prev.length + 1}`, type: 'FIXED', value: 200 },
+    ]);
+  };
+
+  const handleUpdateOptionalFee = (
+    id: string,
+    updates: Partial<{ name: string; type: 'FIXED' | 'PERCENTAGE'; value: number }>
+  ) => {
+    setOptionalFees((prev) => prev.map((fee) => (fee.id === id ? { ...fee, ...updates } : fee)));
+  };
+
+  const handleRemoveOptionalFee = (id: string) => {
+    setOptionalFees((prev) => prev.filter((fee) => fee.id !== id));
+  };
+
+  const calculateFeeAmount = (fee: { type: 'FIXED' | 'PERCENTAGE'; value: number }) => {
+    if (fee.type === 'PERCENTAGE') {
+      return Math.round(calcAmount * ((Number(fee.value) || 0) / 100) * 100) / 100;
+    }
+    return Math.max(0, Math.round((Number(fee.value) || 0) * 100) / 100);
+  };
+
+  const totalOptionalFees = optionalFees.reduce((acc, fee) => acc + calculateFeeAmount(fee), 0);
   const platformFee = Math.round(calcAmount * 0.01 * 100) / 100;
-  const netPlatformRevenue = Math.round((platformFee / 1.12) * 100) / 100;
-  const vatAmount = Math.round((platformFee - netPlatformRevenue) * 100) / 100;
   const coopServiceFee = Math.round(calcAmount * 0.015 * 100) / 100;
-  const netDisbursed = calcAmount - platformFee - coopServiceFee;
+  const totalDeductions = platformFee + coopServiceFee + totalOptionalFees;
+  const netDisbursed = Math.max(0, Math.round((calcAmount - totalDeductions) * 100) / 100);
+
+  // Monthly Amortization Calculation
+  const monthlyRate = (calcRate / 100) / 12.0;
+  let monthlyInstallment = 0;
+  let totalInterest = 0;
+  if (calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+    const factor = Math.pow(1.0 + monthlyRate, calcTerm);
+    monthlyInstallment = factor > 1
+      ? Math.round(((calcAmount * (monthlyRate * factor)) / (factor - 1.0)) * 100) / 100
+      : Math.round((calcAmount / calcTerm) * 100) / 100;
+    totalInterest = Math.round(((monthlyInstallment * calcTerm) - calcAmount) * 100) / 100;
+  } else {
+    totalInterest = Math.round((calcAmount * (calcRate / 100) * (calcTerm / 12.0)) * 100) / 100;
+    monthlyInstallment = Math.round(((calcAmount + totalInterest) / calcTerm) * 100) / 100;
+  }
 
   // Cashier Multi-Transaction State
   const [cashierTxCategory, setCashierTxCategory] = useState<'LOAN_REPAYMENT' | 'SHARE_PURCHASE' | 'SAVINGS_DEPOSIT'>('SHARE_PURCHASE');
@@ -4287,13 +4338,15 @@ export default function AdminDashboard() {
         {activeTab === 'calculator' && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Loan Calculator & Pass-Through Monetization Simulator</h2>
-              <p className="text-xs text-slate-500">Simulate upfront platform deductions, coop service fees, net member proceeds, and monthly amortization.</p>
+              <h2 className="text-lg font-bold text-slate-900">Loan Calculator</h2>
+              <p className="text-xs text-slate-500">
+                Simulate upfront platform deductions, coop service fees, optional fees, net member proceeds, and monthly amortization.
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Inputs */}
-              <div className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Inputs & Optional Fees (Left Column) */}
+              <div className="lg:col-span-7 space-y-5">
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Gross Loan Amount (₱)</label>
                   <input
@@ -4326,14 +4379,6 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Platform Billing Model</label>
-                  <div className="w-full border border-indigo-200 bg-indigo-50/60 rounded-lg px-3 py-2 text-xs font-semibold text-indigo-950 flex items-center justify-between">
-                    <span>Unified SaaS Plan: 1.0% Technology Fee</span>
-                    <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">Standard Tier</span>
-                  </div>
-                </div>
-
-                <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Amortization Method</label>
                   <select
                     value={calcMethod}
@@ -4344,47 +4389,235 @@ export default function AdminDashboard() {
                     <option value="STRAIGHT_LINE">Straight-Line Method</option>
                   </select>
                 </div>
+
+                {/* Optional Fees Section (Up to 5 Optional Fees) */}
+                <div className="pt-4 border-t border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                          Optional Fees
+                        </label>
+                        <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-slate-200">
+                          {optionalFees.length} of 5 added
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Add up to 5 optional fees (fixed amount or percentage of gross loan).
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={optionalFees.length >= 5}
+                      onClick={handleAddOptionalFee}
+                      className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition ${
+                        optionalFees.length >= 5
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-xs'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{optionalFees.length >= 5 ? 'Max Reached' : 'Add Fee'}</span>
+                    </button>
+                  </div>
+
+                  {optionalFees.length === 0 ? (
+                    <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-center text-xs text-slate-500 space-y-1">
+                      <p className="font-medium text-slate-600">No optional fees added</p>
+                      <p className="text-[11px] text-slate-400">Click &quot;Add Fee&quot; above to include insurance, DST, notarial, or other pass-through deductions.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {optionalFees.map((fee, idx) => {
+                        const feeAmt = calculateFeeAmount(fee);
+                        return (
+                          <div
+                            key={fee.id}
+                            className="p-3 bg-slate-50/80 border border-slate-200 rounded-xl space-y-2.5 text-xs"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-700 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-[10px]">
+                                  {idx + 1}
+                                </span>
+                                Optional Fee #{idx + 1}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-indigo-700 text-xs bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                                  ₱{feeAmt.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveOptionalFee(fee.id)}
+                                  title="Delete this fee"
+                                  className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                              <div className="sm:col-span-6">
+                                <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-0.5">
+                                  Fee Description
+                                </label>
+                                <input
+                                  type="text"
+                                  value={fee.name}
+                                  placeholder="e.g. Notarial Fee, DST, Insurance"
+                                  onChange={(e) => handleUpdateOptionalFee(fee.id, { name: e.target.value })}
+                                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-1 focus:ring-emerald-500 outline-none"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-3">
+                                <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-0.5">
+                                  Calculation Type
+                                </label>
+                                <select
+                                  value={fee.type}
+                                  onChange={(e) =>
+                                    handleUpdateOptionalFee(fee.id, {
+                                      type: e.target.value as 'FIXED' | 'PERCENTAGE',
+                                    })
+                                  }
+                                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-1 focus:ring-emerald-500 outline-none font-medium"
+                                >
+                                  <option value="FIXED">Fixed (₱)</option>
+                                  <option value="PERCENTAGE">Percent (%)</option>
+                                </select>
+                              </div>
+
+                              <div className="sm:col-span-3">
+                                <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-0.5">
+                                  {fee.type === 'PERCENTAGE' ? 'Rate (%)' : 'Amount (₱)'}
+                                </label>
+                                <input
+                                  type="number"
+                                  step={fee.type === 'PERCENTAGE' ? '0.01' : '1'}
+                                  min="0"
+                                  value={fee.value}
+                                  placeholder={fee.type === 'PERCENTAGE' ? '1.0' : '500'}
+                                  onChange={(e) =>
+                                    handleUpdateOptionalFee(fee.id, {
+                                      value: Math.max(0, Number(e.target.value)),
+                                    })
+                                  }
+                                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-1 focus:ring-emerald-500 outline-none font-mono"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Output Summary */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 space-y-4">
-                <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider text-slate-600">Disbursement & Fee Breakdown</h3>
+              {/* Output Summary (Right Column) */}
+              <div className="lg:col-span-5 space-y-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 sm:p-6 space-y-4 shadow-xs">
+                  <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider text-slate-500">
+                    Disbursement & Fee Breakdown
+                  </h3>
 
-                <div className="space-y-2 text-sm border-b border-slate-200 pb-4">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Gross Loan Principal:</span>
-                    <span className="font-semibold text-slate-900">₱{calcAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                  <div className="space-y-2.5 text-sm border-b border-slate-200 pb-4">
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Gross Loan Principal:</span>
+                      <span className="font-semibold text-slate-900">
+                        ₱{calcAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-indigo-700">
+                      <span>1% Technology Fee:</span>
+                      <span className="font-semibold">
+                        - ₱{platformFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-600">
+                      <span>Coop Internal Service Fee (1.5%):</span>
+                      <span className="font-semibold">
+                        - ₱{coopServiceFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    {/* Optional Fees Listing */}
+                    {optionalFees.map((fee) => {
+                      const feeAmt = calculateFeeAmount(fee);
+                      return (
+                        <div key={fee.id} className="flex justify-between text-amber-800 text-xs pl-2">
+                          <span>
+                            ↳ {fee.name || 'Optional Fee'} ({fee.type === 'PERCENTAGE' ? `${fee.value}%` : 'Fixed'}):
+                          </span>
+                          <span className="font-semibold">
+                            - ₱{feeAmt.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      );
+                    })}
+
+                    {optionalFees.length > 0 && (
+                      <div className="flex justify-between text-slate-700 text-xs pt-1.5 border-t border-slate-200 font-medium">
+                        <span>Total Fees & Deductions:</span>
+                        <span className="font-bold text-rose-600">
+                          - ₱{totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex justify-between text-indigo-700">
-                    <span>
-                      Loan Technology Fee (1.0% Unified Rate):
-                    </span>
-                    <span className="font-semibold">- ₱{platformFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                  </div>
-
-                  <div className="flex justify-between text-slate-500 text-xs pl-4">
-                    <span>↳ 12% Output VAT Decomposed:</span>
-                    <span>₱{vatAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-500 text-xs pl-4">
-                    <span>↳ Net Platform Revenue:</span>
-                    <span>₱{netPlatformRevenue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                  </div>
-
-                  <div className="flex justify-between text-slate-600">
-                    <span>Coop Internal Service Fee (1.5%):</span>
-                    <span className="font-semibold">- ₱{coopServiceFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                  <div className="p-4 bg-emerald-100/70 border border-emerald-300 rounded-xl">
+                    <div className="text-xs uppercase font-bold text-emerald-900">
+                      Net Proceeds Disbursed to Member:
+                    </div>
+                    <div className="text-2xl font-extrabold text-emerald-950 mt-1">
+                      ₱{netDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-emerald-800 mt-1">
+                      Direct payout via Platform Escrow or Cash Counter
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-4 bg-emerald-100/70 border border-emerald-300 rounded-lg">
-                  <div className="text-xs uppercase font-bold text-emerald-900">Net Proceeds Disbursed to Member:</div>
-                  <div className="text-2xl font-extrabold text-emerald-950 mt-1">
-                    ₱{netDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                {/* Monthly Amortization Schedule Card */}
+                <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 text-xs shadow-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
+                      Amortization Schedule Preview
+                    </span>
+                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                      {calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
+                        ? 'Equal Installment / Annuity'
+                        : 'Straight-Line'}
+                    </span>
                   </div>
-                  <div className="text-xs text-emerald-800 mt-1">
-                    Direct payout via Platform Escrow or Cash Counter
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-slate-600">Monthly Installment:</span>
+                      <span className="font-mono font-bold text-slate-900 text-base text-emerald-700">
+                        ₱{monthlyInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Total Interest Payable:</span>
+                      <span className="font-mono font-semibold text-slate-800">
+                        ₱{totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between pt-2 border-t border-slate-100 font-semibold text-slate-800">
+                      <span>Total Repayment ({calcTerm} Months):</span>
+                      <span className="font-mono text-slate-950 font-bold">
+                        ₱{(calcAmount + totalInterest).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
