@@ -1724,6 +1724,8 @@ export default function AdminDashboard() {
   const [calcTerm, setCalcTerm] = useState<number>(12);
   const [calcMethod, setCalcMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
   const [calcAdvanceInterest, setCalcAdvanceInterest] = useState<'NONE' | 'FIRST_YEAR' | 'ENTIRE_LOAN'>('NONE');
+  const [calcSucceedingMethod, setCalcSucceedingMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
+  const [calcFixedInstallment, setCalcFixedInstallment] = useState<boolean>(true);
 
   // Optional Fees (Up to 5)
   const [optionalFees, setOptionalFees] = useState<Array<{
@@ -1815,9 +1817,203 @@ export default function AdminDashboard() {
 
     let remainingPrincipal = safeAmount;
 
-    if (calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+    // Special Case: Advance Interest First Year with Term > 12 Months
+    if (calcAdvanceInterest === 'FIRST_YEAR' && safeTerm > 12) {
+      const remMonths = safeTerm - 12;
+
+      if (calcFixedInstallment) {
+        // Equal Fixed Monthly Cash Installment throughout all safeTerm periods
+        if (calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+          const factor = Math.pow(1.0 + mRate, remMonths);
+          const A = (factor > 1 && mRate > 0) ? (mRate * factor) / (factor - 1.0) : 1 / remMonths;
+          const pmtFixed = Math.round((safeAmount / (12 + (1 / A))) * 100) / 100;
+
+          for (let i = 1; i <= safeTerm; i++) {
+            const begBal = remainingPrincipal;
+            if (i <= 12) {
+              const interest = calcMethod === 'STRAIGHT_LINE'
+                ? Math.round(((safeAmount * (safeRate / 100)) / 12) * 100) / 100
+                : Math.round(begBal * mRate * 100) / 100;
+              const principal = pmtFixed;
+              const endBal = Math.max(0, Math.round((begBal - principal) * 100) / 100);
+              remainingPrincipal = endBal;
+              rows.push({
+                period: i,
+                dueDate: getDueDate(calcStartDate, i),
+                beginningBalance: begBal,
+                principalPayment: principal,
+                interestPayment: interest,
+                totalInstallment: Math.round((principal + interest) * 100) / 100,
+                endingBalance: endBal,
+                isPrepaid: true,
+                cashInterestDue: 0,
+                cashInstallmentDue: principal,
+              });
+            } else {
+              const interest = Math.round(begBal * mRate * 100) / 100;
+              let principal = i === safeTerm ? begBal : Math.min(begBal, Math.round((pmtFixed - interest) * 100) / 100);
+              let endBal = i === safeTerm ? 0 : Math.max(0, Math.round((begBal - principal) * 100) / 100);
+              let cashInstallment = Math.round((principal + interest) * 100) / 100;
+              remainingPrincipal = endBal;
+              rows.push({
+                period: i,
+                dueDate: getDueDate(calcStartDate, i),
+                beginningBalance: begBal,
+                principalPayment: principal,
+                interestPayment: interest,
+                totalInstallment: cashInstallment,
+                endingBalance: endBal,
+                isPrepaid: false,
+                cashInterestDue: interest,
+                cashInstallmentDue: cashInstallment,
+              });
+            }
+          }
+        } else {
+          // Straight-Line Succeeding with Fixed Installment
+          const totSucceedingInterest = Math.round(safeAmount * (safeRate / 100) * (remMonths / 12) * 100) / 100;
+          const monthlyInt = Math.round((totSucceedingInterest / remMonths) * 100) / 100;
+          const pmtFixed = Math.round(((safeAmount + totSucceedingInterest) / safeTerm) * 100) / 100;
+          const y1MonthlyInt = Math.round(((safeAmount * (safeRate / 100)) / 12) * 100) / 100;
+
+          for (let i = 1; i <= safeTerm; i++) {
+            const begBal = remainingPrincipal;
+            if (i <= 12) {
+              const interest = calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
+                ? Math.round(begBal * mRate * 100) / 100
+                : y1MonthlyInt;
+              const principal = pmtFixed;
+              const endBal = Math.max(0, Math.round((begBal - principal) * 100) / 100);
+              remainingPrincipal = endBal;
+              rows.push({
+                period: i,
+                dueDate: getDueDate(calcStartDate, i),
+                beginningBalance: begBal,
+                principalPayment: principal,
+                interestPayment: interest,
+                totalInstallment: Math.round((principal + interest) * 100) / 100,
+                endingBalance: endBal,
+                isPrepaid: true,
+                cashInterestDue: 0,
+                cashInstallmentDue: principal,
+              });
+            } else {
+              let interest = monthlyInt;
+              let principal = 0;
+              let endBal = 0;
+              if (i === safeTerm) {
+                principal = begBal;
+                endBal = 0;
+                const priorSucceedingInt = rows.slice(12).reduce((acc, r) => acc + r.interestPayment, 0);
+                interest = Math.max(0, Math.round((totSucceedingInterest - priorSucceedingInt) * 100) / 100);
+              } else {
+                principal = Math.min(begBal, Math.round((pmtFixed - monthlyInt) * 100) / 100);
+                endBal = Math.max(0, Math.round((begBal - principal) * 100) / 100);
+              }
+              const cashInstallment = Math.round((principal + interest) * 100) / 100;
+              remainingPrincipal = endBal;
+              rows.push({
+                period: i,
+                dueDate: getDueDate(calcStartDate, i),
+                beginningBalance: begBal,
+                principalPayment: principal,
+                interestPayment: interest,
+                totalInstallment: cashInstallment,
+                endingBalance: endBal,
+                isPrepaid: false,
+                cashInterestDue: interest,
+                cashInstallmentDue: cashInstallment,
+              });
+            }
+          }
+        }
+      } else {
+        // Variable / Two-Phase Installment (Months 1-12 principal only, Months 13-N amortized under calcSucceedingMethod)
+        const baseMonthlyPrincipal = Math.round((safeAmount / safeTerm) * 100) / 100;
+        const balanceAtM12 = Math.max(0, Math.round((safeAmount - (12 * baseMonthlyPrincipal)) * 100) / 100);
+
+        let pmtSucceeding = 0;
+        if (calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+          const factor = Math.pow(1.0 + mRate, remMonths);
+          pmtSucceeding = (factor > 1 && mRate > 0)
+            ? Math.round(((balanceAtM12 * (mRate * factor)) / (factor - 1.0)) * 100) / 100
+            : Math.round((balanceAtM12 / remMonths) * 100) / 100;
+        }
+
+        const totSucceedingStraightInterest = Math.round(safeAmount * (safeRate / 100) * (remMonths / 12) * 100) / 100;
+        const straightLineMonthlyInt = Math.round((totSucceedingStraightInterest / remMonths) * 100) / 100;
+        const straightLineMonthlyPrinc = Math.round((balanceAtM12 / remMonths) * 100) / 100;
+        const y1StraightInt = Math.round(((safeAmount * (safeRate / 100)) / 12) * 100) / 100;
+
+        for (let i = 1; i <= safeTerm; i++) {
+          const begBal = remainingPrincipal;
+          if (i <= 12) {
+            const interest = calcMethod === 'STRAIGHT_LINE'
+              ? y1StraightInt
+              : Math.round(begBal * mRate * 100) / 100;
+            const principal = baseMonthlyPrincipal;
+            const endBal = Math.max(0, Math.round((begBal - principal) * 100) / 100);
+            remainingPrincipal = endBal;
+            rows.push({
+              period: i,
+              dueDate: getDueDate(calcStartDate, i),
+              beginningBalance: begBal,
+              principalPayment: principal,
+              interestPayment: interest,
+              totalInstallment: Math.round((principal + interest) * 100) / 100,
+              endingBalance: endBal,
+              isPrepaid: true,
+              cashInterestDue: 0,
+              cashInstallmentDue: principal,
+            });
+          } else {
+            if (calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
+              const interest = Math.round(begBal * mRate * 100) / 100;
+              let principal = i === safeTerm ? begBal : Math.min(begBal, Math.round((pmtSucceeding - interest) * 100) / 100);
+              let endBal = i === safeTerm ? 0 : Math.max(0, Math.round((begBal - principal) * 100) / 100);
+              let cashInstallment = Math.round((principal + interest) * 100) / 100;
+              remainingPrincipal = endBal;
+              rows.push({
+                period: i,
+                dueDate: getDueDate(calcStartDate, i),
+                beginningBalance: begBal,
+                principalPayment: principal,
+                interestPayment: interest,
+                totalInstallment: cashInstallment,
+                endingBalance: endBal,
+                isPrepaid: false,
+                cashInterestDue: interest,
+                cashInstallmentDue: cashInstallment,
+              });
+            } else {
+              let interest = straightLineMonthlyInt;
+              let principal = i === safeTerm ? begBal : straightLineMonthlyPrinc;
+              let endBal = i === safeTerm ? 0 : Math.max(0, Math.round((begBal - principal) * 100) / 100);
+              if (i === safeTerm) {
+                const priorSucceedingInt = rows.slice(12).reduce((acc, r) => acc + r.interestPayment, 0);
+                interest = Math.max(0, Math.round((totSucceedingStraightInterest - priorSucceedingInt) * 100) / 100);
+              }
+              let cashInstallment = Math.round((principal + interest) * 100) / 100;
+              remainingPrincipal = endBal;
+              rows.push({
+                period: i,
+                dueDate: getDueDate(calcStartDate, i),
+                beginningBalance: begBal,
+                principalPayment: principal,
+                interestPayment: interest,
+                totalInstallment: cashInstallment,
+                endingBalance: endBal,
+                isPrepaid: false,
+                cashInterestDue: interest,
+                cashInstallmentDue: cashInstallment,
+              });
+            }
+          }
+        }
+      }
+    } else if (calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
       const factor = Math.pow(1.0 + mRate, safeTerm);
-      const targetMonthlyPmt = factor > 1
+      const targetMonthlyPmt = (factor > 1 && mRate > 0)
         ? Math.round(((safeAmount * (mRate * factor)) / (factor - 1.0)) * 100) / 100
         : Math.round((safeAmount / safeTerm) * 100) / 100;
 
@@ -1905,7 +2101,7 @@ export default function AdminDashboard() {
     }
 
     return rows;
-  }, [calcAmount, calcTerm, calcRate, calcMethod, calcStartDate, calcAdvanceInterest]);
+  }, [calcAmount, calcTerm, calcRate, calcMethod, calcStartDate, calcAdvanceInterest, calcSucceedingMethod, calcFixedInstallment]);
 
   const scheduleTotals = useMemo(() => {
     return amortizationSchedule.reduce(
@@ -4623,6 +4819,78 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
+                {/* Succeeding Years Method & Fixed Monthly Installment Option */}
+                {calcAdvanceInterest === 'FIRST_YEAR' && calcTerm > 12 && (
+                  <div className="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Succeeding Years Method (Months 13–{calcTerm})</span>
+                      </label>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                        Year 2+ Rate Rule
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Select whether the remaining {calcTerm - 12} months follow diminishing balance or straight-line interest.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCalcSucceedingMethod('DIMINISHING_BALANCE_EQUAL_INSTALLMENT')}
+                        className={`p-2.5 rounded-lg border text-left text-xs transition ${
+                          calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
+                            ? 'border-emerald-500 bg-white text-emerald-950 ring-1 ring-emerald-500 font-semibold shadow-xs'
+                            : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-xs">Diminishing Balance (Annuity)</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">Interest on reducing principal balance</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCalcSucceedingMethod('STRAIGHT_LINE')}
+                        className={`p-2.5 rounded-lg border text-left text-xs transition ${
+                          calcSucceedingMethod === 'STRAIGHT_LINE'
+                            ? 'border-emerald-500 bg-white text-emerald-950 ring-1 ring-emerald-500 font-semibold shadow-xs'
+                            : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-xs">Straight-Line Method</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">Fixed periodic monthly interest</div>
+                      </button>
+                    </div>
+
+                    {/* Fixed Monthly Installment for Entire Loan Period */}
+                    <div className="pt-2 border-t border-emerald-200/60 flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        id="fixedInstallmentCheckbox"
+                        checked={calcFixedInstallment}
+                        onChange={(e) => setCalcFixedInstallment(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      />
+                      <label htmlFor="fixedInstallmentCheckbox" className="cursor-pointer select-none text-xs">
+                        <span className="font-bold text-slate-800 block">
+                          Fixed Monthly Installment for the Entire Loan Period
+                        </span>
+                        <span className="text-[11px] text-slate-500 block mt-0.5">
+                          Level payments across all {calcTerm} months so the member pays a constant installment throughout the entire term (avoids payment jump between Year 1 and succeeding years).
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {calcAdvanceInterest === 'FIRST_YEAR' && calcTerm <= 12 && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span>Loan term is {calcTerm} months. 1st year advance interest covers the full loan duration with fixed principal installments.</span>
+                  </div>
+                )}
+
                 {/* Optional Fees Section (Up to 5 Optional Fees) */}
                 <div className="pt-4 border-t border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
@@ -4850,16 +5118,23 @@ export default function AdminDashboard() {
                     <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
                       Amortization Schedule Preview
                     </span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {calcAdvanceInterest !== 'NONE' && (
                         <span className="text-[10px] bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold">
                           Advance Interest Active
                         </span>
                       )}
+                      {calcAdvanceInterest === 'FIRST_YEAR' && calcTerm > 12 && calcFixedInstallment && (
+                        <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded font-bold">
+                          Level Payment Active
+                        </span>
+                      )}
                       <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
-                        {calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
-                          ? 'Equal Installment / Annuity'
-                          : 'Straight-Line'}
+                        {calcAdvanceInterest === 'FIRST_YEAR' && calcTerm > 12
+                          ? `Y1: ${calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing' : 'Straight-Line'} | Y2+: ${calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing' : 'Straight-Line'}`
+                          : calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT'
+                            ? 'Equal Installment / Annuity'
+                            : 'Straight-Line'}
                       </span>
                     </div>
                   </div>
@@ -4884,6 +5159,23 @@ export default function AdminDashboard() {
                           Principal Only (100% Interest Prepaid at Disbursement)
                         </div>
                       </div>
+                    ) : calcFixedInstallment ? (
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-slate-600">Fixed Monthly Cash Installment:</span>
+                          <span className="font-mono font-bold text-emerald-700 text-base">
+                            ₱{(amortizationSchedule[0]?.cashInstallmentDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Fixed & Uniform Across All {calcTerm} Months (Level Payment)</span>
+                        </div>
+                        <div className="bg-slate-50 p-2 rounded-lg text-[11px] space-y-0.5 text-slate-600 border border-slate-100 mt-1">
+                          <div>• Months 1–12: ₱{(amortizationSchedule[0]?.cashInstallmentDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}/mo (Principal; ₱{advanceInterestAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} interest prepaid upfront)</div>
+                          <div>• Months 13–{calcTerm}: ₱{(amortizationSchedule[12]?.cashInstallmentDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}/mo (Principal + {calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing' : 'Straight-Line'} Interest)</div>
+                        </div>
+                      </div>
                     ) : (
                       <div className="space-y-1">
                         <div className="flex justify-between items-baseline">
@@ -4896,13 +5188,13 @@ export default function AdminDashboard() {
                           ↳ Principal Only (Interest prepaid upfront)
                         </div>
                         <div className="flex justify-between items-baseline pt-1">
-                          <span className="text-slate-600">Months 13–{calcTerm}:</span>
+                          <span className="text-slate-600">Months 13–{calcTerm} (Year 2+):</span>
                           <span className="font-mono font-bold text-slate-800 text-sm">
                             ₱{(amortizationSchedule[12]?.cashInstallmentDue || monthlyInstallment).toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
                           </span>
                         </div>
                         <div className="text-[10px] text-slate-500 pl-2">
-                          ↳ Regular Installment (Principal + Monthly Interest)
+                          ↳ Regular Installment (Principal + {calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing' : 'Straight-Line'} Interest)
                         </div>
                       </div>
                     )}
@@ -4954,6 +5246,16 @@ export default function AdminDashboard() {
                     <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
                       {calcTerm} Monthly Installments
                     </span>
+                    {calcAdvanceInterest === 'FIRST_YEAR' && calcTerm > 12 && (
+                      <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                        Y2+: {calcSucceedingMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
+                      </span>
+                    )}
+                    {calcAdvanceInterest === 'FIRST_YEAR' && calcTerm > 12 && calcFixedInstallment && (
+                      <span className="bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                        Fixed Installment (Level Payment)
+                      </span>
+                    )}
                     <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
                       Maturity: {maturityDate}
                     </span>
