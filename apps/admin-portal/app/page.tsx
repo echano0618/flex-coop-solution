@@ -440,7 +440,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_gm_01',
       name: 'Atty. Roberto Dela Rosa',
-      email: 'gm@bayanicoop.ph',
+      email: 'gm@coop.tuntongtech.com',
       role: 'GENERAL_MANAGER',
       status: 'ACTIVE',
       branch: 'Main Branch - Head Office',
@@ -453,7 +453,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_lo_01',
       name: 'Grace Villanueva',
-      email: 'grace.v@bayanicoop.ph',
+      email: 'grace.v@coop.tuntongtech.com',
       role: 'LOAN_OFFICER',
       status: 'ACTIVE',
       branch: 'Credit & Loans Dept',
@@ -466,7 +466,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_cashier_01',
       name: 'Leah Mendoza',
-      email: 'leah.mendoza@bayanicoop.ph',
+      email: 'leah.mendoza@coop.tuntongtech.com',
       role: 'CASHIER',
       status: 'ACTIVE',
       branch: 'Main Cashier Cage',
@@ -479,7 +479,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_acct_01',
       name: 'Felipe Santos, CPA',
-      email: 'accounting@bayanicoop.ph',
+      email: 'accounting@coop.tuntongtech.com',
       role: 'ACCOUNTANT',
       status: 'ACTIVE',
       branch: 'Finance & Treasury',
@@ -492,7 +492,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_crecom_01',
       name: 'Engr. Manuel Reyes',
-      email: 'crecom@bayanicoop.ph',
+      email: 'crecom@coop.tuntongtech.com',
       role: 'CREDIT_COMMITTEE',
       status: 'ACTIVE',
       branch: 'Credit Committee',
@@ -505,7 +505,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_dpo_01',
       name: 'Atty. Cristina Gomez',
-      email: 'compliance@bayanicoop.ph',
+      email: 'compliance@coop.tuntongtech.com',
       role: 'COMPLIANCE_OFFICER',
       status: 'ACTIVE',
       branch: 'Legal & Compliance Dept',
@@ -518,7 +518,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_bod_01',
       name: 'Dr. Corazon Aquino-Cruz',
-      email: 'bod.chair@bayanicoop.ph',
+      email: 'bod.chair@coop.tuntongtech.com',
       role: 'BOD',
       status: 'ACTIVE',
       branch: 'Board of Directors',
@@ -531,7 +531,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_locked_01',
       name: 'Engr. Derrick Tan',
-      email: 'derrick.tan@bayanicoop.ph',
+      email: 'derrick.tan@coop.tuntongtech.com',
       role: 'LOAN_OFFICER',
       status: 'LOCKED_OUT',
       branch: 'Credit & Loans Dept - West District',
@@ -546,7 +546,7 @@ export default function AdminDashboard() {
     {
       id: 'usr_pending_01',
       name: 'Maria Clarissa Dizon',
-      email: 'mclarissa@bayanicoop.ph',
+      email: 'mclarissa@coop.tuntongtech.com',
       role: 'LOAN_OFFICER',
       status: 'INVITED',
       branch: 'Bacolod Satellite Branch',
@@ -601,7 +601,7 @@ export default function AdminDashboard() {
       timestamp: '2026-03-02 16:40:05',
       actor: 'IAM_SECURITY_DAEMON',
       action: 'ACCOUNT_LOCKED_OUT',
-      target: 'Enforced 24-hour lockout on Engr. Derrick Tan (derrick.tan@bayanicoop.ph) following 5 consecutive failed login attempts',
+      target: 'Enforced 24-hour lockout on Engr. Derrick Tan (derrick.tan@coop.tuntongtech.com) following 5 consecutive failed login attempts',
     },
   ]);
 
@@ -2687,7 +2687,7 @@ export default function AdminDashboard() {
               <div className="flex items-center gap-2.5 text-xs">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>
-                  <strong>Cloud Firestore Synchronized:</strong> 59 CDA Chart of Accounts, 2 Member Profiles, and Active Loan Documents are up to date under path <code className="font-mono text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded">/tenants/tenant_bayani_001/</code>.
+                  <strong>Cloud Firestore Synchronized:</strong> 59 CDA Chart of Accounts, 2 Member Profiles, and Active Loan Documents are up to date under path <code className="font-mono text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded">/tenants/active_tenant/</code>.
                 </span>
               </div>
               <span className="text-[10px] bg-emerald-200 text-emerald-900 font-mono px-2 py-0.5 rounded font-bold">
@@ -5114,7 +5114,7 @@ export default function AdminDashboard() {
 
                   <div className="p-4 bg-slate-100 rounded-lg text-xs font-mono text-slate-700 leading-relaxed border border-slate-200">
                     <div className="font-bold mb-1 uppercase">Promissory Note & Loan Agreement Summary</div>
-                    "FOR VALUE RECEIVED, I promise to pay to the order of BAYANI MULTI-PURPOSE COOPERATIVE the sum of PESOS FIFTY THOUSAND (PHP 50,000.00) in 12 equal monthly installments. Default in payment incurs 3% monthly surcharge. Joint and solidary liability acknowledged pursuant to the Cooperative Code."
+                    "FOR VALUE RECEIVED, I promise to pay to the order of THE COOPERATIVE the sum of PESOS FIFTY THOUSAND (PHP 50,000.00) in 12 equal monthly installments. Default in payment incurs 3% monthly surcharge. Joint and solidary liability acknowledged pursuant to the Cooperative Code."
                   </div>
 
                   <div className="flex justify-end pt-2">
@@ -7984,7 +7984,7 @@ export default function AdminDashboard() {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => alert('Downloaded CDA_CAPR_2026_tenant_bayani_001.csv')}
+                  onClick={() => alert('Downloaded CDA_CAPR_2026_tenant_active.csv')}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
                 >
                   <Download className="w-3.5 h-3.5" /> Export CDA CAPR (CSV)
@@ -8586,7 +8586,7 @@ export default function AdminDashboard() {
                     <span>System Admin Privilege (Root IAM)</span>
                   </span>
                   <span className="text-slate-400 text-xs">•</span>
-                  <span className="text-xs text-slate-500 font-mono">Tenant: bayani_001</span>
+                  <span className="text-xs text-slate-500 font-mono">Tenant: active_tenant</span>
                 </div>
                 <h2 className="text-xl font-black text-slate-900 tracking-tight">Identity & Access Management (IAM)</h2>
                 <p className="text-xs text-slate-500 mt-1 max-w-2xl">
@@ -10010,7 +10010,7 @@ export default function AdminDashboard() {
                   <input
                     type="email"
                     required
-                    placeholder="e.g. msantos@bayanicoop.ph"
+                    placeholder="e.g. msantos@coop.tuntongtech.com"
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
                     className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500"
@@ -10656,7 +10656,7 @@ export default function AdminDashboard() {
                   </span>
                 </span>
                 <span>•</span>
-                <span>Subdomain: bayani-coop.tuntongtech.com</span>
+                <span>Domain: coop.tuntongtech.com</span>
               </div>
             </div>
           </div>

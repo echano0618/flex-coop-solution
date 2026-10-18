@@ -168,7 +168,7 @@ export default function MemberLoginPage() {
                 <label className="block text-xs font-medium text-slate-300">
                   6-Digit MPIN / Password
                 </label>
-                <a href="#help" onClick={(e) => { e.preventDefault(); alert('For PIN resets, visit your branch teller or contact support@bayanicoop.ph'); }} className="text-[11px] text-emerald-400 hover:underline">
+                <a href="#help" onClick={(e) => { e.preventDefault(); alert('For PIN resets, visit your branch teller or contact support@tuntongtech.com'); }} className="text-[11px] text-emerald-400 hover:underline">
                   Forgot MPIN?
                 </a>
               </div>
