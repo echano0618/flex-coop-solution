@@ -362,7 +362,7 @@ export default function MemberRegisterPage() {
 
     const newApp = {
       id: `APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      applicantName: `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`,
+      applicantName: `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim(),
       email,
       phone,
       coopSlug: tenantInfo.slug,
@@ -370,6 +370,11 @@ export default function MemberRegisterPage() {
       tin,
       dateSubmitted: new Date().toISOString(),
       status: 'UNDER_REVIEW',
+      subscribedShares: Number(subscribedShares),
+      parValuePerShare: Number(parValuePerShare),
+      totalSubscribedAmount: Number(totalSubscribedAmount),
+      initialDeposit: Number(initialDeposit),
+      paymentMethod,
     };
     try {
       if (typeof window !== 'undefined') {

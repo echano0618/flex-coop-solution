@@ -82,6 +82,8 @@ import {
   getTenantAdminSession,
   clearTenantAdminSession,
   GeneralManagerInfo,
+  isTestCoopTenant,
+  purgeTenantDummyRecords,
 } from './tenant-utils';
 
 type StaffRole =
@@ -355,6 +357,8 @@ export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const [coopName, setCoopName] = useState<string>('Cooperative Enterprise');
+  const [tenantSlug, setTenantSlug] = useState<string>('default');
+  const isTestTenant = isTestCoopTenant(tenantSlug);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
@@ -365,6 +369,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const tenantInfo = resolveTenantCoop();
     setCoopName(tenantInfo.name);
+    setTenantSlug(tenantInfo.slug);
 
     try {
       if (typeof window !== 'undefined') {
@@ -1381,6 +1386,12 @@ export default function AdminDashboard() {
       if (typeof window !== 'undefined') {
         const tenantInfo = resolveTenantCoop();
         const gm = resolveGeneralManager(tenantInfo.slug);
+        const isTestTenant = isTestCoopTenant(tenantInfo.slug);
+
+        // Purge dummy/test records for production cooperatives (e.g. family-coop)
+        if (!isTestTenant) {
+          purgeTenantDummyRecords(tenantInfo.slug);
+        }
 
         const storageKey = `flexcoop_members_${tenantInfo.slug}`;
         const stored = localStorage.getItem(storageKey);
@@ -1393,9 +1404,9 @@ export default function AdminDashboard() {
           } catch {}
         }
 
-        // Filter out any legacy dummy members
+        // Strictly filter out any legacy dummy members
         const dummyMemberNames = ['Maria Clara Santos', 'Juan Perez Dela Cruz'];
-        list = list.filter((m) => !dummyMemberNames.includes(m.name) && m.id !== 'mem_1' && m.id !== 'mem_2');
+        list = list.filter((m) => !dummyMemberNames.includes(m.name) && m.id !== 'mem_1' && m.id !== 'mem_2' && m.id !== 'mem_maria_santos');
 
         // Statutory Requirement: The General Manager is Member #1 (Regular Member)
         const gmMember: MemberRecord = {
@@ -1408,12 +1419,12 @@ export default function AdminDashboard() {
           idType: 'PhilSys National ID (Verified General Manager)',
           idNumber: gm.idNumber || 'CDA-GM-AUTH-0001',
           address: gm.address || 'Philippines',
-          paidUpShares: 10000,
+          paidUpShares: isTestTenant ? 10000 : (Number(stockParValue) * 100 || 10000),
           sharesCount: 100,
           subscribedShares: 100,
-          initialPledge: 10000,
+          initialPledge: isTestTenant ? 10000 : (Number(stockParValue) * 100 || 10000),
           sharePaymentStatus: 'PAID_OTC',
-          savingsBalance: 5000,
+          savingsBalance: isTestTenant ? 5000 : 0, // Clean 0 in production; no dummy transactions
           loanBalance: 0,
           npcConsent: 'Agreed (Statutory GM Undertaking)',
           pmesStatus: 'COMPLETED',
@@ -1435,12 +1446,14 @@ export default function AdminDashboard() {
             name: gm.name,
             email: gm.email,
             address: gm.address || list[existingGmIndex].address,
+            // Ensure no dummy loan balance is carried forward
+            loanBalance: list[existingGmIndex].loanBalance || 0,
           };
         } else {
           list.unshift(gmMember);
         }
 
-        // Also sync any submitted member applications from PMES registration wizard
+        // Sync submitted member applications from PMES registration wizard (NO dummy transactions)
         try {
           const appStr = localStorage.getItem('tuntong_member_applications');
           if (appStr) {
@@ -1456,6 +1469,11 @@ export default function AdminDashboard() {
                 .forEach((a: any, idx: number) => {
                   const appId = `mem_app_${a.id || idx}`;
                   if (!list.some((m) => m.id === appId || m.email === a.email)) {
+                    const actualSubShares = a.subscribedShares !== undefined ? Number(a.subscribedShares) : 0;
+                    const actualDeposit = a.initialDeposit !== undefined ? Number(a.initialDeposit) : 0;
+                    const actualPledge = a.totalSubscribedAmount !== undefined ? Number(a.totalSubscribedAmount) : 0;
+                    const paymentStatus = actualDeposit > 0 ? (a.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
+
                     list.push({
                       id: appId,
                       memberNo: `MEM-2026-${String(idx + 2).padStart(4, '0')}`,
@@ -1466,13 +1484,13 @@ export default function AdminDashboard() {
                       idType: 'PhilSys National ID',
                       idNumber: a.tin || 'N/A',
                       address: a.address || 'Philippines',
-                      paidUpShares: 5000,
-                      sharesCount: 50,
-                      subscribedShares: 50,
-                      initialPledge: 5000,
-                      sharePaymentStatus: 'PAID_OTC',
-                      savingsBalance: 2000,
-                      loanBalance: 0,
+                      paidUpShares: actualDeposit,
+                      sharesCount: actualSubShares,
+                      subscribedShares: actualSubShares,
+                      initialPledge: actualPledge,
+                      sharePaymentStatus: paymentStatus,
+                      savingsBalance: 0, // Clean 0 - Do not create dummy savings transactions
+                      loanBalance: 0, // Clean 0 - No dummy loans
                       npcConsent: 'Agreed (Republic Act No. 10173)',
                       pmesStatus: 'COMPLETED',
                       pmesCertNo: `CERT-PMES-${idx + 1000}`,
@@ -2208,7 +2226,7 @@ export default function AdminDashboard() {
 
   // Cashier Multi-Transaction State
   const [cashierTxCategory, setCashierTxCategory] = useState<'LOAN_REPAYMENT' | 'SHARE_PURCHASE' | 'SAVINGS_DEPOSIT'>('SHARE_PURCHASE');
-  const [cashierMemberId, setCashierMemberId] = useState<string>('mem_1');
+  const [cashierMemberId, setCashierMemberId] = useState<string>('mem_gm_0001');
   const [sharesToBuy, setSharesToBuy] = useState<number>(20); // ₱100.00 par value = ₱2,000.00
   const [savingsDepositAmount, setSavingsDepositAmount] = useState<number>(2000);
   const [savingsCategory, setSavingsCategory] = useState<'VOLUNTARY' | 'COMPULSORY'>('VOLUNTARY');
@@ -2250,7 +2268,7 @@ export default function AdminDashboard() {
 
   // General Ledger (GL) & Member Subsidiary Ledger (SL) Submodule State
   const [ledgerSubTab, setLedgerSubTab] = useState<'trial_balance' | 'member_sl' | 'gl_statement' | 'reconciliation'>('trial_balance');
-  const [selectedSlMemberId, setSelectedSlMemberId] = useState<string>('mem_1');
+  const [selectedSlMemberId, setSelectedSlMemberId] = useState<string>('mem_gm_0001');
   const [slMemberSearchQuery, setSlMemberSearchQuery] = useState<string>('');
   const [selectedGlAccountCode, setSelectedGlAccountCode] = useState<string>('1-02-01');
   const [glAccountSearchQuery, setGlAccountSearchQuery] = useState<string>('');
@@ -6864,17 +6882,24 @@ export default function AdminDashboard() {
 
             {/* SUB-VIEW 2: MEMBER SUBSIDIARY LEDGER (SL) */}
             {ledgerSubTab === 'member_sl' && (() => {
-              const activeMember = members.find((m) => m.id === selectedSlMemberId) || members[0];
+              const activeMember = members.find((m) => m.id === selectedSlMemberId) || members[0] || {
+                id: 'mem_gm_0001',
+                name: 'General Manager',
+                memberNo: 'MEM-2026-0001',
+                paidUpShares: 10000,
+                savingsBalance: 0,
+                loanBalance: 0,
+              };
 
-              // Mock transaction ledger for selected member
+              // Member Subsidiary Ledger accounts strictly reflecting authentic member balances
               const memberSlAccounts = [
                 {
                   code: '3-01-03',
                   title: 'Paid-Up Share Capital - Common',
                   type: 'SHARE_CAPITAL',
                   normal: 'CREDIT',
-                  balance: activeMember.paidUpShares,
-                  txs: [
+                  balance: activeMember.paidUpShares || 0,
+                  txs: (activeMember.paidUpShares || 0) > 0 ? [
                     {
                       date: '2026-01-20',
                       ref: 'OR-SHR-2026-001',
@@ -6883,15 +6908,15 @@ export default function AdminDashboard() {
                       cr: activeMember.paidUpShares,
                       bal: activeMember.paidUpShares,
                     },
-                  ],
+                  ] : [],
                 },
                 {
                   code: '2-01-01',
                   title: 'Savings Deposits - Compulsory',
                   type: 'SAVINGS',
                   normal: 'CREDIT',
-                  balance: activeMember.savingsBalance,
-                  txs: activeMember.savingsBalance > 0 ? [
+                  balance: activeMember.savingsBalance || 0,
+                  txs: (activeMember.savingsBalance || 0) > 0 ? [
                     {
                       date: '2026-01-20',
                       ref: 'OR-SAV-2026-001',
@@ -6907,23 +6932,15 @@ export default function AdminDashboard() {
                   title: 'Loans Receivable - Regular',
                   type: 'LOAN',
                   normal: 'DEBIT',
-                  balance: activeMember.loanBalance,
-                  txs: activeMember.loanBalance > 0 ? [
+                  balance: activeMember.loanBalance || 0,
+                  txs: (activeMember.loanBalance || 0) > 0 ? [
                     {
                       date: '2026-02-01',
-                      ref: 'LN-2026-00001',
+                      ref: `LN-2026-${(activeMember.memberNo || '0001').replace(/\D/g, '')}`,
                       desc: 'Loan Principal Disbursed via Platform Escrow',
-                      dr: 50000,
+                      dr: activeMember.loanBalance,
                       cr: 0,
-                      bal: 50000,
-                    },
-                    {
-                      date: '2026-03-01',
-                      ref: 'OR-PM-99214',
-                      desc: 'Monthly Installment 1 - Principal Reduction (PayMongo QR Ph)',
-                      dr: 0,
-                      cr: 3000,
-                      bal: 47000,
+                      bal: activeMember.loanBalance,
                     },
                   ] : [],
                 },
@@ -8354,44 +8371,88 @@ export default function AdminDashboard() {
               <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <div className="bg-slate-100 p-3 border-b border-slate-200 font-bold text-xs text-slate-700 flex justify-between items-center">
                   <span>Pro-Rata Member Surplus Allocation Roster (Fiscal Year 2025)</span>
-                  <span className="font-normal text-slate-500">Total Share Capital: ₱25,000.00 Common</span>
+                  <span className="font-normal text-slate-500">
+                    Total Share Capital: ₱{(isTestTenant ? 25000 : members.reduce((s, m) => s + (m.paidUpShares || 0), 0)).toLocaleString('en-PH', { minimumFractionDigits: 2 })} Common
+                  </span>
                 </div>
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                    <tr>
-                      <th className="p-3">Member Details</th>
-                      <th className="p-3 text-right">Paid-Up Capital</th>
-                      <th className="p-3 text-right">Interest on Capital (ISC)</th>
-                      <th className="p-3 text-right">Patronage Refund (PR)</th>
-                      <th className="p-3 text-right">Total Net Dividend</th>
-                      <th className="p-3">Settlement Account</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-800">
-                    <tr>
-                      <td className="p-3">
-                        <div className="font-semibold text-slate-900">Maria Clara Santos</div>
-                        <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0001 (60.0% Capital Weight)</div>
-                      </td>
-                      <td className="p-3 text-right font-mono font-medium">₱15,000.00</td>
-                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(mariaIsc + mariaPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
-                    </tr>
-                    <tr>
-                      <td className="p-3">
-                        <div className="font-semibold text-slate-900">Juan Perez Dela Cruz</div>
-                        <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0002 (40.0% Capital Weight)</div>
-                      </td>
-                      <td className="p-3 text-right font-mono font-medium">₱10,000.00</td>
-                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(juanIsc + juanPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
-                    </tr>
-                  </tbody>
-                </table>
+                {isTestTenant ? (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-3">Member Details</th>
+                        <th className="p-3 text-right">Paid-Up Capital</th>
+                        <th className="p-3 text-right">Interest on Capital (ISC)</th>
+                        <th className="p-3 text-right">Patronage Refund (PR)</th>
+                        <th className="p-3 text-right">Total Net Dividend</th>
+                        <th className="p-3">Settlement Account</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-800">
+                      <tr>
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-900">Maria Clara Santos</div>
+                          <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0001 (60.0% Capital Weight)</div>
+                        </td>
+                        <td className="p-3 text-right font-mono font-medium">₱15,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(mariaIsc + mariaPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-900">Juan Perez Dela Cruz</div>
+                          <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0002 (40.0% Capital Weight)</div>
+                        </td>
+                        <td className="p-3 text-right font-mono font-medium">₱10,000.00</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(juanIsc + juanPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                ) : (
+                  members.filter((m) => (m.paidUpShares || 0) > 0).length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 text-xs">
+                      No member share capital subscriptions have been registered or closed for statutory dividend distribution in this fiscal period.
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                        <tr>
+                          <th className="p-3">Member Details</th>
+                          <th className="p-3 text-right">Paid-Up Capital</th>
+                          <th className="p-3 text-right">Interest on Capital (ISC)</th>
+                          <th className="p-3 text-right">Patronage Refund (PR)</th>
+                          <th className="p-3 text-right">Total Net Dividend</th>
+                          <th className="p-3">Settlement Account</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-800">
+                        {members.filter((m) => (m.paidUpShares || 0) > 0).map((m) => {
+                          const totalCap = members.reduce((s, x) => s + (x.paidUpShares || 0), 0) || 1;
+                          const weight = (m.paidUpShares || 0) / totalCap;
+                          const mIsc = Math.round(computedIscPool * weight);
+                          const mPr = Math.round(computedPrPool * weight);
+                          return (
+                            <tr key={m.id}>
+                              <td className="p-3">
+                                <div className="font-semibold text-slate-900">{m.name}</div>
+                                <div className="text-[11px] text-slate-500 font-mono">{m.memberNo} ({(weight * 100).toFixed(1)}% Capital Weight)</div>
+                              </td>
+                              <td className="p-3 text-right font-mono font-medium">₱{(m.paidUpShares || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                              <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(mIsc + mPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                              <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                )}
               </div>
             </div>
           </div>

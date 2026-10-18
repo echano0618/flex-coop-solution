@@ -21,6 +21,8 @@ import {
   resolveTenantCoop,
   setTenantMemberSession,
   getTenantMemberSession,
+  isTestCoopTenant,
+  resolveGeneralManager,
   TenantInfo,
 } from '../../tenant-utils';
 
@@ -81,18 +83,50 @@ export default function MemberLoginPage() {
       console.warn('API member login fallback:', err);
     }
 
-    // Fallback: If identifier is GM or matches staff/member pattern
+    // Fallback: Resolve registered member or General Manager
     const isGm = identifier.toLowerCase().includes('gm') || identifier.toLowerCase().includes('admin');
+    const isTest = isTestCoopTenant(tenantInfo.slug);
+    const gmInfo = resolveGeneralManager(tenantInfo.slug);
+
+    let resolvedName = isGm ? gmInfo.name : identifier.split('@')[0].replace('.', ' ').toUpperCase();
+    let resolvedMemberNo = isGm ? 'MEM-2026-0001' : 'MEM-2026-0099';
+    let resolvedPaidUp = isGm ? (isTest ? 25000 : 10000) : 0;
+    let resolvedShares = isGm ? 100 : 0;
+    let resolvedSavings = isGm ? (isTest ? 10000 : 0) : 0;
+
+    // Check if user is a registered online applicant
+    try {
+      if (typeof window !== 'undefined') {
+        const appStr = localStorage.getItem('tuntong_member_applications');
+        if (appStr) {
+          const apps = JSON.parse(appStr);
+          if (Array.isArray(apps)) {
+            const matchedApp = apps.find(
+              (a: any) =>
+                a.email?.toLowerCase() === identifier.trim().toLowerCase() ||
+                a.phone === identifier.trim()
+            );
+            if (matchedApp) {
+              resolvedName = matchedApp.applicantName;
+              resolvedPaidUp = matchedApp.initialDeposit ? Number(matchedApp.initialDeposit) : 0;
+              resolvedShares = matchedApp.subscribedShares ? Number(matchedApp.subscribedShares) : 0;
+              resolvedSavings = 0; // Strictly 0 - No dummy savings transactions
+            }
+          }
+        }
+      }
+    } catch {}
+
     const memberObj = {
       id: isGm ? 'mem_gm_0001' : `mem_${Date.now()}`,
-      memberNumber: isGm ? 'MEM-2026-0001' : 'MEM-2026-0099',
-      name: isGm ? 'General Manager' : identifier.split('@')[0].replace('.', ' ').toUpperCase(),
+      memberNumber: resolvedMemberNo,
+      name: resolvedName,
       email: identifier.trim(),
       position: isGm ? 'General Manager' : 'Regular Member',
       type: isGm ? 'General Manager (Regular Member)' : 'Regular Member',
-      paidUpCapital: isGm ? 25000 : 15000,
-      sharesCount: isGm ? 250 : 150,
-      savingsBalance: isGm ? 10000 : 5000,
+      paidUpCapital: resolvedPaidUp,
+      sharesCount: resolvedShares,
+      savingsBalance: resolvedSavings,
       idType: 'PhilSys National ID (Encrypted SPI)',
       coopSlug: tenantInfo.slug,
       coopName: tenantInfo.name,

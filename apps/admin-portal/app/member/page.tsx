@@ -44,6 +44,8 @@ import {
   getTenantAdminSession,
   clearTenantMemberSession,
   resolveGeneralManager,
+  isTestCoopTenant,
+  purgeTenantDummyRecords,
   TenantInfo,
 } from '../tenant-utils';
 
@@ -179,6 +181,12 @@ export default function MemberPortalPage() {
     try {
       if (typeof window !== 'undefined') {
         const info = resolveTenantCoop();
+        const isTestTenant = isTestCoopTenant(info.slug);
+
+        if (!isTestTenant) {
+          purgeTenantDummyRecords(info.slug);
+        }
+
         const auth = getTenantMemberSession(info.slug);
         const admin = getTenantAdminSession(info.slug);
 
@@ -192,11 +200,11 @@ export default function MemberPortalPage() {
                 id: parsed.id || 'mem_0001',
                 memberNumber: parsed.memberNumber || 'MEM-2026-0001',
                 name: fullName,
-                initials: initials || 'GM',
+                initials: initials || 'MB',
                 type: parsed.position ? `${parsed.position} (Regular Member)` : (parsed.type || 'Regular Member'),
-                paidUpCapital: parsed.paidUpCapital || 25000,
-                sharesCount: parsed.sharesCount || 250,
-                savingsBalance: parsed.savingsBalance || 10000,
+                paidUpCapital: parsed.paidUpCapital !== undefined ? parsed.paidUpCapital : (isTestTenant ? 25000 : 0),
+                sharesCount: parsed.sharesCount !== undefined ? parsed.sharesCount : (isTestTenant ? 250 : 0),
+                savingsBalance: parsed.savingsBalance !== undefined ? parsed.savingsBalance : 0,
                 idType: parsed.idType || 'PhilSys Verified Member ID',
               });
               return;
@@ -218,7 +226,7 @@ export default function MemberPortalPage() {
                 type: 'General Manager (Regular Member)',
                 paidUpCapital: 10000,
                 sharesCount: 100,
-                savingsBalance: 5000,
+                savingsBalance: isTestTenant ? 5000 : 0,
                 idType: 'CDA General Manager Verified PhilSys ID',
               });
               return;
@@ -237,7 +245,7 @@ export default function MemberPortalPage() {
             type: 'General Manager (Regular Member)',
             paidUpCapital: 10000,
             sharesCount: 100,
-            savingsBalance: 5000,
+            savingsBalance: isTestTenant ? 5000 : 0,
             idType: 'CDA General Manager Verified PhilSys ID',
           });
           return;
@@ -266,7 +274,7 @@ export default function MemberPortalPage() {
     type: 'General Manager (Regular Member)',
     paidUpCapital: 10000,
     sharesCount: 100,
-    savingsBalance: 5000,
+    savingsBalance: isTestCoopTenant(tenantInfo.slug) ? 5000 : 0,
     idType: 'CDA General Manager Verified PhilSys ID',
   };
 
@@ -303,23 +311,31 @@ export default function MemberPortalPage() {
   };
 
   // Co-Maker Endorsement Requests State
-  const [endorsementRequests, setEndorsementRequests] = useState([
-    {
-      id: 'req_001',
-      loanId: 'loan_maria_001',
-      loanNumber: 'LN-2026-00001',
-      borrowerName: 'Maria Clara Santos',
-      borrowerMemberNumber: 'MEM-2026-0001',
-      designatedCoMakerMemberNumber: 'MEM-2026-0002',
-      productName: 'Regular Member Loan',
-      principalAmount: 50000,
-      termMonths: 12,
-      monthlyInstallment: 4442.44,
-      status: 'PENDING' as 'PENDING' | 'ACCEPTED' | 'DECLINED',
-      requestedAt: '2026-10-10 09:30 AM',
-      respondedAt: null as string | null,
-    },
-  ]);
+  const [endorsementRequests, setEndorsementRequests] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        return [];
+      }
+    }
+    return [
+      {
+        id: 'req_001',
+        loanId: 'loan_maria_001',
+        loanNumber: 'LN-2026-00001',
+        borrowerName: 'Maria Clara Santos',
+        borrowerMemberNumber: 'MEM-2026-0001',
+        designatedCoMakerMemberNumber: 'MEM-2026-0002',
+        productName: 'Regular Member Loan',
+        principalAmount: 50000,
+        termMonths: 12,
+        monthlyInstallment: 4442.44,
+        status: 'PENDING' as 'PENDING' | 'ACCEPTED' | 'DECLINED',
+        requestedAt: '2026-10-10 09:30 AM',
+        respondedAt: null as string | null,
+      },
+    ];
+  });
 
   // Designated Co-Maker Member ID input when applying
   const [coMakerMemberIdInput, setCoMakerMemberIdInput] = useState<string>('MEM-2026-0002');
@@ -408,13 +424,58 @@ export default function MemberPortalPage() {
   const [repayAmount, setRepayAmount] = useState<number>(4442.44);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
 
-  // Active Loan State
-  const [loanBalance, setLoanBalance] = useState<number>(50000.0);
+  // Active Loan State (Zero in production; sample demonstration in test instance)
+  const [loanBalance, setLoanBalance] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        return 0.0;
+      }
+    }
+    return 50000.0;
+  });
 
   // Share Capital & Savings Balances State
-  const [paidUpCapital, setPaidUpCapital] = useState<number>(15000);
-  const [sharesCount, setSharesCount] = useState<number>(150);
-  const [savingsBalance, setSavingsBalance] = useState<number>(5000);
+  const [paidUpCapital, setPaidUpCapital] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        return 10000;
+      }
+    }
+    return 15000;
+  });
+  const [sharesCount, setSharesCount] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        return 100;
+      }
+    }
+    return 150;
+  });
+  const [savingsBalance, setSavingsBalance] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        return 0; // Strictly zero in production
+      }
+    }
+    return 5000;
+  });
+
+  // Keep balances synchronized with authenticated member
+  useEffect(() => {
+    if (customMember) {
+      if (customMember.paidUpCapital !== undefined) setPaidUpCapital(Number(customMember.paidUpCapital));
+      if (customMember.sharesCount !== undefined) setSharesCount(Number(customMember.sharesCount));
+      if (customMember.savingsBalance !== undefined) setSavingsBalance(Number(customMember.savingsBalance));
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        setLoanBalance(0.0);
+      }
+    }
+  }, [customMember]);
 
   // Self-Service Deposit / Share Purchase Modal State
   const [depositModalType, setDepositModalType] = useState<'SHARES' | 'SAVINGS' | null>(null);
@@ -597,6 +658,73 @@ export default function MemberPortalPage() {
     },
   ]);
 
+  const [prodShareLedger, setProdShareLedger] = useState<{
+    date: string;
+    ref: string;
+    particulars: string;
+    shares: number;
+    debit: number;
+    credit: number;
+    balance: number;
+  }[]>([]);
+
+  const [prodSavingsLedger, setProdSavingsLedger] = useState<{
+    date: string;
+    ref: string;
+    particulars: string;
+    debit: number;
+    credit: number;
+    balance: number;
+  }[]>([]);
+
+  const isTestTenant = isTestCoopTenant(tenantInfo.slug);
+
+  const activeShareLedger = isTestTenant
+    ? (currentPersona === 'maria' ? mariaShareLedger : juanShareLedger)
+    : (prodShareLedger.length > 0
+        ? prodShareLedger
+        : paidUpCapital > 0 ? [
+            {
+              date: '2026-01-20',
+              ref: 'OR-SHR-2026-001',
+              particulars: 'Initial Subscription & Paid-Up Capital Contribution',
+              shares: sharesCount || Math.floor(paidUpCapital / 100),
+              debit: 0,
+              credit: paidUpCapital,
+              balance: paidUpCapital,
+            },
+          ] : []);
+
+  const activeSavingsLedger = isTestTenant
+    ? (currentPersona === 'maria' ? mariaSavingsLedger : juanSavingsLedger)
+    : (prodSavingsLedger.length > 0
+        ? prodSavingsLedger
+        : savingsBalance > 0 ? [
+            {
+              date: '2026-01-20',
+              ref: 'OR-SAV-2026-001',
+              particulars: 'Opening Compulsory Savings Account (2-01-01)',
+              debit: 0,
+              credit: savingsBalance,
+              balance: savingsBalance,
+            },
+          ] : []);
+
+  const activeLoanLedger = isTestTenant
+    ? (currentPersona === 'maria' ? mariaLoanLedger : [])
+    : (loanBalance > 0 ? [
+        {
+          date: '2026-02-01',
+          ref: 'DISB-TX-LN001',
+          particulars: 'Disbursement of Loan Proceeds via Escrow',
+          principal: loanBalance,
+          interest: 0,
+          debit: loanBalance,
+          credit: 0,
+          balance: loanBalance,
+        },
+      ] : []);
+
   // Convenience Fee Calculator for PayMongo QR Ph (1.5%, minimum ₱15.00)
   const calculateConvenienceFee = (amount: number) => {
     return Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
@@ -647,20 +775,34 @@ export default function MemberPortalPage() {
       const newBal = Math.round((savingsBalance + amount) * 100) / 100;
       setSavingsBalance(newBal);
 
-      if (currentPersona === 'maria') {
-        setMariaSavingsLedger((prev) => [
-          ...prev,
-          {
-            date: dateStr,
-            ref: orNum,
-            particulars: `Voluntary Savings Deposit via PayMongo QR Ph Rail`,
-            debit: 0,
-            credit: amount,
-            balance: newBal,
-          },
-        ]);
+      if (isTestTenant) {
+        if (currentPersona === 'maria') {
+          setMariaSavingsLedger((prev) => [
+            ...prev,
+            {
+              date: dateStr,
+              ref: orNum,
+              particulars: `Voluntary Savings Deposit via PayMongo QR Ph Rail`,
+              debit: 0,
+              credit: amount,
+              balance: newBal,
+            },
+          ]);
+        } else {
+          setJuanSavingsLedger((prev) => [
+            ...prev,
+            {
+              date: dateStr,
+              ref: orNum,
+              particulars: `Voluntary Savings Deposit via PayMongo QR Ph Rail`,
+              debit: 0,
+              credit: amount,
+              balance: newBal,
+            },
+          ]);
+        }
       } else {
-        setJuanSavingsLedger((prev) => [
+        setProdSavingsLedger((prev) => [
           ...prev,
           {
             date: dateStr,
@@ -683,7 +825,7 @@ export default function MemberPortalPage() {
         convenienceFee: fee,
         totalAmount: total,
         newBalance: newBal,
-        reference: currentPersona === 'maria' ? 'SAV-2026-0001' : 'SAV-2026-0002',
+        reference: isTestTenant ? (currentPersona === 'maria' ? 'SAV-2026-0001' : 'SAV-2026-0002') : `SAV-${currentMember.memberNumber || '001'}`,
         description: 'Voluntary Member Savings Deposit',
       });
     } else if (type === 'SHARES') {
@@ -692,26 +834,41 @@ export default function MemberPortalPage() {
       setPaidUpCapital(newPaidUp);
       setSharesCount((prev) => prev + newShares);
 
-      if (currentPersona === 'maria') {
-        setMariaShareLedger((prev) => [
-          ...prev,
-          {
-            date: dateStr,
-            ref: orNum,
-            particulars: `Capital Build-Up (+${newShares} Shares @ ₱100 Par) via QR Ph`,
-            shares: newShares,
-            debit: 0,
-            credit: amount,
-            balance: newPaidUp,
-          },
-        ]);
+      if (isTestTenant) {
+        if (currentPersona === 'maria') {
+          setMariaShareLedger((prev) => [
+            ...prev,
+            {
+              date: dateStr,
+              ref: orNum,
+              particulars: `Capital Build-Up (+${newShares} Shares @ ₱100 Par) via QR Ph`,
+              shares: newShares,
+              debit: 0,
+              credit: amount,
+              balance: newPaidUp,
+            },
+          ]);
+        } else {
+          setJuanShareLedger((prev) => [
+            ...prev,
+            {
+              date: dateStr,
+              ref: orNum,
+              particulars: `Capital Build-Up (+${newShares} Shares @ ₱100 Par) via QR Ph`,
+              shares: newShares,
+              debit: 0,
+              credit: amount,
+              balance: newPaidUp,
+            },
+          ]);
+        }
       } else {
-        setJuanShareLedger((prev) => [
+        setProdShareLedger((prev) => [
           ...prev,
           {
             date: dateStr,
             ref: orNum,
-            particulars: `Capital Build-Up (+${newShares} Shares @ ₱100 Par) via QR Ph`,
+            particulars: `Capital Build-Up (+${newShares} Shares) via QR Ph`,
             shares: newShares,
             debit: 0,
             credit: amount,
@@ -730,7 +887,7 @@ export default function MemberPortalPage() {
         convenienceFee: fee,
         totalAmount: total,
         newBalance: newPaidUp,
-        reference: currentPersona === 'maria' ? 'SC-2026-0001' : 'SC-2026-0002',
+        reference: isTestTenant ? (currentPersona === 'maria' ? 'SC-2026-0001' : 'SC-2026-0002') : `SC-${currentMember.memberNumber || '001'}`,
         description: 'Paid-Up Share Capital Build-Up Deposit',
       });
     }
@@ -863,7 +1020,7 @@ export default function MemberPortalPage() {
                 <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
                   <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Loan Balance</div>
                   <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
-                    ₱{(currentPersona === 'maria' ? loanBalance : 0).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </div>
                 </div>
               </div>
@@ -1014,7 +1171,7 @@ export default function MemberPortalPage() {
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Passbook Number:</span>
                   <span className="font-mono font-bold text-white text-sm">
-                    {currentPersona === 'maria' ? 'PB-2026-0001' : 'PB-2026-0002'}
+                    {currentMember.memberNumber ? `PB-${(currentMember.memberNumber || '').replace(/\D/g, '') || '0001'}` : 'PB-2026-0001'}
                   </span>
                 </div>
                 <div>
@@ -1106,12 +1263,12 @@ export default function MemberPortalPage() {
                   </span>
                 </div>
                 <div className="text-3xl font-black font-mono text-slate-900 mt-2">
-                  ₱{currentPersona === 'maria' ? loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '0.00'}
+                  ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                 </div>
                 <div className="text-xs text-slate-500 mt-1 flex justify-between">
-                  <span>{currentPersona === 'maria' ? 'LN-2026-00001 (Regular Loan)' : 'No Active Borrowings'}</span>
-                  <span className={currentPersona === 'maria' ? 'text-indigo-700 font-bold' : 'text-emerald-700 font-bold'}>
-                    {currentPersona === 'maria' ? 'Installment Due: Mar 20' : 'Clean Credit'}
+                  <span>{loanBalance > 0 ? 'LN-2026-00001 (Regular Loan)' : 'No Active Borrowings'}</span>
+                  <span className={loanBalance > 0 ? 'text-indigo-700 font-bold' : 'text-emerald-700 font-bold'}>
+                    {loanBalance > 0 ? 'Installment Active' : 'Clean Credit'}
                   </span>
                 </div>
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-indigo-900 font-semibold">
@@ -1247,21 +1404,29 @@ export default function MemberPortalPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                        {(currentPersona === 'maria' ? mariaShareLedger : juanShareLedger).map((tx, idx) => (
-                          <tr key={idx} className="hover:bg-amber-50/20 transition">
-                            <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
-                            <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
-                            <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
-                            <td className="p-3.5 text-center font-bold text-amber-800">+{tx.shares}</td>
-                            <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
-                            <td className="p-3.5 text-right font-bold text-emerald-700">
-                              ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-3.5 text-right font-black text-slate-900">
-                              ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        {activeShareLedger.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="p-8 text-center text-slate-400 font-sans text-xs">
+                              No share capital transactions recorded yet. Initial transactions will appear once paid-up capital contribution is confirmed.
                             </td>
                           </tr>
-                        ))}
+                        ) : (
+                          activeShareLedger.map((tx, idx) => (
+                            <tr key={idx} className="hover:bg-amber-50/20 transition">
+                              <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                              <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                              <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                              <td className="p-3.5 text-center font-bold text-amber-800">+{tx.shares}</td>
+                              <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
+                              <td className="p-3.5 text-right font-bold text-emerald-700">
+                                ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="p-3.5 text-right font-black text-slate-900">
+                                ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -1313,20 +1478,28 @@ export default function MemberPortalPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                        {(currentPersona === 'maria' ? mariaSavingsLedger : juanSavingsLedger).map((tx, idx) => (
-                          <tr key={idx} className="hover:bg-emerald-50/20 transition">
-                            <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
-                            <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
-                            <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
-                            <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
-                            <td className="p-3.5 text-right font-bold text-emerald-700">
-                              ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-3.5 text-right font-black text-slate-900">
-                              ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        {activeSavingsLedger.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="p-8 text-center text-slate-400 font-sans text-xs">
+                              No savings deposit transactions recorded yet. Deposits made via Cashier or QR Ph will appear here automatically.
                             </td>
                           </tr>
-                        ))}
+                        ) : (
+                          activeSavingsLedger.map((tx, idx) => (
+                            <tr key={idx} className="hover:bg-emerald-50/20 transition">
+                              <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                              <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                              <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                              <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
+                              <td className="p-3.5 text-right font-bold text-emerald-700">
+                                ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="p-3.5 text-right font-black text-slate-900">
+                                ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -1340,7 +1513,7 @@ export default function MemberPortalPage() {
               {/* SUB-LEDGER 3: LOANS RECEIVABLE & AMORTIZATION (1-02-01) */}
               {passbookSubTab === 'loan' && (
                 <div className="p-6 space-y-6">
-                  {currentPersona === 'maria' ? (
+                  {isTestTenant && currentPersona === 'maria' && loanBalance > 0 ? (
                     <>
                       {/* Active Loan Details Card */}
                       <div className="p-5 bg-indigo-50/70 border border-indigo-200 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-xs">
@@ -2412,7 +2585,25 @@ export default function MemberPortalPage() {
               <ArrowLeft className="w-4 h-4" />
               Back to More Services
             </button>
-            <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            {!isTestTenant ? (
+              <div className="bg-white p-8 sm:p-12 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
+                  <PieChart className="w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800">
+                  No Allocated Dividends or Patronage Refund for Current Period
+                </h2>
+                <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+                  Net surplus distribution (Interest on Share Capital & Patronage Refund pursuant to RA 9520 Art. 86) is determined following the close of the cooperative fiscal year and formally ratified during the Annual General Assembly.
+                </p>
+                <div className="pt-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-mono">
+                    <span>Fiscal Status: Operational (No Vouchers Issued)</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
               {/* Official Voucher Header */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-slate-200 gap-4">
                 <div className="flex items-center gap-3">
@@ -2531,6 +2722,7 @@ export default function MemberPortalPage() {
                 </button>
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -2558,12 +2750,22 @@ export default function MemberPortalPage() {
                 </div>
 
                 <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs px-3 py-1 rounded-full flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> 1 Pledged Asset Registered
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> {isTestTenant ? '1 Pledged Asset Registered' : '0 Pledged Assets Registered'}
                 </span>
               </div>
 
               {/* Pledged Asset Card */}
-              {currentPersona === 'maria' ? (
+              {!isTestTenant ? (
+                <div className="text-center py-12 space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <Scale className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800">No Pledged Collateral Registered</h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    You currently have no encumbered real estate mortgages (REM) or chattel mortgages registered under your cooperative account.
+                  </p>
+                </div>
+              ) : currentPersona === 'maria' ? (
                 <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/70 space-y-4">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <div className="flex items-center gap-2.5">
@@ -3629,10 +3831,10 @@ export default function MemberPortalPage() {
                         <td className="p-3 font-sans font-bold text-slate-900">Loans Receivable (Regular)</td>
                         <td className="p-3 text-slate-600">1-02-01</td>
                         <td className="p-3 font-bold text-indigo-900">
-                          ₱{currentPersona === 'maria' ? loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '0.00'}
+                          ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 font-sans text-indigo-700 font-bold">
-                          {currentPersona === 'maria' ? 'Installment Due: Mar 20, 2026' : 'No Active Obligations'}
+                          {loanBalance > 0 ? 'Installment Due: Mar 20, 2026' : 'No Active Obligations'}
                         </td>
                       </tr>
                     </tbody>

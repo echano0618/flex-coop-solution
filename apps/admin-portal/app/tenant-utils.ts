@@ -12,23 +12,72 @@ export interface TenantInfo {
   logoLetter: string;
   tin?: string;
   coopType?: string;
+  isTest?: boolean;
 }
 
-export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; type?: string }> = {
+/**
+ * Distinguishes test cooperative instances (strictly bayani-coop / demo)
+ * from production cooperative instances (family-coop and any newly registered coops).
+ */
+export function isTestCoopTenant(slug?: string): boolean {
+  if (!slug) return false;
+  const s = slug.toLowerCase().trim();
+  return s === 'bayani' || s === 'bayani-coop' || s === 'demo' || s === 'test';
+}
+
+/**
+ * Purges legacy test/dummy data from localStorage for production tenants (e.g. family-coop).
+ */
+export function purgeTenantDummyRecords(slug: string) {
+  if (typeof window === 'undefined' || !slug || isTestCoopTenant(slug)) return;
+
+  const targetSlug = slug.toLowerCase().trim();
+
+  // 1. Purge legacy dummy members from localStorage member list
+  try {
+    const storageKey = `flexcoop_members_${targetSlug}`;
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const dummyNames = ['Maria Clara Santos', 'Juan Perez Dela Cruz'];
+        const cleaned = parsed.filter(
+          (m: any) =>
+            !dummyNames.includes(m.name) &&
+            m.id !== 'mem_1' &&
+            m.id !== 'mem_2' &&
+            m.id !== 'mem_maria_santos'
+        );
+        localStorage.setItem(storageKey, JSON.stringify(cleaned));
+      }
+    }
+  } catch {}
+
+  // 2. Remove any dummy test loans or fake transactions stored under this production tenant
+  try {
+    localStorage.removeItem(`flexcoop_loans_${targetSlug}`);
+    localStorage.removeItem(`flexcoop_test_records_${targetSlug}`);
+  } catch {}
+}
+
+export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; type?: string; isTest?: boolean }> = {
   family: {
     name: 'Family Multi-Purpose Cooperative',
     regNo: 'CDA-NCR-2024-00892',
     type: 'Multi-Purpose',
+    isTest: false, // Strictly Production Instance
   },
   bayani: {
     name: 'Bayani Multi-Purpose Cooperative',
     regNo: 'CDA-R4A-2023-00451',
     type: 'Multi-Purpose',
+    isTest: true, // Designated Test Instance
   },
   demo: {
     name: 'Demo Multi-Purpose Cooperative',
     regNo: 'CDA-NCR-2024-00100',
     type: 'Multi-Purpose',
+    isTest: true,
   },
 };
 
@@ -45,6 +94,7 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
       registrationNumber: 'CDA Registered',
       logoLetter: 'C',
       coopType: 'Multi-Purpose',
+      isTest: false,
     };
   }
 
@@ -148,6 +198,7 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
     logoLetter,
     tin: resolvedTin,
     coopType: resolvedType || 'Multi-Purpose',
+    isTest: isTestCoopTenant(slug),
   };
 }
 
