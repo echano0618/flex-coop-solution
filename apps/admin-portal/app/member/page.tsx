@@ -1483,16 +1483,6 @@ export default function MemberPortalPage() {
                 )}
                 <div className="pt-2 flex flex-col sm:flex-row justify-center gap-3">
                   <button
-                    onClick={() => {
-                      setCurrentPersona('juan');
-                      setActiveTab('comaker');
-                      setApplicationSubmitted(false);
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <UserCheck className="w-4 h-4" /> Switch to Juan Dela Cruz (Endorse Now)
-                  </button>
-                  <button
                     onClick={() => setActiveTab('documents')}
                     className="bg-white text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-slate-50"
                   >
@@ -1903,20 +1893,6 @@ export default function MemberPortalPage() {
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
                   You currently have no pending endorsement requests designating your Member ID (<strong>{currentMember.memberNumber}</strong>).
                 </p>
-                {currentPersona === 'maria' && (
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCurrentPersona('juan');
-                        setEndorsementSuccessMsg('');
-                      }}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition-colors"
-                    >
-                      Switch to Juan Dela Cruz (MEM-2026-0002) Account
-                    </button>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="space-y-5">

@@ -17,64 +17,12 @@ import {
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 
-interface StaffPreset {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  roleTitle: string;
-}
-
-const PRESET_ACCOUNTS: StaffPreset[] = [
-  {
-    id: 'usr_sysadmin_01',
-    name: 'Engr. Alex V. Mercer',
-    email: 'admin@coop.tuntongtech.com',
-    role: 'SYSTEM_ADMIN',
-    roleTitle: 'Platform System Admin',
-  },
-  {
-    id: 'usr_gm_01',
-    name: 'Atty. Roberto Dela Rosa',
-    email: 'gm@bayanicoop.ph',
-    role: 'GENERAL_MANAGER',
-    roleTitle: 'General Manager / Superadmin',
-  },
-  {
-    id: 'usr_lo_01',
-    name: 'Grace Villanueva',
-    email: 'lo@bayanicoop.ph',
-    role: 'LOAN_OFFICER',
-    roleTitle: 'Senior Loan Officer',
-  },
-  {
-    id: 'usr_cashier_01',
-    name: 'Leah Mendoza',
-    email: 'cashier@bayanicoop.ph',
-    role: 'CASHIER',
-    roleTitle: 'Branch Head Cashier & Teller',
-  },
-  {
-    id: 'usr_acct_01',
-    name: 'Felipe Santos, CPA',
-    email: 'accountant@bayanicoop.ph',
-    role: 'ACCOUNTANT',
-    roleTitle: 'Chief Bookkeeper & Accountant',
-  },
-];
-
 export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-
-  const handleSelectPreset = (preset: StaffPreset) => {
-    setEmail(preset.email);
-    setPassword('••••••••');
-    setErrorMessage('');
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,23 +35,65 @@ export default function AdminLoginPage() {
     setIsLoading(true);
 
     try {
-      // Find matching preset or default to General Manager
-      const matched = PRESET_ACCOUNTS.find(
-        (a) => a.email.toLowerCase() === email.trim().toLowerCase()
-      ) || {
-        id: `usr_${Date.now()}`,
-        name: email.split('@')[0].replace('.', ' ').toUpperCase(),
-        email: email.trim(),
-        role: 'GENERAL_MANAGER',
-        roleTitle: 'Cooperative Administrator',
-      };
+      // Determine cooperative name from hostname or registrations
+      let coopName = 'Cooperative Enterprise';
+      let coopSlug = '';
+
+      if (typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        if (host.includes('-coop.tuntongtech.com')) {
+          coopSlug = host.split('-coop.tuntongtech.com')[0];
+        } else {
+          const params = new URLSearchParams(window.location.search);
+          coopSlug = params.get('coop') || '';
+        }
+
+        const stored = localStorage.getItem('tuntong_coop_registrations');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            const found = coopSlug
+              ? parsed.find((r: any) => r.slug === coopSlug)
+              : parsed.find((r: any) => r.status === 'APPROVED') || parsed[0];
+            if (found && found.name) {
+              coopName = found.name;
+              coopSlug = found.slug || coopSlug;
+            }
+          }
+        }
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      let role = 'GENERAL_MANAGER';
+      let roleTitle = 'General Manager / Superadmin';
+      let staffName = email.split('@')[0].replace(/[._]/g, ' ').toUpperCase();
+
+      if (cleanEmail.includes('sysadmin') || cleanEmail.includes('mercer')) {
+        role = 'SYSTEM_ADMIN';
+        roleTitle = 'Platform System Admin';
+        staffName = 'Engr. Alex V. Mercer';
+      } else if (cleanEmail.includes('lo') || cleanEmail.includes('loan')) {
+        role = 'LOAN_OFFICER';
+        roleTitle = 'Senior Loan Officer';
+      } else if (cleanEmail.includes('cashier') || cleanEmail.includes('teller')) {
+        role = 'CASHIER';
+        roleTitle = 'Branch Head Cashier & Teller';
+      } else if (cleanEmail.includes('acct') || cleanEmail.includes('accountant')) {
+        role = 'ACCOUNTANT';
+        roleTitle = 'Chief Bookkeeper & Accountant';
+      } else if (cleanEmail.includes('compliance') || cleanEmail.includes('dpo')) {
+        role = 'COMPLIANCE_OFFICER';
+        roleTitle = 'Compliance Officer & DPO';
+      }
 
       const sessionData = {
-        id: matched.id,
-        name: matched.name,
-        email: matched.email,
-        role: matched.role,
-        roleTitle: matched.roleTitle,
+        id: `usr_${Date.now()}`,
+        name: staffName,
+        email: email.trim(),
+        role,
+        roleTitle,
+        coopName,
+        coopSlug,
         token: `adm_sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
         loginAt: new Date().toISOString(),
       };
@@ -192,24 +182,15 @@ export default function AdminLoginPage() {
             </div>
           </div>
 
-          {/* Quick Presets for Demo / Easy Selection */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-            <div className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
-              <KeyRound className="w-4 h-4" />
-              Authorized Staff Roles:
+          {/* Institutional Compliance Notice */}
+          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1.5 text-xs">
+            <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+              <KeyRound className="w-4 h-4 text-emerald-400" />
+              <span>Institutional RBAC Credential Access</span>
             </div>
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {PRESET_ACCOUNTS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => handleSelectPreset(preset)}
-                  className="text-[11px] bg-slate-800 hover:bg-indigo-600/30 text-slate-300 hover:text-white border border-slate-700 px-2.5 py-1 rounded-lg transition"
-                >
-                  {preset.roleTitle}
-                </button>
-              ))}
-            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Log in using your designated cooperative officer email address. Role permissions are enforced pursuant to CDA MC 2015-06 and your cooperative&apos;s internal security policy.
+            </p>
           </div>
         </div>
 

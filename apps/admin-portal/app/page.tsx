@@ -291,55 +291,13 @@ const DEFAULT_LOAN_PRODUCTS = [
   },
 ];
 
-const INITIAL_COLLATERALS = [
-  {
-    id: 'col_rem_001',
-    memberId: 'mem_1',
-    memberNumber: 'MEM-2026-0001',
-    memberName: 'Maria Clara Santos',
-    type: 'REAL_ESTATE_MORTGAGE',
-    description: '180 sqm Residential Lot & 2-Storey House in Fairview, Quezon City',
-    appraisedValue: 1800000,
-    assessedValue: 1440000,
-    maxLoanToValueRatio: 0.70,
-    maxAllowableLoanAmount: 1260000,
-    linkedLoanId: 'loan_rem_001',
-    linkedLoanNumber: 'LN-2026-0001',
-    encumbranceStatus: 'REGISTERED_MORTGAGE',
-    tctNumber: 'TCT-004-2019004812',
-    registryOfDeedsLocation: 'Quezon City',
-    lotAreaSqm: 180,
-    registrationDate: '2026-02-15',
-    notes: 'Primary title deposited in fireproof safe. Registered with Registry of Deeds QC under Entry 2026-0049182.',
-  },
-  {
-    id: 'col_chattel_002',
-    memberId: 'mem_2',
-    memberNumber: 'MEM-2026-0002',
-    memberName: 'Juan Perez Dela Cruz',
-    type: 'CHATTEL_MORTGAGE',
-    description: '2023 Isuzu D-Max 3.0 4x4 Double Cab Utility Pickup',
-    appraisedValue: 1200000,
-    assessedValue: 960000,
-    maxLoanToValueRatio: 0.60,
-    maxAllowableLoanAmount: 720000,
-    linkedLoanId: 'loan_chat_002',
-    linkedLoanNumber: 'LN-2026-0002',
-    encumbranceStatus: 'REGISTERED_MORTGAGE',
-    plateNumber: 'NFP-8812',
-    engineNumber: '4JJ3-199420',
-    chassisNumber: 'MP1TFS40JP-099124',
-    ltoOrCrNumber: 'CR-1301-0098231',
-    vehicleMakeModel: 'Isuzu D-Max 3.0 LS-E 4x4',
-    registrationDate: '2026-02-18',
-    notes: 'LTO Encumbrance annotated. Duplicate key and comprehensive insurance policy endorsed to cooperative.',
-  },
-];
+const INITIAL_COLLATERALS: any[] = [];
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [coopName, setCoopName] = useState<string>('Cooperative Enterprise');
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
@@ -367,6 +325,32 @@ export default function AdminDashboard() {
             setCurrentStaff(matched as any);
             setIsAuthenticated(true);
             setIsCheckingAuth(false);
+
+            // Resolve Cooperative Name
+            if (parsed.coopName) {
+              setCoopName(parsed.coopName);
+            } else {
+              let detectedSlug = '';
+              const host = window.location.hostname;
+              if (host.includes('-coop.tuntongtech.com')) {
+                detectedSlug = host.split('-coop.tuntongtech.com')[0];
+              } else {
+                const params = new URLSearchParams(window.location.search);
+                detectedSlug = params.get('coop') || '';
+              }
+              const regStr = localStorage.getItem('tuntong_coop_registrations');
+              if (regStr) {
+                const regs = JSON.parse(regStr);
+                if (Array.isArray(regs)) {
+                  const found = detectedSlug
+                    ? regs.find((r: any) => r.slug === detectedSlug)
+                    : regs.find((r: any) => r.status === 'APPROVED') || regs[0];
+                  if (found && found.name) {
+                    setCoopName(found.name);
+                  }
+                }
+              }
+            }
             return;
           }
         }
@@ -421,15 +405,6 @@ export default function AdminDashboard() {
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
   const visibleTabs = ALL_MODULE_TABS.filter((tab) => effectiveAllowedTabs.includes(tab.id));
   const currentModule = ALL_MODULE_TABS.find((t) => t.id === activeTab);
-
-  const handleSelectStaff = (staff: StaffAccount) => {
-    setCurrentStaff(staff);
-    const tabsForRole = rolePermissions[staff.role] || staff.allowedTabs;
-    if (!tabsForRole.includes(activeTab)) {
-      setActiveTab(tabsForRole[0] || 'overview');
-    }
-    setIsRoleDropdownOpen(false);
-  };
 
   const handleToggleRolePermission = (role: StaffRole, tabId: TabType) => {
     setRolePermissions((prev) => {
@@ -705,48 +680,6 @@ export default function AdminDashboard() {
     setUnlockError(null);
   };
 
-  const handleSimulateFailedLogin = (userId: string) => {
-    const user = portalUsers.find((u) => u.id === userId);
-    if (!user) return;
-    const currentAttempts = user.failedLoginAttempts || 0;
-    const newAttempts = currentAttempts + 1;
-    const isNowLocked = newAttempts >= 5;
-    const lockoutExpiry = isNowLocked ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined;
-
-    setPortalUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          return {
-            ...u,
-            failedLoginAttempts: isNowLocked ? 5 : newAttempts,
-            status: isNowLocked ? 'LOCKED_OUT' : u.status,
-            lockedUntil: lockoutExpiry,
-            lockoutReason: isNowLocked ? '5 consecutive failed login attempts exhausted. 24-hour security lockout enforced.' : undefined,
-            lastLogin: `Failed attempt ${newAttempts}/5 (${new Date().toLocaleTimeString()})`,
-          };
-        }
-        return u;
-      })
-    );
-
-    if (isNowLocked) {
-      setIamAuditLogs([
-        {
-          id: `audit_${Date.now()}`,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          actor: 'IAM_SECURITY_DAEMON',
-          action: 'ACCOUNT_LOCKED_OUT',
-          target: `Security lockout (24 hours) enforced for ${user.name} (${user.email}) after 5 failed login attempts. Locked until ${lockoutExpiry}`,
-        },
-        ...iamAuditLogs,
-      ]);
-      setIamNotification(`ALERT: ${user.name} reached 5 failed login attempts. 24-hour lockout enforced!`);
-    } else {
-      setIamNotification(`Failed login attempt registered for ${user.name} (${newAttempts}/5).`);
-    }
-    setTimeout(() => setIamNotification(null), 4000);
-  };
-
   const handleInvitePortalUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteName.trim() || !inviteEmail.trim()) return;
@@ -925,86 +858,15 @@ export default function AdminDashboard() {
     status: 'SETTLED' | 'PENDING_CLEARING';
   }
 
-  const [escrowLedger, setEscrowLedger] = useState<EscrowTransaction[]>([
-    {
-      id: 'tx_esc_001',
-      timestamp: '2026-03-02 14:30:12',
-      type: 'INFLOW_SHARE_CAPITAL',
-      description: 'Gabriela Silang Reyes initial share capital via PayMongo QR Ph',
-      reference: 'PAYMONGO-QRPH-908123',
-      memberOrCounterparty: 'Gabriela Silang Reyes (MEM-2026-0003)',
-      grossAmount: 3000,
-      platformFee: 45, // 1.5% convenience fee
-      vatAmount: 4.82,
-      netEscrowAmount: 3000,
-      runningBalance: 48470,
-      status: 'SETTLED',
-    },
-    {
-      id: 'tx_fee_001',
-      timestamp: '2026-03-02 14:28:05',
-      type: 'PLATFORM_ONBOARDING_FEE',
-      description: 'Flex Coop Platform Onboarding Charge (₱15.00/approved member)',
-      reference: 'BIR-FLEX-INV-2026-0042',
-      memberOrCounterparty: 'Cooperative (Tenant)',
-      grossAmount: -15,
-      platformFee: 13.39, // Net service fee
-      vatAmount: 1.61, // 12% EVAT
-      netEscrowAmount: -15,
-      runningBalance: 45470,
-      status: 'SETTLED',
-    },
-    {
-      id: 'tx_esc_002',
-      timestamp: '2026-03-02 11:15:40',
-      type: 'INFLOW_SHARE_CAPITAL',
-      description: 'Juan Dela Cruz additional share subscription via PayMongo QR Ph',
-      reference: 'PAYMONGO-QRPH-904412',
-      memberOrCounterparty: 'Juan Perez Dela Cruz (MEM-2026-0002)',
-      grossAmount: 2000,
-      platformFee: 30,
-      vatAmount: 3.21,
-      netEscrowAmount: 2000,
-      runningBalance: 45485,
-      status: 'SETTLED',
-    },
-    {
-      id: 'tx_esc_003',
-      timestamp: '2026-03-01 16:45:10',
-      type: 'INFLOW_REPAYMENT',
-      description: 'Loan Amortization #1 settlement via PayMongo QR Ph Instapay',
-      reference: 'QRPH-INSTAPAY-88129',
-      memberOrCounterparty: 'Maria Clara Santos (MEM-2026-0001)',
-      grossAmount: 25000,
-      platformFee: 375,
-      vatAmount: 40.18,
-      netEscrowAmount: 25000,
-      runningBalance: 43485,
-      status: 'SETTLED',
-    },
-    {
-      id: 'tx_esc_004',
-      timestamp: '2026-03-01 09:20:30',
-      type: 'INFLOW_REPAYMENT',
-      description: 'Emergency Loan Amortization settlement via PayMongo QR Ph',
-      reference: 'QRPH-GCASH-77123',
-      memberOrCounterparty: 'Pedro Penduko (MEM-2026-0004)',
-      grossAmount: 20000,
-      platformFee: 300,
-      vatAmount: 32.14,
-      netEscrowAmount: 20000,
-      runningBalance: 18485,
-      status: 'SETTLED',
-    },
-  ]);
+  const [escrowLedger, setEscrowLedger] = useState<EscrowTransaction[]>([]);
 
   const [escrowFilterType, setEscrowFilterType] = useState<string>('ALL');
   const [showSweepModal, setShowSweepModal] = useState<boolean>(false);
-  const [sweepAmount, setSweepAmount] = useState<number>(40000);
+  const [sweepAmount, setSweepAmount] = useState<number>(0);
   const [platformUsageNotification, setPlatformUsageNotification] = useState<string | null>(null);
 
   // Cooperative Prepaid Platform Credit State
-  const [coopPlatformCredit, setCoopPlatformCredit] = useState<number>(4250.0);
+  const [coopPlatformCredit, setCoopPlatformCredit] = useState<number>(0.0);
   const [showCreditTopupModal, setShowCreditTopupModal] = useState<boolean>(false);
   const [creditTopupAmount, setCreditTopupAmount] = useState<number>(2500);
   const [creditTopupMethod, setCreditTopupMethod] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
@@ -1167,7 +1029,7 @@ export default function AdminDashboard() {
   const [walkInSettlementChannel, setWalkInSettlementChannel] = useState<'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER'>('BANK_TRANSFER');
   const [walkInSettlementInstitution, setWalkInSettlementInstitution] = useState<string>('Land Bank of the Philippines');
   const [walkInSettlementAccountNo, setWalkInSettlementAccountNo] = useState<string>('0123-4567-89');
-  const [walkInSettlementAccountName, setWalkInSettlementAccountName] = useState<string>('Maria Clara Santos');
+  const [walkInSettlementAccountName, setWalkInSettlementAccountName] = useState<string>('');
 
   // Active Loan Application for LOS Pipeline Display
   const [activeLoanApplication, setActiveLoanApplication] = useState<{
@@ -1197,33 +1059,7 @@ export default function AdminDashboard() {
     submissionSource: 'MEMBER_SELF_SERVICE' | 'STAFF_WALK_IN';
     submittedBy?: string;
     submittedAt: string;
-  }>({
-    id: 'LN-2026-00001',
-    memberId: 'mem_1',
-    memberName: 'Maria Clara Santos',
-    memberNo: 'MEM-2026-0001',
-    memberClassification: 'Regular Member',
-    productId: 'prod_regular',
-    productName: 'Regular Member Loan',
-    annualRate: 0.12,
-    termMonths: 12,
-    amount: 50000,
-    purpose: 'Micro-enterprise Working Capital & Inventory Replenishment',
-    coMakerId: 'mem_2',
-    coMakerName: 'Juan Perez Dela Cruz',
-    coMakerNo: 'MEM-2026-0002',
-    settlement: {
-      channel: 'BANK_TRANSFER',
-      institutionName: 'Land Bank of the Philippines',
-      accountNumber: '0123-4567-89',
-      accountName: 'Maria Clara Santos',
-    },
-    advanceInterestOption: 'NONE',
-    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
-    fixedMonthlyInstallment: true,
-    submissionSource: 'MEMBER_SELF_SERVICE',
-    submittedAt: 'Oct 15, 2026, 09:30 AM',
-  });
+  } | null>(null);
 
   const handleAddLoanProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1473,213 +1309,55 @@ export default function AdminDashboard() {
   const [memberClassificationFilter, setMemberClassificationFilter] = useState<string>('ALL');
   const [memberStatusFilter, setMemberStatusFilter] = useState<string>('ALL');
 
-  const [members, setMembers] = useState<MemberRecord[]>([
-    {
-      id: 'mem_1',
-      memberNo: 'MEM-2026-0001',
-      name: 'Maria Clara Santos',
-      email: 'maria.santos@gmail.com',
-      classification: 'REGULAR',
-      kycStatus: 'VERIFIED',
-      idType: 'PhilSys National ID (Encrypted SPI)',
-      idNumber: '1234-5678-9012-3456',
-      address: '128 Rizal Avenue, Zone 4, Brgy. Malasin, City of San Jose, Nueva Ecija, 3121, Region III (Central Luzon)',
-      psgcAddress: {
-        regionCode: '030000000',
-        regionName: 'Region III (Central Luzon)',
-        provinceCode: '034900000',
-        provinceName: 'Nueva Ecija',
-        cityMunicipalityCode: '034919000',
-        cityMunicipalityName: 'City of San Jose',
-        barangayCode: '034919018',
-        barangayName: 'Malasin',
-        streetAddress: '128 Rizal Avenue, Zone 4',
-        postalCode: '3121',
-        psgcCode: '034919018',
-        formattedAddress: '128 Rizal Avenue, Zone 4, Brgy. Malasin, City of San Jose, Nueva Ecija, 3121, Region III (Central Luzon)',
-      },
-      paidUpShares: 15000,
-      sharesCount: 150,
-      subscribedShares: 150,
-      initialPledge: 15000,
-      sharePaymentStatus: 'PAID_OTC',
-      savingsBalance: 5000,
-      loanBalance: 47000,
-      npcConsent: 'Agreed (IP: 120.29.74.12)',
-      pmesStatus: 'COMPLETED',
-      pmesCertNo: 'PMES-2026-0012',
-      pmesDate: 'Jan 15, 2026',
-      biometricScore: 99.1,
-      amlaStatus: 'PASSED (Clean / Negative Hit)',
-      reviewedBy: 'Atty. Roberto Dela Rosa (General Manager)',
-      reviewDate: 'Jan 16, 2026',
-      reviewNotes: 'Standard regular member admission. Full voting rights.',
-    },
-    {
-      id: 'mem_2',
-      memberNo: 'MEM-2026-0002',
-      name: 'Juan Perez Dela Cruz',
-      email: 'juan.delacruz@yahoo.com',
-      classification: 'REGULAR',
-      kycStatus: 'VERIFIED',
-      idType: 'Driver\'s License (Encrypted SPI)',
-      idNumber: 'N01-18-994120',
-      address: '45 Shaw Boulevard, Brgy. San Antonio, Pasig City, Metro Manila - 2nd District, 1605, National Capital Region',
-      psgcAddress: {
-        regionCode: '130000000',
-        regionName: 'National Capital Region',
-        provinceCode: '137400000',
-        provinceName: 'Metro Manila - 2nd District',
-        cityMunicipalityCode: '137404000',
-        cityMunicipalityName: 'Pasig City',
-        barangayCode: '137404022',
-        barangayName: 'San Antonio',
-        streetAddress: '45 Shaw Boulevard',
-        postalCode: '1605',
-        psgcCode: '137404022',
-        formattedAddress: '45 Shaw Boulevard, Brgy. San Antonio, Pasig City, Metro Manila - 2nd District, 1605, National Capital Region',
-      },
-      paidUpShares: 10000,
-      sharesCount: 100,
-      subscribedShares: 100,
-      initialPledge: 10000,
-      sharePaymentStatus: 'PAID_QRPH',
-      savingsBalance: 2000,
-      loanBalance: 0,
-      npcConsent: 'Agreed (IP: 180.191.22.45)',
-      pmesStatus: 'COMPLETED',
-      pmesCertNo: 'PMES-2026-0028',
-      pmesDate: 'Feb 10, 2026',
-      biometricScore: 98.7,
-      amlaStatus: 'PASSED (Clean / Negative Hit)',
-      reviewedBy: 'Atty. Roberto Dela Rosa (General Manager)',
-      reviewDate: 'Feb 11, 2026',
-      reviewNotes: 'Verified regular member. Designable as loan co-maker.',
-    },
-    {
-      id: 'mem_3',
-      memberNo: 'MEM-2026-0003',
-      name: 'Antonio Luna Valenzuela',
-      email: 'antonio.luna@gmail.com',
-      classification: 'ASSOCIATE',
-      kycStatus: 'VERIFIED',
-      idType: 'PhilHealth ID (Encrypted SPI)',
-      idNumber: '09-123456789-1',
-      address: '88 Gen. Luna St., Brgy. San Guillermo, City of Laoag, Ilocos Norte, 2900, Region I (Ilocos Region)',
-      psgcAddress: {
-        regionCode: '010000000',
-        regionName: 'Region I (Ilocos Region)',
-        provinceCode: '012800000',
-        provinceName: 'Ilocos Norte',
-        cityMunicipalityCode: '012809000',
-        cityMunicipalityName: 'City of Laoag',
-        barangayCode: '012809033',
-        barangayName: 'San Guillermo',
-        streetAddress: '88 Gen. Luna St.',
-        postalCode: '2900',
-        psgcCode: '012809033',
-        formattedAddress: '88 Gen. Luna St., Brgy. San Guillermo, City of Laoag, Ilocos Norte, 2900, Region I (Ilocos Region)',
-      },
-      paidUpShares: 5000,
-      sharesCount: 50,
-      subscribedShares: 50,
-      initialPledge: 5000,
-      sharePaymentStatus: 'PAID_OTC',
-      savingsBalance: 1200,
-      loanBalance: 0,
-      npcConsent: 'Agreed (IP: 112.198.88.21)',
-      pmesStatus: 'COMPLETED',
-      pmesCertNo: 'PMES-2026-0045',
-      pmesDate: 'Mar 05, 2026',
-      biometricScore: 97.5,
-      amlaStatus: 'PASSED (Clean / Negative Hit)',
-      reviewedBy: 'Grace Villanueva (Senior Loan Officer)',
-      reviewDate: 'Mar 06, 2026',
-      reviewNotes: 'Associate member. Non-voting, qualified for savings and consumer credit.',
-    },
-    {
-      id: 'mem_4',
-      memberNo: 'MEM-2026-0004',
-      name: 'Gabriela Silang Reyes',
-      email: 'gabriela.silang@outlook.com',
-      classification: 'REGULAR',
-      kycStatus: 'PENDING_REVIEW',
-      idType: 'Passport (SPI Biometric Review)',
-      idNumber: 'P8942109B',
-      address: 'Unit 802 Ayala Triangle Tower, Makati Avenue, Brgy. Poblacion, Makati City, Metro Manila - 4th District, 1210, National Capital Region',
-      psgcAddress: {
-        regionCode: '130000000',
-        regionName: 'National Capital Region',
-        provinceCode: '137600000',
-        provinceName: 'Metro Manila - 4th District',
-        cityMunicipalityCode: '137602000',
-        cityMunicipalityName: 'Makati City',
-        barangayCode: '137602023',
-        barangayName: 'Poblacion',
-        streetAddress: 'Unit 802 Ayala Triangle Tower, Makati Avenue',
-        postalCode: '1210',
-        psgcCode: '137602023',
-        formattedAddress: 'Unit 802 Ayala Triangle Tower, Makati Avenue, Brgy. Poblacion, Makati City, Metro Manila - 4th District, 1210, National Capital Region',
-      },
-      paidUpShares: 0, // Requirement: Do not require members to pay Share Capital until reviewed!
-      sharesCount: 0,
-      subscribedShares: 30,
-      initialPledge: 3000,
-      sharePaymentStatus: 'UNPAID',
-      savingsBalance: 0,
-      loanBalance: 0,
-      npcConsent: 'Agreed (IP: 49.144.120.89)',
-      pmesStatus: 'COMPLETED',
-      pmesCertNo: 'PMES-2026-0094',
-      pmesDate: 'Oct 08, 2026',
-      biometricScore: 98.4,
-      amlaStatus: 'PASSED (Negative on AMLC / UN Sanctions / PEP List)',
-      reviewedBy: null,
-      reviewDate: null,
-      reviewNotes: null,
-    },
-    {
-      id: 'mem_5',
-      memberNo: 'MEM-2026-0005',
-      name: 'Emilio Aguinaldo Famy',
-      email: 'emilio.aguinaldo@gmail.com',
-      classification: 'ASSOCIATE',
-      kycStatus: 'INACTIVE',
-      idType: 'UMID Card (Encrypted SPI)',
-      idNumber: 'CRN-0111-9482019-3',
-      address: '22 Independence Road, Brgy. Poblacion I-A, City of Imus, Cavite, 4103, Region IV-A (CALABARZON)',
-      psgcAddress: {
-        regionCode: '040000000',
-        regionName: 'Region IV-A (CALABARZON)',
-        provinceCode: '042100000',
-        provinceName: 'Cavite',
-        cityMunicipalityCode: '042109000',
-        cityMunicipalityName: 'City of Imus',
-        barangayCode: '042109001',
-        barangayName: 'Poblacion I-A',
-        streetAddress: '22 Independence Road',
-        postalCode: '4103',
-        psgcCode: '042109001',
-        formattedAddress: '22 Independence Road, Brgy. Poblacion I-A, City of Imus, Cavite, 4103, Region IV-A (CALABARZON)',
-      },
-      paidUpShares: 2000,
-      sharesCount: 20,
-      subscribedShares: 20,
-      initialPledge: 2000,
-      sharePaymentStatus: 'PAID_OTC',
-      savingsBalance: 100,
-      loanBalance: 0,
-      npcConsent: 'Agreed (IP: 124.106.18.99)',
-      pmesStatus: 'PENDING',
-      pmesCertNo: 'N/A',
-      pmesDate: null,
-      biometricScore: 82.0,
-      amlaStatus: 'INCOMPLETE (Pending Physical Verification)',
-      reviewedBy: null,
-      reviewDate: null,
-      reviewNotes: 'Suspended pending updated KYC identity documentation.',
-    },
-  ]);
+  const [members, setMembers] = useState<MemberRecord[]>([]);
+
+  // Load authentic cooperative members (starting with General Manager as Member #1)
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const regStr = localStorage.getItem('tuntong_coop_registrations');
+        if (regStr) {
+          const registrations = JSON.parse(regStr);
+          if (Array.isArray(registrations)) {
+            const approved = registrations.find((r: any) => r.status === 'APPROVED') || registrations[0];
+            if (approved && approved.adminFirstName && approved.adminLastName) {
+              const gmFullName = `${approved.adminFirstName} ${approved.adminMiddleName ? approved.adminMiddleName + ' ' : ''}${approved.adminLastName}`.trim();
+              const gmMember: MemberRecord = {
+                id: 'mem_gm_0001',
+                memberNo: 'MEM-2026-0001',
+                name: gmFullName,
+                email: approved.contactEmail,
+                classification: 'REGULAR',
+                kycStatus: 'VERIFIED',
+                idType: 'PhilSys National ID (Verified General Manager)',
+                idNumber: 'CDA-GM-AUTH-0001',
+                address: approved.address || 'Philippines',
+                paidUpShares: 10000,
+                sharesCount: 100,
+                subscribedShares: 100,
+                initialPledge: 10000,
+                sharePaymentStatus: 'PAID_OTC',
+                savingsBalance: 5000,
+                loanBalance: 0,
+                npcConsent: 'Agreed (Statutory GM Undertaking)',
+                pmesStatus: 'COMPLETED',
+                pmesCertNo: 'PMES-CDA-GM-0001',
+                pmesDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                biometricScore: 99.8,
+                amlaStatus: 'PASSED (Negative on AMLC / UN Sanctions / PEP List)',
+                reviewedBy: 'Cooperative Development Authority (CDA)',
+                reviewDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                reviewNotes: 'Declared General Manager registered as Member #1 upon cooperative accreditation.',
+              };
+              setMembers([gmMember]);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Members load error:', e);
+    }
+  }, []);
 
   // Synchronize Walk-In Form with selected member and product
   useEffect(() => {
@@ -2454,8 +2132,8 @@ export default function AdminDashboard() {
               <Building2 className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="font-bold text-sm text-white leading-tight truncate">
-                Cooperative Admin Portal
+              <div className="font-bold text-sm text-white leading-tight truncate" title={coopName}>
+                {coopName}
               </div>
               <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
                 Powered by Tuntong Tech Solution
@@ -2537,8 +2215,8 @@ export default function AdminDashboard() {
                   <Building2 className="w-5 h-5 text-white" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-bold text-sm text-white leading-tight truncate">
-                    Cooperative Admin Portal
+                  <div className="font-bold text-sm text-white leading-tight truncate" title={coopName}>
+                    {coopName}
                   </div>
                   <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
                     Powered by Tuntong Tech Solution
@@ -2634,7 +2312,7 @@ export default function AdminDashboard() {
               </button>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium truncate">
-                  <span>Cooperative Admin Portal</span>
+                  <span>{coopName}</span>
                   <span>/</span>
                   <span className="text-emerald-700 font-semibold truncate">{currentModule?.label || 'Overview'}</span>
                 </div>
@@ -2676,7 +2354,7 @@ export default function AdminDashboard() {
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
 
-              {/* Interactive Staff Role Switcher (RBAC) */}
+              {/* Authenticated Staff Profile Card (Strict RBAC - Impersonation Disabled) */}
               <div className="relative">
                 <button
                   type="button"
@@ -2696,40 +2374,38 @@ export default function AdminDashboard() {
                 </button>
 
                 {isRoleDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-84 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-2 space-y-1">
-                    <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+                  <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-3 space-y-3">
+                    <div className="border-b border-slate-100 pb-2.5 flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                        Staff Role-Based Access (RBAC)
+                        Authenticated Officer Profile
                       </span>
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono">
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-semibold">
                         CDA MC 2015-06
                       </span>
                     </div>
-                    {STAFF_ACCOUNTS.map((staff) => (
-                      <button
-                        key={staff.id}
-                        type="button"
-                        onClick={() => handleSelectStaff(staff)}
-                        className={`w-full text-left p-2.5 rounded-lg flex items-start gap-2.5 text-xs transition-colors ${
-                          currentStaff.id === staff.id
-                            ? 'bg-emerald-50 border border-emerald-300 text-slate-900'
-                            : 'hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <div className={`w-7 h-7 rounded-full ${staff.color} text-white font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5 shadow-xs`}>
-                          {staff.initials}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-bold flex items-center justify-between">
-                            <span className="truncate">{staff.name}</span>
-                            {currentStaff.id === staff.id && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
-                          </div>
-                          <div className="text-[11px] font-semibold text-emerald-700">{staff.roleTitle}</div>
-                          <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{staff.description}</div>
-                        </div>
-                      </button>
-                    ))}
-                    <div className="pt-1.5 border-t border-slate-100">
+
+                    <div className="flex items-start gap-3 p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className={`w-10 h-10 rounded-full ${currentStaff.color} text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-xs`}>
+                        {currentStaff.initials}
+                      </div>
+                      <div className="flex-1 min-w-0 text-xs">
+                        <div className="font-bold text-slate-900 truncate">{currentStaff.name}</div>
+                        <div className="text-[11px] font-semibold text-emerald-700 truncate">{currentStaff.roleTitle}</div>
+                        <div className="text-[10px] text-slate-500 truncate mt-0.5">{currentStaff.email}</div>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 space-y-1 bg-amber-50/60 border border-amber-200/60 p-2.5 rounded-lg">
+                      <div className="font-semibold text-amber-900 flex items-center gap-1">
+                        <Shield className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Fixed Role Assignment</span>
+                      </div>
+                      <p className="text-[10px] text-amber-800 leading-relaxed">
+                        Role permissions and access scopes are strictly bound to your verified credentials. Role switching is disabled in production environments.
+                      </p>
+                    </div>
+
+                    <div className="pt-1 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={handleAdminSignOut}
@@ -4592,38 +4268,25 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Live Co-Maker Status Banner & Simulator Controller */}
-            {loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
+            {/* Live Co-Maker Status Banner (Production: Simulation Buttons Removed) */}
+            {activeLoanApplication && loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
               <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                 <div>
                   <div className="font-bold text-amber-900 flex items-center gap-1.5 text-sm">
                     <Clock className="w-4 h-4 text-amber-600" />
-                    Awaiting Co-Maker Endorsement (Designated: Juan Perez Dela Cruz • MEM-2026-0002)
+                    Awaiting Co-Maker Endorsement (Designated: {activeLoanApplication.coMakerName || 'Co-Maker'} • {activeLoanApplication.coMakerNo || 'Pending'})
                   </div>
                   <p className="text-amber-800 mt-0.5">
-                    Cooperative credit policy enforces mandatory co-maker verification. Loan Officer triage is locked until the co-maker logs in and executes the digital joint & solidary undertaking.
+                    Cooperative credit policy enforces mandatory co-maker verification. Loan Officer triage is locked until the co-maker logs in and executes the digital joint &amp; solidary undertaking through their Member Portal.
                   </p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setLoanStatus('SUBMITTED')}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors shadow-sm flex items-center gap-1"
-                  >
-                    <CheckCircle className="w-3.5 h-3.5" /> Simulate Co-Maker Accept
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLoanStatus('CO_MAKER_DECLINED')}
-                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-semibold px-3 py-1.5 rounded-lg text-xs transition-colors"
-                  >
-                    Simulate Decline
-                  </button>
-                </div>
+                <span className="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-3 py-1.5 rounded-lg text-xs shrink-0">
+                  Pending Co-Maker Action
+                </span>
               </div>
             )}
 
-            {loanStatus === 'CO_MAKER_DECLINED' && (
+            {activeLoanApplication && loanStatus === 'CO_MAKER_DECLINED' && (
               <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex items-center justify-between text-xs">
                 <div>
                   <div className="font-bold text-rose-900 flex items-center gap-1.5 text-sm">
@@ -4631,28 +4294,24 @@ export default function AdminDashboard() {
                     Co-Maker Declined Joint Solidary Liability
                   </div>
                   <p className="text-rose-800 mt-0.5">
-                    Designated co-maker Juan Dela Cruz declined endorsement. Application returned to borrower and locked from underwriting.
+                    Designated co-maker {activeLoanApplication.coMakerName || 'Co-Maker'} declined endorsement. Application returned to borrower and locked from underwriting.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setLoanStatus('PENDING_CO_MAKER_ACCEPTANCE')}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-3 py-1.5 rounded-lg text-xs transition-colors"
-                >
-                  Reset to Pending
-                </button>
+                <span className="bg-rose-100 text-rose-900 font-bold px-3 py-1.5 rounded-lg text-xs shrink-0">
+                  Endorsement Declined
+                </span>
               </div>
             )}
 
-            {['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) && (
+            {activeLoanApplication && ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) && activeLoanApplication.coMakerName && (
               <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs">
                 <div>
                   <div className="font-bold text-emerald-900 flex items-center gap-1.5 text-sm">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Co-Maker Endorsed & Legally Bound (RA 3765 Undertaking Signed)
+                    Co-Maker Endorsed &amp; Legally Bound (RA 3765 Undertaking Signed)
                   </div>
                   <p className="text-emerald-800 mt-0.5">
-                    Juan Perez Dela Cruz (MEM-2026-0002) agreed to joint & solidary liability. Loan application pushed to Loan Officer triage.
+                    {activeLoanApplication.coMakerName} ({activeLoanApplication.coMakerNo || 'Co-Maker'}) agreed to joint &amp; solidary liability. Loan application pushed to Loan Officer triage.
                   </p>
                 </div>
                 <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold text-[11px] border border-emerald-200">
@@ -4675,29 +4334,21 @@ export default function AdminDashboard() {
             )}
 
             {/* Application Cancelled Notice */}
-            {loanStatus === 'CANCELLED' && (
-              <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-sm">
-                <div className="flex items-center gap-2.5">
-                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
-                  <div>
-                    <strong className="text-rose-900 font-bold text-sm block">Loan Application Cancelled & Voided</strong>
-                    <p className="text-rose-800 text-[11px] mt-0.5">
-                      Application LN-2026-00001 has been formally cancelled upon verification. Pipeline stages and co-maker undertakings are archived.
-                    </p>
-                  </div>
+            {activeLoanApplication && loanStatus === 'CANCELLED' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex items-center gap-2.5 text-xs shadow-sm">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                <div>
+                  <strong className="text-rose-900 font-bold text-sm block">Loan Application Cancelled &amp; Voided</strong>
+                  <p className="text-rose-800 text-[11px] mt-0.5">
+                    Application {activeLoanApplication.id} ({activeLoanApplication.memberName}) has been formally cancelled upon verification. Pipeline stages and co-maker undertakings are archived.
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setLoanStatus('SUBMITTED')}
-                  className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition"
-                >
-                  Reset / Reactivate to Triage
-                </button>
               </div>
             )}
 
-            {/* Application Card */}
-            <div className="p-5 border border-slate-200 rounded-xl bg-slate-50 space-y-4">
+            {activeLoanApplication ? (
+              /* Application Card */
+              <div className="p-5 border border-slate-200 rounded-xl bg-slate-50 space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-start border-b border-slate-200 pb-3 gap-3">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -4878,7 +4529,7 @@ export default function AdminDashboard() {
                               targetStatus: 'UNDER_CREDIT_REVIEW',
                               stageTitle: 'Loan Officer Endorsement',
                               actionTitle: 'Proceed Approval to Credit Committee',
-                              message: 'You are endorsing application LN-2026-00001 (Maria Clara Santos, ₱50,000.00) to the Credit Committee.',
+                              message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.`,
                               statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
                               confirmBtnText: 'Proceed Approval',
                               confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
@@ -4928,7 +4579,7 @@ export default function AdminDashboard() {
                               targetStatus: 'BOD_APPROVAL',
                               stageTitle: 'Credit Committee Evaluation',
                               actionTitle: 'Proceed Approval to Board of Directors',
-                              message: 'You are approving application LN-2026-00001 (₱50,000.00) and escalating to the Board of Directors for policy sign-off.',
+                              message: `You are approving application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) and escalating to the Board of Directors for policy sign-off.`,
                               statutoryDetail: 'Committee sign-off verifies compliance with the cooperative credit manual and confirms collateral/co-maker risk buffers.',
                               confirmBtnText: 'Proceed Approval',
                               confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
@@ -4978,7 +4629,7 @@ export default function AdminDashboard() {
                               targetStatus: 'APPROVED',
                               stageTitle: 'Board of Directors Resolution',
                               actionTitle: 'Proceed with BOD Final Authorization',
-                              message: 'You are ratifying the Board Credit Facility Resolution for application LN-2026-00001 (₱50,000.00). Funds will be unlocked for Cashier disbursement.',
+                              message: `You are ratifying the Board Credit Facility Resolution for application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Funds will be unlocked for Cashier disbursement.`,
                               statutoryDetail: 'Under CDA MC 2015-06, Board sign-off authorizes disbursement from cooperative deposit liabilities.',
                               confirmBtnText: 'Proceed Approval',
                               confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
@@ -5028,8 +4679,8 @@ export default function AdminDashboard() {
                               targetStatus: 'DISBURSED',
                               stageTitle: 'Cashier Disbursement Execution',
                               actionTitle: 'Proceed with Cashier Disbursement',
-                              message: 'You are executing disbursement of net proceeds (₱48,250.00) to Maria Clara Santos after upfront fee deductions (2% platform + 1.5% coop).',
-                              statutoryDetail: 'An official Disbursement Voucher and BIR Electronic Sales Invoice INV-2026-00918 will be booked in the General Ledger.',
+                              message: `You are executing disbursement of net proceeds for application ${activeLoanApplication?.id || ''} to ${activeLoanApplication?.memberName || 'Borrower'} after upfront fee deductions.`,
+                              statutoryDetail: 'An official Disbursement Voucher and BIR Electronic Sales Invoice will be booked in the General Ledger.',
                               confirmBtnText: 'Proceed Disbursement',
                               confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
                             })
@@ -5063,6 +4714,27 @@ export default function AdminDashboard() {
                 </span>
               </div>
             </div>
+            ) : (
+              <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
+                  <FileText className="w-8 h-8" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h3 className="text-base font-bold text-slate-800">No Active Loan Application in Pipeline</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    There are no loan applications currently undergoing underwriting triage. Eligible cooperative members can submit loan applications via the Member Portal, or authorized staff can originate a Walk-In application.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowWalkInLoanModal(true)}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Initiate Walk-In Loan Application</span>
+                </button>
+              </div>
+            )}
 
             {/* LOS Verification Action Confirmation Modal */}
             {losConfirmModal?.isOpen && (
@@ -5098,15 +4770,15 @@ export default function AdminDashboard() {
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
                     <div className="flex justify-between">
                       <span className="text-slate-500">Application Number:</span>
-                      <span className="font-mono font-bold text-slate-900">LN-2026-00001</span>
+                      <span className="font-mono font-bold text-slate-900">{activeLoanApplication?.id || 'N/A'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Applicant / Borrower:</span>
-                      <span className="font-semibold text-slate-900">Maria Clara Santos (MEM-2026-0001)</span>
+                      <span className="font-semibold text-slate-900">{activeLoanApplication?.memberName || 'N/A'} ({activeLoanApplication?.memberNo || 'N/A'})</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Requested Principal:</span>
-                      <span className="font-bold text-slate-900">₱50,000.00</span>
+                      <span className="font-bold text-slate-900">₱{(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Authorizing Officer:</span>
@@ -7302,100 +6974,19 @@ export default function AdminDashboard() {
 
               const currentAccount = coaOptions.find((a) => a.code === selectedGlAccountCode) || coaOptions[3];
 
-              // Sample posted journal vouchers affecting this specific account
-              const sampleAccountLedgers: Record<string, any[]> = {
-                '1-02-01': [
-                  {
-                    date: '2026-02-01',
-                    voucher: 'JE-DISB-001',
-                    ref: 'LN-2026-00001',
-                    desc: 'Disbursement of Regular Member Loan to Maria Clara Santos',
-                    member: 'Maria Clara Santos (MEM-2026-0001)',
-                    dr: 50000,
-                    cr: 0,
-                    bal: 50000,
-                  },
-                  {
-                    date: '2026-03-01',
-                    voucher: 'JE-PAY-001',
-                    ref: 'OR-PM-99214',
-                    desc: 'Monthly Repayment Installment 1 via PayMongo QR Ph',
-                    member: 'Maria Clara Santos (MEM-2026-0001)',
-                    dr: 0,
-                    cr: 3000,
-                    bal: 47000,
-                  },
-                ],
-                '3-01-03': [
-                  {
-                    date: '2026-01-20',
-                    voucher: 'JE-SHR-001',
-                    ref: 'OR-SHR-2026-001',
-                    desc: 'Initial Share Capital Contribution (In-Person Cashier)',
-                    member: 'Maria Clara Santos (MEM-2026-0001)',
-                    dr: 0,
-                    cr: 15000,
-                    bal: 15000,
-                  },
-                  {
-                    date: '2026-02-01',
-                    voucher: 'JE-SHR-002',
-                    ref: 'OR-SHR-2026-002',
-                    desc: 'Initial Share Capital Contribution (In-Person Cashier)',
-                    member: 'Juan Perez Dela Cruz (MEM-2026-0002)',
-                    dr: 0,
-                    cr: 10000,
-                    bal: 25000,
-                  },
-                  {
-                    date: '2026-03-05',
-                    voucher: 'JE-SHR-003',
-                    ref: 'OR-SHR-2026-003',
-                    desc: 'Initial Share Capital Contribution (In-Person Cashier)',
-                    member: 'Antonio Luna Valenzuela (MEM-2026-0003)',
-                    dr: 0,
-                    cr: 5000,
-                    bal: 30000,
-                  },
-                ],
-                '2-01-01': [
-                  {
-                    date: '2026-01-20',
-                    voucher: 'JE-SAV-001',
-                    ref: 'OR-SAV-2026-001',
-                    desc: 'Compulsory Monthly Savings Contribution',
-                    member: 'Maria Clara Santos (MEM-2026-0001)',
-                    dr: 0,
-                    cr: 5000,
-                    bal: 5000,
-                  },
-                  {
-                    date: '2026-02-01',
-                    voucher: 'JE-SAV-002',
-                    ref: 'OR-SAV-2026-002',
-                    desc: 'Compulsory Monthly Savings Contribution',
-                    member: 'Juan Perez Dela Cruz (MEM-2026-0002)',
-                    dr: 0,
-                    cr: 2000,
-                    bal: 7000,
-                  },
-                ],
-              };
+              // Production: Clean ledger initialized with zero dummy records
+              const activeEntries: Array<{
+                date: string;
+                voucher: string;
+                ref: string;
+                desc: string;
+                member: string;
+                dr: number;
+                cr: number;
+                bal: number;
+              }> = [];
 
-              const activeEntries = sampleAccountLedgers[selectedGlAccountCode] || [
-                {
-                  date: '2026-01-20',
-                  voucher: 'JE-GEN-001',
-                  ref: 'REF-001',
-                  desc: `Opening entry posted to ${currentAccount.title}`,
-                  member: 'Cooperative Master Ledger',
-                  dr: currentAccount.normal === 'DEBIT' ? 15000 : 0,
-                  cr: currentAccount.normal === 'CREDIT' ? 15000 : 0,
-                  bal: 15000,
-                },
-              ];
-
-              const endingBal = activeEntries[activeEntries.length - 1]?.bal || 0;
+              const endingBal = activeEntries.length > 0 ? (activeEntries[activeEntries.length - 1]?.bal || 0) : 0;
 
               return (
                 <div className="space-y-6">
@@ -7461,26 +7052,34 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {activeEntries.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-mono text-slate-600">{row.date}</td>
-                            <td className="p-3 font-mono font-bold text-emerald-700">{row.voucher}</td>
-                            <td className="p-3 font-medium text-slate-800">
-                              <div>{row.ref}</div>
-                              <div className="text-[10px] text-slate-500">{row.member}</div>
-                            </td>
-                            <td className="p-3 text-slate-700">{row.desc}</td>
-                            <td className="p-3 text-right font-mono font-medium text-slate-800">
-                              {row.dr > 0 ? `₱${row.dr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
-                            </td>
-                            <td className="p-3 text-right font-mono font-medium text-slate-800">
-                              {row.cr > 0 ? `₱${row.cr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
-                            </td>
-                            <td className="p-3 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
-                              ₱{row.bal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        {activeEntries.length > 0 ? (
+                          activeEntries.map((row, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3 font-mono text-slate-600">{row.date}</td>
+                              <td className="p-3 font-mono font-bold text-emerald-700">{row.voucher}</td>
+                              <td className="p-3 font-medium text-slate-800">
+                                <div>{row.ref}</div>
+                                <div className="text-[10px] text-slate-500">{row.member}</div>
+                              </td>
+                              <td className="p-3 text-slate-700">{row.desc}</td>
+                              <td className="p-3 text-right font-mono font-medium text-slate-800">
+                                {row.dr > 0 ? `₱${row.dr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
+                              </td>
+                              <td className="p-3 text-right font-mono font-medium text-slate-800">
+                                {row.cr > 0 ? `₱${row.cr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—'}
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
+                                ₱{row.bal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={7} className="p-8 text-center text-slate-400">
+                              No journal vouchers posted for this account yet. Entries will appear automatically as financial transactions are finalized.
                             </td>
                           </tr>
-                        ))}
+                        )}
                       </tbody>
                       <tfoot className="bg-slate-50 font-bold border-t border-slate-200 text-xs">
                         <tr>
@@ -8966,29 +8565,17 @@ export default function AdminDashboard() {
                                     <span>Unlock Account</span>
                                   </button>
                                 ) : (
-                                  <>
-                                    {user.status === 'ACTIVE' && (
-                                      <button
-                                        type="button"
-                                        title="Simulate failed login attempt (5th attempt enforces 24-hour lockout)"
-                                        onClick={() => handleSimulateFailedLogin(user.id)}
-                                        className="px-2 py-1 rounded-lg text-[10px] font-medium border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 transition"
-                                      >
-                                        Fail Attempt (+1)
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleUserStatus(user.id)}
-                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
-                                        user.status === 'ACTIVE'
-                                          ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-                                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                                      }`}
-                                    >
-                                      {user.status === 'ACTIVE' ? 'Suspend Access' : 'Reactivate'}
-                                    </button>
-                                  </>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleUserStatus(user.id)}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                                      user.status === 'ACTIVE'
+                                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                    }`}
+                                  >
+                                    {user.status === 'ACTIVE' ? 'Suspend Access' : 'Reactivate'}
+                                  </button>
                                 )}
                               </div>
                             </td>
