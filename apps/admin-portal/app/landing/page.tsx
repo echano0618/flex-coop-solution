@@ -25,6 +25,9 @@ import {
   BookOpen,
   QrCode,
   Lock,
+  Scale,
+  Database,
+  FileCheck,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 
@@ -39,87 +42,40 @@ interface CooperativeItem {
   status?: string;
 }
 
-// Initial directory of accredited Philippine cooperatives
-const DEFAULT_DIRECTORY: CooperativeItem[] = [
-  {
-    id: 'coop_bayani',
-    name: 'Bayani Multi-Purpose Cooperative',
-    slug: 'bayani',
-    cdaRegistrationNumber: 'CDA-NCR-2024-00921',
-    tin: '009-887-123-000',
-    address: 'Diliman, Quezon City, Metro Manila',
-    coopType: 'Multi-Purpose',
-    status: 'ACTIVE',
-  },
-  {
-    id: 'coop_tagumpay',
-    name: 'Tagumpay Multi-Purpose Cooperative',
-    slug: 'tagumpay',
-    cdaRegistrationNumber: 'CDA-R04A-2024-00342',
-    tin: '210-984-771-000',
-    address: 'Calamba City, Laguna, Region IV-A',
-    coopType: 'Multi-Purpose',
-    status: 'ACTIVE',
-  },
-  {
-    id: 'coop_pagasa',
-    name: 'Pag-asa Agricultural Development Cooperative',
-    slug: 'pag-asa',
-    cdaRegistrationNumber: 'CDA-R02-2024-00814',
-    tin: '401-829-105-000',
-    address: 'Sitio Maligaya, Ilagan, Isabela, Region II',
-    coopType: 'Agricultural / Credit',
-    status: 'ACTIVE',
-  },
-  {
-    id: 'coop_silangan',
-    name: 'Silangan Transport and Savings Cooperative',
-    slug: 'silangan',
-    cdaRegistrationNumber: 'CDA-R04A-2024-00512',
-    tin: '305-112-998-000',
-    address: 'Poblacion 2, Silang, Cavite',
-    coopType: 'Transport / Savings',
-    status: 'ACTIVE',
-  },
-  {
-    id: 'coop_maharlika',
-    name: 'Maharlika Employees Credit Cooperative',
-    slug: 'maharlika',
-    cdaRegistrationNumber: 'CDA-NCR-2024-01140',
-    tin: '008-774-651-000',
-    address: 'Ortigas Center, Pasig City, Metro Manila',
-    coopType: 'Credit & Microfinance',
-    status: 'ACTIVE',
-  },
-];
-
 export default function CooperativeLandingPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [cooperatives, setCooperatives] = useState<CooperativeItem[]>(DEFAULT_DIRECTORY);
+  const [cooperatives, setCooperatives] = useState<CooperativeItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   // Fetch approved live cooperatives from API and localStorage
   useEffect(() => {
     const fetchCoops = async () => {
       setIsLoading(true);
+      const itemsMap = new Map<string, CooperativeItem>();
+
       try {
         const res = await fetch(`${getApiBaseUrl()}/tenants`);
         if (res.ok) {
           const json = await res.json();
-          if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-            // Merge unique by slug
-            const merged = [...json.data];
-            DEFAULT_DIRECTORY.forEach((def) => {
-              if (!merged.some((m: any) => m.slug === def.slug)) {
-                merged.push(def);
+          if (json.success && Array.isArray(json.data)) {
+            json.data.forEach((t: any) => {
+              if (t.slug) {
+                itemsMap.set(t.slug, {
+                  id: t.id || `tenant_${t.slug}`,
+                  name: t.name,
+                  slug: t.slug,
+                  cdaRegistrationNumber: t.cdaRegistrationNumber || 'CDA Registered',
+                  tin: t.tin,
+                  address: t.address || 'Philippines',
+                  coopType: t.coopType || 'Multi-Purpose',
+                  status: t.status || 'ACTIVE',
+                });
               }
             });
-            setCooperatives(merged);
-            return;
           }
         }
       } catch (err) {
-        console.warn('API fetch for cooperatives fallback to directory:', err);
+        console.warn('API fetch for cooperatives fallback:', err);
       } finally {
         setIsLoading(false);
       }
@@ -131,34 +87,30 @@ export default function CooperativeLandingPage() {
           if (stored) {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed)) {
-              const approved: CooperativeItem[] = parsed
-                .filter((r: any) => r.status === 'APPROVED')
-                .map((r: any) => ({
-                  id: r.id,
-                  name: r.name,
-                  slug: r.slug,
-                  cdaRegistrationNumber: r.cdaRegistrationNumber,
-                  tin: r.tin,
-                  address: r.address || 'Philippines',
-                  coopType: r.coopType || 'Multi-Purpose',
-                  status: 'ACTIVE',
-                }));
-
-              if (approved.length > 0) {
-                const combined: CooperativeItem[] = [...approved];
-                DEFAULT_DIRECTORY.forEach((def) => {
-                  if (!combined.some((c) => c.slug === def.slug)) {
-                    combined.push(def);
+              parsed
+                .filter((r: any) => r.status === 'APPROVED' && r.slug)
+                .forEach((r: any) => {
+                  if (!itemsMap.has(r.slug)) {
+                    itemsMap.set(r.slug, {
+                      id: r.id || `reg_${r.slug}`,
+                      name: r.name,
+                      slug: r.slug,
+                      cdaRegistrationNumber: r.cdaRegistrationNumber || 'CDA Registered',
+                      tin: r.tin,
+                      address: r.address || 'Philippines',
+                      coopType: r.coopType || 'Multi-Purpose',
+                      status: 'ACTIVE',
+                    });
                   }
                 });
-                setCooperatives(combined);
-              }
             }
           }
         }
       } catch (e) {
         console.error(e);
       }
+
+      setCooperatives(Array.from(itemsMap.values()));
     };
 
     fetchCoops();
@@ -213,22 +165,40 @@ export default function CooperativeLandingPage() {
               <Building2 className="w-5 h-5" />
             </div>
             <div>
-              <div className="font-extrabold text-base text-white flex items-center gap-2">
+              <div className="font-extrabold text-base text-white">
                 Coop Solution
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono font-semibold">
-                  CDA Regulated
-                </span>
               </div>
               <div className="text-[11px] text-slate-400">Powered by Tuntong Tech</div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1 sm:gap-3">
+            <a
+              href="#directory"
+              className="hidden lg:flex items-center text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
+            >
+              <span>Directory</span>
+            </a>
+
+            <a
+              href="#privacy"
+              className="hidden md:flex items-center text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
+            >
+              <span>Privacy Policy</span>
+            </a>
+
+            <a
+              href="#terms"
+              className="hidden md:flex items-center text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
+            >
+              <span>Terms of Service</span>
+            </a>
+
             <a
               href="https://cda.gov.ph"
               target="_blank"
               rel="noreferrer"
-              className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
+              className="hidden xl:flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
             >
               <span>CDA Website</span>
               <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
@@ -238,7 +208,7 @@ export default function CooperativeLandingPage() {
               href="https://tuntongtech.com"
               target="_blank"
               rel="noreferrer"
-              className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
+              className="hidden xl:flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition"
             >
               <span>Tuntong Tech</span>
               <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
@@ -402,12 +372,16 @@ export default function CooperativeLandingPage() {
           ) : (
             <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-3xl space-y-4 max-w-lg mx-auto">
               <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                <Search className="w-6 h-6" />
+                <Building2 className="w-6 h-6 text-emerald-400" />
               </div>
               <div className="space-y-1">
-                <h4 className="font-bold text-white text-base">No cooperative found matching &ldquo;{searchQuery}&rdquo;</h4>
+                <h4 className="font-bold text-white text-base">
+                  {searchQuery ? `No cooperative found matching "${searchQuery}"` : 'No accredited cooperatives registered yet'}
+                </h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Is your cooperative not registered yet? Submit your cooperative application online today to join the multi-tenant network.
+                  {searchQuery
+                    ? 'Is your cooperative not registered yet? Submit your cooperative application online today to join the multi-tenant network.'
+                    : 'Be the first to onboard your cooperative on the platform and launch your digital member banking experience.'}
                 </p>
               </div>
               <Link
@@ -486,8 +460,226 @@ export default function CooperativeLandingPage() {
         </div>
       </section>
 
-      {/* 5. REGULATORY PARTNERS & RELATED LINKS SECTION */}
-      <section className="py-12 sm:py-16 px-4 max-w-7xl mx-auto w-full space-y-8">
+      {/* 5. PRIVACY POLICY SECTION */}
+      <section id="privacy" className="py-16 sm:py-24 px-4 max-w-7xl mx-auto w-full space-y-10 border-t border-slate-800/80 scroll-mt-20">
+        <div className="text-center space-y-3 max-w-3xl mx-auto">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Republic Act No. 10173 • National Privacy Commission (NPC)</span>
+          </div>
+          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
+            Privacy Policy &amp; Data Protection Protocol
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+            This Privacy Policy governs the processing, encryption, and protection of member personal information and sensitive financial records across all tenant cooperatives operating within the Flex Coop Solution cloud.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Card 1: Legal Framework & Roles */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-emerald-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 flex items-center justify-center">
+              <Scale className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">1. Legal Basis &amp; Entity Roles</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              In accordance with RA 10173 (Data Privacy Act of 2012) and NPC Circulars:
+            </p>
+            <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4">
+              <li><strong className="text-slate-200">Personal Information Controller (PIC):</strong> The subscribing cooperative maintains autonomous ownership and controller responsibility for member and officer data.</li>
+              <li><strong className="text-slate-200">Personal Information Processor (PIP):</strong> Tuntong Tech Solution operates the multi-tenant cloud infrastructure under strict organizational and technical safeguards.</li>
+            </ul>
+          </div>
+
+          {/* Card 2: Sensitive Personal Information Collected */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-emerald-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-indigo-950/60 border border-indigo-800/60 text-indigo-400 flex items-center justify-center">
+              <Database className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">2. Scope of Data Collected</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              We process data necessary for cooperative banking and statutory compliance:
+            </p>
+            <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4">
+              <li><strong className="text-slate-200">KYC &amp; Identification:</strong> Full legal name, birth date, civil status, Tax Identification Number (TIN), PhilSys Card Number / Government IDs, and proof of address.</li>
+              <li><strong className="text-slate-200">PMES Undertakings:</strong> Pre-Membership Education Seminar records, biometric photo verification, and designated beneficiaries.</li>
+              <li><strong className="text-slate-200">Subsidiary Ledgers:</strong> Share capital subscriptions, savings, time deposits, loan contracts, and official payment receipts.</li>
+            </ul>
+          </div>
+
+          {/* Card 3: Lawful Purpose of Processing */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-emerald-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-cyan-950/60 border border-cyan-800/60 text-cyan-400 flex items-center justify-center">
+              <FileCheck className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">3. Lawful Purpose &amp; Processing</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Member information is processed strictly for legitimate operational purposes:
+            </p>
+            <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4">
+              <li>Maintenance of the Official Cooperative Member Masterlist pursuant to CDA Article 26 of RA 9520.</li>
+              <li>Autonomous credit scoring, loan underwriting, and diminishing balance amortization calculations.</li>
+              <li>Anti-Money Laundering Council (AMLC) risk screening and compliance under Republic Act No. 9160.</li>
+              <li>Reconciliation of double-entry financial journals pursuant to CDA MC 2015-06.</li>
+            </ul>
+          </div>
+
+          {/* Card 4: Cryptographic Security & RBAC */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-emerald-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 flex items-center justify-center">
+              <Lock className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">4. Encryption &amp; Security Architecture</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Enterprise-grade defense-in-depth safeguards protecting every transaction:
+            </p>
+            <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4">
+              <li><strong className="text-slate-200">AES-256-GCM Encryption:</strong> Sensitive Personal Information (PhilSys numbers, government IDs) is encrypted at rest at the field level.</li>
+              <li><strong className="text-slate-200">TLS 1.3 in Transit:</strong> All API and web communications enforce TLS 1.3 transport security.</li>
+              <li><strong className="text-slate-200">Multi-Tenant Isolation:</strong> Strict logical tenant barriers prevent cross-tenant data leakage.</li>
+              <li><strong className="text-slate-200">Dual-Control RBAC:</strong> Least-privilege access enforced across General Manager, Loan Officer, Cashier, and BOD roles.</li>
+            </ul>
+          </div>
+
+          {/* Card 5: Member Rights Under RA 10173 */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-emerald-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-purple-950/60 border border-purple-800/60 text-purple-400 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">5. Member Data Subject Rights</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Cooperative members exercise full statutory rights under Section 16 of RA 10173:
+            </p>
+            <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4">
+              <li><strong className="text-slate-200">Right to Access:</strong> View your digital member passbook, share capital, and loan ledgers in real time.</li>
+              <li><strong className="text-slate-200">Right to Rectification:</strong> Request correction of inaccurate personal records through your cooperative administrator.</li>
+              <li><strong className="text-slate-200">Right to Erasure:</strong> Request data deletion for non-statutory records, subject to mandatory 10-year financial audit holds.</li>
+              <li><strong className="text-slate-200">Right to Redress:</strong> File complaints directly with the National Privacy Commission (privacy.gov.ph).</li>
+            </ul>
+          </div>
+
+          {/* Card 6: Retention & DPO Contact */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-emerald-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-400 flex items-center justify-center">
+              <Mail className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">6. Statutory Retention &amp; DPO</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Financial journals, subsidiary ledgers, and official receipts are retained for a minimum of ten (10) years as mandated by CDA and BIR rules.
+            </p>
+            <div className="pt-2 border-t border-slate-800 space-y-1 text-xs">
+              <div className="text-slate-300 font-semibold">Data Protection Officer (DPO) Contact:</div>
+              <div className="text-emerald-400 font-mono">privacy@tuntongtech.com</div>
+              <div className="text-[11px] text-slate-500">Tuntong Tech Solution • Manila, Philippines</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 6. TERMS OF SERVICE SECTION */}
+      <section id="terms" className="py-16 sm:py-24 px-4 max-w-7xl mx-auto w-full space-y-10 border-t border-slate-800/80 scroll-mt-20">
+        <div className="text-center space-y-3 max-w-3xl mx-auto">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold">
+            <Landmark className="w-4 h-4 text-indigo-400" />
+            <span>Republic Act No. 9520 • CDA MC 2015-06 Accounting Standard</span>
+          </div>
+          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
+            Terms of Service &amp; Platform Governance
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+            These Terms of Service govern the onboarding, operational boundaries, double-entry ledger integrity, and digital banking rails for all cooperatives subscribing to the Flex Coop Solution.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Term 1: Statutory Governance */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-indigo-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-blue-950/60 border border-blue-800/60 text-blue-400 flex items-center justify-center">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">1. Statutory Governance &amp; CDA Law</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              The Flex Coop Solution operates in strict compliance with Republic Act No. 9520 (Philippine Cooperative Code of 2008), Cooperative Development Authority (CDA) Memorandum Circulars, and the regulatory frameworks of the Republic of the Philippines.
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Subscribing cooperatives warrant that all operations on this platform conform to their registered Articles of Cooperation and By-Laws.
+            </p>
+          </div>
+
+          {/* Term 2: SaaS Boundary & Fiduciary Autonomy */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-indigo-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-indigo-950/60 border border-indigo-800/60 text-indigo-400 flex items-center justify-center">
+              <Layers className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">2. Technology Provider Boundary</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Tuntong Tech Solution provides multi-tenant cloud software infrastructure. Tuntong Tech is a technology provider, not a cooperative, bank, or depository financial institution.
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Each subscribing cooperative maintains exclusive fiduciary control, financial sovereignty, and legal liability over its member capital, loan approvals, interest rates, and statutory CDA reporting.
+            </p>
+          </div>
+
+          {/* Term 3: Cooperative Accreditation */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-indigo-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 flex items-center justify-center">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">3. Onboarding &amp; Accreditation</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Eligibility to operate a tenant on this platform requires a valid CDA Registration Certificate and a BIR Tax Identification Number (TIN).
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              General Managers declared during onboarding represent that they are duly authorized by their Board of Directors. The platform reserves the right to suspend any tenant involved in fraudulent activities.
+            </p>
+          </div>
+
+          {/* Term 4: Immutable Accounting & Non-Repudiation */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-indigo-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-400 flex items-center justify-center">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">4. Immutable Double-Entry Ledger</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Pursuant to CDA MC 2015-06, all transactions enforce standard double-entry bookkeeping. General ledger journal entries, invoices, and official receipts are immutable once committed.
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Direct modification or retroactive deletion of posted entries is strictly prohibited. Corrections must be recorded via audited adjusting journal entries.
+            </p>
+          </div>
+
+          {/* Term 5: Truth in Lending & Diminishing Balance */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-indigo-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-purple-950/60 border border-purple-800/60 text-purple-400 flex items-center justify-center">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">5. Loan Underwriting &amp; Dual Control</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              In accordance with RA 3765 (Truth in Lending Act), all loan facilities disclose total finance charges and amortization schedules calculated strictly on a diminishing balance basis.
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Dual-control governance is mandatory: Loan Officers underwrite, Credit Committee members recommend, the Board of Directors approves, and Cashiers execute disbursements.
+            </p>
+          </div>
+
+          {/* Term 6: Payment Settlement & Escrow Float */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-indigo-500/30 transition">
+            <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 flex items-center justify-center">
+              <QrCode className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-white">6. QR Ph Rails &amp; Escrow Float</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Member digital deposits and loan repayments utilize BSP-regulated payment networks (PayMongo QR Ph).
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              To guarantee real-time settlement and SMS notification delivery, cooperatives must maintain an active escrow/settlement balance (minimum ₱1,000 platform credit threshold).
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 7. REGULATORY PARTNERS & RELATED LINKS SECTION */}
+      <section className="py-12 sm:py-16 px-4 max-w-7xl mx-auto w-full space-y-8 border-t border-slate-800/80">
         <div className="text-center space-y-2">
           <div className="text-xs font-mono uppercase text-indigo-400 font-bold tracking-wider">
             Institutional Governance &amp; Regulatory Partners
@@ -554,20 +746,32 @@ export default function CooperativeLandingPage() {
         </div>
       </section>
 
-      {/* 6. FOOTER */}
+      {/* 8. FOOTER */}
       <footer className="border-t border-slate-800/80 bg-slate-950 py-8 px-4 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center space-x-2">
-            <Building2 className="w-4 h-4 text-emerald-500" />
-            <span>© 2026 Tuntong Tech Solution • Regulated under CDA Republic Act No. 9520 &amp; PSA Guidelines</span>
+            <Building2 className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span>© 2026 Tuntong Tech Solution • Built for Philippine Cooperatives compliant with CDA RA 9520 &amp; NPC RA 10173</span>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <a href="https://cda.gov.ph" target="_blank" rel="noreferrer" className="hover:text-slate-300">
+          <div className="flex flex-wrap items-center gap-4">
+            <a href="#directory" className="hover:text-slate-300 transition">
+              Directory
+            </a>
+            <span>•</span>
+            <a href="#privacy" className="hover:text-slate-300 transition">
+              Privacy Policy
+            </a>
+            <span>•</span>
+            <a href="#terms" className="hover:text-slate-300 transition">
+              Terms of Service
+            </a>
+            <span>•</span>
+            <a href="https://cda.gov.ph" target="_blank" rel="noreferrer" className="hover:text-slate-300 transition">
               CDA Portal
             </a>
             <span>•</span>
-            <a href="https://tuntongtech.com" target="_blank" rel="noreferrer" className="hover:text-slate-300">
+            <a href="https://tuntongtech.com" target="_blank" rel="noreferrer" className="hover:text-slate-300 transition">
               Tuntong Tech
             </a>
           </div>
