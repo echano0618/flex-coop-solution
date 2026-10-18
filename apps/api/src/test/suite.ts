@@ -1,3 +1,5 @@
+process.env.NODE_ENV = 'test';
+
 import { MonetizationService } from '../modules/monetization/monetization.service';
 import { AmortizationService } from '../modules/lending/amortization.service';
 import { GeneralLedgerService } from '../modules/accounting/ledger.service';

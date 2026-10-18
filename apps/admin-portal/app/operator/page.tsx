@@ -104,176 +104,20 @@ export default function OperatorPortalPage() {
   // Navigation Tab State
   const [activeTab, setActiveTab] = useState<'FLEET' | 'REGISTRATIONS' | 'LEDGER' | 'BROADCASTS'>('FLEET');
 
-  // Tenant Fleet State
-  const [tenants, setTenants] = useState<TenantFleetItem[]>([
-    {
-      id: 'tenant_bayani_001',
-      name: 'Bayani Multi-Purpose Cooperative',
-      slug: 'bayani',
-      subdomain: 'bayani-coop.tuntongtech.com',
-      cdaRegistrationNumber: 'CDA-NCR-2024-00921',
-      tin: '009-887-123-000',
-      contactEmail: 'admin@bayanicoop.ph',
-      contactPhone: '+63 917 555 0192',
-      adminName: 'Atty. Roberto Dela Rosa',
-      billingMode: 'PLATFORM_ESCROW',
-      status: 'ACTIVE',
-      totalMembers: 18,
-      activeMembers: 17,
-      freeTierMembers: 15,
-      billedMembers: 3,
-      platformCreditBalance: 4250.0,
-      escrowFloatBalance: 48470.0,
-      totalLoansDisbursed: 14,
-      totalLoanVolume: 750000.0,
-      totalTechFeesGenerated: 7500.0,
-      storageUsedMb: 114.5,
-      storageQuotaMb: 10240,
-      databaseSchema: 'tenant_bayani',
-      healthScore: 99,
-      lastActiveAt: '2 mins ago',
-      createdAt: '2026-01-15T08:00:00Z',
-    },
-    {
-      id: 'tenant_maharlika_002',
-      name: 'Maharlika Agrarian Reform Cooperative',
-      slug: 'maharlika',
-      subdomain: 'maharlika-coop.tuntongtech.com',
-      cdaRegistrationNumber: 'CDA-R03-2023-01044',
-      tin: '210-994-382-000',
-      contactEmail: 'gm@maharlikacoop.ph',
-      contactPhone: '+63 920 441 9901',
-      adminName: 'Danilo Macapagal',
-      billingMode: 'STANDARD_UNIFIED',
-      status: 'ACTIVE',
-      totalMembers: 12,
-      activeMembers: 12,
-      freeTierMembers: 12,
-      billedMembers: 0,
-      platformCreditBalance: 350.0,
-      escrowFloatBalance: 12100.0,
-      totalLoansDisbursed: 6,
-      totalLoanVolume: 280000.0,
-      totalTechFeesGenerated: 2800.0,
-      storageUsedMb: 68.2,
-      storageQuotaMb: 10240,
-      databaseSchema: 'tenant_maharlika',
-      healthScore: 84,
-      lastActiveAt: '18 mins ago',
-      createdAt: '2026-02-01T08:00:00Z',
-    },
-    {
-      id: 'tenant_silangan_003',
-      name: 'Silangan Community Credit Cooperative',
-      slug: 'silangan',
-      subdomain: 'silangan-coop.tuntongtech.com',
-      cdaRegistrationNumber: 'CDA-R04A-2022-00412',
-      tin: '118-204-559-000',
-      contactEmail: 'manager@silangancoop.org',
-      contactPhone: '+63 918 332 1092',
-      adminName: 'Corazon Aquino-Santos',
-      billingMode: 'STANDARD_UNIFIED',
-      status: 'ACTIVE',
-      totalMembers: 42,
-      activeMembers: 39,
-      freeTierMembers: 15,
-      billedMembers: 27,
-      platformCreditBalance: 8900.0,
-      escrowFloatBalance: 26500.0,
-      totalLoansDisbursed: 31,
-      totalLoanVolume: 1650000.0,
-      totalTechFeesGenerated: 16500.0,
-      storageUsedMb: 245.0,
-      storageQuotaMb: 10240,
-      databaseSchema: 'tenant_silangan',
-      healthScore: 97,
-      lastActiveAt: 'Just now',
-      createdAt: '2026-03-10T08:00:00Z',
-    },
-  ]);
+  // Tenant Fleet State (starts clean, populated via API)
+  const [tenants, setTenants] = useState<TenantFleetItem[]>([]);
 
-  // Cooperative Registrations State
-  const [registrations, setRegistrations] = useState<CooperativeRegistration[]>([
-    {
-      id: 'REG-2026-8914',
-      name: 'Pag-asa Agricultural Development Cooperative',
-      coopType: 'AGRICULTURAL',
-      slug: 'pag-asa',
-      subdomain: 'pag-asa-coop.tuntongtech.com',
-      cdaRegistrationNumber: 'CDA-R02-2024-00814',
-      tin: '401-829-105-000',
-      contactEmail: 'contact@pagasacoop.ph',
-      contactPhone: '+63 917 882 4410',
-      address: 'Sitio Maligaya, Ilagan, Isabela',
-      adminFirstName: 'Danilo',
-      adminMiddleName: 'Ramos',
-      adminLastName: 'Bautista',
-      adminEmail: 'danilo.bautista@pagasacoop.ph',
-      validIdFileName: 'Danilo_Bautista_National_ID.pdf',
-      validIdFileSizeMb: '2.40',
-      validIdUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80',
-      status: 'PENDING_REVIEW',
-      submittedAt: '2026-10-18T07:15:00Z',
-    },
-  ]);
+  // Cooperative Registrations State (starts clean, populated via API)
+  const [registrations, setRegistrations] = useState<CooperativeRegistration[]>([]);
   const [isLoadingRegistrations, setIsLoadingRegistrations] = useState<boolean>(false);
   const [regStatusFilter, setRegStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'>('ALL');
   const [regSearchQuery, setRegSearchQuery] = useState<string>('');
 
   // Transaction History State
-  const [creditTransactions, setCreditTransactions] = useState<CreditTx[]>([
-    {
-      id: 'ctx_001',
-      tenantId: 'tenant_bayani_001',
-      tenantName: 'Bayani Multi-Purpose Cooperative',
-      type: 'TOP_UP',
-      amount: 5000,
-      balanceBefore: 0,
-      balanceAfter: 5000,
-      reference: 'BDO-DEP-2026-08129',
-      notes: 'Initial prepaid technology credit bundle',
-      performedBy: 'Lex (Platform Operator)',
-      createdAt: 'Oct 01, 2026 09:30 AM',
-    },
-    {
-      id: 'ctx_002',
-      tenantId: 'tenant_bayani_001',
-      tenantName: 'Bayani Multi-Purpose Cooperative',
-      type: 'FEE_DEDUCTION',
-      amount: -150,
-      balanceBefore: 5000,
-      balanceAfter: 4850,
-      reference: 'INV-ONB-0016-0018',
-      notes: 'Auto-debit 3 onboarding fees after 15 free members (₱50 x 3)',
-      performedBy: 'System Auto-Billing',
-      createdAt: 'Oct 08, 2026 14:15 PM',
-    },
-    {
-      id: 'ctx_003',
-      tenantId: 'tenant_silangan_003',
-      tenantName: 'Silangan Community Credit Cooperative',
-      type: 'TOP_UP',
-      amount: 10000,
-      balanceBefore: 250,
-      balanceAfter: 10250,
-      reference: 'UB-WIRE-99214',
-      notes: 'Quarterly platform credit package refill',
-      performedBy: 'Lex (Platform Operator)',
-      createdAt: 'Oct 10, 2026 11:20 AM',
-    },
-  ]);
+  const [creditTransactions, setCreditTransactions] = useState<CreditTx[]>([]);
 
   // Broadcasts State
-  const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([
-    {
-      id: 'bc_1',
-      title: 'Scheduled Cloud Infrastructure Maintenance',
-      message: 'Routine PostgreSQL indexing scheduled for Sunday, Oct 18, 2026, 02:00 AM - 03:00 AM PHT. Subdomains will experience brief intermittent read latency.',
-      severity: 'INFO',
-      isActive: true,
-      createdAt: 'Oct 11, 2026',
-    },
-  ]);
+  const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([]);
 
   // Modals & Action States
   const [selectedTenantForCredit, setSelectedTenantForCredit] = useState<TenantFleetItem | null>(null);
@@ -354,6 +198,26 @@ export default function OperatorPortalPage() {
 
   useEffect(() => {
     fetchRegistrations();
+
+    // Fetch live tenant fleet from API
+    fetch(`${getApiBaseUrl()}/operator/tenants`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data)) {
+          setTenants(json.data);
+        }
+      })
+      .catch((err) => console.warn('Fleet API load warning:', err));
+
+    // Fetch system broadcasts from API
+    fetch(`${getApiBaseUrl()}/operator/broadcasts`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data)) {
+          setBroadcasts(json.data);
+        }
+      })
+      .catch((err) => console.warn('Broadcasts API load warning:', err));
   }, []);
 
   // Fleet Totals
@@ -963,8 +827,26 @@ https://tuntongtech.com`;
             </div>
 
             {/* Fleet Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+            {filteredTenants.length === 0 ? (
+              <div className="p-12 text-center text-slate-500 space-y-3 bg-slate-950/40 rounded-xl border border-slate-800">
+                <Building2 className="w-10 h-10 mx-auto text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">No Cooperative Tenants Provisioned</p>
+                <p className="text-xs max-w-md mx-auto">
+                  There are currently no active cooperative instances in the fleet. When new cooperatives submit applications through the onboarding portal and are approved, their live instances will appear here.
+                </p>
+                <div className="pt-2">
+                  <Link
+                    href="/coop-register"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-700/20"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Open Cooperative Registration Portal</span>
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950/80 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
                   <tr>
                     <th className="py-3 px-3">Tenant / Subdomain</th>
@@ -1097,6 +979,7 @@ https://tuntongtech.com`;
                 </tbody>
               </table>
             </div>
+            )}
           </section>
         )}
 
@@ -1335,49 +1218,57 @@ https://tuntongtech.com`;
               <span className="text-xs text-slate-400">Strict double-entry prepaid credit log</span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
-                  <tr>
-                    <th className="py-2.5 px-3">Timestamp</th>
-                    <th className="py-2.5 px-3">Tenant</th>
-                    <th className="py-2.5 px-3">Action Type</th>
-                    <th className="py-2.5 px-3">Amount</th>
-                    <th className="py-2.5 px-3">New Balance</th>
-                    <th className="py-2.5 px-3">Reference / Notes</th>
-                    <th className="py-2.5 px-3">Operator</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 text-slate-300">
-                  {creditTransactions.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-800/20">
-                      <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">{tx.createdAt}</td>
-                      <td className="py-2.5 px-3 font-medium text-white">{tx.tenantName}</td>
-                      <td className="py-2.5 px-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                          tx.amount > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
-                        }`}>
-                          {tx.type}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 font-mono font-bold">
-                        <span className={tx.amount > 0 ? 'text-emerald-400' : 'text-amber-400'}>
-                          {tx.amount > 0 ? '+' : ''}₱{Math.abs(tx.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 font-mono font-semibold text-slate-200">
-                        ₱{tx.balanceAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                        <div>{tx.reference}</div>
-                        <div className="text-[10px] text-slate-500 italic">{tx.notes}</div>
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-400 text-[11px]">{tx.performedBy}</td>
+            {creditTransactions.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 space-y-2 bg-slate-950/40 rounded-xl border border-slate-800">
+                <CreditCard className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">No Credit Ledger Transactions</p>
+                <p className="text-xs">Prepaid platform credit top-ups, fee deductions, and adjustments will be audited here.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">Timestamp</th>
+                      <th className="py-2.5 px-3">Tenant</th>
+                      <th className="py-2.5 px-3">Action Type</th>
+                      <th className="py-2.5 px-3">Amount</th>
+                      <th className="py-2.5 px-3">New Balance</th>
+                      <th className="py-2.5 px-3">Reference / Notes</th>
+                      <th className="py-2.5 px-3">Operator</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50 text-slate-300">
+                    {creditTransactions.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-slate-800/20">
+                        <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">{tx.createdAt}</td>
+                        <td className="py-2.5 px-3 font-medium text-white">{tx.tenantName}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                            tx.amount > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                          }`}>
+                            {tx.type}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold">
+                          <span className={tx.amount > 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                            {tx.amount > 0 ? '+' : ''}₱{Math.abs(tx.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-semibold text-slate-200">
+                          ₱{tx.balanceAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                          <div>{tx.reference}</div>
+                          <div className="text-[10px] text-slate-500 italic">{tx.notes}</div>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">{tx.performedBy}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
 
@@ -1399,31 +1290,39 @@ https://tuntongtech.com`;
               </button>
             </div>
 
-            <div className="space-y-3">
-              {broadcasts.map((b) => (
-                <div key={b.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-start gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                        b.severity === 'CRITICAL' ? 'bg-rose-950 text-rose-300 border border-rose-800' :
-                        b.severity === 'WARNING' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
-                        'bg-indigo-950 text-indigo-300 border border-indigo-800'
-                      }`}>
-                        {b.severity}
-                      </span>
-                      <h4 className="font-bold text-white text-xs">{b.title}</h4>
-                      <span className="text-[10px] text-slate-500 font-mono">({b.createdAt})</span>
+            {broadcasts.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 space-y-2 bg-slate-950/40 rounded-xl border border-slate-800">
+                <Megaphone className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">No Active Broadcasts</p>
+                <p className="text-xs">Publish system announcements or maintenance notices visible to all cooperative tenancies.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {broadcasts.map((b) => (
+                  <div key={b.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-start gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                          b.severity === 'CRITICAL' ? 'bg-rose-950 text-rose-300 border border-rose-800' :
+                          b.severity === 'WARNING' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                          'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                        }`}>
+                          {b.severity}
+                        </span>
+                        <h4 className="font-bold text-white text-xs">{b.title}</h4>
+                        <span className="text-[10px] text-slate-500 font-mono">({b.createdAt})</span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">{b.message}</p>
                     </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">{b.message}</p>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      b.isActive ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-500'
+                    }`}>
+                      {b.isActive ? 'ACTIVE' : 'EXPIRED'}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    b.isActive ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-500'
-                  }`}>
-                    {b.isActive ? 'ACTIVE' : 'EXPIRED'}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </main>

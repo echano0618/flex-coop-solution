@@ -17,88 +17,90 @@ export class OperatorService {
    * Initializes default platform credit balances and seed tenants for the operator fleet
    */
   public static ensureInitialized() {
-    // Seed additional tenant instances if only 1 exists
-    if (dbStore.tenants.size < 3) {
-      const maharlikaId = 'tenant_maharlika_002';
-      if (!dbStore.tenants.has(maharlikaId)) {
-        const maharlika: Tenant = {
-          id: maharlikaId,
-          name: 'Maharlika Agrarian Reform Cooperative',
-          slug: 'maharlika',
-          cdaRegistrationNumber: 'CDA-R03-2023-01044',
-          tin: '210-994-382-000',
-          contactEmail: 'gm@maharlikacoop.ph',
-          contactPhone: '+63 920 441 9901',
+    // Only seed mock demonstration tenant records in test environment
+    if (process.env.NODE_ENV === 'test') {
+      if (dbStore.tenants.size < 3) {
+        const maharlikaId = 'tenant_maharlika_002';
+        if (!dbStore.tenants.has(maharlikaId)) {
+          const maharlika: Tenant = {
+            id: maharlikaId,
+            name: 'Maharlika Agrarian Reform Cooperative',
+            slug: 'maharlika',
+            cdaRegistrationNumber: 'CDA-R03-2023-01044',
+            tin: '210-994-382-000',
+            contactEmail: 'gm@maharlikacoop.ph',
+            contactPhone: '+63 920 441 9901',
+            adminFirstName: 'Danilo',
+            adminLastName: 'Macapagal',
+            address: 'Barangay San Fabian, Guimba, Nueva Ecija',
+            billingMode: 'STANDARD_UNIFIED',
+            status: 'ACTIVE',
+            createdAt: '2026-02-01T08:00:00Z',
+            updatedAt: '2026-02-01T08:00:00Z',
+          };
+          dbStore.tenants.set(maharlikaId, maharlika);
+        }
+
+        const silanganId = 'tenant_silangan_003';
+        if (!dbStore.tenants.has(silanganId)) {
+          const silangan: Tenant = {
+            id: silanganId,
+            name: 'Silangan Community Credit Cooperative',
+            slug: 'silangan',
+            cdaRegistrationNumber: 'CDA-R04A-2022-00412',
+            tin: '118-204-559-000',
+            contactEmail: 'manager@silangancoop.org',
+            contactPhone: '+63 918 332 1092',
+            adminFirstName: 'Corazon',
+            adminLastName: 'Aquino-Santos',
+            address: 'Poblacion 2, Silang, Cavite',
+            billingMode: 'STANDARD_UNIFIED',
+            status: 'ACTIVE',
+            createdAt: '2026-03-10T08:00:00Z',
+            updatedAt: '2026-03-10T08:00:00Z',
+          };
+          dbStore.tenants.set(silanganId, silangan);
+        }
+      }
+
+      // Initialize default credit balances for test tenancies
+      const tenantBayani = 'tenant_bayani_001';
+      if (!dbStore.platformCredits.has(tenantBayani)) {
+        dbStore.platformCredits.set(tenantBayani, 4250.0);
+      }
+      const tenantMaharlika = 'tenant_maharlika_002';
+      if (!dbStore.platformCredits.has(tenantMaharlika)) {
+        dbStore.platformCredits.set(tenantMaharlika, 350.0);
+      }
+      const tenantSilangan = 'tenant_silangan_003';
+      if (!dbStore.platformCredits.has(tenantSilangan)) {
+        dbStore.platformCredits.set(tenantSilangan, 8900.0);
+      }
+
+      // Seed test pending registration in test environment
+      if (dbStore.coopRegistrations.length === 0) {
+        dbStore.coopRegistrations.push({
+          id: 'REG-2026-8914',
+          name: 'Pag-asa Agricultural Development Cooperative',
+          coopType: 'AGRICULTURAL',
+          slug: 'pag-asa',
+          subdomain: 'pag-asa-coop.tuntongtech.com',
+          cdaRegistrationNumber: 'CDA-R02-2024-00814',
+          tin: '401-829-105-000',
+          contactEmail: 'contact@pagasacoop.ph',
+          contactPhone: '+63 917 882 4410',
+          address: 'Sitio Maligaya, Ilagan, Isabela',
           adminFirstName: 'Danilo',
-          adminLastName: 'Macapagal',
-          address: 'Barangay San Fabian, Guimba, Nueva Ecija',
-          billingMode: 'STANDARD_UNIFIED',
-          status: 'ACTIVE',
-          createdAt: '2026-02-01T08:00:00Z',
-          updatedAt: '2026-02-01T08:00:00Z',
-        };
-        dbStore.tenants.set(maharlikaId, maharlika);
+          adminMiddleName: 'Ramos',
+          adminLastName: 'Bautista',
+          adminEmail: 'danilo.bautista@pagasacoop.ph',
+          validIdFileName: 'Danilo_Bautista_National_ID.pdf',
+          validIdFileSizeMb: '2.40',
+          validIdUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80',
+          status: 'PENDING_REVIEW',
+          submittedAt: '2026-10-18T07:15:00Z',
+        });
       }
-
-      const silanganId = 'tenant_silangan_003';
-      if (!dbStore.tenants.has(silanganId)) {
-        const silangan: Tenant = {
-          id: silanganId,
-          name: 'Silangan Community Credit Cooperative',
-          slug: 'silangan',
-          cdaRegistrationNumber: 'CDA-R04A-2022-00412',
-          tin: '118-204-559-000',
-          contactEmail: 'manager@silangancoop.org',
-          contactPhone: '+63 918 332 1092',
-          adminFirstName: 'Corazon',
-          adminLastName: 'Aquino-Santos',
-          address: 'Poblacion 2, Silang, Cavite',
-          billingMode: 'STANDARD_UNIFIED',
-          status: 'ACTIVE',
-          createdAt: '2026-03-10T08:00:00Z',
-          updatedAt: '2026-03-10T08:00:00Z',
-        };
-        dbStore.tenants.set(silanganId, silangan);
-      }
-    }
-
-    // Initialize default credit balances
-    const tenantBayani = 'tenant_bayani_001';
-    if (!dbStore.platformCredits.has(tenantBayani)) {
-      dbStore.platformCredits.set(tenantBayani, 4250.0);
-    }
-    const tenantMaharlika = 'tenant_maharlika_002';
-    if (!dbStore.platformCredits.has(tenantMaharlika)) {
-      dbStore.platformCredits.set(tenantMaharlika, 350.0); // Low credit warning demo
-    }
-    const tenantSilangan = 'tenant_silangan_003';
-    if (!dbStore.platformCredits.has(tenantSilangan)) {
-      dbStore.platformCredits.set(tenantSilangan, 8900.0);
-    }
-
-    // Initialize default submitted cooperative registration if empty
-    if (dbStore.coopRegistrations.length === 0) {
-      dbStore.coopRegistrations.push({
-        id: 'REG-2026-8914',
-        name: 'Pag-asa Agricultural Development Cooperative',
-        coopType: 'AGRICULTURAL',
-        slug: 'pag-asa',
-        subdomain: 'pag-asa-coop.tuntongtech.com',
-        cdaRegistrationNumber: 'CDA-R02-2024-00814',
-        tin: '401-829-105-000',
-        contactEmail: 'contact@pagasacoop.ph',
-        contactPhone: '+63 917 882 4410',
-        address: 'Sitio Maligaya, Ilagan, Isabela',
-        adminFirstName: 'Danilo',
-        adminMiddleName: 'Ramos',
-        adminLastName: 'Bautista',
-        adminEmail: 'danilo.bautista@pagasacoop.ph',
-        validIdFileName: 'Danilo_Bautista_National_ID.pdf',
-        validIdFileSizeMb: '2.40',
-        validIdUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80',
-        status: 'PENDING_REVIEW',
-        submittedAt: '2026-10-18T07:15:00Z',
-      });
     }
   }
 

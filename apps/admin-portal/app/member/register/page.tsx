@@ -1381,22 +1381,14 @@ export default function MemberRegisterPage() {
             )}
 
 
-            {/* Quick Demo Fast-Track Button */}
+            {/* Production Action Navigation */}
             <div className="pt-4 space-y-3">
-              <button
-                type="button"
-                onClick={() => router.push('/member')}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/30"
-              >
-                <span>Instant Demo: Fast-Track Approval & Enter Portal</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
               <Link
                 href="/member/login"
-                className="block text-xs text-slate-400 hover:text-white transition-colors"
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/30"
               >
-                Return to Member Login Screen
+                <span>Proceed to Member Login Screen</span>
+                <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
           </div>

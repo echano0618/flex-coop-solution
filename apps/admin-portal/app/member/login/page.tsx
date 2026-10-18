@@ -19,45 +19,28 @@ import {
 
 export default function MemberLoginPage() {
   const router = useRouter();
-  const [identifier, setIdentifier] = useState('09171234567');
-  const [pin, setPin] = useState('123456');
+  const [identifier, setIdentifier] = useState('');
+  const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const demoAccounts = [
-    {
-      name: 'Maria Clara Santos',
-      memberNo: 'MEM-2026-0001',
-      identifier: '09171234567',
-      pin: '123456',
-      role: 'Regular Member (Active Loan)',
-      paidUp: '₱15,000.00',
-    },
-    {
-      name: 'Juan Perez Dela Cruz',
-      memberNo: 'MEM-2026-0002',
-      identifier: '09189876543',
-      pin: '123456',
-      role: 'Regular Member (Co-Maker)',
-      paidUp: '₱10,000.00',
-    },
-  ];
-
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!identifier.trim() || !pin.trim()) {
+      setErrorMessage('Please enter your Registered Mobile Number or Member ID and your 6-digit PIN.');
+      return;
+    }
     setErrorMessage('');
     setIsLoading(true);
 
     setTimeout(() => {
       setIsLoading(false);
-      // In a real app we store JWT to localStorage / cookies
+      // In production, persists session token to localStorage
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('flexcoop_auth_member', identifier.trim());
+      }
       router.push('/member');
     }, 600);
-  };
-
-  const handleSelectDemo = (acc: typeof demoAccounts[0]) => {
-    setIdentifier(acc.identifier);
-    setPin(acc.pin);
   };
 
   return (
@@ -219,41 +202,16 @@ export default function MemberLoginPage() {
             </button>
           </form>
 
-          {/* Quick Demo Accounts */}
-          <div className="pt-4 border-t border-slate-700/80">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>One-Click Test Accounts (Demo Sandbox)</span>
-            </div>
-            <div className="grid grid-cols-1 gap-2">
-              {demoAccounts.map((acc) => (
-                <button
-                  key={acc.memberNo}
-                  type="button"
-                  onClick={() => handleSelectDemo(acc)}
-                  className={`text-left p-2.5 rounded-lg border text-xs transition-all flex items-center justify-between ${
-                    identifier === acc.identifier
-                      ? 'bg-emerald-950/40 border-emerald-500/60 text-white'
-                      : 'bg-slate-900/60 border-slate-700 text-slate-300 hover:bg-slate-900'
-                  }`}
-                >
-                  <div>
-                    <div className="font-semibold text-white">{acc.name}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      {acc.memberNo} • {acc.role}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
-                      Auto Fill
-                    </span>
-                  </div>
-                </button>
-              ))}
+            <div className="pt-4 border-t border-slate-700/80 text-center">
+              <p className="text-xs text-slate-400">
+                Not yet an accredited member?{' '}
+                <Link href="/member/register" className="text-emerald-400 font-semibold hover:underline">
+                  Apply for Membership Online
+                </Link>
+              </p>
             </div>
           </div>
         </div>
-      </div>
 
       {/* Footer */}
       <div className="max-w-5xl w-full mx-auto pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
