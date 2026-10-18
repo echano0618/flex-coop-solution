@@ -60,6 +60,30 @@ export function purgeTenantDummyRecords(slug: string) {
   } catch {}
 }
 
+/**
+ * Normalizes cooperative slugs to ensure uniform keying across subdomains,
+ * query parameters, and storage keys (e.g. 'family-coop' and 'family' both normalize to 'family-coop').
+ */
+export function normalizeCoopSlug(slug?: string): string {
+  if (!slug) return 'family-coop';
+  const s = slug.toLowerCase().trim();
+  if (s === 'default' || !s) return 'family-coop';
+  // Standardize on -coop format for tenant keys
+  if (s === 'family' || s === 'family-coop') return 'family-coop';
+  if (s === 'bayani' || s === 'bayani-coop') return 'bayani-coop';
+  return s.endsWith('-coop') ? s : `${s}-coop`;
+}
+
+/**
+ * Checks whether two cooperative slugs refer to the same cooperative.
+ */
+export function isCoopSlugMatch(slugA?: string, slugB?: string): boolean {
+  if (!slugA || !slugB) return true;
+  const a = normalizeCoopSlug(slugA);
+  const b = normalizeCoopSlug(slugB);
+  return a === b;
+}
+
 export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; type?: string; isTest?: boolean }> = {
   family: {
     name: 'Family Multi-Purpose Cooperative',
@@ -67,11 +91,23 @@ export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; t
     type: 'Multi-Purpose',
     isTest: false, // Strictly Production Instance
   },
+  'family-coop': {
+    name: 'Family Multi-Purpose Cooperative',
+    regNo: 'CDA-NCR-2024-00892',
+    type: 'Multi-Purpose',
+    isTest: false,
+  },
   bayani: {
     name: 'Bayani Multi-Purpose Cooperative',
     regNo: 'CDA-R4A-2023-00451',
     type: 'Multi-Purpose',
     isTest: true, // Designated Test Instance
+  },
+  'bayani-coop': {
+    name: 'Bayani Multi-Purpose Cooperative',
+    regNo: 'CDA-R4A-2023-00451',
+    type: 'Multi-Purpose',
+    isTest: true,
   },
   demo: {
     name: 'Demo Multi-Purpose Cooperative',

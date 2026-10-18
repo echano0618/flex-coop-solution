@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -84,6 +84,8 @@ import {
   GeneralManagerInfo,
   isTestCoopTenant,
   purgeTenantDummyRecords,
+  normalizeCoopSlug,
+  isCoopSlugMatch,
 } from './tenant-utils';
 
 type StaffRole =
@@ -1425,7 +1427,7 @@ export default function AdminDashboard() {
   const [members, setMembers] = useState<MemberRecord[]>([]);
 
   // Load authentic cooperative members (strictly guaranteeing General Manager as Member #1)
-  useEffect(() => {
+  const loadAndSyncMembers = useCallback(() => {
     try {
       if (typeof window !== 'undefined') {
         const tenantInfo = resolveTenantCoop();
@@ -1463,12 +1465,12 @@ export default function AdminDashboard() {
           idType: 'PhilSys National ID (Verified General Manager)',
           idNumber: gm.idNumber || 'CDA-GM-AUTH-0001',
           address: gm.address || 'Philippines',
-          paidUpShares: isTestTenant ? 10000 : (Number(stockParValue) * 100 || 10000),
+          paidUpShares: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
           sharesCount: 100,
           subscribedShares: 100,
-          initialPledge: isTestTenant ? 10000 : (Number(stockParValue) * 100 || 10000),
+          initialPledge: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
           sharePaymentStatus: 'PAID_OTC',
-          savingsBalance: isTestTenant ? 5000 : 0, // Clean 0 in production; no dummy transactions
+          savingsBalance: isTestTenant ? 10000 : 0, // Clean 0 in production; no dummy transactions
           loanBalance: 0,
           npcConsent: 'Agreed (Statutory GM Undertaking)',
           pmesStatus: 'COMPLETED',
@@ -1490,7 +1492,6 @@ export default function AdminDashboard() {
             name: gm.name,
             email: gm.email,
             address: gm.address || list[existingGmIndex].address,
-            // Ensure no dummy loan balance is carried forward
             loanBalance: list[existingGmIndex].loanBalance || 0,
           };
         } else {
@@ -1506,55 +1507,70 @@ export default function AdminDashboard() {
               apps
                 .filter(
                   (a: any) =>
-                    (!a.coopSlug || a.coopSlug.toLowerCase() === tenantInfo.slug.toLowerCase()) &&
+                    isCoopSlugMatch(a.coopSlug, tenantInfo.slug) &&
                     a.applicantName &&
                     a.applicantName !== gm.name
                 )
                 .forEach((a: any, idx: number) => {
                   const appId = `mem_app_${a.id || idx}`;
-                  if (!list.some((m) => m.id === appId || m.email === a.email)) {
-                    const actualSubShares = a.subscribedShares !== undefined ? Number(a.subscribedShares) : 0;
-                    const actualDeposit = a.initialDeposit !== undefined ? Number(a.initialDeposit) : 0;
-                    const actualPledge = a.totalSubscribedAmount !== undefined ? Number(a.totalSubscribedAmount) : 0;
-                    const paymentStatus = actualDeposit > 0 ? (a.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
+                  const existingIdx = list.findIndex(
+                    (m) => m.id === appId || (a.email && m.email?.toLowerCase() === a.email.toLowerCase())
+                  );
 
-                    list.push({
-                      id: appId,
-                      memberNo: `MEM-2026-${String(idx + 2).padStart(4, '0')}`,
-                      name: a.applicantName,
-                      email: a.email,
-                      classification: 'REGULAR',
-                      kycStatus: a.status === 'APPROVED' ? 'VERIFIED' : 'PENDING_REVIEW',
-                      idType: a.idType || 'PhilSys National ID',
-                      idNumber: a.tin || 'N/A',
-                      address: a.address || 'Philippines',
-                      paidUpShares: actualDeposit,
-                      sharesCount: actualSubShares,
-                      subscribedShares: actualSubShares,
-                      initialPledge: actualPledge,
-                      sharePaymentStatus: paymentStatus,
-                      savingsBalance: 0, // Clean 0 - Do not create dummy savings transactions
-                      loanBalance: 0, // Clean 0 - No dummy loans
-                      npcConsent: 'Agreed (Republic Act No. 10173)',
-                      pmesStatus: 'COMPLETED',
-                      pmesCertNo: `CERT-PMES-${idx + 1000}`,
-                      pmesDate: new Date().toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      }),
-                      biometricScore: 98.5,
-                      amlaStatus: 'PASSED',
-                      reviewedBy: 'Compliance Officer',
-                      reviewDate: new Date().toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      }),
-                      reviewNotes: 'Online applicant registered via PMES onboarding portal.',
-                      idFrontPreview: a.idFrontPreview || null,
-                      selfiePreview: a.selfiePreview || null,
-                    });
+                  const actualSubShares = a.subscribedShares !== undefined ? Number(a.subscribedShares) : 0;
+                  const actualDeposit = a.initialDeposit !== undefined ? Number(a.initialDeposit) : 0;
+                  const actualPledge = a.totalSubscribedAmount !== undefined ? Number(a.totalSubscribedAmount) : 0;
+                  const paymentStatus = actualDeposit > 0 ? (a.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
+                  const appKycStatus = a.status === 'APPROVED' ? 'VERIFIED' : (a.status === 'INACTIVE' || a.status === 'REJECTED') ? 'INACTIVE' : 'PENDING_REVIEW';
+
+                  const recordData: MemberRecord = {
+                    id: appId,
+                    memberNo: existingIdx >= 0 ? list[existingIdx].memberNo : `MEM-2026-${String(list.length + 1).padStart(4, '0')}`,
+                    name: a.applicantName,
+                    email: a.email,
+                    classification: 'REGULAR',
+                    kycStatus: existingIdx >= 0 ? list[existingIdx].kycStatus : appKycStatus,
+                    idType: a.idType || 'PhilSys National ID',
+                    idNumber: a.tin || a.idNumber || 'N/A',
+                    address: a.address || 'Philippines',
+                    paidUpShares: existingIdx >= 0 ? list[existingIdx].paidUpShares : actualDeposit,
+                    sharesCount: existingIdx >= 0 ? list[existingIdx].sharesCount : actualSubShares,
+                    subscribedShares: actualSubShares,
+                    initialPledge: actualPledge,
+                    sharePaymentStatus: existingIdx >= 0 ? list[existingIdx].sharePaymentStatus : paymentStatus,
+                    savingsBalance: 0, // Clean 0 - Do not create dummy savings transactions
+                    loanBalance: 0, // Clean 0 - No dummy loans
+                    npcConsent: 'Agreed (Republic Act No. 10173)',
+                    pmesStatus: 'COMPLETED',
+                    pmesCertNo: `CERT-PMES-${idx + 1000}`,
+                    pmesDate: new Date().toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    }),
+                    biometricScore: 98.5,
+                    amlaStatus: 'PASSED',
+                    reviewedBy: 'Membership & Credit Committee',
+                    reviewDate: new Date().toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    }),
+                    reviewNotes: 'Online applicant registered via PMES onboarding portal. Action Required for eKYC & Admission.',
+                    idFrontPreview: a.idFrontPreview || null,
+                    selfiePreview: a.selfiePreview || null,
+                  };
+
+                  if (existingIdx >= 0) {
+                    list[existingIdx] = {
+                      ...list[existingIdx],
+                      idFrontPreview: a.idFrontPreview || list[existingIdx].idFrontPreview,
+                      selfiePreview: a.selfiePreview || list[existingIdx].selfiePreview,
+                      address: a.address || list[existingIdx].address,
+                      idNumber: a.tin || a.idNumber || list[existingIdx].idNumber,
+                    };
+                  } else {
+                    list.push(recordData);
                   }
                 });
             }
@@ -1567,7 +1583,32 @@ export default function AdminDashboard() {
     } catch (e) {
       console.warn('Members load error:', e);
     }
-  }, []);
+  }, [stockParValue]);
+
+  // Initial load
+  useEffect(() => {
+    loadAndSyncMembers();
+  }, [loadAndSyncMembers]);
+
+  // Re-sync whenever the admin navigates to the Membership tab
+  useEffect(() => {
+    if (activeTab === 'members') {
+      loadAndSyncMembers();
+    }
+  }, [activeTab, loadAndSyncMembers]);
+
+  // Reactive listener for storage and cross-window registration events
+  useEffect(() => {
+    const handleSync = () => {
+      loadAndSyncMembers();
+    };
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('flexcoop_member_registered', handleSync);
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('flexcoop_member_registered', handleSync);
+    };
+  }, [loadAndSyncMembers]);
 
   // Synchronize Walk-In Form with selected member and product
   useEffect(() => {
@@ -1712,38 +1753,106 @@ export default function AdminDashboard() {
       }
       setOnboardingInvoices((prev) => [newInvoice, ...prev]);
 
-      setMembers((prev) =>
-        prev.map((m) =>
-          m.id === member.id
-            ? {
-                ...m,
-                kycStatus: 'VERIFIED',
-                sharePaymentStatus: 'UNPAID', // Unpaid until member pays via OTC or QR
-                reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
-                reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
-                reviewNotes: notes || 'PMES, eKYC, AMLA, and Capital Build manually verified. Application approved.',
-              }
-            : m
-        )
+      const updatedMembers = members.map((m) =>
+        m.id === member.id
+          ? {
+              ...m,
+              kycStatus: 'VERIFIED' as const,
+              sharePaymentStatus: 'UNPAID', // Unpaid until member pays via OTC or QR
+              reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+              reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+              reviewNotes: notes || 'PMES, eKYC, AMLA, and Capital Build manually verified. Application approved.',
+            }
+          : m
       );
+      setMembers(updatedMembers);
+
+      try {
+        if (typeof window !== 'undefined') {
+          const tenantInfo = resolveTenantCoop();
+          localStorage.setItem(`flexcoop_members_${tenantInfo.slug}`, JSON.stringify(updatedMembers));
+
+          // Also synchronize tuntong_member_applications
+          const rawApps = localStorage.getItem('tuntong_member_applications');
+          if (rawApps) {
+            const apps = JSON.parse(rawApps);
+            if (Array.isArray(apps)) {
+              const updatedApps = apps.map((a: any) => {
+                if (
+                  `mem_app_${a.id}` === member.id ||
+                  a.email?.toLowerCase() === member.email?.toLowerCase() ||
+                  a.applicantName === member.name
+                ) {
+                  return {
+                    ...a,
+                    status: 'APPROVED',
+                    reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+                    reviewDate: new Date().toISOString(),
+                    reviewNotes: notes || 'Application approved.',
+                  };
+                }
+                return a;
+              });
+              localStorage.setItem('tuntong_member_applications', JSON.stringify(updatedApps));
+            }
+          }
+          window.dispatchEvent(new Event('storage'));
+        }
+      } catch (err) {
+        console.warn('Error saving approved member:', err);
+      }
 
       setMemberActionNotification(
         `Member ${member.memberNo} (${member.name}) APPROVED! ${isFreeTier ? `Free onboarding tier (Member #${currentMemberSequence} of 15 free).` : `Coop charged ₱50.00 onboarding fee (Member #${currentMemberSequence}, Invoice ${newInvoice.id}).`} Member can now pay initial Share Capital (₱${(member.initialPledge || 3000).toLocaleString()}) via OTC (₱0 fee) or QR Ph (1.5% fee).`
       );
     } else {
-      setMembers((prev) =>
-        prev.map((m) =>
-          m.id === member.id
-            ? {
-                ...m,
-                kycStatus: 'INACTIVE',
-                reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
-                reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
-                reviewNotes: notes || 'Declined / Requires document re-submission.',
-              }
-            : m
-        )
+      const updatedMembers = members.map((m) =>
+        m.id === member.id
+          ? {
+              ...m,
+              kycStatus: 'INACTIVE' as const,
+              reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+              reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+              reviewNotes: notes || 'Declined / Requires document re-submission.',
+            }
+          : m
       );
+      setMembers(updatedMembers);
+
+      try {
+        if (typeof window !== 'undefined') {
+          const tenantInfo = resolveTenantCoop();
+          localStorage.setItem(`flexcoop_members_${tenantInfo.slug}`, JSON.stringify(updatedMembers));
+
+          const rawApps = localStorage.getItem('tuntong_member_applications');
+          if (rawApps) {
+            const apps = JSON.parse(rawApps);
+            if (Array.isArray(apps)) {
+              const updatedApps = apps.map((a: any) => {
+                if (
+                  `mem_app_${a.id}` === member.id ||
+                  a.email?.toLowerCase() === member.email?.toLowerCase() ||
+                  a.applicantName === member.name
+                ) {
+                  return {
+                    ...a,
+                    status: 'INACTIVE',
+                    reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+                    reviewDate: new Date().toISOString(),
+                    reviewNotes: notes || 'Application set to INACTIVE / Returned for correction.',
+                  };
+                }
+                return a;
+              });
+              localStorage.setItem('tuntong_member_applications', JSON.stringify(updatedApps));
+            }
+          }
+          window.dispatchEvent(new Event('storage'));
+        }
+      } catch (err) {
+        console.warn('Error saving deactivated member:', err);
+      }
+
       setMemberActionNotification(
         `Member ${member.memberNo} (${member.name}) application set to INACTIVE / Returned for correction.`
       );
@@ -1759,18 +1868,25 @@ export default function AdminDashboard() {
     const pledge = sharePaymentMember.initialPledge || 3000;
     const convenienceFee = sharePaymentMethod === 'QRPH' ? Math.round(pledge * 0.015 * 100) / 100 : 0;
 
-    setMembers((prev) =>
-      prev.map((m) =>
-        m.id === sharePaymentMember.id
-          ? {
-              ...m,
-              paidUpShares: pledge,
-              sharesCount: Math.floor(pledge / 100),
-              sharePaymentStatus: sharePaymentMethod === 'QRPH' ? 'PAID_QRPH' : 'PAID_OTC',
-            }
-          : m
-      )
+    const updatedMembers = members.map((m) =>
+      m.id === sharePaymentMember.id
+        ? {
+            ...m,
+            paidUpShares: pledge,
+            sharesCount: Math.floor(pledge / 100),
+            sharePaymentStatus: sharePaymentMethod === 'QRPH' ? 'PAID_QRPH' : 'PAID_OTC',
+          }
+        : m
     );
+    setMembers(updatedMembers);
+
+    try {
+      if (typeof window !== 'undefined') {
+        const tenantInfo = resolveTenantCoop();
+        localStorage.setItem(`flexcoop_members_${tenantInfo.slug}`, JSON.stringify(updatedMembers));
+        window.dispatchEvent(new Event('storage'));
+      }
+    } catch {}
 
     if (sharePaymentMethod === 'QRPH') {
       // Requirement: Share Capital paid via QR payment must be added in Coops Platform Escrow

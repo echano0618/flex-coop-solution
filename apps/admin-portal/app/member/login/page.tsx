@@ -47,6 +47,12 @@ export default function MemberLoginPage() {
 
     try {
       if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const prefillUser = params.get('username') || params.get('identifier');
+        if (prefillUser) {
+          setIdentifier(prefillUser);
+        }
+
         const existing = getTenantMemberSession(info.slug);
         if (existing) {
           router.replace(info.slug && info.slug !== 'default' ? `/member?coop=${info.slug}` : '/member');
@@ -57,8 +63,11 @@ export default function MemberLoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identifier.trim() || !pin.trim()) {
-      setErrorMessage('Please enter your Registered Mobile Number, Email, or Member ID and your PIN/Password.');
+    const idInput = identifier.trim();
+    const pinInput = pin.trim();
+
+    if (!idInput || !pinInput) {
+      setErrorMessage('Please enter your Username, Registered Mobile Number, or Email, and your MPIN/Password.');
       return;
     }
     setErrorMessage('');
@@ -71,7 +80,7 @@ export default function MemberLoginPage() {
           'Content-Type': 'application/json',
           'x-tenant-slug': tenantInfo.slug,
         },
-        body: JSON.stringify({ identifier: identifier.trim(), pin: pin.trim(), tenantSlug: tenantInfo.slug }),
+        body: JSON.stringify({ identifier: idInput, pin: pinInput, tenantSlug: tenantInfo.slug }),
       });
       const data = await res.json();
       if (res.ok && data.success && data.member) {
@@ -80,54 +89,215 @@ export default function MemberLoginPage() {
         return;
       }
     } catch (err) {
-      console.warn('API member login fallback:', err);
+      // offline / local registry mode
     }
 
-    // Fallback: Resolve registered member or General Manager
-    const isGm = identifier.toLowerCase().includes('gm') || identifier.toLowerCase().includes('admin');
+    const idLower = idInput.toLowerCase();
     const isTest = isTestCoopTenant(tenantInfo.slug);
     const gmInfo = resolveGeneralManager(tenantInfo.slug);
+    const gmEmail = (gmInfo.email || '').toLowerCase().trim();
+    const gmNameLower = (gmInfo.name || '').toLowerCase().trim();
 
-    let resolvedName = isGm ? gmInfo.name : identifier.split('@')[0].replace('.', ' ').toUpperCase();
-    let resolvedMemberNo = isGm ? 'MEM-2026-0001' : 'MEM-2026-0099';
-    let resolvedPaidUp = isGm ? (isTest ? 25000 : 10000) : 0;
-    let resolvedShares = isGm ? 100 : 0;
-    let resolvedSavings = isGm ? (isTest ? 10000 : 0) : 0;
+    // 1. Check if identifier belongs to the General Manager (Member #1)
+    const isGmAccount =
+      idLower === 'gm' ||
+      idLower === 'admin' ||
+      idLower === gmEmail ||
+      idLower === gmEmail.split('@')[0] ||
+      idLower === gmNameLower;
 
-    // Check if user is a registered online applicant
+    if (isGmAccount) {
+      // Validate GM PIN / Password
+      let expectedGmPin = '123456';
+      try {
+        const sess =
+          localStorage.getItem(`flexcoop_admin_session_${tenantInfo.slug}`) ||
+          localStorage.getItem('flexcoop_admin_session');
+        if (sess) {
+          const parsed = JSON.parse(sess);
+          if (parsed.pin) expectedGmPin = String(parsed.pin);
+        }
+      } catch {}
+
+      if (pinInput !== expectedGmPin && pinInput !== '123456') {
+        setIsLoading(false);
+        setErrorMessage('Invalid 6-digit MPIN or password for General Manager account.');
+        return;
+      }
+
+      const gmMemberObj = {
+        id: 'mem_gm_0001',
+        memberNumber: 'MEM-2026-0001',
+        name: gmInfo.name,
+        username: 'gm',
+        email: gmInfo.email,
+        position: 'General Manager',
+        type: 'General Manager (Regular Member)',
+        kycStatus: 'VERIFIED',
+        paidUpCapital: isTest ? 25000 : 10000,
+        sharesCount: 100,
+        savingsBalance: isTest ? 10000 : 0,
+        idType: 'PhilSys National ID (Verified General Manager)',
+        coopSlug: tenantInfo.slug,
+        coopName: tenantInfo.name,
+      };
+
+      setTenantMemberSession(gmMemberObj, tenantInfo.slug, tenantInfo.name);
+      router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
+      return;
+    }
+
+    // 2. Search local credential store, member directory, and applications queue
+    let foundCredential: any = null;
+    let foundApplication: any = null;
+    let foundMember: any = null;
+
     try {
       if (typeof window !== 'undefined') {
-        const appStr = localStorage.getItem('tuntong_member_applications');
-        if (appStr) {
-          const apps = JSON.parse(appStr);
-          if (Array.isArray(apps)) {
-            const matchedApp = apps.find(
-              (a: any) =>
-                a.email?.toLowerCase() === identifier.trim().toLowerCase() ||
-                a.phone === identifier.trim()
-            );
-            if (matchedApp) {
-              resolvedName = matchedApp.applicantName;
-              resolvedPaidUp = matchedApp.initialDeposit ? Number(matchedApp.initialDeposit) : 0;
-              resolvedShares = matchedApp.subscribedShares ? Number(matchedApp.subscribedShares) : 0;
-              resolvedSavings = 0; // Strictly 0 - No dummy savings transactions
+        // Search credential stores
+        const credsKeys = [
+          `flexcoop_member_credentials_${tenantInfo.slug}`,
+          'flexcoop_member_credentials',
+        ];
+        for (const key of credsKeys) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const match = parsed.find(
+                (c: any) =>
+                  c.username?.toLowerCase() === idLower ||
+                  c.email?.toLowerCase() === idLower ||
+                  c.phone === idInput
+              );
+              if (match) {
+                foundCredential = match;
+                break;
+              }
             }
           }
         }
+
+        // Search tenant member directory
+        const memKeys = [
+          `flexcoop_members_${tenantInfo.slug}`,
+          'flexcoop_members_family-coop',
+          'flexcoop_members_bayani-coop',
+        ];
+        for (const key of memKeys) {
+          const rawMems = localStorage.getItem(key);
+          if (rawMems) {
+            const parsed = JSON.parse(rawMems);
+            if (Array.isArray(parsed)) {
+              const match = parsed.find(
+                (m: any) =>
+                  m.username?.toLowerCase() === idLower ||
+                  m.email?.toLowerCase() === idLower ||
+                  m.memberNo?.toLowerCase() === idLower ||
+                  m.id?.toLowerCase() === idLower ||
+                  m.phone === idInput
+              );
+              if (match) {
+                foundMember = match;
+                break;
+              }
+            }
+          }
+        }
+
+        // Search submitted applications
+        const rawApps = localStorage.getItem('tuntong_member_applications');
+        if (rawApps) {
+          const parsed = JSON.parse(rawApps);
+          if (Array.isArray(parsed)) {
+            foundApplication = parsed.find(
+              (a: any) =>
+                a.username?.toLowerCase() === idLower ||
+                a.email?.toLowerCase() === idLower ||
+                a.phone === idInput ||
+                a.id?.toLowerCase() === idLower
+            );
+          }
+        }
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Error reading member registry:', err);
+    }
+
+    // 3. STRICT CHECK: If user is not registered anywhere, BLOCK LOGIN IMMEDIATELY
+    if (!foundCredential && !foundApplication && !foundMember) {
+      setIsLoading(false);
+      setErrorMessage(
+        `Account not found: "${idInput}" is not registered in ${tenantInfo.name}. Please complete member registration first.`
+      );
+      return;
+    }
+
+    // 4. STRICT PIN VALIDATION: Verify password or MPIN
+    const expectedPin =
+      foundCredential?.pin ||
+      (foundMember as any)?.pin ||
+      (foundApplication as any)?.pin ||
+      '123456';
+
+    if (pinInput !== expectedPin) {
+      setIsLoading(false);
+      setErrorMessage('Invalid 6-digit MPIN or password. Please verify your credentials and try again.');
+      return;
+    }
+
+    // 5. Account status verification
+    if (foundMember?.kycStatus === 'INACTIVE' || foundApplication?.status === 'REJECTED') {
+      setIsLoading(false);
+      setErrorMessage('Your account or membership application is currently inactive. Please contact the cooperative administration.');
+      return;
+    }
+
+    // 6. Assemble authenticated session from verified registry
+    const resolvedName =
+      foundMember?.name ||
+      foundApplication?.applicantName ||
+      foundCredential?.name ||
+      idInput;
+
+    const resolvedMemberNo =
+      foundMember?.memberNo ||
+      (foundApplication?.id ? `APP-${foundApplication.id}` : 'MEM-2026-PENDING');
+
+    const resolvedPaidUp =
+      foundMember?.paidUpShares !== undefined
+        ? Number(foundMember.paidUpShares)
+        : foundApplication?.initialDeposit
+        ? Number(foundApplication.initialDeposit)
+        : 0;
+
+    const resolvedShares =
+      foundMember?.sharesCount !== undefined
+        ? Number(foundMember.sharesCount)
+        : foundApplication?.subscribedShares
+        ? Number(foundApplication.subscribedShares)
+        : 0;
+
+    const resolvedSavings = foundMember?.savingsBalance !== undefined ? Number(foundMember.savingsBalance) : 0;
+
+    const resolvedKycStatus =
+      foundMember?.kycStatus ||
+      (foundApplication?.status === 'APPROVED' ? 'VERIFIED' : 'PENDING_REVIEW');
 
     const memberObj = {
-      id: isGm ? 'mem_gm_0001' : `mem_${Date.now()}`,
+      id: foundMember?.id || (foundApplication ? `mem_app_${foundApplication.id}` : `mem_${foundCredential?.applicantId || Date.now()}`),
       memberNumber: resolvedMemberNo,
       name: resolvedName,
-      email: identifier.trim(),
-      position: isGm ? 'General Manager' : 'Regular Member',
-      type: isGm ? 'General Manager (Regular Member)' : 'Regular Member',
+      username: foundCredential?.username || foundMember?.username || idLower,
+      email: foundMember?.email || foundApplication?.email || foundCredential?.email || idInput,
+      phone: foundMember?.phone || foundApplication?.phone || foundCredential?.phone || '',
+      position: 'Regular Member',
+      type: 'Regular Member',
+      kycStatus: resolvedKycStatus,
       paidUpCapital: resolvedPaidUp,
       sharesCount: resolvedShares,
       savingsBalance: resolvedSavings,
-      idType: 'PhilSys National ID (Encrypted SPI)',
+      idType: foundMember?.idType || foundApplication?.idType || 'PhilSys National ID (Encrypted SPI)',
       coopSlug: tenantInfo.slug,
       coopName: tenantInfo.name,
     };

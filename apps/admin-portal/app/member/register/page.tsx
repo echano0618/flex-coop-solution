@@ -133,6 +133,12 @@ export default function MemberRegisterPage() {
   const [psgcPostalCode, setPsgcPostalCode] = useState<string>('');
   const [psgcAddressError, setPsgcAddressError] = useState<string | null>(null);
 
+  // Step 2: Member Portal Login Credentials
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [credentialError, setCredentialError] = useState<string | null>(null);
+
   // Dynamic lists derived from PSGC hierarchy
   const availableProvinces = psgcRegionCode ? getProvincesByRegion(psgcRegionCode) : [];
   const availableCities = psgcProvinceCode ? getCitiesByProvince(psgcProvinceCode) : [];
@@ -360,14 +366,40 @@ export default function MemberRegisterPage() {
     e.preventDefault();
     setIsSubmitting(true);
 
+    const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim();
+    const effectiveSlug = tenantInfo.slug && tenantInfo.slug !== 'default' ? tenantInfo.slug : 'family-coop';
+    const effectiveCoopName = tenantInfo.name && tenantInfo.name !== 'Cooperative Enterprise' ? tenantInfo.name : 'Family Multi-Purpose Cooperative';
+    const appId = `APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const newApp = {
-      id: `APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      applicantName: `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim(),
-      email,
-      phone,
-      coopSlug: tenantInfo.slug,
-      coopName: tenantInfo.name,
-      tin,
+      id: appId,
+      applicantName: fullName,
+      firstName,
+      middleName,
+      lastName,
+      username: (username || '').trim().toLowerCase() || email.split('@')[0].toLowerCase(),
+      email: email.trim().toLowerCase(),
+      phone: phone.trim(),
+      landline: landline.trim(),
+      birthdate,
+      gender,
+      civilStatus,
+      employeeIdNumber: employeeIdNumber.trim(),
+      position: position.trim(),
+      officeUnitSection: officeUnitSection.trim(),
+      dateOfAppointment,
+      tin: tin.trim(),
+      occupation: occupation.trim(),
+      monthlyIncome: monthlyIncome === '' ? 0 : Number(monthlyIncome),
+      address: formattedPsgcAddress || address || 'Philippines',
+      psgcRegionCode,
+      psgcProvinceCode,
+      psgcCityCode,
+      psgcBarangayCode,
+      psgcStreetAddress,
+      psgcPostalCode,
+      coopSlug: effectiveSlug,
+      coopName: effectiveCoopName,
       dateSubmitted: new Date().toISOString(),
       status: 'UNDER_REVIEW',
       subscribedShares: Number(subscribedShares),
@@ -376,20 +408,115 @@ export default function MemberRegisterPage() {
       initialDeposit: Number(initialDeposit),
       paymentMethod,
       idType,
+      idNumber: tin || employeeIdNumber || 'CDA-APP-ID',
       idFrontFileName: idFrontFile?.name || null,
       idFrontPreview: idFrontFile?.previewUrl || null,
       selfiePreview: selfiePreview || null,
     };
+
     try {
       if (typeof window !== 'undefined') {
-        const existing = JSON.parse(localStorage.getItem('tuntong_member_applications') || '[]');
-        localStorage.setItem('tuntong_member_applications', JSON.stringify([newApp, ...existing]));
+        // 1. Save to global member applications queue
+        const existingApps = JSON.parse(localStorage.getItem('tuntong_member_applications') || '[]');
+        localStorage.setItem('tuntong_member_applications', JSON.stringify([newApp, ...existingApps]));
+
+        // 2. Persist portal credentials for strict authentication
+        const credEntry = {
+          username: newApp.username,
+          email: newApp.email,
+          phone: newApp.phone,
+          pin: (password || '123456').trim(),
+          name: fullName,
+          applicantId: appId,
+          coopSlug: effectiveSlug,
+          coopName: effectiveCoopName,
+          status: 'UNDER_REVIEW',
+          createdAt: new Date().toISOString(),
+        };
+
+        const scopedCredsKey = `flexcoop_member_credentials_${effectiveSlug}`;
+        const existingScopedCreds = JSON.parse(localStorage.getItem(scopedCredsKey) || '[]');
+        localStorage.setItem(
+          scopedCredsKey,
+          JSON.stringify([
+            credEntry,
+            ...existingScopedCreds.filter((c: any) => c.username !== credEntry.username && c.email !== credEntry.email),
+          ])
+        );
+
+        const globalCreds = JSON.parse(localStorage.getItem('flexcoop_member_credentials') || '[]');
+        localStorage.setItem(
+          'flexcoop_member_credentials',
+          JSON.stringify([
+            credEntry,
+            ...globalCreds.filter((c: any) => c.username !== credEntry.username && c.email !== credEntry.email),
+          ])
+        );
+
+        // 3. Immediately register applicant into the active tenant member directory
+        const membersKey = `flexcoop_members_${effectiveSlug}`;
+        const existingMembers = JSON.parse(localStorage.getItem(membersKey) || '[]');
+        const actualDeposit = Number(initialDeposit);
+        const actualSubShares = Number(subscribedShares);
+        const paymentStatus = actualDeposit > 0 ? (paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
+
+        const memberEntry = {
+          id: `mem_app_${appId}`,
+          memberNo: `MEM-2026-${String(existingMembers.length + 2).padStart(4, '0')}`,
+          name: fullName,
+          username: newApp.username,
+          email: newApp.email,
+          phone: newApp.phone,
+          classification: 'REGULAR',
+          kycStatus: 'PENDING_REVIEW',
+          idType: idType || 'PhilSys National ID',
+          idNumber: tin || 'N/A',
+          address: formattedPsgcAddress || 'Philippines',
+          paidUpShares: actualDeposit,
+          sharesCount: actualSubShares,
+          subscribedShares: actualSubShares,
+          initialPledge: Number(totalSubscribedAmount),
+          sharePaymentStatus: paymentStatus,
+          savingsBalance: 0,
+          loanBalance: 0,
+          npcConsent: 'Agreed (Republic Act No. 10173)',
+          pmesStatus: 'COMPLETED',
+          pmesCertNo: `CERT-PMES-${Math.floor(1000 + Math.random() * 9000)}`,
+          pmesDate: new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          biometricScore: 98.5,
+          amlaStatus: 'PASSED',
+          reviewedBy: 'Membership & Credit Committee',
+          reviewDate: new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          reviewNotes: 'Online applicant registered via PMES onboarding portal. Pending eKYC review & sign-off.',
+          idFrontPreview: idFrontFile?.previewUrl || null,
+          selfiePreview: selfiePreview || null,
+        };
+
+        const updatedMembers = [
+          memberEntry,
+          ...existingMembers.filter((m: any) => m.email !== memberEntry.email && m.id !== memberEntry.id),
+        ];
+        localStorage.setItem(membersKey, JSON.stringify(updatedMembers));
+
+        // 4. Notify open windows/tabs of the new registration
+        window.dispatchEvent(new CustomEvent('flexcoop_member_registered', { detail: newApp }));
+        window.dispatchEvent(new Event('storage'));
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Error saving member registration:', err);
+    }
 
     setTimeout(() => {
       setIsSubmitting(false);
-      setApplicationId(newApp.id);
+      setApplicationId(appId);
       setStep(5); // Success step
     }, 1000);
   };
@@ -711,7 +838,29 @@ export default function MemberRegisterPage() {
                 return;
               }
 
+              if (!username.trim()) {
+                setCredentialError('Please choose a preferred Username for your member portal login.');
+                return;
+              }
+              if (username.trim().length < 3) {
+                setCredentialError('Username must be at least 3 characters long.');
+                return;
+              }
+              if (!password.trim()) {
+                setCredentialError('Please set a 6-digit MPIN or password.');
+                return;
+              }
+              if (password.trim().length < 4) {
+                setCredentialError('MPIN / password must be at least 4 digits or characters.');
+                return;
+              }
+              if (password.trim() !== confirmPassword.trim()) {
+                setCredentialError('Passwords do not match. Please verify your MPIN.');
+                return;
+              }
+
               setPsgcAddressError(null);
+              setCredentialError(null);
               setAddress(formattedPsgcAddress);
               setStep(3);
             }}
@@ -1170,6 +1319,87 @@ export default function MemberRegisterPage() {
                   placeholder="e.g. 35000"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
+              </div>
+            </div>
+
+            {/* Member Portal Login Credentials */}
+            <div className="bg-slate-900/90 border border-emerald-500/30 rounded-xl p-4 sm:p-5 space-y-4 shadow-inner">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  <span>Member Portal Login Credentials</span>
+                </div>
+                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                  Self-Service Access
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Choose your username and 6-digit MPIN / password. You will use these credentials to securely log in to the Member Portal once registered.
+              </p>
+
+              {credentialError && (
+                <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/50 text-xs text-red-200 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{credentialError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Preferred Username *
+                  </label>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => {
+                      setUsername(e.target.value.toLowerCase().replace(/\s+/g, ''));
+                      setCredentialError(null);
+                    }}
+                    required
+                    placeholder="e.g. jdelacruz"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">Letters, numbers, dots, or dashes</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    6-Digit MPIN / Password *
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={20}
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setCredentialError(null);
+                    }}
+                    required
+                    placeholder="e.g. 123456"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono tracking-widest"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">Your confidential access PIN</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Confirm MPIN / Password *
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={20}
+                    value={confirmPassword}
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      setCredentialError(null);
+                    }}
+                    required
+                    placeholder="Re-enter MPIN"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono tracking-widest"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">Must match the MPIN above</span>
+                </div>
               </div>
             </div>
 
@@ -1816,10 +2046,44 @@ export default function MemberRegisterPage() {
             )}
 
 
+            {/* Registered Member Portal Credentials Card */}
+            <div className="bg-slate-900 border border-emerald-500/40 rounded-xl p-4 text-left space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                  Your Member Portal Credentials:
+                </span>
+                <span className="font-mono text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full">
+                  Status: PENDING REVIEW
+                </span>
+              </div>
+              <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800 space-y-1.5 text-xs text-slate-300">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Username / Account ID:</span>
+                  <span className="font-mono font-bold text-emerald-400">{username || email.split('@')[0]}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">6-Digit MPIN:</span>
+                  <span className="font-mono text-slate-400">•••••• (Configured)</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Registered Email:</span>
+                  <span className="font-mono text-slate-300">{email}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                You can now log in using your <strong>Username</strong> and <strong>6-digit MPIN</strong> to track your application status and access self-service cooperative features.
+              </p>
+            </div>
+
             {/* Production Action Navigation */}
             <div className="pt-4 space-y-3">
               <Link
-                href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login'}
+                href={
+                  tenantInfo.slug && tenantInfo.slug !== 'default'
+                    ? `/member/login?coop=${tenantInfo.slug}&username=${encodeURIComponent(username || email.split('@')[0])}`
+                    : `/member/login?username=${encodeURIComponent(username || email.split('@')[0])}`
+                }
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/30"
               >
                 <span>Proceed to {tenantInfo.name} Member Login</span>
