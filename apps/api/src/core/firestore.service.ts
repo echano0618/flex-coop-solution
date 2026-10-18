@@ -360,6 +360,11 @@ export class FirestoreCoopService {
     await this.applicationsCol(tenantId).doc(application.id).set(application, { merge: true });
   }
 
+  public async getApplication(tenantId: string, applicationId: string): Promise<any | null> {
+    const doc = await this.applicationsCol(tenantId).doc(applicationId).get();
+    return doc.exists ? doc.data() : null;
+  }
+
   public async listApplications(tenantId: string): Promise<any[]> {
     const snapshot = await this.applicationsCol(tenantId).get();
     const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());

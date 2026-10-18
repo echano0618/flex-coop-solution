@@ -819,11 +819,18 @@ https://tuntongtech.com`;
 
     console.log(`[OPERATOR OTP DISPATCH] PIN ${otp} sent to ${op.email} from support@tuntongtech.com`);
 
-    MailerService.sendMail({
-      to: op.email,
-      subject: emailSubject,
-      text: emailBody,
-    }).catch((err) => console.error('[MAILER ERROR] requestOperatorOtpAsync:', err));
+    try {
+      const mailRes = await MailerService.sendMail({
+        to: op.email,
+        subject: emailSubject,
+        text: emailBody,
+      });
+      if (!mailRes.success) {
+        console.error('[MAILER ERROR] requestOperatorOtpAsync:', mailRes.error);
+      }
+    } catch (err) {
+      console.error('[MAILER ERROR] requestOperatorOtpAsync caught:', err);
+    }
 
     return {
       success: true,
@@ -1167,6 +1174,36 @@ https://tuntongtech.com`;
     } catch (err) {
       console.warn('[OPERATOR] submitRegistrationAsync firestore error:', err);
     }
+
+    try {
+      const confirmSubject = `[Tuntong Tech] Application Received: ${record.name} (${record.id})`;
+      const confirmBody = `Dear ${record.adminFirstName} ${record.adminLastName},\n\n` +
+        `Thank you for registering "${record.name}" with the Tuntong Tech Cooperative SaaS Platform.\n\n` +
+        `Your cooperative registration application has been received and logged under reference ID:\n\n` +
+        `    ${record.id}\n\n` +
+        `• Application Summary:\n` +
+        `- Cooperative Name: ${record.name}\n` +
+        `- Type: ${record.coopType}\n` +
+        `- Designated Subdomain: https://${record.subdomain}\n` +
+        `- CDA Registration Number: ${record.cdaRegistrationNumber}\n` +
+        `- Tax Identification Number (TIN): ${record.tin}\n` +
+        `- Declared General Manager: ${record.adminFirstName} ${record.adminLastName}\n` +
+        `- Status: PENDING COMPLIANCE REVIEW\n\n` +
+        `Our compliance team is currently reviewing your application credentials. You will receive an official notification once your cooperative workspace is approved.\n\n` +
+        `Sincerely,\n` +
+        `Tuntong Tech Onboarding Desk\n` +
+        `support@tuntongtech.com\n` +
+        `https://tuntongtech.com`;
+
+      await MailerService.sendMail({
+        to: record.adminEmail,
+        subject: confirmSubject,
+        text: confirmBody,
+      });
+    } catch (mailErr) {
+      console.error('[MAILER ERROR] submitRegistrationAsync confirmation error:', mailErr);
+    }
+
     return record;
   }
 
@@ -1203,6 +1240,18 @@ https://tuntongtech.com`;
       console.warn('[OPERATOR] approveRegistrationAsync firestore provisioning warning:', err);
     }
 
+    if (res.registration.emailNotification) {
+      try {
+        await MailerService.sendMail({
+          to: res.registration.adminEmail,
+          subject: res.registration.emailNotification.subject,
+          text: res.registration.emailNotification.body,
+        });
+      } catch (mailErr) {
+        console.error('[MAILER ERROR] approveRegistrationAsync mail error:', mailErr);
+      }
+    }
+
     return res;
   }
 
@@ -1221,6 +1270,18 @@ https://tuntongtech.com`;
       await fs.saveRegistration(res.registration);
     } catch (err) {
       console.warn('[OPERATOR] rejectRegistrationAsync firestore warning:', err);
+    }
+
+    if (res.registration.emailNotification) {
+      try {
+        await MailerService.sendMail({
+          to: res.registration.adminEmail,
+          subject: res.registration.emailNotification.subject,
+          text: res.registration.emailNotification.body,
+        });
+      } catch (mailErr) {
+        console.error('[MAILER ERROR] rejectRegistrationAsync mail error:', mailErr);
+      }
     }
 
     return res;

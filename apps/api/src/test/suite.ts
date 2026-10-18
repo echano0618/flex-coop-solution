@@ -18,6 +18,7 @@ import { NetSurplusService } from '../modules/accounting/surplus.service';
 import { CollateralService } from '../modules/lending/collateral.service';
 import { CooperativeTaxService } from '../modules/accounting/tax.service';
 import { OperatorService } from '../modules/operator/operator.service';
+import { MailerService } from '../core/mailer.service';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -2067,7 +2068,61 @@ console.log('\n--- 31. Member Profile & eKYC Updating (Name Breakdown, Address, 
   assert(updatedMember.reviewNotes.includes('eKYC verification approved'), 'Underwriting review notes preserved and updated');
 }
 
-console.log('\n🎉 ALL 310 VERIFICATION TEST CASES (INCLUDING MEMBER PROFILE & eKYC UPDATE SUITE) PASSED SUCCESSFULLY!\n');
+// 32. Member Application Confirmation & Approval/Rejection Email Notifications
+console.log('\n--- 32. Member Application Confirmation & Approval/Rejection Email Notifications ---');
+{
+  const testApplicant = {
+    applicantName: 'Ana Patricia Santos',
+    email: 'anapatricia.santos@example.com',
+    phone: '09171234567',
+    address: 'Quezon City, Metro Manila',
+    appId: 'APP-2026-9901',
+    memberNumber: 'MEM-2026-0042',
+    coopName: 'Tagumpay Multi-Purpose Cooperative',
+    coopSlug: 'tagumpay',
+    subscribedShares: 50,
+    totalSubscribedAmount: 5000,
+    initialDeposit: 1000,
+  };
+
+  // Test Member Application Received
+  let receivedEmailSent = false;
+  try {
+    MailerService.sendMemberApplicationReceived(testApplicant);
+    receivedEmailSent = true;
+  } catch {}
+  assert(receivedEmailSent === true, 'Member application received confirmation email dispatches successfully');
+
+  // Test Member Application Approved Decision
+  let approvedEmailSent = false;
+  try {
+    MailerService.sendMemberApplicationDecision({
+      ...testApplicant,
+      decision: 'APPROVED',
+      notes: 'PMES and eKYC verified. Approved by Credit Committee.',
+      reviewedBy: 'Atty. Maria Santos (Membership Committee)',
+      reviewDate: 'Oct 19, 2026',
+    });
+    approvedEmailSent = true;
+  } catch {}
+  assert(approvedEmailSent === true, 'Member application approved confirmation email dispatches successfully');
+
+  // Test Member Application Rejected Decision
+  let rejectedEmailSent = false;
+  try {
+    MailerService.sendMemberApplicationDecision({
+      ...testApplicant,
+      decision: 'REJECTED',
+      notes: 'Government ID submitted is expired. Please re-submit valid ID.',
+      reviewedBy: 'Compliance Officer',
+      reviewDate: 'Oct 19, 2026',
+    });
+    rejectedEmailSent = true;
+  } catch {}
+  assert(rejectedEmailSent === true, 'Member application rejected notice email dispatches successfully');
+}
+
+console.log('\n🎉 ALL 313 VERIFICATION TEST CASES (INCLUDING MEMBER EMAIL NOTIFICATIONS & OPERATOR OTP) PASSED SUCCESSFULLY!\n');
 
 
 

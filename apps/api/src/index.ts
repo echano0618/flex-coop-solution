@@ -18,6 +18,7 @@ import { JournalEntry, Loan, LoanProduct, LoanStatus, Member, PaymentTransaction
 import { NetSurplusService } from './modules/accounting/surplus.service';
 import { CollateralService } from './modules/lending/collateral.service';
 import { OperatorService } from './modules/operator/operator.service';
+import { MailerService } from './core/mailer.service';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -592,6 +593,25 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
       sequenceIndex: members.length,
       tenantTin: tenant?.tin,
     });
+
+    // 7. Dispatch Member Application Confirmation Email
+    try {
+      await MailerService.sendMemberApplicationReceived({
+        applicantName: fullName,
+        email: email.trim().toLowerCase(),
+        phone: phone || '',
+        address: resolvedAddress,
+        appId,
+        memberNumber,
+        coopName: coopName || tenant?.name || 'Cooperative Enterprise',
+        coopSlug: coopSlug || tenantId.replace('tenant_', ''),
+        subscribedShares: actualSubShares,
+        totalSubscribedAmount: actualPledge,
+        initialDeposit: actualDeposit,
+      });
+    } catch (mailErr) {
+      console.error('[MAILER ERROR] member registration confirmation email error:', mailErr);
+    }
 
     res.status(201).json({
       success: true,
@@ -1219,16 +1239,20 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
     const { action, notes, reviewedBy } = req.body;
     const status = action === 'APPROVE' ? 'APPROVED' : 'INACTIVE';
 
+    let targetApp: any = null;
+    let targetMember: any = null;
+
     try {
       const fsService = FirestoreCoopService.getInstance();
+      targetApp = await fsService.getApplication(tenantId, appId);
       await fsService.updateApplicationStatus(tenantId, appId, status, notes, reviewedBy);
 
       // Also update member status in Firestore
       const memberId = `mem_app_${appId}`;
-      const member = await fsService.getMember(tenantId, memberId);
-      if (member) {
+      targetMember = await fsService.getMember(tenantId, memberId);
+      if (targetMember) {
         const updated = {
-          ...member,
+          ...targetMember,
           kycStatus: action === 'APPROVE' ? ('VERIFIED' as const) : ('REJECTED' as const),
           status: action === 'APPROVE' ? ('ACTIVE' as const) : ('INACTIVE' as const),
           reviewedBy: reviewedBy || 'Membership & Credit Committee',
@@ -1237,9 +1261,36 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
           updatedAt: new Date().toISOString(),
         };
         await fsService.saveMember(tenantId, updated);
+        targetMember = updated;
       }
     } catch (fsErr) {
       console.warn('Firestore updateApplicationStatus fallback:', fsErr);
+    }
+
+    // Dispatch official decision email to applicant
+    const recipientEmail = targetApp?.email || targetMember?.email;
+    const applicantName = targetApp?.applicantName || targetMember?.name || 'Valued Member';
+    const coopName = targetApp?.coopName || dbStore.tenants.get(tenantId)?.name || 'Cooperative Enterprise';
+    const coopSlug = targetApp?.coopSlug || tenantId.replace('tenant_', '');
+
+    if (recipientEmail) {
+      try {
+        await MailerService.sendMemberApplicationDecision({
+          applicantName,
+          email: recipientEmail,
+          appId,
+          memberNumber: targetMember?.memberNumber || targetMember?.memberNo || appId,
+          coopName,
+          coopSlug,
+          decision: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          notes: notes || (action === 'APPROVE' ? 'Application confirmed and verified.' : 'Incomplete documentation or unverified credentials.'),
+          reviewedBy: reviewedBy || 'Membership & Credit Committee',
+          reviewDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          actualDeposit: targetApp?.initialDeposit || targetMember?.paidUpShares || 0,
+        });
+      } catch (mailErr) {
+        console.error('[MAILER ERROR] member application decision email error:', mailErr);
+      }
     }
 
     res.json({ success: true, message: `Application ${appId} status updated to ${status}.` });
@@ -1280,6 +1331,31 @@ app.post('/api/v1/members/:id/kyc/review', async (req: Request, res: Response) =
       doc.reviewedByUserId = reviewedByUserId || 'usr_compliance_officer';
       if (newStatus === 'VERIFIED') {
         doc.verifiedAt = new Date().toISOString();
+      }
+    }
+
+    // Dispatch official decision email to member
+    const recipientEmail = member?.email;
+    const applicantName = member?.firstName ? `${member.firstName} ${member.lastName}` : ((member as any)?.name || 'Member');
+    const coopName = dbStore.tenants.get(tenantId)?.name || 'Cooperative Enterprise';
+    const coopSlug = tenantId.replace('tenant_', '');
+
+    if (recipientEmail) {
+      try {
+        await MailerService.sendMemberApplicationDecision({
+          applicantName,
+          email: recipientEmail,
+          appId: memberId,
+          memberNumber: member?.memberNumber || memberId,
+          coopName,
+          coopSlug,
+          decision: newStatus === 'VERIFIED' ? 'APPROVED' : 'REJECTED',
+          notes: notes || (newStatus === 'VERIFIED' ? 'eKYC verification approved.' : 'eKYC verification rejected.'),
+          reviewedBy: reviewedByUserId || 'Compliance Officer',
+          reviewDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        });
+      } catch (mailErr) {
+        console.error('[MAILER ERROR] member kyc review email error:', mailErr);
       }
     }
 
