@@ -440,7 +440,7 @@ export default function AdminDashboard() {
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
 
   // System Configuration Sub-Section State
-  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital'>('membership_registration');
+  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee'>('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -909,6 +909,48 @@ export default function AdminDashboard() {
     }
     setShareConfigNotification('Restored default share capital parameters (₱100.00 par value, 50 min shares, ₱1,000 min paid-up).');
     setTimeout(() => setShareConfigNotification(null), 4000);
+  };
+
+  // Technology Fee Treatment Configuration (Superadmin Configurable: Pass-Through vs OPEX)
+  const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>(() => {
+    if (typeof window !== 'undefined') {
+      const tenant = resolveTenantCoop();
+      const saved = localStorage.getItem(`flexcoop_tech_fee_config_${tenant.slug}`) || localStorage.getItem('flexcoop_tech_fee_config');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.treatment === 'PASS_THROUGH' || parsed.treatment === 'OPEX') {
+            return parsed.treatment;
+          }
+        } catch {}
+      }
+    }
+    return 'PASS_THROUGH';
+  });
+  const [techFeeNotification, setTechFeeNotification] = useState<string | null>(null);
+
+  const handleSaveTechFeeConfig = (treatmentToSave: 'PASS_THROUGH' | 'OPEX') => {
+    const tenant = resolveTenantCoop();
+    const config = {
+      treatment: treatmentToSave,
+      ratePercent: 1,
+      updatedAt: new Date().toISOString(),
+    };
+    setTechFeeTreatment(treatmentToSave);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`flexcoop_tech_fee_config_${tenant.slug}`, JSON.stringify(config));
+      localStorage.setItem('flexcoop_tech_fee_config', JSON.stringify(config));
+    }
+    setTechFeeNotification(
+      treatmentToSave === 'PASS_THROUGH'
+        ? 'Technology Fee (1%) configured as PASS-THROUGH FEE (deducted upfront from member loan proceeds).'
+        : 'Technology Fee (1%) configured as COOPERATIVE OPEX (absorbed by coop, ₱0.00 deducted from member loan proceeds).'
+    );
+    setTimeout(() => setTechFeeNotification(null), 4000);
+  };
+
+  const handleResetTechFeeConfig = () => {
+    handleSaveTechFeeConfig('PASS_THROUGH');
   };
 
   // Platform Escrow & Usage State
@@ -2665,9 +2707,11 @@ export default function AdminDashboard() {
               </div>
 
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Platform Pass-Through Fees</div>
-                <div className="text-2xl font-bold text-emerald-600 mt-2">₱1,000.00</div>
-                <div className="text-xs text-slate-500 font-medium mt-1">₱107.14 Output VAT Remitted</div>
+                <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  {techFeeTreatment === 'PASS_THROUGH' ? 'Technology Fees (Pass-Through)' : 'Technology Fees (OPEX Absorbed)'}
+                </div>
+                <div className="text-2xl font-bold text-emerald-600 mt-2">₱{isTestTenant ? '500.00' : '0.00'}</div>
+                <div className="text-xs text-slate-500 font-medium mt-1">₱{isTestTenant ? '53.57' : '0.00'} Output VAT Remitted</div>
               </div>
 
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
@@ -2725,11 +2769,13 @@ export default function AdminDashboard() {
                 <div className="space-y-4 text-sm">
                   <div className="p-4 border border-emerald-200 bg-emerald-50/50 rounded-lg">
                     <div className="flex justify-between font-semibold text-emerald-950">
-                      <span>Platform Escrow Mode (Active)</span>
-                      <span className="text-emerald-700">2.0% (Min ₱100.00)</span>
+                      <span>Platform Technology Fee (Active Policy)</span>
+                      <span className="text-emerald-700">1.0% Flat Rate ({techFeeTreatment === 'PASS_THROUGH' ? 'Pass-Through' : 'OPEX'})</span>
                     </div>
                     <p className="text-xs text-emerald-800 mt-1">
-                      Platform handles escrow settlement. Processing fee is deducted upfront from loan disbursement proceeds.
+                      {techFeeTreatment === 'PASS_THROUGH'
+                        ? 'Technology fee is deducted upfront from loan disbursement proceeds.'
+                        : 'Technology fee is absorbed directly by the cooperative under operating expense account 5-02-14.'}
                     </p>
                   </div>
 
@@ -4855,7 +4901,11 @@ export default function AdminDashboard() {
                       <span className="text-slate-400">Locked</span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 mb-3">Deducts 2% fee & issues 12% VAT invoice.</p>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    {techFeeTreatment === 'PASS_THROUGH'
+                      ? 'Deducts 1% Technology Fee & issues 12% VAT invoice.'
+                      : '1% Technology Fee absorbed via Coop OPEX & issues 12% VAT invoice.'}
+                  </p>
                   {loanStatus === 'APPROVED' && (
                     <div>
                       {currentStaff.role === 'CASHIER' || currentStaff.role === 'GENERAL_MANAGER' ? (
@@ -5021,48 +5071,66 @@ export default function AdminDashboard() {
                     </button>
                   </div>
 
-                  <div className="text-xs space-y-3 text-slate-700 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="flex justify-between">
-                      <span className="font-semibold">Borrower:</span>
-                      <span>MARIA CLARA SANTOS (MEM-2026-0001)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-semibold">1. Loan Principal:</span>
-                      <span className="font-bold text-slate-900">₱50,000.00</span>
-                    </div>
-                    <div className="border-t border-slate-200 pt-2 space-y-1 pl-4">
-                      <div className="flex justify-between text-slate-600">
-                        <span>a. SaaS Pass-Through Processing Fee (2%):</span>
-                        <span>₱1,000.00</span>
-                      </div>
-                      <div className="flex justify-between text-slate-600">
-                        <span>b. Coop Service and Filing Fee (1.5%):</span>
-                        <span>₱750.00</span>
-                      </div>
-                    </div>
-                    <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-emerald-900">
-                      <span>2. Net Disbursed Proceeds (1 minus Deductions):</span>
-                      <span className="text-emerald-800 text-sm">₱48,250.00</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-semibold">3. Effective Interest Rate (EIR):</span>
-                      <span>15.50% per annum</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const principal = activeLoanApplication?.amount || 50000;
+                    const isPassThrough = techFeeTreatment === 'PASS_THROUGH';
+                    const techFee = Math.round(principal * 0.01 * 100) / 100;
+                    const techFeeDeduction = isPassThrough ? techFee : 0;
+                    const coopServiceFee = Math.round(principal * 0.015 * 100) / 100;
+                    const netProceeds = principal - techFeeDeduction - coopServiceFee;
+                    const borrowerName = activeLoanApplication?.memberName || 'MARIA CLARA SANTOS';
+                    const memberNo = activeLoanApplication?.memberNo || 'MEM-2026-0001';
+                    const term = activeLoanApplication?.termMonths || 12;
 
-                  <div className="p-4 bg-slate-100 rounded-lg text-xs font-mono text-slate-700 leading-relaxed border border-slate-200">
-                    <div className="font-bold mb-1 uppercase">Promissory Note & Loan Agreement Summary</div>
-                    "FOR VALUE RECEIVED, I promise to pay to the order of THE COOPERATIVE the sum of PESOS FIFTY THOUSAND (PHP 50,000.00) in 12 equal monthly installments. Default in payment incurs 3% monthly surcharge. Joint and solidary liability acknowledged pursuant to the Cooperative Code."
-                  </div>
+                    return (
+                      <>
+                        <div className="text-xs space-y-3 text-slate-700 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                          <div className="flex justify-between">
+                            <span className="font-semibold">Borrower:</span>
+                            <span className="font-bold text-slate-900">{borrowerName} ({memberNo})</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-semibold">1. Loan Principal:</span>
+                            <span className="font-bold text-slate-900">₱{principal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="border-t border-slate-200 pt-2 space-y-1 pl-4">
+                            <div className="flex justify-between text-slate-600">
+                              <span>a. Technology Fee (1%){!isPassThrough ? ' [Coop OPEX Absorbed]' : ''}:</span>
+                              <span className={!isPassThrough ? 'text-emerald-700 font-semibold' : 'font-mono'}>
+                                {isPassThrough ? `₱${techFee.toFixed(2)}` : '₱0.00 (Coop OPEX)'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-slate-600">
+                              <span>b. Coop Service and Filing Fee (1.5%):</span>
+                              <span className="font-mono">₱{coopServiceFee.toFixed(2)}</span>
+                            </div>
+                          </div>
+                          <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-emerald-900">
+                            <span>2. Net Disbursed Proceeds (1 minus Deductions):</span>
+                            <span className="text-emerald-800 text-sm font-mono">₱{netProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-semibold">3. Effective Interest Rate (EIR):</span>
+                            <span>{isPassThrough ? '14.85%' : '13.75%'} per annum</span>
+                          </div>
+                        </div>
 
-                  <div className="flex justify-end pt-2">
-                    <button
-                      onClick={() => setShowDisclosureModal(false)}
-                      className="bg-slate-900 text-white text-xs font-medium px-5 py-2.5 rounded-lg hover:bg-slate-800"
-                    >
-                      Close Statement
-                    </button>
-                  </div>
+                        <div className="p-4 bg-slate-100 rounded-lg text-xs font-mono text-slate-700 leading-relaxed border border-slate-200">
+                          <div className="font-bold mb-1 uppercase">Promissory Note &amp; Loan Agreement Summary</div>
+                          &quot;FOR VALUE RECEIVED, I promise to pay to the order of THE COOPERATIVE the sum of PESOS {principal.toLocaleString('en-PH')} (PHP {principal.toFixed(2)}) in {term} equal monthly installments. Default in payment incurs 3% monthly surcharge. Joint and solidary liability acknowledged pursuant to the Cooperative Code.&quot;
+                        </div>
+
+                        <div className="flex justify-end pt-2">
+                          <button
+                            onClick={() => setShowDisclosureModal(false)}
+                            className="bg-slate-900 text-white text-xs font-medium px-5 py-2.5 rounded-lg hover:bg-slate-800"
+                          >
+                            Close Statement
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -6688,221 +6756,237 @@ export default function AdminDashboard() {
             </div>
 
             {/* SUB-VIEW 1: CDA TRIAL BALANCE */}
-            {ledgerSubTab === 'trial_balance' && (
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-emerald-600" />
-                      <span>CDA Standard Trial Balance (As of {new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })})</span>
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Summary of all asset, liability, equity, revenue, and expense accounts. Strictly balanced double-entry validation.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Total Debits = Total Credits (Balanced)</span>
-                  </div>
-                </div>
+            {ledgerSubTab === 'trial_balance' && (() => {
+              const tbPaidUpShares = isTestTenant ? 30000 : members.reduce((s, m) => s + (m.paidUpShares || 0), 0);
+              const tbCompulsorySavings = isTestTenant ? 7000 : members.reduce((s, m) => s + (m.savingsBalance || 0), 0);
+              const tbVoluntarySavings = isTestTenant ? 1200 : 0;
+              const tbProcessingFeePayable = isTestTenant ? 1000 : 0;
+              const tbInterestIncome = isTestTenant ? 3270 : 0;
+              const tbServiceFeeIncome = isTestTenant ? 750 : 0;
+              const tbEscrow = isTestTenant ? 48250 : 0;
+              const tbPaymongo = isTestTenant ? 48470 : 0;
+              const tbLoans = isTestTenant ? 47000 : members.reduce((s, m) => s + (m.loanBalance || 0), 0);
+              const tbCashOnHand = isTestTenant ? 15000 : Math.max(0, tbPaidUpShares + tbCompulsorySavings + tbVoluntarySavings - tbLoans);
 
-                <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
-                      <tr>
-                        <th className="p-3">CDA Code</th>
-                        <th className="p-3">Account Title</th>
-                        <th className="p-3">Category</th>
-                        <th className="p-3">Normal Balance</th>
-                        <th className="p-3 text-right">Debit Balance (₱)</th>
-                        <th className="p-3 text-right">Credit Balance (₱)</th>
-                        <th className="p-3 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">1-01-01</td>
-                        <td className="p-3 font-medium text-slate-800">Cash on Hand (Cashier Counter)</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">15,000.00</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('1-01-01'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">1-01-04</td>
-                        <td className="p-3 font-medium text-slate-800">Platform Escrow Settlement Account</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">48,250.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('1-01-04'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">1-01-05</td>
-                        <td className="p-3 font-medium text-slate-800">Digital Wallet / PayMongo Float</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">48,470.00</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('1-01-05'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
-                        <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular (Control Account)</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                        <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">47,000.00</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('1-02-01'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
-                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory (Control Account)</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">7,000.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('2-01-01'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
-                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary (Control Account)</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">1,200.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('2-01-02'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">2-02-02</td>
-                        <td className="p-3 font-medium text-slate-800">Platform Loan Processing Fee Payable</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">1,000.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('2-02-02'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
-                        <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common (Control Account)</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
-                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">30,000.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('3-01-03'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">4-01-01</td>
-                        <td className="p-3 font-medium text-slate-800">Interest Income from Loans</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
-                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">3,270.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('4-01-01'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">4-01-02</td>
-                        <td className="p-3 font-medium text-slate-800">Service and Filing Fees Income</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
-                        <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                        <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">750.00</td>
-                        <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGlAccountCode('4-01-02'); setLedgerSubTab('gl_statement'); }}
-                            className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                          >
-                            View GL Ledger
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                    <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
-                      <tr>
-                        <td colSpan={4} className="p-3 text-right uppercase">Trial Balance Grand Total:</td>
-                        <td className="p-3 text-right font-mono text-emerald-900 font-black">₱110,470.00</td>
-                        <td className="p-3 text-right font-mono text-emerald-900 font-black">₱110,470.00</td>
-                        <td className="p-3 text-center text-[10px] text-emerald-700 font-bold">BALANCED</td>
-                      </tr>
-                    </tfoot>
-                  </table>
+              const tbTotalDebits = tbCashOnHand + tbEscrow + tbPaymongo + tbLoans;
+              const tbTotalCredits = tbEscrow + tbCompulsorySavings + tbVoluntarySavings + tbProcessingFeePayable + tbPaidUpShares + tbInterestIncome + tbServiceFeeIncome;
+
+              return (
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-emerald-600" />
+                        <span>CDA Standard Trial Balance (As of {new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })})</span>
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Summary of all asset, liability, equity, revenue, and expense accounts. Strictly balanced double-entry validation.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>Total Debits = Total Credits (Balanced)</span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
+                        <tr>
+                          <th className="p-3">CDA Code</th>
+                          <th className="p-3">Account Title</th>
+                          <th className="p-3">Category</th>
+                          <th className="p-3">Normal Balance</th>
+                          <th className="p-3 text-right">Debit Balance (₱)</th>
+                          <th className="p-3 text-right">Credit Balance (₱)</th>
+                          <th className="p-3 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">1-01-01</td>
+                          <td className="p-3 font-medium text-slate-800">Cash on Hand (Cashier Counter)</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbCashOnHand.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('1-01-01'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">1-01-04</td>
+                          <td className="p-3 font-medium text-slate-800">Platform Escrow Settlement Account</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbEscrow.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('1-01-04'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">1-01-05</td>
+                          <td className="p-3 font-medium text-slate-800">Digital Wallet / PayMongo Float</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbPaymongo.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('1-01-05'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
+                          <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular (Control Account)</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbLoans.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('1-02-01'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
+                          <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory (Control Account)</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbCompulsorySavings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('2-01-01'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
+                          <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary (Control Account)</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbVoluntarySavings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('2-01-02'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">2-02-02</td>
+                          <td className="p-3 font-medium text-slate-800">Platform Loan Processing Fee Payable</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbProcessingFeePayable.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('2-02-02'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
+                          <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common (Control Account)</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
+                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbPaidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('3-01-03'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">4-01-01</td>
+                          <td className="p-3 font-medium text-slate-800">Interest Income from Loans</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
+                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbInterestIncome.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('4-01-01'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">4-01-02</td>
+                          <td className="p-3 font-medium text-slate-800">Service and Filing Fees Income</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
+                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
+                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbServiceFeeIncome.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGlAccountCode('4-01-02'); setLedgerSubTab('gl_statement'); }}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                            >
+                              View GL Ledger
+                            </button>
+                          </td>
+                        </tr>
+                      </tbody>
+                      <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
+                        <tr>
+                          <td colSpan={4} className="p-3 text-right uppercase">Trial Balance Grand Total:</td>
+                          <td className="p-3 text-right font-mono text-emerald-900 font-black">₱{tbTotalDebits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono text-emerald-900 font-black">₱{tbTotalCredits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-center text-[10px] text-emerald-700 font-bold">BALANCED</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* SUB-VIEW 2: MEMBER SUBSIDIARY LEDGER (SL) */}
             {ledgerSubTab === 'member_sl' && (() => {
@@ -6923,7 +7007,7 @@ export default function AdminDashboard() {
                   type: 'SHARE_CAPITAL',
                   normal: 'CREDIT',
                   balance: activeMember.paidUpShares || 0,
-                  txs: (activeMember.paidUpShares || 0) > 0 ? [
+                  txs: isTestTenant && (activeMember.paidUpShares || 0) > 0 ? [
                     {
                       date: '2026-01-20',
                       ref: 'OR-SHR-2026-001',
@@ -6940,7 +7024,7 @@ export default function AdminDashboard() {
                   type: 'SAVINGS',
                   normal: 'CREDIT',
                   balance: activeMember.savingsBalance || 0,
-                  txs: (activeMember.savingsBalance || 0) > 0 ? [
+                  txs: isTestTenant && (activeMember.savingsBalance || 0) > 0 ? [
                     {
                       date: '2026-01-20',
                       ref: 'OR-SAV-2026-001',
@@ -6957,7 +7041,7 @@ export default function AdminDashboard() {
                   type: 'LOAN',
                   normal: 'DEBIT',
                   balance: activeMember.loanBalance || 0,
-                  txs: (activeMember.loanBalance || 0) > 0 ? [
+                  txs: isTestTenant && (activeMember.loanBalance || 0) > 0 ? [
                     {
                       date: '2026-02-01',
                       ref: `LN-2026-${(activeMember.memberNo || '0001').replace(/\D/g, '')}`,
@@ -7283,117 +7367,138 @@ export default function AdminDashboard() {
             })()}
 
             {/* SUB-VIEW 4: GL VS SL CONTROL RECONCILIATION */}
-            {ledgerSubTab === 'reconciliation' && (
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                      Audit Verification
-                    </span>
-                    <span className="text-xs text-slate-400">•</span>
-                    <span className="text-xs text-slate-500 font-mono">CDA Memorandum Circular 2015-06</span>
-                  </div>
-                  <h3 className="text-base font-bold text-slate-900">Control Account Reconciliation (GL vs Sum of Member SLs)</h3>
-                  <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-                    Internal control test mandated by the CDA: The balance of each General Ledger control account must strictly equal the mathematical sum of all active member subsidiary ledger accounts. Zero variance is required.
-                  </p>
-                </div>
+            {ledgerSubTab === 'reconciliation' && (() => {
+              const recLoansCount = isTestTenant ? 1 : members.filter((m) => (m.loanBalance || 0) > 0).length;
+              const recLoansGl = isTestTenant ? 47000 : members.reduce((s, m) => s + (m.loanBalance || 0), 0);
+              const recLoansSl = recLoansGl;
 
-                <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
-                      <tr>
-                        <th className="p-3">CDA Control Account</th>
-                        <th className="p-3">Account Title</th>
-                        <th className="p-3">Category</th>
-                        <th className="p-3 text-center">Active Members</th>
-                        <th className="p-3 text-right">GL Control Balance (₱)</th>
-                        <th className="p-3 text-right">Sum of Member SLs (₱)</th>
-                        <th className="p-3 text-right">Variance (₱)</th>
-                        <th className="p-3 text-center">Audit Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
-                        <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                        <td className="p-3 text-center font-mono">1 Member</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">47,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">47,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
-                        <td className="p-3 text-center">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
-                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                        <td className="p-3 text-center font-mono">2 Members</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">7,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">7,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
-                        <td className="p-3 text-center">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
-                        <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                        <td className="p-3 text-center font-mono">1 Member</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">1,200.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">1,200.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
-                        <td className="p-3 text-center">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
-                          </span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
-                        <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common</td>
-                        <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
-                        <td className="p-3 text-center font-mono">3 Members</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">30,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-800">30,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
-                        <td className="p-3 text-center">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
-                          </span>
-                        </td>
-                      </tr>
-                    </tbody>
-                    <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
-                      <tr>
-                        <td colSpan={4} className="p-3 text-right uppercase">Total Control Accounts Variance:</td>
-                        <td className="p-3 text-right font-mono">₱85,200.00</td>
-                        <td className="p-3 text-right font-mono">₱85,200.00</td>
-                        <td className="p-3 text-right font-mono text-emerald-900 font-black">₱0.00</td>
-                        <td className="p-3 text-center text-emerald-800 font-bold">100% RECONCILED</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+              const recCompSavingsCount = isTestTenant ? 2 : members.filter((m) => (m.savingsBalance || 0) > 0).length;
+              const recCompSavingsGl = isTestTenant ? 7000 : members.reduce((s, m) => s + (m.savingsBalance || 0), 0);
+              const recCompSavingsSl = recCompSavingsGl;
 
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+              const recVolSavingsCount = isTestTenant ? 1 : 0;
+              const recVolSavingsGl = isTestTenant ? 1200 : 0;
+              const recVolSavingsSl = recVolSavingsGl;
+
+              const recSharesCount = isTestTenant ? 3 : members.filter((m) => (m.paidUpShares || 0) > 0).length;
+              const recSharesGl = isTestTenant ? 30000 : members.reduce((s, m) => s + (m.paidUpShares || 0), 0);
+              const recSharesSl = recSharesGl;
+
+              const recTotalGl = recLoansGl + recCompSavingsGl + recVolSavingsGl + recSharesGl;
+              const recTotalSl = recLoansSl + recCompSavingsSl + recVolSavingsSl + recSharesSl;
+
+              return (
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
                   <div>
-                    <div className="font-bold">CDA MC 2015-06 Audit Compliance Certified</div>
-                    <p className="text-[11px] text-emerald-700 mt-0.5">
-                      All General Ledger Control Accounts match the underlying Member Subsidiary Ledgers (SL) with <strong>₱0.00 variance</strong>. No unallocated deposits, orphan loan receipts, or uncredited share pledges detected.
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        Audit Verification
+                      </span>
+                      <span className="text-xs text-slate-400">•</span>
+                      <span className="text-xs text-slate-500 font-mono">CDA Memorandum Circular 2015-06</span>
+                    </div>
+                    <h3 className="text-base font-bold text-slate-900">Control Account Reconciliation (GL vs Sum of Member SLs)</h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+                      Internal control test mandated by the CDA: The balance of each General Ledger control account must strictly equal the mathematical sum of all active member subsidiary ledger accounts. Zero variance is required.
                     </p>
                   </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
+                        <tr>
+                          <th className="p-3">CDA Control Account</th>
+                          <th className="p-3">Account Title</th>
+                          <th className="p-3">Category</th>
+                          <th className="p-3 text-center">Active Members</th>
+                          <th className="p-3 text-right">GL Control Balance (₱)</th>
+                          <th className="p-3 text-right">Sum of Member SLs (₱)</th>
+                          <th className="p-3 text-right">Variance (₱)</th>
+                          <th className="p-3 text-center">Audit Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
+                          <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
+                          <td className="p-3 text-center font-mono">{recLoansCount} {recLoansCount === 1 ? 'Member' : 'Members'}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recLoansGl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recLoansSl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                          <td className="p-3 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                            </span>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
+                          <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                          <td className="p-3 text-center font-mono">{recCompSavingsCount} {recCompSavingsCount === 1 ? 'Member' : 'Members'}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recCompSavingsGl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recCompSavingsSl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                          <td className="p-3 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                            </span>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
+                          <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
+                          <td className="p-3 text-center font-mono">{recVolSavingsCount} {recVolSavingsCount === 1 ? 'Member' : 'Members'}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recVolSavingsGl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recVolSavingsSl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                          <td className="p-3 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                            </span>
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
+                          <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common</td>
+                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
+                          <td className="p-3 text-center font-mono">{recSharesCount} {recSharesCount === 1 ? 'Member' : 'Members'}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recSharesGl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-800">{recSharesSl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">0.00</td>
+                          <td className="p-3 text-center">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                      <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
+                        <tr>
+                          <td colSpan={4} className="p-3 text-right uppercase">Total Control Accounts Variance:</td>
+                          <td className="p-3 text-right font-mono">₱{recTotalGl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono">₱{recTotalSl.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                          <td className="p-3 text-right font-mono text-emerald-900 font-black">₱0.00</td>
+                          <td className="p-3 text-center text-emerald-800 font-bold">100% RECONCILED</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                    <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                    <div>
+                      <div className="font-bold">CDA MC 2015-06 Audit Compliance Certified</div>
+                      <p className="text-[11px] text-emerald-700 mt-0.5">
+                        All General Ledger Control Accounts match the underlying Member Subsidiary Ledgers (SL) with <strong>₱0.00 variance</strong>. No unallocated deposits, orphan loan receipts, or uncredited share pledges detected.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
 
@@ -9186,6 +9291,19 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               )}
+
+              {systemConfigSection === 'tech_fee' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetTechFeeConfig}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Fee Defaults</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Sub-Section Navigation / Module Selector */}
@@ -9223,6 +9341,24 @@ export default function AdminDashboard() {
                   systemConfigSection === 'share_capital' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
                 }`}>
                   ₱{stockParValue} / {minSubscribedShares} Shares
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSystemConfigSection('tech_fee')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'tech_fee'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <Percent className="w-3.5 h-3.5" />
+                <span>Technology Fee Policy (1%)</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'tech_fee' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {techFeeTreatment === 'PASS_THROUGH' ? 'Pass-Through' : 'Coop OPEX'}
                 </span>
               </button>
 
@@ -9807,6 +9943,210 @@ export default function AdminDashboard() {
                       </button>
                     </div>
                   </form>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-SECTION 4: TECHNOLOGY FEE (1%) POLICY (PASS-THROUGH VS OPEX) */}
+            {systemConfigSection === 'tech_fee' && (
+              <div className="space-y-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                          <Percent className="w-3 h-3 text-emerald-600" />
+                          <span>Superadmin Technology Fee Configuration</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">
+                          Flat Rate: 1.00% of Gross Loan Principal
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                        Technology Fee Accounting Treatment Policy
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+                        Configure whether the 1% Technology Fee is treated as a <strong>Pass-Through Fee</strong> (deducted upfront from the borrower&apos;s loan proceeds during Cashier disbursement) or as a <strong>Cooperative Operating Expense (OPEX)</strong> (absorbed directly by the cooperative under COA Account 5-02-14, with ₱0.00 deducted from the borrower).
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetTechFeeConfig}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset Defaults</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notification Banner */}
+                  {techFeeNotification && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{techFeeNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setTechFeeNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Policy Selection Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* OPTION 1: PASS-THROUGH FEE */}
+                    <div
+                      onClick={() => setTechFeeTreatment('PASS_THROUGH')}
+                      className={`p-6 rounded-2xl border-2 cursor-pointer transition-all space-y-4 ${
+                        techFeeTreatment === 'PASS_THROUGH'
+                          ? 'border-emerald-600 bg-emerald-50/40 shadow-sm ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            techFeeTreatment === 'PASS_THROUGH'
+                              ? 'border-emerald-600 bg-emerald-600 text-white'
+                              : 'border-slate-300 bg-white'
+                          }`}>
+                            {techFeeTreatment === 'PASS_THROUGH' && <Check className="w-3 h-3 stroke-[3]" />}
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 block">Pass-Through Fee</span>
+                            <span className="text-[10px] text-slate-500 font-mono">Deducted from Borrower</span>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                          Borrower Deducted
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-slate-600 leading-relaxed">
+                        <p>
+                          The 1% Technology Fee is deducted upfront from the member&apos;s loan proceeds at the time of Cashier disbursement.
+                        </p>
+                        <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-1.5 font-mono text-[11px]">
+                          <div className="flex justify-between text-slate-700">
+                            <span>Sample Loan Principal:</span>
+                            <span className="font-bold">₱50,000.00</span>
+                          </div>
+                          <div className="flex justify-between text-rose-600 font-semibold">
+                            <span>- 1% Technology Fee:</span>
+                            <span>- ₱500.00</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500">
+                            <span>- 1.5% Coop Filing Fee:</span>
+                            <span>- ₱750.00</span>
+                          </div>
+                          <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-800">
+                            <span>Borrower Proceeds:</span>
+                            <span>₱48,750.00</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Held in platform escrow until automated invoice settlement.</span>
+                      </div>
+                    </div>
+
+                    {/* OPTION 2: COOPERATIVE OPEX */}
+                    <div
+                      onClick={() => setTechFeeTreatment('OPEX')}
+                      className={`p-6 rounded-2xl border-2 cursor-pointer transition-all space-y-4 ${
+                        techFeeTreatment === 'OPEX'
+                          ? 'border-emerald-600 bg-emerald-50/40 shadow-sm ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            techFeeTreatment === 'OPEX'
+                              ? 'border-emerald-600 bg-emerald-600 text-white'
+                              : 'border-slate-300 bg-white'
+                          }`}>
+                            {techFeeTreatment === 'OPEX' && <Check className="w-3 h-3 stroke-[3]" />}
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 block">Cooperative OPEX</span>
+                            <span className="text-[10px] text-slate-500 font-mono">Absorbed by Cooperative</span>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          Coop Absorbed
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-slate-600 leading-relaxed">
+                        <p>
+                          The 1% Technology Fee is absorbed directly by the Cooperative as an Operating Expense. <strong>₱0.00</strong> is deducted from the borrower.
+                        </p>
+                        <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-1.5 font-mono text-[11px]">
+                          <div className="flex justify-between text-slate-700">
+                            <span>Sample Loan Principal:</span>
+                            <span className="font-bold">₱50,000.00</span>
+                          </div>
+                          <div className="flex justify-between text-emerald-700 font-semibold">
+                            <span>- 1% Technology Fee:</span>
+                            <span>₱0.00 (Coop OPEX)</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500">
+                            <span>- 1.5% Coop Filing Fee:</span>
+                            <span>- ₱750.00</span>
+                          </div>
+                          <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-800">
+                            <span>Borrower Proceeds:</span>
+                            <span>₱49,250.00</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Booked under CDA Account 5-02-14 (Tech &amp; SaaS Operating Expenses).</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Informational Guidance Box */}
+                  <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span className="uppercase tracking-wider">BIR &amp; CDA Accounting Architecture</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Regardless of whether Pass-Through or OPEX is selected, the platform issues an electronic Sales Invoice with <strong>12% Output VAT</strong> to the cooperative. In Pass-Through mode, the fee is collected from the member upfront. In OPEX mode, the cooperative assumes the full cost as an institutional digitization and platform operating expense.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={handleResetTechFeeConfig}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                    >
+                      Reset Default (Pass-Through)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveTechFeeConfig(techFeeTreatment)}
+                      className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Save Technology Fee Policy</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

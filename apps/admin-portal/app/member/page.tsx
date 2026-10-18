@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -497,7 +497,23 @@ export default function MemberPortalPage() {
   const requiresCoMaker = Boolean(selectedProduct.requiresCoMaker);
   const coMakerRuleText = selectedProduct.coMakerRuleDescription || 'Requires active co-maker endorsement with joint solidary liability.';
 
-  const platformFee = Math.max(loanAmount * 0.02, 100.0);
+  // Technology Fee Treatment (Pass-Through vs OPEX)
+  const techFeeConfig = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const slug = tenantInfo.slug || 'default';
+      const saved = localStorage.getItem(`flexcoop_tech_fee_config_${slug}`) || localStorage.getItem('flexcoop_tech_fee_config');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {}
+      }
+    }
+    return { treatment: 'PASS_THROUGH', ratePercent: 1 };
+  }, [tenantInfo.slug]);
+
+  const isTechFeePassThrough = (techFeeConfig?.treatment || 'PASS_THROUGH') === 'PASS_THROUGH';
+  const techFeeAmount = Math.round(loanAmount * 0.01 * 100) / 100;
+  const memberTechFeeDeduction = isTechFeePassThrough ? techFeeAmount : 0;
   const coopServiceFee = loanAmount * (selectedProduct.serviceFeeRate || 0.015);
 
   let advanceInterest = 0;
@@ -517,14 +533,14 @@ export default function MemberPortalPage() {
     }, 0);
   }
 
-  const netProceeds = Math.max(0, loanAmount - platformFee - coopServiceFee - advanceInterest - optionalFeesTotal);
+  const netProceeds = Math.max(0, loanAmount - memberTechFeeDeduction - coopServiceFee - advanceInterest - optionalFeesTotal);
 
   // Monthly annuity installment
   const monthlyRate = annualRate / 12.0;
   const factor = Math.pow(1.0 + monthlyRate, loanTerm);
   const monthlyInstallment = Math.round(((loanAmount * (monthlyRate * factor)) / (factor - 1.0)) * 100) / 100;
   const totalInterest = Math.round(((monthlyInstallment * loanTerm) - loanAmount) * 100) / 100;
-  const eir = Math.round((((totalInterest + platformFee + coopServiceFee + advanceInterest + optionalFeesTotal) / netProceeds) / (loanTerm / 12.0)) * 10000) / 100;
+  const eir = Math.round((((totalInterest + memberTechFeeDeduction + coopServiceFee + advanceInterest + optionalFeesTotal) / netProceeds) / (loanTerm / 12.0)) * 10000) / 100;
 
   // Pass-On Fee for QR Ph
   const passOnFee = repayChannel === 'PAYMONGO_QRPH' ? Math.max(15.0, Math.round(repayAmount * 0.015 * 100) / 100) : 0.0;
@@ -2044,8 +2060,10 @@ export default function MemberPortalPage() {
                       </div>
 
                       <div className="flex justify-between text-emerald-800">
-                        <span>SaaS Pass-Through Fee (2% / min ₱100):</span>
-                        <span className="font-bold">- ₱{platformFee.toFixed(2)}</span>
+                        <span>Technology Fee (1%){!isTechFeePassThrough ? ' (Coop OPEX Absorbed)' : ''}:</span>
+                        <span className="font-bold">
+                          {isTechFeePassThrough ? `- ₱${techFeeAmount.toFixed(2)}` : '₱0.00 (Coop OPEX)'}
+                        </span>
                       </div>
 
                       <div className="flex justify-between text-slate-600">
