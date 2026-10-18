@@ -3203,10 +3203,10 @@ export default function AdminDashboard() {
         </header>
 
         {/* Main Workspace Body */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6 print:p-0 print:m-0 print:max-w-none print:w-full print:space-y-0">
           {/* Cloud Firestore Sync Confirmation Banner */}
           {firestoreSyncStatus === 'SYNCED' && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 mb-6 flex items-center justify-between shadow-xs animate-in fade-in duration-300">
+            <div className="no-print p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 mb-6 flex items-center justify-between shadow-xs animate-in fade-in duration-300">
               <div className="flex items-center gap-2.5 text-xs">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>
@@ -3221,7 +3221,7 @@ export default function AdminDashboard() {
 
           {/* Segregation of Duties Notice Banner (if active tab is restricted for active staff) */}
           {!effectiveAllowedTabs.includes(activeTab) && (
-            <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 mb-6 flex items-start gap-3 shadow-xs">
+            <div className="no-print p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 mb-6 flex items-start gap-3 shadow-xs">
               <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <div className="text-xs">
                 <div className="font-bold text-sm text-amber-950 flex items-center gap-2">
@@ -6111,15 +6111,15 @@ export default function AdminDashboard() {
         )}
 
         {activeTab === 'calculator' && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-            <div>
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 print:p-0 print:border-none print:shadow-none print:space-y-4">
+            <div className="no-print">
               <h2 className="text-lg font-bold text-slate-900">Loan Calculator</h2>
               <p className="text-xs text-slate-500">
                 Simulate upfront platform deductions, coop service fees, optional fees, net member proceeds, and monthly amortization.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 no-print">
               {/* Inputs & Optional Fees (Left Column) */}
               <div className="lg:col-span-7 space-y-5">
                 <div>
@@ -6649,8 +6649,71 @@ export default function AdminDashboard() {
             </div>
 
             {/* Detailed Month-by-Month Amortization Schedule Table */}
-            <div className="pt-6 border-t border-slate-200 space-y-4">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+            <div className="pt-6 border-t border-slate-200 space-y-4 print:pt-0 print:border-t-0">
+              {/* Official Printable Header & Key Parameters (Print Mode Only) */}
+              <div className="hidden print:block mb-6 border-b-2 border-slate-800 pb-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h1 className="text-xl font-bold uppercase tracking-tight text-slate-900">
+                      {coopName || 'Cooperative Enterprise'}
+                    </h1>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Republic Act No. 9520 (Philippine Cooperative Code) • CDA MC 2015-06
+                    </p>
+                    <div className="text-sm font-extrabold uppercase text-emerald-800 mt-2 tracking-wide">
+                      Official Loan Amortization Schedule
+                    </div>
+                  </div>
+                  <div className="text-right text-[10px] text-slate-500 font-mono">
+                    <div>Generated: {new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                    <div className="text-slate-700 font-semibold mt-0.5">Doc Ref: LAS-{Date.now().toString().slice(-8)}</div>
+                  </div>
+                </div>
+
+                {/* Key Loan Parameters Grid for Print */}
+                <div className="grid grid-cols-4 gap-2 mt-4 p-3 bg-slate-50 border border-slate-300 rounded text-[10px]">
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Principal Amount</span>
+                    <strong className="text-slate-900 text-xs font-mono">₱{calcAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Loan Term</span>
+                    <strong className="text-slate-900 text-xs">{calcTerm} Months ({maturityDate || 'N/A'})</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Interest Rate</span>
+                    <strong className="text-slate-900 text-xs">{calcRate}% per annum</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Amortization Method</span>
+                    <strong className="text-slate-900 text-xs">
+                      {calcMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">First Due Date</span>
+                    <strong className="text-slate-900 font-mono">{calcStartDate ? formatScheduleDate(calcStartDate) : 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Advance Interest</span>
+                    <strong className="text-slate-900 font-mono">
+                      {calcAdvanceInterest !== 'NONE' ? `₱${advanceInterestAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (Prepaid)` : 'None / Regular'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Net Disbursed Proceeds</span>
+                    <strong className="text-emerald-800 text-xs font-mono">₱{netDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block uppercase font-medium">Total Cash Repayment</span>
+                    <strong className="text-slate-950 text-xs font-mono">
+                      ₱{(calcAdvanceInterest !== 'NONE' ? scheduleTotals.totalCashInstallment : scheduleTotals.totalInstallment).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 no-print">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
@@ -6702,7 +6765,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Schedule Summary Strip */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs no-print">
                 <div>
                   <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Gross Principal</div>
                   <div className="font-mono font-bold text-slate-900 text-sm mt-0.5">
@@ -6734,9 +6797,9 @@ export default function AdminDashboard() {
               </div>
 
               {/* Schedule Table Container */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
-                <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
-                  <table className="w-full text-left text-xs">
+              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs print:border print:border-slate-300 print:rounded-none print:shadow-none">
+                <div className="overflow-x-auto max-h-[520px] overflow-y-auto print:max-h-none print:overflow-visible print:h-auto">
+                  <table className="w-full text-left text-xs print:text-[10px]">
                     <thead className="bg-slate-900 text-white font-bold sticky top-0 z-10">
                       <tr>
                         <th className="p-3 text-center w-12">#</th>
@@ -6849,6 +6912,37 @@ export default function AdminDashboard() {
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+              </div>
+
+              {/* Printable Conforme & Certification Block */}
+              <div className="hidden print:block pt-6 mt-6 border-t border-slate-300 text-[10px] text-slate-800 break-inside-avoid">
+                <div className="grid grid-cols-3 gap-6">
+                  <div>
+                    <div className="font-semibold text-slate-500 uppercase text-[9px] mb-8">Prepared By (Loan Officer):</div>
+                    <div className="border-t border-slate-700 pt-1">
+                      <div className="font-bold text-slate-900">{currentStaff.name || 'Cooperative Loan Officer'}</div>
+                      <div className="text-slate-500 text-[9px]">{currentStaff.roleTitle || 'Credit & Loan Evaluation Officer'}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-slate-500 uppercase text-[9px] mb-8">Approved By (Credit Committee / GM):</div>
+                    <div className="border-t border-slate-700 pt-1">
+                      <div className="font-bold text-slate-900">Credit Committee Chair / GM</div>
+                      <div className="text-slate-500 text-[9px]">Authorized Signatory</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-slate-500 uppercase text-[9px] mb-8">Conforme & Acknowledged:</div>
+                    <div className="border-t border-slate-700 pt-1">
+                      <div className="font-bold text-slate-900">Borrower Signature over Printed Name</div>
+                      <div className="text-slate-500 text-[9px]">Date: ________________________</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-3 border-t border-slate-200 text-center text-[9px] text-slate-500">
+                  This Official Loan Amortization Schedule is rendered in accordance with Cooperative Development Authority (CDA) Memorandum Circular No. 2015-06 and Republic Act No. 9520. Subject to cooperative credit policies, terms, and conditions stipulated in the signed Promissory Note and Disclosure Statement.
                 </div>
               </div>
             </div>
