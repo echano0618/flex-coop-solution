@@ -1899,6 +1899,15 @@ console.log('\n--- 28. Cooperative Registration, Operator Review, ID Inspection,
   assert(rejectResult.registration?.rejectionReason === rejectReason, 'Rejection reason is preserved verbatim');
   assert(rejectResult.registration?.emailNotification?.from === 'support@tuntongtech.com', 'Rejection email originates from support@tuntongtech.com');
   assert(Boolean(rejectResult.registration?.emailNotification?.body.includes(rejectReason)), 'Rejection email conveys specific non-compliance reason');
+
+  // 28.6 Operator removes individual registration from queue
+  const removeOk = OperatorService.removeRegistration(rejectedApp.id);
+  assert(removeOk === true, 'Operator successfully removes registration from queue');
+  assert(OperatorService.getRegistrationById(rejectedApp.id) === undefined, 'Removed registration no longer exists in queue');
+
+  // 28.7 Operator clears all registrations from queue
+  OperatorService.clearAllRegistrations();
+  assert(OperatorService.listRegistrations().length === 0, 'Coop onboarding queue is completely cleared');
 }
 
 // 29. Operator Passwordless Authentication (Username: tuntongtech, Email: felix.echano@tuntongtech.com, 1-Time PIN)

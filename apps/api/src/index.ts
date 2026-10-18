@@ -633,6 +633,20 @@ app.post('/api/v1/operator/registrations/:id/reject', (req: Request, res: Respon
   });
 });
 
+app.delete('/api/v1/operator/registrations/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const removed = OperatorService.removeRegistration(id);
+  if (!removed) {
+    return res.status(404).json({ success: false, error: 'Registration application not found.' });
+  }
+  res.json({ success: true, message: `Registration '${id}' removed from onboarding queue.` });
+});
+
+app.delete('/api/v1/operator/registrations', (_req: Request, res: Response) => {
+  OperatorService.clearAllRegistrations();
+  res.json({ success: true, message: 'All registrations cleared from onboarding queue.' });
+});
+
 // ==========================================
 // 2.2 COOPERATIVE PLATFORM CREDIT & TOP-UP WALLET
 // ==========================================

@@ -17,10 +17,14 @@ import { dbStore } from '../../core/store';
 import { MailerService } from '../../core/mailer.service';
 
 export class OperatorService {
+  private static isInitialized = false;
+
   /**
    * Initializes default platform credit balances and seed tenants for the operator fleet
    */
   public static ensureInitialized() {
+    if (this.isInitialized) return;
+    this.isInitialized = true;
     // Only seed mock demonstration tenant records in test environment
     if (process.env.NODE_ENV === 'test') {
       if (dbStore.tenants.size < 3) {
@@ -499,6 +503,21 @@ https://tuntongtech.com`;
       success: true,
       registration: reg,
     };
+  }
+
+  public static removeRegistration(id: string): boolean {
+    this.ensureInitialized();
+    const idx = dbStore.coopRegistrations.findIndex((r) => r.id === id);
+    if (idx !== -1) {
+      dbStore.coopRegistrations.splice(idx, 1);
+      return true;
+    }
+    return false;
+  }
+
+  public static clearAllRegistrations(): void {
+    this.ensureInitialized();
+    dbStore.coopRegistrations = [];
   }
 
   public static readonly DEFAULT_OPERATOR: OperatorAccount = {

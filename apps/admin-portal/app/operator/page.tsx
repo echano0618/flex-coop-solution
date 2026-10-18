@@ -44,6 +44,7 @@ import {
   LogOut,
   KeyRound,
   Shield,
+  Trash2,
 } from 'lucide-react';
 import {
   CooperativeRegistration,
@@ -334,6 +335,8 @@ export default function OperatorPortalPage() {
             }
             return m;
           });
+          // Remove seed test records (e.g. REG-2026-8914)
+          merged = merged.filter((m) => m.id !== 'REG-2026-8914');
           try {
             localStorage.setItem('tuntong_coop_registrations', JSON.stringify(merged));
           } catch (e) {}
@@ -352,19 +355,57 @@ export default function OperatorPortalPage() {
       if (localSaved) {
         let parsed = JSON.parse(localSaved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          parsed = parsed.map((m: any) => {
-            if (m.validIdUrl && m.validIdUrl.startsWith('/uploads/')) {
-              const { validIdUrl, ...rest } = m;
-              return rest;
-            }
-            return m;
-          });
+          parsed = parsed
+            .filter((m: any) => m.id !== 'REG-2026-8914')
+            .map((m: any) => {
+              if (m.validIdUrl && m.validIdUrl.startsWith('/uploads/')) {
+                const { validIdUrl, ...rest } = m;
+                return rest;
+              }
+              return m;
+            });
           setRegistrations(parsed);
         }
       }
     } catch (e) {
       console.error(e);
     }
+  };
+
+  // Delete individual registration record from queue
+  const handleDeleteRegistration = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm(`Are you sure you want to remove registration '${id}' from the onboarding queue?`)) {
+      return;
+    }
+    try {
+      await fetch(`${getApiBaseUrl()}/operator/registrations/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('API delete registration warning:', err);
+    }
+    const updated = registrations.filter((r) => r.id !== id);
+    setRegistrations(updated);
+    try {
+      localStorage.setItem('tuntong_coop_registrations', JSON.stringify(updated));
+    } catch {}
+    setToastMessage(`Registration ${id} removed from onboarding queue.`);
+  };
+
+  // Clear all registrations in queue
+  const handleClearAllRegistrations = async () => {
+    if (!confirm('Are you sure you want to remove all existing records in the Coop Onboarding Queue?')) {
+      return;
+    }
+    try {
+      await fetch(`${getApiBaseUrl()}/operator/registrations`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('API clear registrations warning:', err);
+    }
+    setRegistrations([]);
+    try {
+      localStorage.removeItem('tuntong_coop_registrations');
+    } catch {}
+    setToastMessage('All records in Coop Onboarding Queue have been removed.');
   };
 
   // Fetch operator fleet and registrations once authenticated
@@ -1236,6 +1277,17 @@ https://tuntongtech.com`;
                   <span>Refresh</span>
                 </button>
 
+                {registrations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllRegistrations}
+                    className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Clear Queue</span>
+                  </button>
+                )}
+
                 <div className="relative flex-1 sm:w-64">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -1389,6 +1441,17 @@ https://tuntongtech.com`;
                       </div>
 
                       <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        {/* Remove / Delete record from queue */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteRegistration(reg.id, e)}
+                          title="Remove registration from queue"
+                          className="bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-800 px-2.5 py-1.5 rounded-xl font-medium flex items-center gap-1 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Remove</span>
+                        </button>
+
                         {/* View Dispatched Email Button if notification exists */}
                         {reg.emailNotification && (
                           <button
