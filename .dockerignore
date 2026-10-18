@@ -1,0 +1,24 @@
+# Dependencies and build outputs
+**/node_modules
+**/.next
+apps/admin-portal/.next
+apps/api/dist
+packages/*/dist
+packages/*/*.tsbuildinfo
+*.tsbuildinfo
+
+# Git and logs
+.git
+.github
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+
+# Mobile app (not part of web/api container builds)
+apps/mobile-app
+
+# Miscellaneous
+.DS_Store
+deploy

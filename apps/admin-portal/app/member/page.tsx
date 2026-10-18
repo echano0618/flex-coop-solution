@@ -36,6 +36,7 @@ import {
   Sparkles,
   LogOut,
 } from 'lucide-react';
+import { getApiBaseUrl } from '../api-config';
 
 const DEFAULT_LOAN_PRODUCTS = [
   {
@@ -228,7 +229,7 @@ export default function MemberPortalPage() {
       }
     }
 
-    fetch('http://localhost:4000/api/v1/loan-products')
+    fetch(`${getApiBaseUrl()}/loan-products`)
       .then((r) => r.json())
       .then((res) => {
         if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {

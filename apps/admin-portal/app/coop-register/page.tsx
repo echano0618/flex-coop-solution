@@ -17,6 +17,7 @@ import {
   ExternalLink,
   UploadCloud,
 } from 'lucide-react';
+import { getApiBaseUrl } from '../api-config';
 
 export default function CoopRegisterPage() {
   const [formData, setFormData] = useState({
@@ -119,7 +120,7 @@ export default function CoopRegisterPage() {
 
     try {
       // Call Backend API to provision tenant
-      const res = await fetch('http://localhost:4000/api/v1/tenants', {
+      const res = await fetch(`${getApiBaseUrl()}/tenants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

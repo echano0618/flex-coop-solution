@@ -71,6 +71,7 @@ import {
   MemberRegistrationFieldConfig,
   DEFAULT_MEMBER_REGISTRATION_FIELDS,
 } from '@flexcoop/shared-types';
+import { getApiBaseUrl } from './api-config';
 
 type StaffRole =
   | 'SYSTEM_ADMIN'
@@ -1034,7 +1035,7 @@ export default function AdminDashboard() {
       }
     }
 
-    fetch('http://localhost:4000/api/v1/loan-products')
+    fetch(`${getApiBaseUrl()}/loan-products`)
       .then((res) => res.json())
       .then((resData) => {
         if (resData && resData.success && Array.isArray(resData.data) && resData.data.length > 0) {
@@ -1212,7 +1213,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      await fetch('http://localhost:4000/api/v1/loan-products', {
+      await fetch(`${getApiBaseUrl()}/loan-products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(createdProduct),
@@ -1241,7 +1242,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      await fetch(`http://localhost:4000/api/v1/loan-products/${productId}`, {
+      await fetch(`${getApiBaseUrl()}/loan-products/${productId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isActive: newIsActive }),

@@ -28,7 +28,7 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_API_URL=http://api:4000/api/v1
-      - NEXT_PUBLIC_ROOT_DOMAIN=flexcoop.tuntongtech.com
+      - NEXT_PUBLIC_ROOT_DOMAIN=coop.tuntongtech.com
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -45,7 +45,7 @@ services:
       - NODE_ENV=production
       - PORT=4000
       - JWT_SECRET=flexcoop_jwt_signing_secret_key_2026
-      - ROOT_DOMAIN=flexcoop.tuntongtech.com
+      - ROOT_DOMAIN=coop.tuntongtech.com
       - FIRESTORE_EMULATOR_HOST=firebase-emulator:8080
       - FIREBASE_AUTH_EMULATOR_HOST=firebase-emulator:9099
       - FIREBASE_STORAGE_EMULATOR_HOST=firebase-emulator:9199
