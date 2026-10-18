@@ -16,6 +16,7 @@ import {
   SystemBroadcast,
 } from '@flexcoop/shared-types';
 import { CDACoAManager } from '@flexcoop/cda-coa';
+import { PlatformPaymentMethod, PlatformCreditTopupRequest } from './store';
 
 export class FirestoreCoopService {
   private static instance: FirestoreCoopService;
@@ -127,6 +128,14 @@ export class FirestoreCoopService {
 
   public broadcastsCol() {
     return this.db.collection('system_broadcasts');
+  }
+
+  public platformPaymentMethodsCol() {
+    return this.db.collection('platform_payment_methods');
+  }
+
+  public creditTopupRequestsCol() {
+    return this.db.collection('platform_credit_topups');
   }
 
   // --------------------------------------------------------------------------
@@ -652,5 +661,74 @@ export class FirestoreCoopService {
     if (!doc.exists) return false;
     await ref.delete();
     return true;
+  }
+
+  // --------------------------------------------------------------------------
+  // Platform Payment Methods (Operator Configured)
+  // --------------------------------------------------------------------------
+
+  public async listPlatformPaymentMethods(): Promise<PlatformPaymentMethod[]> {
+    const snapshot = await this.platformPaymentMethodsCol().get();
+    let list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as PlatformPaymentMethod);
+    if (list.length === 0) {
+      const defaultMethod: PlatformPaymentMethod = {
+        id: 'pm_landbank_01',
+        type: 'BANK_TRANSFER',
+        bankName: 'Land Bank of the Philippines',
+        accountName: 'Tuntong Technology Solutions Inc.',
+        accountNumber: '0012-9981-22',
+        instructions: 'Transfer via InstaPay or PESONet. Key-in your cooperative name or reference number in transfer details.',
+        status: 'ACTIVE',
+        isDefault: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'System Admin',
+      };
+      await this.savePlatformPaymentMethod(defaultMethod);
+      list = [defaultMethod];
+    }
+    return list.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0) || new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  public async savePlatformPaymentMethod(method: PlatformPaymentMethod): Promise<void> {
+    await this.platformPaymentMethodsCol().doc(method.id).set(method, { merge: true });
+  }
+
+  public async deletePlatformPaymentMethod(id: string): Promise<boolean> {
+    const ref = this.platformPaymentMethodsCol().doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) return false;
+    await ref.delete();
+    return true;
+  }
+
+  // --------------------------------------------------------------------------
+  // Platform Credit Top-Up Requests & Verification Queue
+  // --------------------------------------------------------------------------
+
+  public async createCreditTopupRequest(request: PlatformCreditTopupRequest): Promise<void> {
+    await this.creditTopupRequestsCol().doc(request.id).set(request, { merge: true });
+  }
+
+  public async listCreditTopupRequests(tenantId?: string): Promise<PlatformCreditTopupRequest[]> {
+    let query: any = this.creditTopupRequestsCol();
+    if (tenantId) {
+      query = query.where('tenantId', '==', tenantId);
+    }
+    const snapshot = await query.get();
+    const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as PlatformCreditTopupRequest);
+    return list.sort((a: any, b: any) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
+  }
+
+  public async getCreditTopupRequest(id: string): Promise<PlatformCreditTopupRequest | null> {
+    const doc = await this.creditTopupRequestsCol().doc(id).get();
+    return doc.exists ? (doc.data() as PlatformCreditTopupRequest) : null;
+  }
+
+  public async updateCreditTopupRequest(id: string, updates: Partial<PlatformCreditTopupRequest>): Promise<void> {
+    await this.creditTopupRequestsCol().doc(id).set({
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
   }
 }

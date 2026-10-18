@@ -45,6 +45,8 @@ import {
   KeyRound,
   Shield,
   Trash2,
+  Landmark,
+  Edit,
 } from 'lucide-react';
 import {
   CooperativeRegistration,
@@ -110,7 +112,7 @@ interface BroadcastItem {
 export default function OperatorPortalPage() {
   const router = useRouter();
   // Navigation Tab State
-  const [activeTab, setActiveTab] = useState<'FLEET' | 'REGISTRATIONS' | 'LEDGER' | 'BROADCASTS' | 'OPERATORS'>('FLEET');
+  const [activeTab, setActiveTab] = useState<'FLEET' | 'REGISTRATIONS' | 'LEDGER' | 'PAYMENT_METHODS' | 'BROADCASTS' | 'OPERATORS'>('FLEET');
 
   // Tenant Fleet State (starts clean, populated via API)
   const [tenants, setTenants] = useState<TenantFleetItem[]>([]);
@@ -123,6 +125,25 @@ export default function OperatorPortalPage() {
 
   // Transaction History State
   const [creditTransactions, setCreditTransactions] = useState<CreditTx[]>([]);
+
+  // Platform Payment Methods State (Stored in Firebase Firestore)
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [isLoadingPaymentMethods, setIsLoadingPaymentMethods] = useState<boolean>(false);
+  const [showAddMethodModal, setShowAddMethodModal] = useState<boolean>(false);
+  const [editingMethod, setEditingMethod] = useState<any | null>(null);
+  const [methodBankName, setMethodBankName] = useState<string>('');
+  const [methodAccountName, setMethodAccountName] = useState<string>('');
+  const [methodAccountNumber, setMethodAccountNumber] = useState<string>('');
+  const [methodType, setMethodType] = useState<'BANK_TRANSFER' | 'QRPH'>('BANK_TRANSFER');
+  const [methodInstructions, setMethodInstructions] = useState<string>('');
+  const [methodIsActive, setMethodIsActive] = useState<boolean>(true);
+  const [methodIsDefault, setMethodIsDefault] = useState<boolean>(false);
+
+  // Credit Top-Up Verification Queue State (Stored in Firebase Firestore)
+  const [topupRequests, setTopupRequests] = useState<any[]>([]);
+  const [isLoadingTopupRequests, setIsLoadingTopupRequests] = useState<boolean>(false);
+  const [selectedTopupForReject, setSelectedTopupForReject] = useState<any | null>(null);
+  const [topupRejectReason, setTopupRejectReason] = useState<string>('');
 
   // Broadcasts State
   const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([]);
@@ -482,7 +503,202 @@ export default function OperatorPortalPage() {
     }
   };
 
-  // Fetch operator fleet, registrations, credit ledger, broadcasts, and operators once authenticated
+  // Fetch Platform Payment Methods from Firebase Firestore API
+  const fetchPaymentMethods = async () => {
+    setIsLoadingPaymentMethods(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/payment-methods`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setPaymentMethods(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Payment methods API load warning:', err);
+    } finally {
+      setIsLoadingPaymentMethods(false);
+    }
+  };
+
+  // Fetch Credit Top-Up Verification Requests from Firebase Firestore API
+  const fetchTopupRequests = async () => {
+    setIsLoadingTopupRequests(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/credit/topup-requests`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setTopupRequests(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Topup requests API load warning:', err);
+    } finally {
+      setIsLoadingTopupRequests(false);
+    }
+  };
+
+  const openAddMethodModal = () => {
+    setEditingMethod(null);
+    setMethodBankName('');
+    setMethodAccountName('');
+    setMethodAccountNumber('');
+    setMethodType('BANK_TRANSFER');
+    setMethodInstructions('');
+    setMethodIsActive(true);
+    setMethodIsDefault(false);
+    setShowAddMethodModal(true);
+  };
+
+  const openEditMethodModal = (pm: any) => {
+    setEditingMethod(pm);
+    setMethodBankName(pm.bankName || '');
+    setMethodAccountName(pm.accountName || '');
+    setMethodAccountNumber(pm.accountNumber || '');
+    setMethodType(pm.type || 'BANK_TRANSFER');
+    setMethodInstructions(pm.instructions || '');
+    setMethodIsActive(pm.isActive !== false);
+    setMethodIsDefault(!!pm.isDefault);
+    setShowAddMethodModal(true);
+  };
+
+  const handleSavePaymentMethod = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!methodBankName.trim() || !methodAccountName.trim() || !methodAccountNumber.trim()) {
+      alert('Bank Name, Account Name, and Account Number are required.');
+      return;
+    }
+
+    setIsSubmittingAction(true);
+    try {
+      const payload: any = {
+        bankName: methodBankName.trim(),
+        accountName: methodAccountName.trim(),
+        accountNumber: methodAccountNumber.trim(),
+        type: methodType,
+        instructions: methodInstructions.trim(),
+        isActive: methodIsActive,
+        isDefault: methodIsDefault,
+      };
+      if (editingMethod && editingMethod.id) {
+        payload.id = editingMethod.id;
+      }
+
+      const res = await fetch(`${getApiBaseUrl()}/operator/payment-methods`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Payment method '${payload.bankName}' saved in Firebase.`);
+        setShowAddMethodModal(false);
+        setEditingMethod(null);
+        await fetchPaymentMethods();
+      } else {
+        alert(json.error || 'Failed to save payment method.');
+      }
+    } catch (err) {
+      console.error('Save payment method error:', err);
+      alert('Connection error contacting API server.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const handleDeletePaymentMethod = async (id: string, bankName: string) => {
+    if (!confirm(`Are you sure you want to remove payment method '${bankName}'? Tenants will no longer be able to select it when refilling credit.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/payment-methods/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Payment method '${bankName}' deleted from Firebase.`);
+        await fetchPaymentMethods();
+      } else {
+        alert(json.error || 'Failed to delete payment method.');
+      }
+    } catch (err) {
+      console.error('Delete payment method error:', err);
+      alert('Connection error deleting payment method.');
+    }
+  };
+
+  const handleApproveTopupRequest = async (req: any) => {
+    if (!confirm(`Approve top-up of ₱${req.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} for ${req.tenantName}? This will instantly credit the tenant's balance.`)) {
+      return;
+    }
+
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/credit/topup-requests/${req.id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviewedBy: operatorSession?.name || operatorSession?.username || 'Lex (Operator)',
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Top-up of ₱${req.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} verified and credited to ${req.tenantName}!`);
+        await fetchTopupRequests();
+        await fetchCreditTransactions();
+        await fetchFleet();
+      } else {
+        alert(json.error || 'Failed to approve top-up request.');
+      }
+    } catch (err) {
+      console.error('Approve top-up error:', err);
+      alert('Connection error approving top-up request.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const handleRejectTopupRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTopupForReject) return;
+    if (!topupRejectReason.trim()) {
+      alert('Please specify the reason for rejecting this refill request.');
+      return;
+    }
+
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/credit/topup-requests/${selectedTopupForReject.id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviewedBy: operatorSession?.name || operatorSession?.username || 'Lex (Operator)',
+          reason: topupRejectReason.trim(),
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Top-up request ${selectedTopupForReject.id} has been rejected.`);
+        setSelectedTopupForReject(null);
+        setTopupRejectReason('');
+        await fetchTopupRequests();
+      } else {
+        alert(json.error || 'Failed to reject top-up request.');
+      }
+    } catch (err) {
+      console.error('Reject top-up error:', err);
+      alert('Connection error rejecting top-up request.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  // Fetch operator fleet, registrations, credit ledger, broadcasts, operators, payment methods, and topup requests once authenticated
   useEffect(() => {
     if (!operatorSession) return;
 
@@ -491,6 +707,8 @@ export default function OperatorPortalPage() {
     fetchCreditTransactions();
     fetchBroadcasts();
     fetchOperators();
+    fetchPaymentMethods();
+    fetchTopupRequests();
   }, [operatorSession]);
 
   // Fleet Totals
@@ -506,6 +724,7 @@ export default function OperatorPortalPage() {
   const netTechRevenue = Math.round((grossTechFees / 1.12) * 100) / 100;
   const outputVatDue = Math.round((grossTechFees - netTechRevenue) * 100) / 100;
   const pendingRegistrationsCount = registrations.filter((r) => r.status === 'PENDING_REVIEW').length;
+  const pendingTopupCount = topupRequests.filter((r) => r.status === 'PENDING_VERIFICATION').length;
 
   // Filtered Fleet
   const filteredTenants = tenants.filter((t) => {
@@ -1127,7 +1346,25 @@ https://tuntongtech.com`;
             }`}
           >
             <CreditCard className="w-3.5 h-3.5" />
-            <span>Prepaid Credit Ledger</span>
+            <span>Prepaid Credit & Top-Ups</span>
+            {pendingTopupCount > 0 && (
+              <span className="text-[10px] bg-emerald-400 text-slate-950 font-black px-1.5 py-0.5 rounded-full animate-pulse">
+                {pendingTopupCount} Pending
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('PAYMENT_METHODS')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'PAYMENT_METHODS'
+                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Landmark className="w-3.5 h-3.5" />
+            <span>Payment Methods</span>
+            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">{paymentMethods.length}</span>
           </button>
 
           <button
@@ -1614,66 +1851,286 @@ https://tuntongtech.com`;
           </section>
         )}
 
-        {/* TAB 3: PLATFORM CREDIT LEDGER */}
+        {/* TAB 3: PLATFORM CREDIT LEDGER & TOP-UP VERIFICATIONS */}
         {activeTab === 'LEDGER' && (
-          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-emerald-400" />
-                <h3 className="font-bold text-sm text-white">Recent Platform Credit Ledger & Refill Audit</h3>
+          <div className="space-y-6">
+            {/* 1. PENDING TOP-UP VERIFICATION QUEUE */}
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <h3 className="font-bold text-sm text-white">Pending Tenant Top-Up Verifications</h3>
+                  {pendingTopupCount > 0 ? (
+                    <span className="text-[10px] bg-emerald-400 text-slate-950 font-black px-2 py-0.5 rounded-full animate-pulse">
+                      {pendingTopupCount} Awaiting Review
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-mono">
+                      Queue Clear
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={fetchTopupRequests}
+                    className="p-1.5 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition"
+                    title="Refresh Queue"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-slate-400 text-[11px]">Strict verification before credit injection</span>
+                </div>
               </div>
-              <span className="text-xs text-slate-400">Strict double-entry prepaid credit log</span>
+
+              {topupRequests.filter((r) => r.status === 'PENDING_VERIFICATION').length === 0 ? (
+                <div className="p-6 text-center text-slate-500 space-y-1 bg-slate-950/40 rounded-xl border border-slate-800">
+                  <CheckCircle2 className="w-6 h-6 mx-auto text-emerald-500/50" />
+                  <p className="text-xs font-semibold text-slate-400">No Pending Top-Up Requests</p>
+                  <p className="text-[11px] text-slate-500">When tenants refill platform credit, their bank transfer reference details will appear here for verification.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+                      <tr>
+                        <th className="py-2.5 px-3">Requested At</th>
+                        <th className="py-2.5 px-3">Tenant</th>
+                        <th className="py-2.5 px-3">Top-Up Amount</th>
+                        <th className="py-2.5 px-3">Remitting Source Bank</th>
+                        <th className="py-2.5 px-3">Reference / Trace #</th>
+                        <th className="py-2.5 px-3">Depository Bank Account</th>
+                        <th className="py-2.5 px-3 text-right">Verification Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-slate-300">
+                      {topupRequests
+                        .filter((r) => r.status === 'PENDING_VERIFICATION')
+                        .map((req) => (
+                          <tr key={req.id} className="hover:bg-slate-800/30">
+                            <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">
+                              {new Date(req.createdAt).toLocaleString()}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <div className="font-semibold text-white">{req.tenantName}</div>
+                              <div className="font-mono text-[10px] text-slate-500">{req.tenantId}</div>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-emerald-400 text-sm">
+                              ₱{req.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-amber-300">
+                              {req.sourceBank}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-white bg-slate-950/60 px-2 py-1 rounded">
+                              {req.referenceNumber}
+                            </td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-300">
+                              <div>{req.bankName}</div>
+                              <div className="font-mono text-[10px] text-slate-400">{req.accountNumber}</div>
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedTopupForReject(req);
+                                    setTopupRejectReason('');
+                                  }}
+                                  className="px-2.5 py-1 bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-800/80 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
+                                >
+                                  <X className="w-3 h-3" />
+                                  <span>Decline</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveTopupRequest(req)}
+                                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-700/30 transition"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Verify & Credit</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            {/* 2. COMPREHENSIVE CREDIT LEDGER AUDIT */}
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-emerald-400" />
+                  <h3 className="font-bold text-sm text-white">Recent Platform Credit Ledger & Refill Audit</h3>
+                </div>
+                <span className="text-xs text-slate-400">Strict double-entry prepaid credit log</span>
+              </div>
+
+              {creditTransactions.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 space-y-2 bg-slate-950/40 rounded-xl border border-slate-800">
+                  <CreditCard className="w-8 h-8 mx-auto text-slate-600" />
+                  <p className="text-sm font-semibold text-slate-400">No Credit Ledger Transactions</p>
+                  <p className="text-xs">Prepaid platform credit top-ups, fee deductions, and adjustments will be audited here.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+                      <tr>
+                        <th className="py-2.5 px-3">Timestamp</th>
+                        <th className="py-2.5 px-3">Tenant</th>
+                        <th className="py-2.5 px-3">Action Type</th>
+                        <th className="py-2.5 px-3">Amount</th>
+                        <th className="py-2.5 px-3">New Balance</th>
+                        <th className="py-2.5 px-3">Reference / Notes</th>
+                        <th className="py-2.5 px-3">Operator</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-slate-300">
+                      {creditTransactions.map((tx) => (
+                        <tr key={tx.id} className="hover:bg-slate-800/20">
+                          <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">{tx.createdAt}</td>
+                          <td className="py-2.5 px-3 font-medium text-white">{tx.tenantName}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                              tx.amount > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                            }`}>
+                              {tx.type}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold">
+                            <span className={tx.amount > 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                              {tx.amount > 0 ? '+' : ''}₱{Math.abs(tx.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-semibold text-slate-200">
+                            ₱{tx.balanceAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                            <div>{tx.reference}</div>
+                            <div className="text-[10px] text-slate-500 italic">{tx.notes}</div>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400 text-[11px]">{tx.performedBy}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* TAB: PLATFORM PAYMENT METHODS (Bank Accounts) */}
+        {activeTab === 'PAYMENT_METHODS' && (
+          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-teal-400" />
+                <h3 className="font-bold text-sm text-white">Platform Payment Methods (Bank Deposit Accounts)</h3>
+                <span className="text-[10px] bg-teal-500/10 text-teal-300 border border-teal-500/30 px-2 py-0.5 rounded font-mono">
+                  Firebase Database: platform_payment_methods
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={openAddMethodModal}
+                className="bg-teal-600 hover:bg-teal-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-teal-700/20"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Bank Account</span>
+              </button>
             </div>
 
-            {creditTransactions.length === 0 ? (
+            <div className="p-3.5 rounded-xl bg-teal-950/30 border border-teal-800/40 text-xs text-teal-200 space-y-1">
+              <p className="font-semibold text-teal-100 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
+                <span>Authoritative Deposit Routing</span>
+              </p>
+              <p className="text-[11px] opacity-90">
+                The bank accounts configured here are the <strong>only</strong> payment options made available to all cooperative tenants when refilling Platform Credit. Tenants must remit to one of these accounts and provide their source bank and bank reference number for operator verification.
+              </p>
+            </div>
+
+            {paymentMethods.length === 0 ? (
               <div className="p-8 text-center text-slate-500 space-y-2 bg-slate-950/40 rounded-xl border border-slate-800">
-                <CreditCard className="w-8 h-8 mx-auto text-slate-600" />
-                <p className="text-sm font-semibold text-slate-400">No Credit Ledger Transactions</p>
-                <p className="text-xs">Prepaid platform credit top-ups, fee deductions, and adjustments will be audited here.</p>
+                <Landmark className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">No Payment Methods Configured</p>
+                <p className="text-xs">Add a bank account so tenants can deposit funds to refill their prepaid platform credit.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
-                    <tr>
-                      <th className="py-2.5 px-3">Timestamp</th>
-                      <th className="py-2.5 px-3">Tenant</th>
-                      <th className="py-2.5 px-3">Action Type</th>
-                      <th className="py-2.5 px-3">Amount</th>
-                      <th className="py-2.5 px-3">New Balance</th>
-                      <th className="py-2.5 px-3">Reference / Notes</th>
-                      <th className="py-2.5 px-3">Operator</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50 text-slate-300">
-                    {creditTransactions.map((tx) => (
-                      <tr key={tx.id} className="hover:bg-slate-800/20">
-                        <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">{tx.createdAt}</td>
-                        <td className="py-2.5 px-3 font-medium text-white">{tx.tenantName}</td>
-                        <td className="py-2.5 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                            tx.amount > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {paymentMethods.map((pm) => (
+                  <div
+                    key={pm.id}
+                    className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-3 relative group hover:border-slate-700 transition-colors"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <h4 className="font-bold text-sm text-white flex items-center gap-1.5">
+                            <Landmark className="w-4 h-4 text-teal-400" />
+                            <span>{pm.bankName}</span>
+                          </h4>
+                          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                            {pm.type || 'BANK_TRANSFER'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {pm.isDefault && (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded font-bold">
+                              Default
+                            </span>
+                          )}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            pm.isActive !== false ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-500'
                           }`}>
-                            {tx.type}
+                            {pm.isActive !== false ? 'ACTIVE' : 'INACTIVE'}
                           </span>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-bold">
-                          <span className={tx.amount > 0 ? 'text-emerald-400' : 'text-amber-400'}>
-                            {tx.amount > 0 ? '+' : ''}₱{Math.abs(tx.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-semibold text-slate-200">
-                          ₱{tx.balanceAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                          <div>{tx.reference}</div>
-                          <div className="text-[10px] text-slate-500 italic">{tx.notes}</div>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">{tx.performedBy}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-900 rounded-lg space-y-1.5 text-xs font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 text-[11px]">Account Name:</span>
+                          <span className="text-slate-200 font-semibold">{pm.accountName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 text-[11px]">Account Number:</span>
+                          <span className="text-teal-400 font-bold">{pm.accountNumber}</span>
+                        </div>
+                      </div>
+
+                      {pm.instructions && (
+                        <p className="text-[11px] text-slate-400 italic bg-slate-900/50 p-2 rounded border border-slate-800/80">
+                          {pm.instructions}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800/80 flex justify-end gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => openEditMethodModal(pm)}
+                        className="px-2.5 py-1 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center gap-1 transition"
+                      >
+                        <Edit className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePaymentMethod(pm.id, pm.bankName)}
+                        className="px-2.5 py-1 text-rose-400 hover:text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 rounded-lg flex items-center gap-1 transition"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </section>
@@ -2585,6 +3042,236 @@ https://tuntongtech.com`;
                     <CheckCircle2 className="w-3.5 h-3.5" />
                   )}
                   <span>Save Operator in Firebase</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD / EDIT PLATFORM PAYMENT METHOD */}
+      {showAddMethodModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Landmark className="w-5 h-5 text-teal-400" />
+                <h3 className="font-bold text-white text-base">
+                  {editingMethod ? 'Edit Bank Payment Method' : 'Add Bank Payment Method'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddMethodModal(false);
+                  setEditingMethod(null);
+                }}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePaymentMethod} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Bank Name / Institution *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Land Bank of the Philippines, BDO, BPI"
+                  value={methodBankName}
+                  onChange={(e) => setMethodBankName(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Account Holder Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Tuntong Tech Solution Inc."
+                  value={methodAccountName}
+                  onChange={(e) => setMethodAccountName(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Account Number / IBAN *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 0012-9981-22"
+                  value={methodAccountNumber}
+                  onChange={(e) => setMethodAccountNumber(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Payment Method Type</label>
+                <select
+                  value={methodType}
+                  onChange={(e) => setMethodType(e.target.value as any)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  <option value="BANK_TRANSFER">Bank Transfer (InstaPay / PESONet)</option>
+                  <option value="QRPH">QR Ph National Standard</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Remittance Instructions</label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Transfer via InstaPay/PESONet. Input your cooperative name in the payment description."
+                  value={methodInstructions}
+                  onChange={(e) => setMethodInstructions(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-6 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={methodIsActive}
+                    onChange={(e) => setMethodIsActive(e.target.checked)}
+                    className="rounded bg-slate-950 border-slate-700 text-teal-600 focus:ring-teal-500 w-4 h-4"
+                  />
+                  <span>Active for Refills</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={methodIsDefault}
+                    onChange={(e) => setMethodIsDefault(e.target.checked)}
+                    className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-amber-500 w-4 h-4"
+                  />
+                  <span>Default Method</span>
+                </label>
+              </div>
+
+              <div className="p-3 bg-teal-950/30 border border-teal-800/50 rounded-xl text-xs text-teal-200">
+                This bank account will be saved to Firebase Firestore collection <span className="font-mono text-teal-300 font-bold">platform_payment_methods</span> and instantly made available to all tenant admins.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddMethodModal(false);
+                    setEditingMethod(null);
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAction}
+                  className="px-5 py-2 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-teal-700/30"
+                >
+                  {isSubmittingAction ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>Save Bank Method</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DECLINE / REJECT TOP-UP REQUEST */}
+      {selectedTopupForReject && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <X className="w-5 h-5 text-rose-400" />
+                <h3 className="font-bold text-white text-base">Decline Platform Credit Refill</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTopupForReject(null);
+                  setTopupRejectReason('');
+                }}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRejectTopupRequest} className="space-y-4">
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Cooperative Tenant:</span>
+                  <span className="text-white font-bold">{selectedTopupForReject.tenantName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Requested Refill Amount:</span>
+                  <span className="text-emerald-400 font-mono font-bold">
+                    ₱{selectedTopupForReject.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Remitting Source Bank:</span>
+                  <span className="text-amber-300 font-semibold">{selectedTopupForReject.sourceBank}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Bank Reference / Trace #:</span>
+                  <span className="text-white font-mono font-bold bg-slate-900 px-1.5 py-0.5 rounded">
+                    {selectedTopupForReject.referenceNumber}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Reason for Decline *
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Remittance reference number not found in bank statement, amount mismatch, or illegible deposit proof."
+                  value={topupRejectReason}
+                  onChange={(e) => setTopupRejectReason(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+
+              <div className="p-3 bg-rose-950/30 border border-rose-800/50 rounded-xl text-xs text-rose-200">
+                The top-up request will be flagged as REJECTED in Firebase Firestore. No credits will be injected into the tenant's balance.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTopupForReject(null);
+                    setTopupRejectReason('');
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAction}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-rose-700/30"
+                >
+                  {isSubmittingAction ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <X className="w-3.5 h-3.5" />
+                  )}
+                  <span>Decline Top-Up</span>
                 </button>
               </div>
             </form>

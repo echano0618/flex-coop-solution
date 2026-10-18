@@ -21,6 +21,41 @@ import { MonetizationService } from '../modules/monetization/monetization.servic
 import { GeneralLedgerService } from '../modules/accounting/ledger.service';
 import { NPCEncryptionService } from './npc-encryption';
 
+export interface PlatformPaymentMethod {
+  id: string;
+  type: 'BANK_TRANSFER' | 'QRPH';
+  bankName: string;
+  accountName: string;
+  accountNumber: string;
+  qrCodeUrl?: string;
+  instructions?: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  isDefault?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export interface PlatformCreditTopupRequest {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  amount: number;
+  paymentMethodId: string;
+  paymentMethodName: string;
+  sourceBank: string;
+  referenceNumber: string;
+  notes?: string;
+  proofUrl?: string;
+  status: 'PENDING_VERIFICATION' | 'APPROVED' | 'REJECTED';
+  requestedAt: string;
+  requestedBy: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
+}
+
 export class AppDataStore {
   public tenants: Map<string, Tenant> = new Map();
   public members: Map<string, Member[]> = new Map(); // tenantId -> members
@@ -41,9 +76,30 @@ export class AppDataStore {
   public systemBroadcasts: SystemBroadcast[] = [];
   public coopRegistrations: CooperativeRegistration[] = [];
   public systemConfigs: Map<string, any> = new Map(); // tenantId -> SystemConfig
+  public platformPaymentMethods: PlatformPaymentMethod[] = [];
+  public creditTopupRequests: PlatformCreditTopupRequest[] = [];
 
   constructor() {
+    this.seedDefaultPaymentMethods();
     this.seedInitialTenantData();
+  }
+
+  private seedDefaultPaymentMethods() {
+    if (this.platformPaymentMethods.length === 0) {
+      this.platformPaymentMethods.push({
+        id: 'pm_landbank_01',
+        type: 'BANK_TRANSFER',
+        bankName: 'Land Bank of the Philippines',
+        accountName: 'Tuntong Technology Solutions Inc.',
+        accountNumber: '0012-9981-22',
+        instructions: 'Transfer via InstaPay or PESONet. Key-in your cooperative name or reference number in remarks.',
+        status: 'ACTIVE',
+        isDefault: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'System Admin',
+      });
+    }
   }
 
   private seedInitialTenantData() {

@@ -14,7 +14,7 @@ import {
   OperatorOtpResponse,
   Member,
 } from '@flexcoop/shared-types';
-import { dbStore } from '../../core/store';
+import { dbStore, PlatformPaymentMethod, PlatformCreditTopupRequest } from '../../core/store';
 import { MailerService } from '../../core/mailer.service';
 import { FirestoreCoopService } from '../../core/firestore.service';
 
@@ -1072,12 +1072,14 @@ https://tuntongtech.com`;
   }): Promise<{ success: boolean; newBalance: number; transaction: PlatformCreditTransaction }> {
     const res = this.adjustPlatformCredit(params);
 
-    try {
-      const fs = FirestoreCoopService.getInstance();
-      await fs.recordCreditTransaction(res.transaction);
-      await fs.updateTenantCreditBalance(params.tenantId, res.newBalance);
-    } catch (err) {
-      console.warn('[OPERATOR] adjustPlatformCreditAsync firestore error:', err);
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        await fs.recordCreditTransaction(res.transaction);
+        await fs.updateTenantCreditBalance(params.tenantId, res.newBalance);
+      } catch (err) {
+        console.warn('[OPERATOR] adjustPlatformCreditAsync firestore error:', err);
+      }
     }
 
     return res;
@@ -1306,6 +1308,259 @@ https://tuntongtech.com`;
     } catch (err) {
       console.warn('[OPERATOR] clearAllRegistrationsAsync firestore warning:', err);
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Platform Payment Methods (Operator Bank Accounts)
+  // --------------------------------------------------------------------------
+
+  public static async listPaymentMethodsAsync(): Promise<PlatformPaymentMethod[]> {
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        const methods = await fs.listPlatformPaymentMethods();
+        if (methods && methods.length > 0) {
+          dbStore.platformPaymentMethods = methods;
+          return methods;
+        }
+      } catch (err) {
+        console.warn('[OPERATOR] listPaymentMethodsAsync firestore fallback:', err);
+      }
+    }
+    return dbStore.platformPaymentMethods;
+  }
+
+  public static async savePaymentMethodAsync(methodData: Partial<PlatformPaymentMethod> & { bankName: string; accountName: string; accountNumber: string }): Promise<PlatformPaymentMethod> {
+    const id = methodData.id || `pm_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    const now = new Date().toISOString();
+    const method: PlatformPaymentMethod = {
+      id,
+      type: methodData.type || 'BANK_TRANSFER',
+      bankName: methodData.bankName.trim(),
+      accountName: methodData.accountName.trim(),
+      accountNumber: methodData.accountNumber.trim(),
+      qrCodeUrl: methodData.qrCodeUrl,
+      instructions: methodData.instructions || 'Transfer via InstaPay or PESONet. Reference number required.',
+      status: methodData.status || 'ACTIVE',
+      isDefault: methodData.isDefault || false,
+      createdAt: methodData.createdAt || now,
+      updatedAt: now,
+      updatedBy: methodData.updatedBy || 'Platform Operator',
+    };
+
+    const existingIndex = dbStore.platformPaymentMethods.findIndex((m) => m.id === id);
+    if (existingIndex >= 0) {
+      dbStore.platformPaymentMethods[existingIndex] = method;
+    } else {
+      dbStore.platformPaymentMethods.unshift(method);
+    }
+
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        await fs.savePlatformPaymentMethod(method);
+      } catch (err) {
+        console.warn('[OPERATOR] savePaymentMethodAsync firestore warning:', err);
+      }
+    }
+
+    return method;
+  }
+
+  public static async deletePaymentMethodAsync(id: string): Promise<boolean> {
+    dbStore.platformPaymentMethods = dbStore.platformPaymentMethods.filter((m) => m.id !== id);
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        return await fs.deletePlatformPaymentMethod(id);
+      } catch (err) {
+        console.warn('[OPERATOR] deletePaymentMethodAsync firestore warning:', err);
+      }
+    }
+    return true;
+  }
+
+  // --------------------------------------------------------------------------
+  // Platform Credit Top-Up Requests & Verification
+  // --------------------------------------------------------------------------
+
+  public static async submitCreditTopupRequestAsync(params: {
+    tenantId: string;
+    amount: number;
+    paymentMethodId: string;
+    sourceBank: string;
+    referenceNumber: string;
+    notes?: string;
+    requestedBy?: string;
+  }): Promise<PlatformCreditTopupRequest> {
+    this.ensureInitialized();
+    const tenant = dbStore.tenants.get(params.tenantId);
+    const tenantName = tenant?.name || params.tenantId;
+    const tenantSlug = tenant?.slug || params.tenantId.replace('tenant_', '');
+
+    // Get payment method details
+    const methods = await this.listPaymentMethodsAsync();
+    const method = methods.find((m) => m.id === params.paymentMethodId) || methods[0];
+    const paymentMethodName = method ? `${method.bankName} (${method.accountNumber})` : 'Operator Bank Account';
+
+    const id = `topup_req_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    const request: PlatformCreditTopupRequest = {
+      id,
+      tenantId: params.tenantId,
+      tenantName,
+      tenantSlug,
+      amount: Math.round(params.amount * 100) / 100,
+      paymentMethodId: params.paymentMethodId,
+      paymentMethodName,
+      sourceBank: params.sourceBank.trim(),
+      referenceNumber: params.referenceNumber.trim(),
+      notes: params.notes,
+      status: 'PENDING_VERIFICATION',
+      requestedAt: new Date().toISOString(),
+      requestedBy: params.requestedBy || 'Cooperative Admin',
+    };
+
+    dbStore.creditTopupRequests.unshift(request);
+
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        await fs.createCreditTopupRequest(request);
+      } catch (err) {
+        console.warn('[OPERATOR] submitCreditTopupRequestAsync firestore warning:', err);
+      }
+    }
+
+    return request;
+  }
+
+  public static async listCreditTopupRequestsAsync(tenantId?: string): Promise<PlatformCreditTopupRequest[]> {
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        const list = await fs.listCreditTopupRequests(tenantId);
+        if (list && list.length > 0) {
+          if (!tenantId) {
+            dbStore.creditTopupRequests = list;
+          }
+          return list;
+        }
+      } catch (err) {
+        console.warn('[OPERATOR] listCreditTopupRequestsAsync firestore fallback:', err);
+      }
+    }
+    return tenantId ? dbStore.creditTopupRequests.filter((r) => r.tenantId === tenantId) : dbStore.creditTopupRequests;
+  }
+
+  public static async approveCreditTopupRequestAsync(
+    requestId: string,
+    reviewedBy: string = 'Platform Operator'
+  ): Promise<{ success: boolean; request?: PlatformCreditTopupRequest; newBalance?: number; error?: string }> {
+    let request = dbStore.creditTopupRequests.find((r) => r.id === requestId);
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        const fsReq = await fs.getCreditTopupRequest(requestId);
+        if (fsReq) request = fsReq;
+      } catch {}
+    }
+
+    if (!request) {
+      return { success: false, error: 'Top-up request not found.' };
+    }
+
+    if (request.status !== 'PENDING_VERIFICATION') {
+      return { success: false, error: `Top-up request is already ${request.status}.` };
+    }
+
+    // Credit tenant platform credit balance
+    const creditResult = await this.adjustPlatformCreditAsync({
+      tenantId: request.tenantId,
+      amount: request.amount,
+      type: 'TOP_UP',
+      reference: request.referenceNumber,
+      notes: `Verified Refill via ${request.sourceBank} to ${request.paymentMethodName}`,
+      performedBy: reviewedBy,
+    });
+
+    const now = new Date().toISOString();
+    request.status = 'APPROVED';
+    request.reviewedAt = now;
+    request.reviewedBy = reviewedBy;
+
+    // Update memory
+    const idx = dbStore.creditTopupRequests.findIndex((r) => r.id === requestId);
+    if (idx >= 0) dbStore.creditTopupRequests[idx] = request;
+
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        await fs.updateCreditTopupRequest(requestId, {
+          status: 'APPROVED',
+          reviewedAt: now,
+          reviewedBy,
+        });
+      } catch (err) {
+        console.warn('[OPERATOR] approveCreditTopupRequestAsync firestore warning:', err);
+      }
+    }
+
+    return {
+      success: true,
+      request,
+      newBalance: creditResult.newBalance,
+    };
+  }
+
+  public static async rejectCreditTopupRequestAsync(
+    requestId: string,
+    reason: string,
+    reviewedBy: string = 'Platform Operator'
+  ): Promise<{ success: boolean; request?: PlatformCreditTopupRequest; error?: string }> {
+    let request = dbStore.creditTopupRequests.find((r) => r.id === requestId);
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        const fsReq = await fs.getCreditTopupRequest(requestId);
+        if (fsReq) request = fsReq;
+      } catch {}
+    }
+
+    if (!request) {
+      return { success: false, error: 'Top-up request not found.' };
+    }
+
+    if (request.status !== 'PENDING_VERIFICATION') {
+      return { success: false, error: `Top-up request is already ${request.status}.` };
+    }
+
+    const now = new Date().toISOString();
+    request.status = 'REJECTED';
+    request.rejectionReason = reason;
+    request.reviewedAt = now;
+    request.reviewedBy = reviewedBy;
+
+    const idx = dbStore.creditTopupRequests.findIndex((r) => r.id === requestId);
+    if (idx >= 0) dbStore.creditTopupRequests[idx] = request;
+
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        await fs.updateCreditTopupRequest(requestId, {
+          status: 'REJECTED',
+          rejectionReason: reason,
+          reviewedAt: now,
+          reviewedBy,
+        });
+      } catch (err) {
+        console.warn('[OPERATOR] rejectCreditTopupRequestAsync firestore warning:', err);
+      }
+    }
+
+    return {
+      success: true,
+      request,
+    };
   }
 }
 

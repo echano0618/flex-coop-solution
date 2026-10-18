@@ -909,6 +909,100 @@ app.get('/api/v1/operator/credit-transactions', async (req: Request, res: Respon
   }
 });
 
+// Platform Payment Methods Configuration (Stored in Firebase Firestore)
+app.get('/api/v1/operator/payment-methods', async (_req: Request, res: Response) => {
+  try {
+    const methods = await OperatorService.listPaymentMethodsAsync();
+    res.json({ success: true, count: methods.length, data: methods });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/payment-methods', async (req: Request, res: Response) => {
+  try {
+    const { id, type, bankName, accountName, accountNumber, qrCodeUrl, instructions, status, isDefault, updatedBy } = req.body;
+    if (!bankName || !accountName || !accountNumber) {
+      return res.status(400).json({ success: false, error: 'Bank Name, Account Name, and Account Number are required.' });
+    }
+    const method = await OperatorService.savePaymentMethodAsync({
+      id,
+      type,
+      bankName,
+      accountName,
+      accountNumber,
+      qrCodeUrl,
+      instructions,
+      status,
+      isDefault,
+      updatedBy,
+    });
+    res.json({ success: true, message: `Payment Method '${method.bankName}' saved successfully in Firebase.`, data: method });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/v1/operator/payment-methods/:id', async (req: Request, res: Response) => {
+  try {
+    const ok = await OperatorService.deletePaymentMethodAsync(req.params.id);
+    res.json({ success: ok, message: 'Payment method deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Platform Credit Top-Up Verification Queue (Stored in Firebase Firestore)
+app.get('/api/v1/operator/credit/topup-requests', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.query.tenantId as string | undefined;
+    const requests = await OperatorService.listCreditTopupRequestsAsync(tenantId);
+    res.json({ success: true, count: requests.length, data: requests });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/credit/topup-requests/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reviewedBy } = req.body;
+    const result = await OperatorService.approveCreditTopupRequestAsync(id, reviewedBy || 'Platform Operator');
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    res.json({
+      success: true,
+      message: `Top-up request for ₱${result.request?.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} approved and credited to ${result.request?.tenantName} in Firebase. New Balance: ₱${result.newBalance?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+      data: result.request,
+      newBalance: result.newBalance,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/credit/topup-requests/:id/reject', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason, reviewedBy } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, error: 'Rejection reason is required.' });
+    }
+    const result = await OperatorService.rejectCreditTopupRequestAsync(id, reason.trim(), reviewedBy || 'Platform Operator');
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    res.json({
+      success: true,
+      message: `Top-up request for ₱${result.request?.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} has been rejected.`,
+      data: result.request,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // System Broadcasts (Stored in Firebase Firestore)
 app.get('/api/v1/operator/broadcasts', async (_req: Request, res: Response) => {
   try {
@@ -1057,15 +1151,43 @@ app.delete('/api/v1/operator/registrations', async (_req: Request, res: Response
 // ==========================================
 // 2.2 COOPERATIVE PLATFORM CREDIT & TOP-UP WALLET
 // ==========================================
-app.get('/api/v1/billing/credit', (req: Request, res: Response) => {
+app.get('/api/v1/billing/credit', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   OperatorService.ensureInitialized();
-  const tenant = dbStore.tenants.get(tenantId);
-  const currentCredit = dbStore.platformCredits.get(tenantId) ?? 0;
+  let tenant = dbStore.tenants.get(tenantId);
+  let currentCredit = dbStore.platformCredits.get(tenantId);
+
+  // Authoritative sync from Cloud Firestore
+  try {
+    const fs = FirestoreCoopService.getInstance();
+    const tenantDoc = await fs.getTenant(tenantId);
+    if (tenantDoc) {
+      tenant = tenantDoc;
+      dbStore.tenants.set(tenantId, tenantDoc);
+      if ((tenantDoc as any).platformCreditBalance !== undefined) {
+        currentCredit = (tenantDoc as any).platformCreditBalance;
+        dbStore.platformCredits.set(tenantId, currentCredit!);
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore getTenant credit check error:', err);
+  }
+
+  if (currentCredit === undefined) {
+    currentCredit = 0;
+  }
+
   const members = dbStore.members.get(tenantId) || [];
   const freeTierCount = Math.min(15, members.length);
   const billedCount = Math.max(0, members.length - 15);
   const transactions = dbStore.creditTransactions.filter((tx) => tx.tenantId === tenantId);
+
+  let topupRequests: any[] = [];
+  try {
+    topupRequests = await OperatorService.listCreditTopupRequestsAsync(tenantId);
+  } catch {}
+
+  const pendingRequests = topupRequests.filter((r) => r.status === 'PENDING_VERIFICATION');
 
   res.json({
     success: true,
@@ -1073,6 +1195,9 @@ app.get('/api/v1/billing/credit', (req: Request, res: Response) => {
       tenantId,
       tenantName: tenant?.name || tenantId,
       creditBalance: currentCredit,
+      pendingTopupsCount: pendingRequests.length,
+      pendingTopupsTotal: pendingRequests.reduce((sum, r) => sum + r.amount, 0),
+      pendingRequests,
       totalMembers: members.length,
       freeTierMembers: freeTierCount,
       billedMembers: billedCount,
@@ -1082,35 +1207,63 @@ app.get('/api/v1/billing/credit', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/v1/billing/credit/topup', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const { amount, paymentMethod, reference, notes, performedBy } = req.body;
-
-  if (!amount || Number(amount) <= 0) {
-    return res.status(400).json({ success: false, error: 'Valid top-up amount is required.' });
+app.get('/api/v1/billing/payment-methods', async (_req: Request, res: Response) => {
+  try {
+    const allMethods = await OperatorService.listPaymentMethodsAsync();
+    const activeMethods = allMethods.filter((m) => m.status === 'ACTIVE');
+    res.json({
+      success: true,
+      count: activeMethods.length,
+      data: activeMethods.length > 0 ? activeMethods : allMethods,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
+});
 
-  const topupAmount = Number(amount);
-  const ref = reference || `TOPUP-${Date.now().toString(36).toUpperCase()}`;
-  const method = paymentMethod || 'PAYMONGO_QRPH';
+app.post('/api/v1/billing/credit/topup', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const { amount, paymentMethodId, sourceBank, referenceNumber, notes, requestedBy } = req.body;
 
-  const result = OperatorService.adjustPlatformCredit({
-    tenantId,
-    amount: topupAmount,
-    type: 'TOP_UP',
-    reference: ref,
-    notes: notes || `Prepaid Platform Credit Top-Up via ${method}`,
-    performedBy: performedBy || 'Cooperative Admin',
-  });
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'A valid top-up amount greater than 0 is required.' });
+    }
+    if (!sourceBank || !sourceBank.trim()) {
+      return res.status(400).json({ success: false, error: 'Source bank is required.' });
+    }
+    if (!referenceNumber || !referenceNumber.trim()) {
+      return res.status(400).json({ success: false, error: 'Reference number is required.' });
+    }
 
-  res.status(200).json({
-    success: true,
-    message: `Platform Credit of ₱${topupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} credited successfully via ${method}.`,
-    data: {
-      newBalance: result.newBalance,
-      transaction: result.transaction,
-    },
-  });
+    const request = await OperatorService.submitCreditTopupRequestAsync({
+      tenantId,
+      amount: Number(amount),
+      paymentMethodId: paymentMethodId || 'pm_landbank_01',
+      sourceBank: sourceBank.trim(),
+      referenceNumber: referenceNumber.trim(),
+      notes,
+      requestedBy: requestedBy || 'Cooperative Admin',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Top-up request for ₱${request.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (Ref: ${request.referenceNumber}) submitted. It will be credited once verified by the platform operator.`,
+      data: request,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/v1/billing/credit/topup-requests', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const requests = await OperatorService.listCreditTopupRequestsAsync(tenantId);
+    res.json({ success: true, count: requests.length, data: requests });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ==========================================

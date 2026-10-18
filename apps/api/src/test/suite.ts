@@ -2122,7 +2122,97 @@ console.log('\n--- 32. Member Application Confirmation & Approval/Rejection Emai
   assert(rejectedEmailSent === true, 'Member application rejected notice email dispatches successfully');
 }
 
-console.log('\n🎉 ALL 313 VERIFICATION TEST CASES (INCLUDING MEMBER EMAIL NOTIFICATIONS & OPERATOR OTP) PASSED SUCCESSFULLY!\n');
+// 33. Operator Platform Payment Method Configuration & Tenant Top-Up Verification Workflow
+console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant Top-Up Verification Workflow ---');
+(async () => {
+  // 33.1 Operator Configures Payment Method (Key-in Bank Info)
+  const initialMethods = await OperatorService.listPaymentMethodsAsync();
+  assert(initialMethods.length >= 1, 'Default platform payment method is available');
+  assert(initialMethods[0].bankName === 'Land Bank of the Philippines', 'Default bank is Land Bank of the Philippines');
+
+  const newMethod = await OperatorService.savePaymentMethodAsync({
+    type: 'BANK_TRANSFER',
+    bankName: 'BDO Unibank',
+    accountName: 'Tuntong Technology Inc. Platform Escrow',
+    accountNumber: '0054-9811-0023',
+    instructions: 'Send via InstaPay/PESONet and retain transaction trace number.',
+    status: 'ACTIVE',
+    isDefault: false,
+    updatedBy: 'Lex (Platform Operator)',
+  });
+  assert(newMethod.bankName === 'BDO Unibank', 'Custom payment method configured with bank name');
+  assert(newMethod.accountNumber === '0054-9811-0023', 'Custom payment method retains bank account number');
+  assert(newMethod.status === 'ACTIVE', 'New payment method is ACTIVE');
+
+  const allMethods = await OperatorService.listPaymentMethodsAsync();
+  const bdoMethod = allMethods.find((m) => m.id === newMethod.id);
+  assert(bdoMethod !== undefined, 'Configured payment method is discoverable in operator list');
+
+  // 33.2 Tenant Refill Top-Up Request (Mandatory Ref Number & Source Bank)
+  const tenantId = 'tenant_family';
+  dbStore.platformCredits.set(tenantId, 50000.0);
+  const initialCredit = dbStore.platformCredits.get(tenantId)!;
+
+  const topupRequest = await OperatorService.submitCreditTopupRequestAsync({
+    tenantId,
+    amount: 15000.0,
+    paymentMethodId: newMethod.id,
+    sourceBank: 'Bank of the Philippine Islands (BPI)',
+    referenceNumber: 'BPI-INSTA-9982410',
+    notes: 'Prepaid platform refill for upcoming member batch',
+    requestedBy: 'Felix Echano (Family Coop Admin)',
+  });
+
+  assert(topupRequest.id.startsWith('topup_req_'), 'Top-up request receives unique identifier');
+  assert(topupRequest.status === 'PENDING_VERIFICATION', 'Initial status is strictly PENDING_VERIFICATION');
+  assert(topupRequest.sourceBank === 'Bank of the Philippine Islands (BPI)', 'Source bank is preserved verbatim');
+  assert(topupRequest.referenceNumber === 'BPI-INSTA-9982410', 'Financial reference number is preserved verbatim');
+  assert(topupRequest.amount === 15000.0, 'Requested amount is recorded accurately');
+
+  // 33.3 Balance is NOT updated before operator verification
+  const balanceBeforeVerification = dbStore.platformCredits.get(tenantId)!;
+  assert(balanceBeforeVerification === initialCredit, 'Platform credit balance remains completely unchanged before verification');
+
+  // 33.4 Operator Verification Queue
+  const pendingRequests = await OperatorService.listCreditTopupRequestsAsync(tenantId);
+  assert(pendingRequests.some((r) => r.id === topupRequest.id), 'Pending top-up request is visible in operator queue');
+
+  // 33.5 Operator Verifies & Approves Request
+  const approvalResult = await OperatorService.approveCreditTopupRequestAsync(topupRequest.id, 'Platform Operator (Lex)');
+  assert(approvalResult.success === true, 'Operator approval of top-up request succeeds');
+  assert(approvalResult.request?.status === 'APPROVED', 'Request status transitions to APPROVED');
+  assert(approvalResult.newBalance === initialCredit + 15000.0, 'Platform credit is strictly credited by the top-up amount');
+  assert(dbStore.platformCredits.get(tenantId) === initialCredit + 15000.0, 'Tenant credit balance in store matches approved balance');
+
+  // 33.6 Operator Rejection Workflow
+  const rejectedTopup = await OperatorService.submitCreditTopupRequestAsync({
+    tenantId,
+    amount: 5000.0,
+    paymentMethodId: newMethod.id,
+    sourceBank: 'GCash',
+    referenceNumber: 'GCASH-INVALID-REF',
+    notes: 'Test invalid reference',
+    requestedBy: 'Unknown User',
+  });
+  const balanceBeforeRejection = dbStore.platformCredits.get(tenantId)!;
+  const rejectResult = await OperatorService.rejectCreditTopupRequestAsync(
+    rejectedTopup.id,
+    'Invalid reference number. Funds not received in BDO account.',
+    'Compliance Officer'
+  );
+  assert(rejectResult.success === true, 'Operator rejection succeeds');
+  assert(rejectResult.request?.status === 'REJECTED', 'Request status transitions to REJECTED');
+  assert(rejectResult.request?.rejectionReason?.includes('Invalid reference number') === true, 'Rejection reason is preserved verbatim');
+  assert(dbStore.platformCredits.get(tenantId) === balanceBeforeRejection, 'Platform credit remains untouched upon rejection');
+
+  // Clean up test top-up credit
+  dbStore.platformCredits.set(tenantId, 50000.0);
+
+  console.log('\n🎉 ALL 327 VERIFICATION TEST CASES (INCLUDING OPERATOR PAYMENT METHODS & TOP-UP VERIFICATION) PASSED SUCCESSFULLY!\n');
+})().catch((err) => {
+  console.error('Section 33 failed:', err);
+  process.exit(1);
+});
 
 
 

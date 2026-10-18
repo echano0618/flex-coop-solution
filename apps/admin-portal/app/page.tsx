@@ -994,17 +994,121 @@ export default function AdminDashboard() {
   const [coopPlatformCredit, setCoopPlatformCredit] = useState<number>(0.0);
   const [showCreditTopupModal, setShowCreditTopupModal] = useState<boolean>(false);
   const [creditTopupAmount, setCreditTopupAmount] = useState<number>(2500);
-  const [creditTopupMethod, setCreditTopupMethod] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
+  const [availablePaymentMethods, setAvailablePaymentMethods] = useState<any[]>([]);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string>('');
+  const [topupSourceBank, setTopupSourceBank] = useState<string>('Land Bank of the Philippines');
+  const [customSourceBank, setCustomSourceBank] = useState<string>('');
+  const [topupReferenceNumber, setTopupReferenceNumber] = useState<string>('');
+  const [topupNotes, setTopupNotes] = useState<string>('');
+  const [isSubmittingTopup, setIsSubmittingTopup] = useState<boolean>(false);
+  const [pendingTopupRequests, setPendingTopupRequests] = useState<any[]>([]);
 
-  const handleExecuteCreditTopup = (e: React.FormEvent) => {
+  const loadPlatformCredit = useCallback(async () => {
+    const tenantInfo = resolveTenantCoop();
+    const cleanSlug = tenantInfo.slug.replace(/[-_]coop$/, '');
+    const tenantId = `tenant_${cleanSlug}`;
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/billing/credit`, {
+        headers: {
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': tenantId,
+        },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          if (json.data.creditBalance !== undefined) {
+            setCoopPlatformCredit(Number(json.data.creditBalance));
+          }
+          if (Array.isArray(json.data.pendingRequests)) {
+            setPendingTopupRequests(json.data.pendingRequests);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching platform credit balance:', err);
+    }
+  }, []);
+
+  const loadPaymentMethods = useCallback(async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/billing/payment-methods`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setAvailablePaymentMethods(json.data);
+          if (json.data.length > 0) {
+            setSelectedPaymentMethodId((prev) => {
+              if (prev && json.data.some((m: any) => m.id === prev)) return prev;
+              const def = json.data.find((m: any) => m.isDefault) || json.data[0];
+              return def.id;
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching payment methods:', err);
+    }
+  }, []);
+
+  const handleExecuteCreditTopup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (creditTopupAmount <= 0) return;
-    const newBal = Math.round((coopPlatformCredit + creditTopupAmount) * 100) / 100;
-    setCoopPlatformCredit(newBal);
-    setShowCreditTopupModal(false);
-    setPlatformUsageNotification(
-      `Prepaid Platform Credit refilled with ₱${creditTopupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} via ${creditTopupMethod === 'PAYMONGO_QRPH' ? 'PayMongo QR Ph Rail' : 'Bank Depository'}. New Available Balance: ₱${newBal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
-    );
+    if (creditTopupAmount <= 0) {
+      alert('Please enter a valid top-up amount.');
+      return;
+    }
+    const finalSourceBank = topupSourceBank === 'OTHER' ? customSourceBank.trim() : topupSourceBank;
+    if (!finalSourceBank) {
+      alert('Please select or specify your source bank.');
+      return;
+    }
+    if (!topupReferenceNumber.trim()) {
+      alert('Please provide the transaction reference number from your transfer receipt.');
+      return;
+    }
+
+    setIsSubmittingTopup(true);
+    const tenantInfo = resolveTenantCoop();
+    const cleanSlug = tenantInfo.slug.replace(/[-_]coop$/, '');
+    const tenantId = `tenant_${cleanSlug}`;
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/billing/credit/topup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': tenantId,
+        },
+        body: JSON.stringify({
+          amount: creditTopupAmount,
+          paymentMethodId: selectedPaymentMethodId,
+          sourceBank: finalSourceBank,
+          referenceNumber: topupReferenceNumber.trim(),
+          notes: topupNotes.trim(),
+          requestedBy: 'Cooperative Administrator',
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setShowCreditTopupModal(false);
+        const refNo = topupReferenceNumber.trim();
+        setTopupReferenceNumber('');
+        setTopupNotes('');
+        setPlatformUsageNotification(
+          `Top-Up Request of ₱${creditTopupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (Ref: ${refNo}) submitted! Funds will be added to Available Credit once verified by the platform operator.`
+        );
+        loadPlatformCredit();
+      } else {
+        alert(json.error || 'Failed to submit top-up request.');
+      }
+    } catch (err: any) {
+      alert('Network error submitting top-up request: ' + err.message);
+    } finally {
+      setIsSubmittingTopup(false);
+    }
   };
 
   const handleExecuteTreasurySweep = (e: React.FormEvent) => {
@@ -1840,15 +1944,18 @@ export default function AdminDashboard() {
   // Initial load
   useEffect(() => {
     loadAndSyncMembers();
-  }, [loadAndSyncMembers]);
+    loadPlatformCredit();
+    loadPaymentMethods();
+  }, [loadAndSyncMembers, loadPlatformCredit, loadPaymentMethods]);
 
   // Periodic sync every 15 seconds to ensure cross-device updates appear automatically
   useEffect(() => {
     const interval = setInterval(() => {
       loadAndSyncMembers();
+      loadPlatformCredit();
     }, 15000);
     return () => clearInterval(interval);
-  }, [loadAndSyncMembers]);
+  }, [loadAndSyncMembers, loadPlatformCredit]);
 
   // Load system configuration online from Cloud Firestore
   useEffect(() => {
@@ -12006,7 +12113,7 @@ export default function AdminDashboard() {
         {/* MODAL 3: REFILL PREPAID PLATFORM CREDIT */}
         {showCreditTopupModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
               <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm shadow">
@@ -12014,7 +12121,7 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900">Refill Platform Credit</h3>
-                    <p className="text-xs text-slate-500">Prepaid balance for automated member & technology fee billing.</p>
+                    <p className="text-xs text-slate-500">Submit prepaid top-up for operator verification & balance reload.</p>
                   </div>
                 </div>
                 <button
@@ -12040,9 +12147,81 @@ export default function AdminDashboard() {
                   </span>
                 </div>
 
-                {/* Preset Amount Pills */}
+                {/* Pending Verification Notice (If any) */}
+                {pendingTopupRequests.length > 0 && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1.5 text-blue-950">
+                    <div className="flex items-center gap-1.5 font-bold text-[11px] text-blue-900">
+                      <Clock className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                      <span>Pending Operator Verification ({pendingTopupRequests.length})</span>
+                    </div>
+                    <div className="space-y-1 text-[11px]">
+                      {pendingTopupRequests.slice(0, 3).map((req) => (
+                        <div key={req.id} className="flex justify-between items-center bg-white/70 p-2 rounded-lg border border-blue-100">
+                          <div>
+                            <span className="font-bold text-slate-900">₱{req.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            <span className="text-slate-500 text-[10px] ml-1.5">via {req.sourceBank}</span>
+                            <div className="font-mono text-[10px] text-slate-400">Ref: {req.referenceNumber}</div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-800 font-mono">
+                            VERIFYING
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Configured Receiving Depository / Payment Method */}
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1.5">Select Top-Up Amount (₱)</label>
+                  <label className="block font-semibold text-slate-700 mb-1.5">
+                    Platform Depository Bank (Operator Configured)
+                  </label>
+                  {availablePaymentMethods.length === 0 ? (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-center">
+                      Loading available payment rails...
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {availablePaymentMethods.map((method) => {
+                        const isSelected = selectedPaymentMethodId === method.id;
+                        return (
+                          <div
+                            key={method.id}
+                            onClick={() => setSelectedPaymentMethodId(method.id)}
+                            className={`p-3 rounded-xl border text-left cursor-pointer transition ${
+                              isSelected
+                                ? 'border-amber-600 bg-amber-50/70 ring-2 ring-amber-500/20'
+                                : 'border-slate-200 bg-white hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                                <Landmark className="w-4 h-4 text-amber-600" />
+                                <span>{method.bankName}</span>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded">
+                                {method.type === 'QRPH' ? 'QR Ph Rail' : 'Bank Transfer'}
+                              </span>
+                            </div>
+                            <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-600 font-mono">
+                              <div>Account Name: <strong className="text-slate-900 font-sans">{method.accountName}</strong></div>
+                              <div>Account Number: <strong className="text-slate-900 font-mono font-bold tracking-wider">{method.accountNumber}</strong></div>
+                            </div>
+                            {method.instructions && (
+                              <div className="mt-1.5 text-[10px] text-slate-500 italic bg-white/60 p-1.5 rounded border border-slate-200/60">
+                                {method.instructions}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Top-Up Amount */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1.5">Refill Amount (₱)</label>
                   <div className="grid grid-cols-4 gap-2 mb-2">
                     {[1000, 2500, 5000, 10000].map((amt) => (
                       <button
@@ -12062,61 +12241,93 @@ export default function AdminDashboard() {
 
                   <input
                     type="number"
-                    min="500"
+                    min="100"
                     step="100"
                     required
                     value={creditTopupAmount}
                     onChange={(e) => setCreditTopupAmount(Number(e.target.value))}
                     className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                    placeholder="Enter amount in PHP"
                   />
                 </div>
 
-                {/* Fulfillment Channel */}
+                {/* Source Bank (Mandatory) */}
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1.5">Payment Rail / Method</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCreditTopupMethod('PAYMONGO_QRPH')}
-                      className={`p-3 rounded-xl border text-left transition ${
-                        creditTopupMethod === 'PAYMONGO_QRPH'
-                          ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1 font-bold">
-                        <QrCode className="w-3.5 h-3.5 text-amber-600" />
-                        <span>PayMongo QR Ph</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-normal">Instant settlement via GCash / Maya / Banks</div>
-                    </button>
+                  <label className="block font-semibold text-slate-700 mb-1.5">
+                    Source Bank / Remitting Institution <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={topupSourceBank}
+                    onChange={(e) => setTopupSourceBank(e.target.value)}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-amber-500 outline-none bg-white"
+                    required
+                  >
+                    <option value="Land Bank of the Philippines">Land Bank of the Philippines</option>
+                    <option value="BDO Unibank">BDO Unibank</option>
+                    <option value="Bank of the Philippine Islands (BPI)">Bank of the Philippine Islands (BPI)</option>
+                    <option value="Metropolitan Bank & Trust Company (Metrobank)">Metropolitan Bank & Trust Company (Metrobank)</option>
+                    <option value="UnionBank of the Philippines">UnionBank of the Philippines</option>
+                    <option value="Rizal Commercial Banking Corporation (RCBC)">Rizal Commercial Banking Corporation (RCBC)</option>
+                    <option value="Security Bank">Security Bank</option>
+                    <option value="Philippine National Bank (PNB)">Philippine National Bank (PNB)</option>
+                    <option value="GCash">GCash</option>
+                    <option value="Maya">Maya</option>
+                    <option value="OTHER">Other Bank / Rural Bank (Specify)</option>
+                  </select>
 
-                    <button
-                      type="button"
-                      onClick={() => setCreditTopupMethod('BANK_TRANSFER')}
-                      className={`p-3 rounded-xl border text-left transition ${
-                        creditTopupMethod === 'BANK_TRANSFER'
-                          ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1 font-bold">
-                        <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                        <span>LandBank Wire</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-normal">Direct Clearing Acct #0012-9981-22</div>
-                    </button>
-                  </div>
+                  {topupSourceBank === 'OTHER' && (
+                    <input
+                      type="text"
+                      required
+                      value={customSourceBank}
+                      onChange={(e) => setCustomSourceBank(e.target.value)}
+                      placeholder="Type remitting bank name"
+                      className="w-full mt-2 p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-amber-500 outline-none"
+                    />
+                  )}
                 </div>
 
+                {/* Reference Number (Mandatory) */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1.5">
+                    Bank Reference Number / Trace No. <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={topupReferenceNumber}
+                    onChange={(e) => setTopupReferenceNumber(e.target.value)}
+                    placeholder="e.g. INSTA-88219401 / 20261019001248"
+                    className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-xs font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Key-in the reference code from your bank transfer or deposit receipt for operator verification.
+                  </p>
+                </div>
+
+                {/* Remittance Remarks (Optional) */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1.5">
+                    Transfer Remarks / Notes (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={topupNotes}
+                    onChange={(e) => setTopupNotes(e.target.value)}
+                    placeholder="e.g. Refill for monthly loan processing"
+                    className="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+
+                {/* Summary Box */}
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1 text-[11px] text-slate-600">
                   <div className="flex justify-between">
-                    <span>Credit to be Added:</span>
+                    <span>Requested Refill:</span>
                     <strong className="font-mono text-slate-900">₱{creditTopupAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span>Est. New Available Credit:</span>
-                    <strong className="font-mono text-emerald-700">₱{(coopPlatformCredit + creditTopupAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                    <span>Operator Review:</span>
+                    <strong className="text-amber-800 font-semibold">Verified before balance reload</strong>
                   </div>
                 </div>
 
@@ -12130,10 +12341,11 @@ export default function AdminDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-black shadow-md shadow-amber-950/10 flex items-center gap-1.5"
+                    disabled={isSubmittingTopup}
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-black shadow-md shadow-amber-950/10 flex items-center gap-1.5 disabled:opacity-50"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Confirm & Refill Credit</span>
+                    <span>{isSubmittingTopup ? 'Submitting...' : 'Submit Refill for Verification'}</span>
                   </button>
                 </div>
               </form>
