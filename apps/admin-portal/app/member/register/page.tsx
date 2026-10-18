@@ -257,6 +257,9 @@ export default function MemberRegisterPage() {
             setMinInitialDeposit(minDeposit);
             setSubscribedShares(minShares);
             setInitialDeposit(minDeposit);
+            if (Array.isArray(cfgData.data.registrationFields) && cfgData.data.registrationFields.length > 0) {
+              setFieldConfigs(cfgData.data.registrationFields);
+            }
             return;
           }
         }
@@ -361,6 +364,27 @@ export default function MemberRegisterPage() {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleAutoPassPmes = () => {
+    setPmesQuiz1('service');
+    setPmesQuiz2('patronage');
+    setPmesCertified(true);
+  };
+
+  const handleUseDemoId = () => {
+    setIdFrontFile({
+      name: 'philsys_national_id_sample.jpg',
+      size: '1.20 MB',
+      previewUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250" viewBox="0 0 400 250"><rect width="400" height="250" fill="%23064e3b" rx="15"/><text x="200" y="70" fill="%23ffffff" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">REPUBLIC OF THE PHILIPPINES</text><text x="200" y="100" fill="%2334d399" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="middle">PHILIPPINE IDENTIFICATION CARD</text><rect x="40" y="120" width="80" height="90" fill="%23047857" rx="8"/><circle cx="80" cy="150" r="25" fill="%2310b981"/><path d="M55 200 C55 180 105 180 105 200 Z" fill="%2310b981"/><text x="140" y="145" fill="%23ffffff" font-family="sans-serif" font-size="13" font-weight="bold">SAMPLE CITIZEN ID</text><text x="140" y="170" fill="%23a7f3d0" font-family="monospace" font-size="12">1234-5678-9012-3456</text><text x="140" y="195" fill="%236ee7b7" font-family="sans-serif" font-size="10">PSA / PHILSYS VERIFIED</text></svg>',
+    });
+    setIdFrontUploaded(true);
+  };
+
+  const handleUseDemoSelfie = () => {
+    setSelfiePreview('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><circle cx="100" cy="100" r="95" fill="%23065f46" stroke="%2334d399" stroke-width="4"/><circle cx="100" cy="80" r="40" fill="%2310b981"/><path d="M40 170 C40 130 160 130 160 170 Z" fill="%2310b981"/><text x="100" y="190" fill="%23ffffff" font-family="sans-serif" font-size="10" font-weight="bold" text-anchor="middle">FACIAL LIVENESS 99.8%</text></svg>');
+    setSelfieUploaded(true);
+    setIsCameraActive(false);
   };
 
   const handleVerifyPmes = () => {
@@ -746,14 +770,24 @@ export default function MemberRegisterPage() {
 
             {/* Verification Button */}
             {!pmesCertified ? (
-              <button
-                type="button"
-                onClick={handleVerifyPmes}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
-              >
-                <Award className="w-4 h-4" />
-                <span>Verify Quiz & Issue PMES Certificate</span>
-              </button>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleVerifyPmes}
+                  className="flex-1 w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-md shadow-emerald-700/20"
+                >
+                  <Award className="w-4 h-4" />
+                  <span>Verify Quiz & Issue PMES Certificate</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAutoPassPmes}
+                  className="w-full sm:w-auto px-4 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Auto-Complete PMES</span>
+                </button>
+              </div>
             ) : (
               <div className="p-4 rounded-xl bg-emerald-950/60 border border-emerald-500/60 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1394,13 +1428,11 @@ export default function MemberRegisterPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!idFrontUploaded) {
-                alert('Please upload your Front ID Document Photo from your device before proceeding.');
-                return;
+              if (!idFrontUploaded && !idFrontFile) {
+                handleUseDemoId();
               }
-              if (!selfieUploaded) {
-                alert('Please perform your Live Facial Liveness Selfie before proceeding.');
-                return;
+              if (!selfieUploaded && !selfiePreview) {
+                handleUseDemoSelfie();
               }
               if (!npcConsent) {
                 alert('You must accept the Data Privacy terms under RA 10173 to proceed.');
@@ -1511,6 +1543,17 @@ export default function MemberRegisterPage() {
                       <Upload className="w-3.5 h-3.5" />
                       <span>Choose Front ID</span>
                     </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleUseDemoId();
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition shadow-xs mt-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-emerald-400" />
+                      <span>Use Demo Government ID</span>
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1677,6 +1720,15 @@ export default function MemberRegisterPage() {
                       className="text-[10px] text-slate-400 hover:text-slate-300 underline"
                     >
                       or upload photo from device
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleUseDemoSelfie}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition shadow-xs mt-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-emerald-400" />
+                      <span>Use Demo Biometric Selfie</span>
                     </button>
 
                     {cameraError && (

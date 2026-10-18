@@ -474,8 +474,8 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
           }
         : undefined,
       classification: 'REGULAR',
-      status: 'PENDING_APPROVAL',
-      kycStatus: 'SUBMITTED',
+      status: req.body.initialStatus === 'ACTIVE' ? 'ACTIVE' : 'PENDING_APPROVAL',
+      kycStatus: req.body.initialStatus === 'ACTIVE' ? 'VERIFIED' : 'SUBMITTED',
       joinedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -501,9 +501,9 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
       pmesDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       biometricScore: 98.5,
       amlaStatus: 'PASSED',
-      reviewedBy: 'Membership & Credit Committee',
+      reviewedBy: req.body.initialStatus === 'ACTIVE' ? 'Cooperative Administrator' : 'Membership & Credit Committee',
       reviewDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      reviewNotes: 'Online applicant registered via PMES onboarding portal. Pending verification.',
+      reviewNotes: req.body.initialStatus === 'ACTIVE' ? 'Enrolled and verified directly by Cooperative Administrator.' : 'Online applicant registered via PMES onboarding portal. Pending verification.',
       idFrontPreview: idFrontPreview || null,
       selfiePreview: selfiePreview || null,
     };

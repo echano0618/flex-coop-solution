@@ -70,6 +70,7 @@ import {
   Edit3,
   DollarSign,
   Sparkles,
+  Briefcase,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -1387,6 +1388,125 @@ export default function AdminDashboard() {
   const [memberStatusFilter, setMemberStatusFilter] = useState<string>('ALL');
 
   const [members, setMembers] = useState<MemberRecord[]>([]);
+
+  // Admin Register New Member Modal State
+  const [showRegisterMemberModal, setShowRegisterMemberModal] = useState<boolean>(false);
+  const [newMemberForm, setNewMemberForm] = useState({
+    firstName: '',
+    middleName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    landline: '',
+    birthdate: '1990-01-01',
+    gender: 'FEMALE',
+    civilStatus: 'SINGLE',
+    address: '',
+    employeeIdNumber: '',
+    position: '',
+    officeUnitSection: '',
+    dateOfAppointment: '',
+    tin: '',
+    idType: 'PHILSYS_NATIONAL_ID',
+    idNumber: '',
+    subscribedShares: 50,
+    initialDeposit: 1000,
+    paymentMethod: 'CASHIER',
+    initialStatus: 'ACTIVE',
+  });
+  const [isSubmittingNewMember, setIsSubmittingNewMember] = useState<boolean>(false);
+  const [newMemberError, setNewMemberError] = useState<string | null>(null);
+  const [newMemberSuccessNotification, setNewMemberSuccessNotification] = useState<string | null>(null);
+
+  const handleAdminRegisterMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingNewMember(true);
+    setNewMemberError(null);
+
+    const tenantInfo = resolveTenantCoop();
+    const effectiveSlug = tenantInfo.slug && tenantInfo.slug !== 'default' ? tenantInfo.slug : 'family-coop';
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/auth/member/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': effectiveSlug,
+        },
+        body: JSON.stringify({
+          firstName: newMemberForm.firstName.trim(),
+          middleName: newMemberForm.middleName.trim(),
+          lastName: newMemberForm.lastName.trim(),
+          email: newMemberForm.email.trim().toLowerCase(),
+          phone: newMemberForm.phone.trim(),
+          landline: newMemberForm.landline.trim(),
+          birthdate: newMemberForm.birthdate,
+          gender: newMemberForm.gender,
+          civilStatus: newMemberForm.civilStatus,
+          address: newMemberForm.address.trim() || 'Philippines',
+          employeeIdNumber: newMemberForm.employeeIdNumber.trim(),
+          position: newMemberForm.position.trim(),
+          officeUnitSection: newMemberForm.officeUnitSection.trim(),
+          dateOfAppointment: newMemberForm.dateOfAppointment,
+          tin: newMemberForm.tin.trim(),
+          idType: newMemberForm.idType,
+          idNumber: newMemberForm.idNumber.trim() || 'N/A',
+          subscribedShares: Number(newMemberForm.subscribedShares) || Number(minSubscribedShares) || 50,
+          parValuePerShare: Number(stockParValue) || 100,
+          totalSubscribedAmount: (Number(newMemberForm.subscribedShares) || 50) * (Number(stockParValue) || 100),
+          initialDeposit: Number(newMemberForm.initialDeposit) || Number(minPaidUpAmount) || 1000,
+          initialPaidUpAmount: Number(newMemberForm.initialDeposit) || Number(minPaidUpAmount) || 1000,
+          paymentMethod: newMemberForm.paymentMethod,
+          initialStatus: newMemberForm.initialStatus,
+          completedPMES: true,
+          agreedToPrivacyPolicy: true,
+          coopSlug: effectiveSlug,
+          coopName: tenantInfo.name,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setNewMemberError(data.error || 'Failed to register member. Please check form details.');
+        setIsSubmittingNewMember(false);
+        return;
+      }
+
+      setNewMemberSuccessNotification(`Member "${newMemberForm.firstName} ${newMemberForm.lastName}" registered successfully!`);
+      setShowRegisterMemberModal(false);
+      setNewMemberForm({
+        firstName: '',
+        middleName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        landline: '',
+        birthdate: '1990-01-01',
+        gender: 'FEMALE',
+        civilStatus: 'SINGLE',
+        address: '',
+        employeeIdNumber: '',
+        position: '',
+        officeUnitSection: '',
+        dateOfAppointment: '',
+        tin: '',
+        idType: 'PHILSYS_NATIONAL_ID',
+        idNumber: '',
+        subscribedShares: Number(minSubscribedShares) || 50,
+        initialDeposit: Number(minPaidUpAmount) || 1000,
+        paymentMethod: 'CASHIER',
+        initialStatus: 'ACTIVE',
+      });
+      setIsSubmittingNewMember(false);
+
+      // Refresh members list from cloud
+      await loadAndSyncMembers();
+      setTimeout(() => setNewMemberSuccessNotification(null), 5000);
+    } catch (err: any) {
+      setNewMemberError('Unable to connect to the cooperative API server: ' + (err.message || 'Network error'));
+      setIsSubmittingNewMember(false);
+    }
+  };
 
   // Load authentic cooperative members (strictly guaranteeing General Manager as Member #1)
   // Load authentic cooperative members directly from Google Cloud Firestore (100% Online Single Database)
@@ -2935,11 +3055,29 @@ export default function AdminDashboard() {
               </div>
               <button
                 type="button"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
+                onClick={() => setShowRegisterMemberModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
               >
-                + Register New Member
+                <UserPlus className="w-4 h-4" />
+                <span>+ Register New Member</span>
               </button>
             </div>
+
+            {newMemberSuccessNotification && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{newMemberSuccessNotification}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewMemberSuccessNotification(null)}
+                  className="text-emerald-700 hover:text-emerald-900 font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Top Statutory & Financial Escrow KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -10759,6 +10897,297 @@ export default function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: DIRECT ADMINISTRATIVE MEMBER REGISTRATION */}
+        {showRegisterMemberModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 my-8">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <UserPlus className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Register New Cooperative Member</h3>
+                    <p className="text-xs text-slate-500">
+                      Direct administrative enrollment into {resolveTenantCoop().name} registry.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterMemberModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {newMemberError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{newMemberError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAdminRegisterMember} className="space-y-4 text-xs">
+                {/* Personal Information */}
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-emerald-800">
+                    <User className="w-3.5 h-3.5" />
+                    <span>1. Personal &amp; Contact Information</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">First Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={newMemberForm.firstName}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, firstName: e.target.value })}
+                        placeholder="e.g. Maria Clara"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Middle Name</label>
+                      <input
+                        type="text"
+                        value={newMemberForm.middleName}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, middleName: e.target.value })}
+                        placeholder="e.g. De Los"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Last Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={newMemberForm.lastName}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, lastName: e.target.value })}
+                        placeholder="e.g. Santos"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2.5">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Date of Birth *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newMemberForm.birthdate}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, birthdate: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Gender *</label>
+                      <select
+                        value={newMemberForm.gender}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, gender: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="FEMALE">Female</option>
+                        <option value="MALE">Male</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Civil Status *</label>
+                      <select
+                        value={newMemberForm.civilStatus}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, civilStatus: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="SINGLE">Single</option>
+                        <option value="MARRIED">Married</option>
+                        <option value="WIDOWED">Widowed</option>
+                        <option value="SEPARATED">Separated</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2.5">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Email Address *</label>
+                      <input
+                        type="email"
+                        required
+                        value={newMemberForm.email}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, email: e.target.value })}
+                        placeholder="member@example.com"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Mobile Number (+63) *</label>
+                      <input
+                        type="text"
+                        required
+                        value={newMemberForm.phone}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, phone: e.target.value })}
+                        placeholder="09171234567"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5">
+                    <label className="block text-slate-700 font-semibold mb-1">Residential Address *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newMemberForm.address}
+                      onChange={(e) => setNewMemberForm({ ...newMemberForm, address: e.target.value })}
+                      placeholder="e.g. 123 Rizal Street, Brgy. San Antonio, Pasig City, Metro Manila"
+                      className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Institutional / Employment Details */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-indigo-800">
+                    <Briefcase className="w-3.5 h-3.5" />
+                    <span>2. Institutional / Employment Details (Optional)</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Employee ID Number</label>
+                      <input
+                        type="text"
+                        value={newMemberForm.employeeIdNumber}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, employeeIdNumber: e.target.value })}
+                        placeholder="e.g. EMP-2026-0814"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Position / Job Title</label>
+                      <input
+                        type="text"
+                        value={newMemberForm.position}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, position: e.target.value })}
+                        placeholder="e.g. Administrative Officer"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2.5">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Office / Unit / Section</label>
+                      <input
+                        type="text"
+                        value={newMemberForm.officeUnitSection}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, officeUnitSection: e.target.value })}
+                        placeholder="e.g. Finance &amp; Accounting Division"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Tax Identification Number (TIN)</label>
+                      <input
+                        type="text"
+                        value={newMemberForm.tin}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, tin: e.target.value })}
+                        placeholder="000-000-000-000"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Share Capital & Initial Commitment */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-blue-800">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>3. Share Capital Commitment &amp; Admission Status</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Subscribed Shares</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={newMemberForm.subscribedShares}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, subscribedShares: Number(e.target.value) })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">
+                        Par: ₱{stockParValue} (Total: ₱{((Number(newMemberForm.subscribedShares) || 0) * (Number(stockParValue) || 100)).toLocaleString()})
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Initial Paid-Up Deposit (₱)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={newMemberForm.initialDeposit}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, initialDeposit: Number(e.target.value) })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">Recorded to COA 3-01-01</span>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Admission Status</label>
+                      <select
+                        value={newMemberForm.initialStatus}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, initialStatus: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-bold focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="ACTIVE">✓ Active &amp; Verified</option>
+                        <option value="PENDING_APPROVAL">Pending Review</option>
+                      </select>
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">Direct Admin Decision</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Statutory PMES and NPC consent automatically certified under Admin authority.</span>
+                  </div>
+                  <Link
+                    href="/member/register"
+                    target="_blank"
+                    className="text-emerald-700 hover:text-emerald-800 font-bold underline shrink-0 flex items-center gap-1"
+                  >
+                    <span>Public Form</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </Link>
+                </div>
+
+                {/* Modal Actions */}
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setShowRegisterMemberModal(false)}
+                    className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-semibold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingNewMember}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2"
+                  >
+                    {isSubmittingNewMember ? (
+                      <span>Enrolling Member...</span>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Enroll &amp; Register Member</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
