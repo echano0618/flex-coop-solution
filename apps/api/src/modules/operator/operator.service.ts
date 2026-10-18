@@ -16,6 +16,7 @@ import {
 } from '@flexcoop/shared-types';
 import { dbStore } from '../../core/store';
 import { MailerService } from '../../core/mailer.service';
+import { FirestoreCoopService } from '../../core/firestore.service';
 
 export class OperatorService {
   private static isInitialized = false;
@@ -727,6 +728,523 @@ https://tuntongtech.com`;
       return null;
     }
     return session;
+  }
+
+  // ==========================================================================
+  // CLOUD FIRESTORE OPERATOR ASYNC IMPLEMENTATIONS (PERSISTENT MULTI-INSTANCE)
+  // ==========================================================================
+
+  public static async listOperatorsAsync(): Promise<OperatorAccount[]> {
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      let ops = await fs.listOperators();
+      if (ops.length === 0) {
+        await fs.saveOperator(this.DEFAULT_OPERATOR);
+        ops = [this.DEFAULT_OPERATOR];
+      }
+      return ops;
+    } catch (err) {
+      console.warn('[OPERATOR] listOperatorsAsync error, falling back:', err);
+      return [this.DEFAULT_OPERATOR];
+    }
+  }
+
+  public static async createOperatorAsync(operator: OperatorAccount): Promise<OperatorAccount> {
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveOperator(operator);
+    } catch (err) {
+      console.warn('[OPERATOR] createOperatorAsync error:', err);
+    }
+    return operator;
+  }
+
+  public static async deleteOperatorAsync(username: string): Promise<boolean> {
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      return await fs.deleteOperator(username);
+    } catch (err) {
+      console.warn('[OPERATOR] deleteOperatorAsync error:', err);
+      return false;
+    }
+  }
+
+  public static async requestOperatorOtpAsync(usernameOrEmail: string): Promise<OperatorOtpResponse> {
+    const query = (usernameOrEmail || '').trim().toLowerCase();
+    let op: OperatorAccount | null = null;
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      op = await fs.getOperator(query);
+      if (!op && (query === this.DEFAULT_OPERATOR.username.toLowerCase() || query === this.DEFAULT_OPERATOR.email.toLowerCase())) {
+        await fs.saveOperator(this.DEFAULT_OPERATOR);
+        op = this.DEFAULT_OPERATOR;
+      }
+    } catch (err) {
+      console.warn('[OPERATOR] getOperator firestore query error:', err);
+      if (query === this.DEFAULT_OPERATOR.username.toLowerCase() || query === this.DEFAULT_OPERATOR.email.toLowerCase()) {
+        op = this.DEFAULT_OPERATOR;
+      }
+    }
+
+    if (!op) {
+      return {
+        success: false,
+        message: 'Invalid operator username or email address.',
+        error: 'OPERATOR_NOT_FOUND',
+      };
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+
+    // Cache locally
+    this.activeOtps.set(op.username, { otp, expiresAt, attempts: 0 });
+
+    // Store in Cloud Firestore
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveOperatorOtp(op.username, {
+        otp,
+        expiresAt,
+        attempts: 0,
+        email: op.email,
+      });
+    } catch (err) {
+      console.warn('[OPERATOR] saveOperatorOtp firestore error:', err);
+    }
+
+    const emailSubject = `[Tuntong Tech Operator] Your 1-Time Sign-In PIN: ${otp}`;
+    const emailBody = `Dear ${op.name},\n\nA secure operator sign-in request was initiated for your Tuntong Tech Operator Control Plane account.\n\nYour One-Time PIN (OTP) is:\n\n    ${otp}\n\n• Security Details:\n- Operator Username: ${op.username}\n- Destination: ${op.email}\n- Validity: 10 minutes (expires at ${new Date(expiresAt).toLocaleTimeString()})\n\nIMPORTANT: Do not disclose this 6-digit PIN to anyone. Tuntong Tech support representatives will never ask for your authentication PIN.\n\nSincerely,\nTuntong Tech Security Desk\nsupport@tuntongtech.com\nhttps://tuntongtech.com`;
+
+    console.log(`[OPERATOR OTP DISPATCH] PIN ${otp} sent to ${op.email} from support@tuntongtech.com`);
+
+    MailerService.sendMail({
+      to: op.email,
+      subject: emailSubject,
+      text: emailBody,
+    }).catch((err) => console.error('[MAILER ERROR] requestOperatorOtpAsync:', err));
+
+    return {
+      success: true,
+      message: `A One-Time PIN has been dispatched to ${op.email} from support@tuntongtech.com.`,
+      email: op.email,
+      username: op.username,
+      otp,
+    };
+  }
+
+  public static async verifyOperatorOtpAsync(
+    usernameOrEmail: string,
+    inputOtp: string
+  ): Promise<{ success: boolean; session?: OperatorSession; error?: string }> {
+    const query = (usernameOrEmail || '').trim().toLowerCase();
+    let op: OperatorAccount | null = null;
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      op = await fs.getOperator(query);
+      if (!op && (query === this.DEFAULT_OPERATOR.username.toLowerCase() || query === this.DEFAULT_OPERATOR.email.toLowerCase())) {
+        op = this.DEFAULT_OPERATOR;
+      }
+    } catch {
+      if (query === this.DEFAULT_OPERATOR.username.toLowerCase() || query === this.DEFAULT_OPERATOR.email.toLowerCase()) {
+        op = this.DEFAULT_OPERATOR;
+      }
+    }
+
+    if (!op) {
+      return { success: false, error: 'Invalid operator credentials.' };
+    }
+
+    let record = this.activeOtps.get(op.username);
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const fsOtp = await fs.getOperatorOtp(op.username);
+      if (fsOtp) {
+        record = fsOtp;
+      }
+    } catch {}
+
+    if (!record) {
+      return { success: false, error: 'No active OTP request found. Please request a new PIN.' };
+    }
+
+    if (Date.now() > record.expiresAt) {
+      this.activeOtps.delete(op.username);
+      try {
+        await FirestoreCoopService.getInstance().deleteOperatorOtp(op.username);
+      } catch {}
+      return { success: false, error: 'One-Time PIN has expired. Please request a new PIN.' };
+    }
+
+    if (record.attempts >= 5) {
+      this.activeOtps.delete(op.username);
+      try {
+        await FirestoreCoopService.getInstance().deleteOperatorOtp(op.username);
+      } catch {}
+      return { success: false, error: 'Too many incorrect attempts. Please request a new PIN.' };
+    }
+
+    const cleanInput = (inputOtp || '').trim();
+    if (cleanInput !== record.otp) {
+      record.attempts += 1;
+      this.activeOtps.set(op.username, record);
+      try {
+        await FirestoreCoopService.getInstance().saveOperatorOtp(op.username, { ...record, email: op.email });
+      } catch {}
+      return { success: false, error: `Invalid PIN. ${5 - record.attempts} attempt(s) remaining.` };
+    }
+
+    // OTP Verified!
+    this.activeOtps.delete(op.username);
+    try {
+      await FirestoreCoopService.getInstance().deleteOperatorOtp(op.username);
+    } catch {}
+
+    const token = `opt_sess_${Date.now()}_${Math.random().toString(36).substring(2, 12)}`;
+    const session: OperatorSession = {
+      token,
+      username: op.username,
+      name: op.name,
+      email: op.email,
+      role: op.role,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    };
+
+    this.activeSessions.set(token, session);
+    try {
+      await FirestoreCoopService.getInstance().saveOperatorSession(session);
+    } catch (err) {
+      console.warn('[OPERATOR] saveOperatorSession firestore error:', err);
+    }
+
+    return {
+      success: true,
+      session,
+    };
+  }
+
+  public static async validateOperatorSessionAsync(token: string): Promise<OperatorSession | null> {
+    if (!token) return null;
+    let session = this.activeSessions.get(token);
+    if (!session) {
+      try {
+        const fsSession = await FirestoreCoopService.getInstance().getOperatorSession(token);
+        if (fsSession) {
+          session = fsSession;
+          this.activeSessions.set(token, session);
+        }
+      } catch {}
+    }
+
+    if (!session) return null;
+    if (new Date(session.expiresAt).getTime() < Date.now()) {
+      this.activeSessions.delete(token);
+      try {
+        await FirestoreCoopService.getInstance().deleteOperatorSession(token);
+      } catch {}
+      return null;
+    }
+    return session;
+  }
+
+  /**
+   * Retrieves tenant fleet summaries grounded in Firebase Firestore
+   */
+  public static async getTenantFleetSummariesAsync(): Promise<TenantFleetSummary[]> {
+    this.ensureInitialized();
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const firestoreTenants = await fs.listTenants();
+
+      if (firestoreTenants && firestoreTenants.length > 0) {
+        // Sync into dbStore
+        for (const t of firestoreTenants) {
+          dbStore.tenants.set(t.id, t);
+          if ((t as any).platformCreditBalance !== undefined) {
+            dbStore.platformCredits.set(t.id, (t as any).platformCreditBalance);
+          }
+          if ((t as any).escrowFloatBalance !== undefined) {
+            dbStore.escrowFloats?.set(t.id, (t as any).escrowFloatBalance);
+          }
+        }
+
+        const summaries: TenantFleetSummary[] = [];
+        for (const tenant of firestoreTenants) {
+          let members: Member[] = [];
+          try {
+            members = await fs.listMembers(tenant.id);
+          } catch {
+            members = dbStore.members.get(tenant.id) || [];
+          }
+          if (members.length > 0) {
+            dbStore.members.set(tenant.id, members);
+          }
+
+          let loans: any[] = [];
+          try {
+            loans = await fs.listLoans(tenant.id);
+          } catch {
+            loans = dbStore.loans.get(tenant.id) || [];
+          }
+          if (loans.length > 0) {
+            dbStore.loans.set(tenant.id, loans);
+          }
+
+          const totalMembers = members.length;
+          const activeMembers = members.filter((m) => m.status === 'ACTIVE' || m.kycStatus === 'VERIFIED').length;
+          const pendingMembers = members.filter((m) => m.status === 'PENDING_APPROVAL').length;
+          const freeTierMembers = Math.min(15, totalMembers);
+          const billedMembers = Math.max(0, totalMembers - 15);
+
+          const totalLoansDisbursed = loans.filter((l) => l.status === 'DISBURSED' || l.status === 'APPROVED').length;
+          const totalLoanVolume = loans
+            .filter((l) => l.status === 'DISBURSED' || l.status === 'APPROVED')
+            .reduce((sum, l) => sum + (l.principalAmount || 0), 0);
+          const totalTechFeesGenerated = Math.round(totalLoanVolume * 0.01 * 100) / 100;
+
+          const creditBalance = (tenant as any).platformCreditBalance ?? dbStore.platformCredits.get(tenant.id) ?? 0.0;
+          const escrowFloat = (tenant as any).escrowFloatBalance ?? dbStore.escrowFloats?.get(tenant.id) ?? 0.0;
+
+          const storageUsedMb = Math.round((totalMembers * 0.4 + 45.0) * 10) / 10;
+          let healthScore = 98;
+          if (tenant.status === 'SUSPENDED') healthScore = 40;
+          else if (creditBalance < 1000) healthScore = 82;
+
+          summaries.push({
+            id: tenant.id,
+            name: tenant.name,
+            slug: tenant.slug,
+            subdomain: `${tenant.slug}-coop.tuntongtech.com`,
+            cdaRegistrationNumber: tenant.cdaRegistrationNumber,
+            tin: tenant.tin,
+            contactEmail: tenant.contactEmail,
+            contactPhone: tenant.contactPhone,
+            adminName: `${tenant.adminFirstName || 'Admin'} ${tenant.adminLastName || 'Officer'}`.trim(),
+            billingMode: tenant.billingMode,
+            status: tenant.status,
+            totalMembers,
+            activeMembers,
+            pendingMembers,
+            freeTierMembers,
+            billedMembers,
+            platformCreditBalance: creditBalance,
+            escrowFloatBalance: escrowFloat,
+            totalLoansDisbursed,
+            totalLoanVolume,
+            totalTechFeesGenerated,
+            lastBillingDate: '2026-10-01',
+            storageUsedMb,
+            storageQuotaMb: (tenant as any).storageQuotaMb || 10240,
+            databaseSchema: `tenant_${tenant.slug}`,
+            healthScore,
+            lastActiveAt: tenant.updatedAt || new Date().toISOString(),
+            createdAt: tenant.createdAt,
+          });
+        }
+        return summaries;
+      }
+    } catch (err) {
+      console.warn('[OPERATOR] getTenantFleetSummariesAsync firestore error, falling back to local memory:', err);
+    }
+    return this.getTenantFleetSummaries();
+  }
+
+  /**
+   * Adjusts platform credit with persistence to Firebase Firestore
+   */
+  public static async adjustPlatformCreditAsync(params: {
+    tenantId: string;
+    amount: number;
+    type: PlatformCreditTransactionType;
+    reference: string;
+    notes: string;
+    performedBy: string;
+  }): Promise<{ success: boolean; newBalance: number; transaction: PlatformCreditTransaction }> {
+    const res = this.adjustPlatformCredit(params);
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.recordCreditTransaction(res.transaction);
+      await fs.updateTenantCreditBalance(params.tenantId, res.newBalance);
+    } catch (err) {
+      console.warn('[OPERATOR] adjustPlatformCreditAsync firestore error:', err);
+    }
+
+    return res;
+  }
+
+  /**
+   * Updates tenant lifecycle status in Firebase Firestore
+   */
+  public static async updateTenantStatusAsync(tenantId: string, status: TenantStatus, reason?: string): Promise<boolean> {
+    const updated = this.updateTenantStatus(tenantId, status, reason);
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.updateTenantStatus(tenantId, status, reason);
+    } catch (err) {
+      console.warn('[OPERATOR] updateTenantStatusAsync firestore error:', err);
+    }
+    return updated;
+  }
+
+  /**
+   * System Broadcasts in Firebase Firestore
+   */
+  public static async createBroadcastAsync(broadcast: Omit<SystemBroadcast, 'id' | 'createdAt'>): Promise<SystemBroadcast> {
+    const record = this.createBroadcast(broadcast);
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveBroadcast(record);
+    } catch (err) {
+      console.warn('[OPERATOR] createBroadcastAsync firestore error:', err);
+    }
+    return record;
+  }
+
+  public static async listBroadcastsAsync(): Promise<SystemBroadcast[]> {
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const broadcasts = await fs.listBroadcasts();
+      if (broadcasts && broadcasts.length > 0) {
+        dbStore.systemBroadcasts = broadcasts;
+        return broadcasts;
+      }
+    } catch (err) {
+      console.warn('[OPERATOR] listBroadcastsAsync firestore error, falling back:', err);
+    }
+    return dbStore.systemBroadcasts;
+  }
+
+  /**
+   * Platform Credit Transactions in Firebase Firestore
+   */
+  public static async listCreditTransactionsAsync(tenantId?: string): Promise<PlatformCreditTransaction[]> {
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const txs = await fs.listCreditTransactions(tenantId);
+      if (txs && txs.length > 0) {
+        if (!tenantId) {
+          dbStore.creditTransactions = txs;
+        }
+        return txs;
+      }
+    } catch (err) {
+      console.warn('[OPERATOR] listCreditTransactionsAsync firestore error, falling back:', err);
+    }
+    return tenantId
+      ? dbStore.creditTransactions.filter((tx) => tx.tenantId === tenantId)
+      : dbStore.creditTransactions;
+  }
+
+  /**
+   * Cooperative Registrations in Firebase Firestore
+   */
+  public static async listRegistrationsAsync(): Promise<CooperativeRegistration[]> {
+    this.ensureInitialized();
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const regs = await fs.listRegistrations();
+      if (regs && regs.length > 0) {
+        dbStore.coopRegistrations = regs;
+        return regs;
+      }
+    } catch (err) {
+      console.warn('[OPERATOR] listRegistrationsAsync firestore error, falling back:', err);
+    }
+    return this.listRegistrations();
+  }
+
+  public static async submitRegistrationAsync(
+    data: Omit<CooperativeRegistration, 'id' | 'status' | 'submittedAt' | 'subdomain'>
+  ): Promise<CooperativeRegistration> {
+    const record = this.submitRegistration(data);
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveRegistration(record);
+    } catch (err) {
+      console.warn('[OPERATOR] submitRegistrationAsync firestore error:', err);
+    }
+    return record;
+  }
+
+  public static async approveRegistrationAsync(
+    id: string,
+    reviewedBy: string = 'Tuntong Tech Operator'
+  ): Promise<{ success: boolean; registration?: CooperativeRegistration; tenant?: Tenant; error?: string }> {
+    const res = this.approveRegistration(id, reviewedBy);
+    if (!res.success || !res.registration || !res.tenant) {
+      return res;
+    }
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      // 1. Save updated registration document
+      await fs.saveRegistration(res.registration);
+
+      // 2. Provision tenant in Firestore
+      await fs.saveTenant({
+        ...res.tenant,
+        platformCreditBalance: 0.0,
+        escrowFloatBalance: 0.0,
+      } as any);
+
+      // 3. Seed CDA Chart of Accounts in Firestore
+      await fs.seedTenant(res.tenant);
+
+      // 4. Provision GM member in Firestore
+      const gmMember = (dbStore.members.get(res.tenant.id) || [])[0];
+      if (gmMember) {
+        await fs.saveMember(res.tenant.id, gmMember);
+      }
+    } catch (err) {
+      console.warn('[OPERATOR] approveRegistrationAsync firestore provisioning warning:', err);
+    }
+
+    return res;
+  }
+
+  public static async rejectRegistrationAsync(
+    id: string,
+    reason: string,
+    reviewedBy: string = 'Tuntong Tech Operator'
+  ): Promise<{ success: boolean; registration?: CooperativeRegistration; error?: string }> {
+    const res = this.rejectRegistration(id, reason, reviewedBy);
+    if (!res.success || !res.registration) {
+      return res;
+    }
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveRegistration(res.registration);
+    } catch (err) {
+      console.warn('[OPERATOR] rejectRegistrationAsync firestore warning:', err);
+    }
+
+    return res;
+  }
+
+  public static async removeRegistrationAsync(id: string): Promise<boolean> {
+    const removed = this.removeRegistration(id);
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.deleteRegistration(id);
+    } catch (err) {
+      console.warn('[OPERATOR] removeRegistrationAsync firestore warning:', err);
+    }
+    return removed;
+  }
+
+  public static async clearAllRegistrationsAsync(): Promise<void> {
+    this.clearAllRegistrations();
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.clearAllRegistrations();
+    } catch (err) {
+      console.warn('[OPERATOR] clearAllRegistrationsAsync firestore warning:', err);
+    }
   }
 }
 

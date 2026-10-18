@@ -9,6 +9,11 @@ import {
   PlatformInvoice,
   PaymentTransaction,
   AMLCCoveredTransactionAlert,
+  OperatorAccount,
+  OperatorSession,
+  CooperativeRegistration,
+  PlatformCreditTransaction,
+  SystemBroadcast,
 } from '@flexcoop/shared-types';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 
@@ -98,6 +103,30 @@ export class FirestoreCoopService {
 
   public amlcAlertsCol(tenantId: string) {
     return this.tenantDoc(tenantId).collection('amlc_alerts');
+  }
+
+  public operatorsCol() {
+    return this.db.collection('operators');
+  }
+
+  public operatorOtpsCol() {
+    return this.db.collection('operator_otps');
+  }
+
+  public operatorSessionsCol() {
+    return this.db.collection('operator_sessions');
+  }
+
+  public coopRegistrationsCol() {
+    return this.db.collection('coop_registrations');
+  }
+
+  public creditTransactionsCol() {
+    return this.db.collection('platform_credit_transactions');
+  }
+
+  public broadcastsCol() {
+    return this.db.collection('system_broadcasts');
   }
 
   // --------------------------------------------------------------------------
@@ -428,5 +457,165 @@ export class FirestoreCoopService {
       });
       await coaBatch.commit();
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Operator Control Plane & Security (Stored in Firebase Firestore)
+  // --------------------------------------------------------------------------
+
+  public async saveOperator(operator: OperatorAccount): Promise<void> {
+    await this.operatorsCol().doc(operator.username.toLowerCase()).set({
+      ...operator,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
+
+  public async getOperator(usernameOrEmail: string): Promise<OperatorAccount | null> {
+    const q = (usernameOrEmail || '').toLowerCase().trim();
+    const doc = await this.operatorsCol().doc(q).get();
+    if (doc.exists) return doc.data() as OperatorAccount;
+    const byEmail = await this.operatorsCol().where('email', '==', q).limit(1).get();
+    if (!byEmail.empty) return byEmail.docs[0].data() as OperatorAccount;
+    return null;
+  }
+
+  public async listOperators(): Promise<OperatorAccount[]> {
+    const snapshot = await this.operatorsCol().get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as OperatorAccount);
+  }
+
+  public async deleteOperator(username: string): Promise<boolean> {
+    const docRef = this.operatorsCol().doc(username.toLowerCase());
+    const doc = await docRef.get();
+    if (!doc.exists) return false;
+    await docRef.delete();
+    return true;
+  }
+
+  public async saveOperatorOtp(username: string, data: { otp: string; expiresAt: number; attempts: number; email: string }): Promise<void> {
+    await this.operatorOtpsCol().doc(username.toLowerCase()).set({
+      ...data,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  public async getOperatorOtp(username: string): Promise<{ otp: string; expiresAt: number; attempts: number; email: string } | null> {
+    const doc = await this.operatorOtpsCol().doc(username.toLowerCase()).get();
+    return doc.exists ? (doc.data() as any) : null;
+  }
+
+  public async deleteOperatorOtp(username: string): Promise<void> {
+    await this.operatorOtpsCol().doc(username.toLowerCase()).delete();
+  }
+
+  public async saveOperatorSession(session: OperatorSession): Promise<void> {
+    await this.operatorSessionsCol().doc(session.token).set(session);
+  }
+
+  public async getOperatorSession(token: string): Promise<OperatorSession | null> {
+    const doc = await this.operatorSessionsCol().doc(token).get();
+    return doc.exists ? (doc.data() as OperatorSession) : null;
+  }
+
+  public async deleteOperatorSession(token: string): Promise<void> {
+    await this.operatorSessionsCol().doc(token).delete();
+  }
+
+  // --------------------------------------------------------------------------
+  // Tenant Fleet Status & Platform Credit Balance
+  // --------------------------------------------------------------------------
+
+  public async updateTenantStatus(tenantId: string, status: string, reason?: string): Promise<void> {
+    await this.tenantDoc(tenantId).set({
+      status,
+      statusReason: reason || '',
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
+
+  public async updateTenantCreditBalance(tenantId: string, balance: number): Promise<void> {
+    await this.tenantDoc(tenantId).set({
+      platformCreditBalance: balance,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
+
+  // --------------------------------------------------------------------------
+  // Cooperative Registrations (Onboarding Queue in Firebase Firestore)
+  // --------------------------------------------------------------------------
+
+  public async saveRegistration(reg: CooperativeRegistration): Promise<void> {
+    await this.coopRegistrationsCol().doc(reg.id).set(reg, { merge: true });
+  }
+
+  public async getRegistration(id: string): Promise<CooperativeRegistration | null> {
+    const doc = await this.coopRegistrationsCol().doc(id).get();
+    return doc.exists ? (doc.data() as CooperativeRegistration) : null;
+  }
+
+  public async listRegistrations(): Promise<CooperativeRegistration[]> {
+    const snapshot = await this.coopRegistrationsCol().get();
+    const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as CooperativeRegistration);
+    return list.sort((a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime());
+  }
+
+  public async deleteRegistration(id: string): Promise<boolean> {
+    const ref = this.coopRegistrationsCol().doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) return false;
+    await ref.delete();
+    return true;
+  }
+
+  public async clearAllRegistrations(): Promise<void> {
+    const snapshot = await this.coopRegistrationsCol().get();
+    if (snapshot.empty) return;
+    const batch = this.db.batch();
+    snapshot.docs.forEach((doc: QueryDocumentSnapshot) => batch.delete(doc.ref));
+    await batch.commit();
+  }
+
+  // --------------------------------------------------------------------------
+  // Platform Credit Ledger & Transactions (Firebase Firestore)
+  // --------------------------------------------------------------------------
+
+  public async recordCreditTransaction(tx: PlatformCreditTransaction): Promise<void> {
+    await this.creditTransactionsCol().doc(tx.id).set(tx);
+  }
+
+  public async listCreditTransactions(tenantId?: string): Promise<PlatformCreditTransaction[]> {
+    let query: any = this.creditTransactionsCol();
+    if (tenantId) {
+      query = query.where('tenantId', '==', tenantId);
+    }
+    const snapshot = await query.get();
+    const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as PlatformCreditTransaction);
+    return list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  // --------------------------------------------------------------------------
+  // System Broadcasts (Firebase Firestore)
+  // --------------------------------------------------------------------------
+
+  public async saveBroadcast(broadcast: SystemBroadcast): Promise<void> {
+    await this.broadcastsCol().doc(broadcast.id).set(broadcast, { merge: true });
+  }
+
+  public async listBroadcasts(onlyActive?: boolean): Promise<SystemBroadcast[]> {
+    const snapshot = await this.broadcastsCol().get();
+    let list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as SystemBroadcast);
+    if (onlyActive) {
+      const now = new Date().toISOString();
+      list = list.filter((b) => b.isActive && (!b.expiresAt || b.expiresAt > now));
+    }
+    return list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  public async deleteBroadcast(id: string): Promise<boolean> {
+    const ref = this.broadcastsCol().doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) return false;
+    await ref.delete();
+    return true;
   }
 }

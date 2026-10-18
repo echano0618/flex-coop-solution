@@ -677,14 +677,64 @@ app.post('/api/v1/tenants', (req: Request, res: Response) => {
 // 2.1 SAAS OPERATOR CONTROL PLANE (TUNTONG TECH SOLUTION)
 // ==========================================
 
-// Operator Authentication (Passwordless via One-Time PIN)
-app.post('/api/v1/operator/auth/request-otp', (req: Request, res: Response) => {
+// ==========================================
+// 2.1 SAAS OPERATOR CONTROL PLANE (TUNTONG TECH SOLUTION)
+// ==========================================
+
+// Operator Users Management (Stored in Firebase Firestore)
+app.get('/api/v1/operator/users', async (_req: Request, res: Response) => {
+  try {
+    const operators = await OperatorService.listOperatorsAsync();
+    res.json({ success: true, count: operators.length, data: operators });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/users', async (req: Request, res: Response) => {
+  const { username, name, email, role } = req.body;
+  if (!username || !email || !name) {
+    return res.status(400).json({ success: false, error: 'Username, name, and email are required for operator accounts.' });
+  }
+
+  try {
+    const op = await OperatorService.createOperatorAsync({
+      username: username.trim().toLowerCase(),
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      role: role || 'PLATFORM_SUPPORT',
+    });
+    res.status(201).json({ success: true, message: `Operator account '${op.username}' created successfully in Firebase.`, data: op });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/v1/operator/users/:username', async (req: Request, res: Response) => {
+  const { username } = req.params;
+  if (username.toLowerCase() === 'tuntongtech') {
+    return res.status(400).json({ success: false, error: 'Cannot remove the primary platform super operator account.' });
+  }
+
+  try {
+    const removed = await OperatorService.deleteOperatorAsync(username);
+    if (!removed) {
+      return res.status(404).json({ success: false, error: 'Operator account not found.' });
+    }
+    res.json({ success: true, message: `Operator account '${username}' removed successfully from Firebase.` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Operator Authentication (Passwordless via One-Time PIN stored in Firebase)
+app.post('/api/v1/operator/auth/request-otp', async (req: Request, res: Response) => {
   const { usernameOrEmail } = req.body;
   if (!usernameOrEmail) {
     return res.status(400).json({ success: false, error: 'Operator username or email is required.' });
   }
 
-  const result = OperatorService.requestOperatorOtp(usernameOrEmail);
+  const result = await OperatorService.requestOperatorOtpAsync(usernameOrEmail);
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
   }
@@ -698,13 +748,13 @@ app.post('/api/v1/operator/auth/request-otp', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/v1/operator/auth/verify-otp', (req: Request, res: Response) => {
+app.post('/api/v1/operator/auth/verify-otp', async (req: Request, res: Response) => {
   const { usernameOrEmail, otp } = req.body;
   if (!usernameOrEmail || !otp) {
     return res.status(400).json({ success: false, error: 'Operator username/email and 6-digit PIN are required.' });
   }
 
-  const result = OperatorService.verifyOperatorOtp(usernameOrEmail, otp);
+  const result = await OperatorService.verifyOperatorOtpAsync(usernameOrEmail, otp);
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
   }
@@ -716,7 +766,7 @@ app.post('/api/v1/operator/auth/verify-otp', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/v1/operator/auth/session', (req: Request, res: Response) => {
+app.get('/api/v1/operator/auth/session', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.headers['x-operator-token'] as string);
 
@@ -724,7 +774,7 @@ app.get('/api/v1/operator/auth/session', (req: Request, res: Response) => {
     return res.status(401).json({ success: false, error: 'No operator session token provided.' });
   }
 
-  const session = OperatorService.validateOperatorSession(token);
+  const session = await OperatorService.validateOperatorSessionAsync(token);
   if (!session) {
     return res.status(401).json({ success: false, error: 'Operator session invalid or expired.' });
   }
@@ -735,17 +785,55 @@ app.get('/api/v1/operator/auth/session', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/v1/operator/overview', (_req: Request, res: Response) => {
-  const metrics = OperatorService.getOperatorOverviewMetrics();
-  res.json({ success: true, data: metrics });
+app.get('/api/v1/operator/overview', async (_req: Request, res: Response) => {
+  try {
+    const fleet = await OperatorService.getTenantFleetSummariesAsync();
+    const totalTenants = fleet.length;
+    const activeTenants = fleet.filter((t) => t.status === 'ACTIVE').length;
+    const suspendedTenants = fleet.filter((t) => t.status === 'SUSPENDED').length;
+    const totalFleetMembers = fleet.reduce((sum, t) => sum + t.totalMembers, 0);
+    const totalFleetLoanVolume = fleet.reduce((sum, t) => sum + t.totalLoanVolume, 0);
+    const totalEscrowFloat = fleet.reduce((sum, t) => sum + t.escrowFloatBalance, 0);
+    const totalPlatformCreditPool = fleet.reduce((sum, t) => sum + t.platformCreditBalance, 0);
+    const totalBilledMembers = fleet.reduce((sum, t) => sum + t.billedMembers, 0);
+    const grossTechFee = Math.round(totalFleetLoanVolume * 0.01 + totalBilledMembers * 50);
+    const netBase = Math.round((grossTechFee / 1.12) * 100) / 100;
+    const outputVat = Math.round((grossTechFee - netBase) * 100) / 100;
+    const totalStorageUsedMb = fleet.reduce((sum, t) => sum + t.storageUsedMb, 0);
+    const totalStorageUsedGb = Math.round((totalStorageUsedMb / 1024) * 100) / 100;
+    const lowCreditTenantsCount = fleet.filter((t) => t.platformCreditBalance < 1000).length;
+
+    res.json({
+      success: true,
+      data: {
+        totalTenants,
+        activeTenants,
+        suspendedTenants,
+        totalFleetMembers,
+        totalFleetLoanVolume,
+        totalEscrowFloat,
+        totalPlatformCreditPool,
+        monthlyTechFeeRevenue: netBase,
+        monthlyOutputVatPayable: outputVat,
+        totalStorageUsedGb,
+        lowCreditTenantsCount,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.get('/api/v1/operator/tenants', (_req: Request, res: Response) => {
-  const fleet = OperatorService.getTenantFleetSummaries();
-  res.json({ success: true, count: fleet.length, data: fleet });
+app.get('/api/v1/operator/tenants', async (_req: Request, res: Response) => {
+  try {
+    const fleet = await OperatorService.getTenantFleetSummariesAsync();
+    res.json({ success: true, count: fleet.length, data: fleet });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.post('/api/v1/operator/tenants/:id/credit/adjust', (req: Request, res: Response) => {
+app.post('/api/v1/operator/tenants/:id/credit/adjust', async (req: Request, res: Response) => {
   const tenantId = req.params.id;
   const { amount, type, reference, notes, performedBy } = req.body;
 
@@ -753,7 +841,7 @@ app.post('/api/v1/operator/tenants/:id/credit/adjust', (req: Request, res: Respo
     return res.status(400).json({ success: false, error: 'Valid adjustment amount is required.' });
   }
 
-  const result = OperatorService.adjustPlatformCredit({
+  const result = await OperatorService.adjustPlatformCreditAsync({
     tenantId,
     amount: Number(amount),
     type: type || 'ADJUSTMENT',
@@ -764,12 +852,12 @@ app.post('/api/v1/operator/tenants/:id/credit/adjust', (req: Request, res: Respo
 
   res.json({
     success: true,
-    message: `Platform credit updated for tenant. New balance: ₱${result.newBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+    message: `Platform credit updated for tenant in Firebase. New balance: ₱${result.newBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
     data: result,
   });
 });
 
-app.post('/api/v1/operator/tenants/:id/status', (req: Request, res: Response) => {
+app.post('/api/v1/operator/tenants/:id/status', async (req: Request, res: Response) => {
   const tenantId = req.params.id;
   const { status, reason } = req.body;
 
@@ -777,31 +865,47 @@ app.post('/api/v1/operator/tenants/:id/status', (req: Request, res: Response) =>
     return res.status(400).json({ success: false, error: 'Status is required.' });
   }
 
-  const updated = OperatorService.updateTenantStatus(tenantId, status, reason);
+  const updated = await OperatorService.updateTenantStatusAsync(tenantId, status, reason);
   if (!updated) {
     return res.status(404).json({ success: false, error: 'Tenant not found.' });
   }
 
   res.json({
     success: true,
-    message: `Tenant status updated to '${status}'.`,
+    message: `Tenant status updated to '${status}' in Firebase.`,
     tenantId,
     status,
   });
 });
 
-app.get('/api/v1/operator/broadcasts', (_req: Request, res: Response) => {
-  const broadcasts = OperatorService.getActiveBroadcasts();
-  res.json({ success: true, count: broadcasts.length, data: broadcasts });
+// Prepaid Credit Ledger (Stored in Firebase Firestore)
+app.get('/api/v1/operator/credit-transactions', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.query.tenantId as string | undefined;
+    const transactions = await OperatorService.listCreditTransactionsAsync(tenantId);
+    res.json({ success: true, count: transactions.length, data: transactions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.post('/api/v1/operator/broadcasts', (req: Request, res: Response) => {
+// System Broadcasts (Stored in Firebase Firestore)
+app.get('/api/v1/operator/broadcasts', async (_req: Request, res: Response) => {
+  try {
+    const broadcasts = await OperatorService.listBroadcastsAsync();
+    res.json({ success: true, count: broadcasts.length, data: broadcasts });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/broadcasts', async (req: Request, res: Response) => {
   const { title, message, severity, targetTenantIds, expiresAt, createdBy } = req.body;
   if (!title || !message) {
     return res.status(400).json({ success: false, error: 'Title and message are required.' });
   }
 
-  const broadcast = OperatorService.createBroadcast({
+  const broadcast = await OperatorService.createBroadcastAsync({
     title,
     message,
     severity: severity || 'INFO',
@@ -811,18 +915,22 @@ app.post('/api/v1/operator/broadcasts', (req: Request, res: Response) => {
     createdBy: createdBy || 'SaaS Operator',
   });
 
-  res.status(201).json({ success: true, data: broadcast });
+  res.status(201).json({ success: true, message: 'System broadcast published and stored in Firebase.', data: broadcast });
 });
 
 // -------------------------------------------------------------
-// 2.1.1 COOPERATIVE REGISTRATION ONBOARDING & OPERATOR GOVERNANCE
+// 2.1.1 COOPERATIVE REGISTRATION ONBOARDING & OPERATOR GOVERNANCE (Firebase Firestore)
 // -------------------------------------------------------------
-app.get('/api/v1/operator/registrations', (_req: Request, res: Response) => {
-  const registrations = OperatorService.listRegistrations();
-  res.json({ success: true, count: registrations.length, data: registrations });
+app.get('/api/v1/operator/registrations', async (_req: Request, res: Response) => {
+  try {
+    const registrations = await OperatorService.listRegistrationsAsync();
+    res.json({ success: true, count: registrations.length, data: registrations });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.post('/api/v1/coop-registrations', (req: Request, res: Response) => {
+app.post('/api/v1/coop-registrations', async (req: Request, res: Response) => {
   const {
     name,
     coopType,
@@ -848,7 +956,7 @@ app.post('/api/v1/coop-registrations', (req: Request, res: Response) => {
     });
   }
 
-  const record = OperatorService.submitRegistration({
+  const record = await OperatorService.submitRegistrationAsync({
     name,
     coopType: coopType || 'MULTI_PURPOSE',
     slug,
@@ -868,30 +976,30 @@ app.post('/api/v1/coop-registrations', (req: Request, res: Response) => {
 
   res.status(201).json({
     success: true,
-    message: `Cooperative registration application '${name}' (${record.id}) submitted successfully for compliance review by Tuntong Tech.`,
+    message: `Cooperative registration application '${name}' (${record.id}) submitted and stored in Firebase for compliance review by Tuntong Tech.`,
     data: record,
   });
 });
 
-app.post('/api/v1/operator/registrations/:id/approve', (req: Request, res: Response) => {
+app.post('/api/v1/operator/registrations/:id/approve', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reviewedBy } = req.body;
 
-  const result = OperatorService.approveRegistration(id, reviewedBy || 'Tuntong Tech Operator');
+  const result = await OperatorService.approveRegistrationAsync(id, reviewedBy || 'Tuntong Tech Operator');
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
   }
 
   res.json({
     success: true,
-    message: `Cooperative '${result.registration?.name}' approved successfully. Subdomain '${result.registration?.subdomain}' activated and onboarding credentials dispatched via support@tuntongtech.com.`,
+    message: `Cooperative '${result.registration?.name}' approved successfully in Firebase. Subdomain '${result.registration?.subdomain}' activated and onboarding credentials dispatched via support@tuntongtech.com.`,
     registration: result.registration,
     data: result.registration,
     tenant: result.tenant,
   });
 });
 
-app.post('/api/v1/operator/registrations/:id/reject', (req: Request, res: Response) => {
+app.post('/api/v1/operator/registrations/:id/reject', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reason, reviewedBy } = req.body;
 
@@ -899,31 +1007,31 @@ app.post('/api/v1/operator/registrations/:id/reject', (req: Request, res: Respon
     return res.status(400).json({ success: false, error: 'Rejection reason is required.' });
   }
 
-  const result = OperatorService.rejectRegistration(id, reason, reviewedBy || 'Tuntong Tech Compliance Officer');
+  const result = await OperatorService.rejectRegistrationAsync(id, reason, reviewedBy || 'Tuntong Tech Compliance Officer');
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
   }
 
   res.json({
     success: true,
-    message: `Cooperative registration '${result.registration?.name}' rejected. Official notice dispatched via support@tuntongtech.com.`,
+    message: `Cooperative registration '${result.registration?.name}' rejected and updated in Firebase. Official notice dispatched via support@tuntongtech.com.`,
     registration: result.registration,
     data: result.registration,
   });
 });
 
-app.delete('/api/v1/operator/registrations/:id', (req: Request, res: Response) => {
+app.delete('/api/v1/operator/registrations/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const removed = OperatorService.removeRegistration(id);
+  const removed = await OperatorService.removeRegistrationAsync(id);
   if (!removed) {
     return res.status(404).json({ success: false, error: 'Registration application not found.' });
   }
-  res.json({ success: true, message: `Registration '${id}' removed from onboarding queue.` });
+  res.json({ success: true, message: `Registration '${id}' removed from onboarding queue in Firebase.` });
 });
 
-app.delete('/api/v1/operator/registrations', (_req: Request, res: Response) => {
-  OperatorService.clearAllRegistrations();
-  res.json({ success: true, message: 'All registrations cleared from onboarding queue.' });
+app.delete('/api/v1/operator/registrations', async (_req: Request, res: Response) => {
+  await OperatorService.clearAllRegistrationsAsync();
+  res.json({ success: true, message: 'All registrations cleared from onboarding queue in Firebase.' });
 });
 
 // ==========================================

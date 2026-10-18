@@ -51,6 +51,7 @@ import {
   RegistrationStatus,
   RegistrationEmailNotification,
   OperatorSession,
+  OperatorAccount,
 } from '@flexcoop/shared-types';
 import { getApiBaseUrl } from '../api-config';
 
@@ -109,7 +110,7 @@ interface BroadcastItem {
 export default function OperatorPortalPage() {
   const router = useRouter();
   // Navigation Tab State
-  const [activeTab, setActiveTab] = useState<'FLEET' | 'REGISTRATIONS' | 'LEDGER' | 'BROADCASTS'>('FLEET');
+  const [activeTab, setActiveTab] = useState<'FLEET' | 'REGISTRATIONS' | 'LEDGER' | 'BROADCASTS' | 'OPERATORS'>('FLEET');
 
   // Tenant Fleet State (starts clean, populated via API)
   const [tenants, setTenants] = useState<TenantFleetItem[]>([]);
@@ -125,6 +126,15 @@ export default function OperatorPortalPage() {
 
   // Broadcasts State
   const [broadcasts, setBroadcasts] = useState<BroadcastItem[]>([]);
+
+  // Operator Users State (stored in Firebase Firestore)
+  const [operators, setOperators] = useState<OperatorAccount[]>([]);
+  const [isLoadingOperators, setIsLoadingOperators] = useState<boolean>(false);
+  const [showAddOperatorModal, setShowAddOperatorModal] = useState<boolean>(false);
+  const [newOperatorUsername, setNewOperatorUsername] = useState<string>('');
+  const [newOperatorName, setNewOperatorName] = useState<string>('');
+  const [newOperatorEmail, setNewOperatorEmail] = useState<string>('');
+  const [newOperatorRole, setNewOperatorRole] = useState<'PLATFORM_SUPER_OPERATOR' | 'PLATFORM_SUPPORT'>('PLATFORM_SUPPORT');
 
   // Modals & Action States
   const [selectedTenantForCredit, setSelectedTenantForCredit] = useState<TenantFleetItem | null>(null);
@@ -292,7 +302,7 @@ export default function OperatorPortalPage() {
     router.replace('/operator/login');
   };
 
-  // Load Registrations from API or fallback
+  // Load Registrations directly from Firebase Firestore API
   const fetchRegistrations = async () => {
     setIsLoadingRegistrations(true);
     try {
@@ -300,139 +310,187 @@ export default function OperatorPortalPage() {
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          let merged = [...json.data];
-          const localSaved = localStorage.getItem('tuntong_coop_registrations');
-          if (localSaved) {
-            try {
-              const parsed: CooperativeRegistration[] = JSON.parse(localSaved);
-              parsed.forEach((item) => {
-                // Strip broken legacy /uploads/ paths
-                if (item.validIdUrl && item.validIdUrl.startsWith('/uploads/')) {
-                  delete (item as any).validIdUrl;
-                }
-                const idx = merged.findIndex((m) => m.id === item.id);
-                if (idx === -1) {
-                  merged.unshift(item);
-                } else {
-                  // Server has authoritative status; preserve local validIdUrl if valid and server doesn't have it
-                  if (item.validIdUrl && !merged[idx].validIdUrl && !item.validIdUrl.startsWith('/uploads/')) {
-                    merged[idx].validIdUrl = item.validIdUrl;
-                  }
-                  if (item.rejectionReason && !merged[idx].rejectionReason) {
-                    merged[idx].rejectionReason = item.rejectionReason;
-                  }
-                }
-              });
-            } catch (e) {
-              console.error(e);
-            }
-          }
-          // Sanitize merged items too
-          merged = merged.map((m) => {
-            if (m.validIdUrl && m.validIdUrl.startsWith('/uploads/')) {
-              const { validIdUrl, ...rest } = m;
-              return rest as CooperativeRegistration;
-            }
-            return m;
-          });
-          // Remove seed test records (e.g. REG-2026-8914)
-          merged = merged.filter((m) => m.id !== 'REG-2026-8914');
-          try {
-            localStorage.setItem('tuntong_coop_registrations', JSON.stringify(merged));
-          } catch (e) {}
-          setRegistrations(merged);
+          // Remove seed test records if any
+          const filtered = json.data.filter((m: any) => m.id !== 'REG-2026-8914');
+          setRegistrations(filtered);
           return;
         }
       }
     } catch (err) {
-      console.warn('API fetch for registrations failed, checking localStorage:', err);
+      console.warn('API fetch for registrations warning:', err);
     } finally {
       setIsLoadingRegistrations(false);
     }
+  };
 
+  // Load Tenant Fleet directly from Firebase Firestore API
+  const fetchFleet = async () => {
     try {
-      const localSaved = localStorage.getItem('tuntong_coop_registrations');
-      if (localSaved) {
-        let parsed = JSON.parse(localSaved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          parsed = parsed
-            .filter((m: any) => m.id !== 'REG-2026-8914')
-            .map((m: any) => {
-              if (m.validIdUrl && m.validIdUrl.startsWith('/uploads/')) {
-                const { validIdUrl, ...rest } = m;
-                return rest;
-              }
-              return m;
-            });
-          setRegistrations(parsed);
+      const res = await fetch(`${getApiBaseUrl()}/operator/tenants`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setTenants(json.data);
         }
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.warn('Fleet API load warning:', err);
     }
   };
 
-  // Delete individual registration record from queue
+  // Load Prepaid Credit Ledger from Firebase Firestore API
+  const fetchCreditTransactions = async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/credit-transactions`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setCreditTransactions(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Credit transactions load warning:', err);
+    }
+  };
+
+  // Load System Broadcasts from Firebase Firestore API
+  const fetchBroadcasts = async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/broadcasts`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setBroadcasts(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Broadcasts API load warning:', err);
+    }
+  };
+
+  // Load Operator Users from Firebase Firestore API
+  const fetchOperators = async () => {
+    setIsLoadingOperators(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/users`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setOperators(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Operators API load warning:', err);
+    } finally {
+      setIsLoadingOperators(false);
+    }
+  };
+
+  // Add new operator user to Firebase
+  const handleAddOperator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOperatorUsername.trim() || !newOperatorName.trim() || !newOperatorEmail.trim()) {
+      alert('Username, full name, and email are required.');
+      return;
+    }
+
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: newOperatorUsername.trim().toLowerCase(),
+          name: newOperatorName.trim(),
+          email: newOperatorEmail.trim().toLowerCase(),
+          role: newOperatorRole,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Operator user '${newOperatorUsername}' stored in Firebase successfully.`);
+        setShowAddOperatorModal(false);
+        setNewOperatorUsername('');
+        setNewOperatorName('');
+        setNewOperatorEmail('');
+        await fetchOperators();
+      } else {
+        alert(json.error || 'Failed to create operator user.');
+      }
+    } catch (err) {
+      console.error('Add operator error:', err);
+      alert('Connection error contacting API server.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  // Delete operator user from Firebase
+  const handleDeleteOperator = async (username: string) => {
+    if (username.toLowerCase() === 'tuntongtech') {
+      alert('Cannot delete the primary platform super operator.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to remove operator '${username}' from Firebase?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/users/${encodeURIComponent(username)}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Operator user '${username}' removed from Firebase.`);
+        await fetchOperators();
+      } else {
+        alert(json.error || 'Failed to remove operator user.');
+      }
+    } catch (err) {
+      console.error('Delete operator error:', err);
+    }
+  };
+
+  // Delete individual registration record from queue in Firebase
   const handleDeleteRegistration = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!confirm(`Are you sure you want to remove registration '${id}' from the onboarding queue?`)) {
+    if (!confirm(`Are you sure you want to remove registration '${id}' from the onboarding queue in Firebase?`)) {
       return;
     }
     try {
       await fetch(`${getApiBaseUrl()}/operator/registrations/${id}`, { method: 'DELETE' });
+      setToastMessage(`Registration ${id} removed from Firebase onboarding queue.`);
+      await fetchRegistrations();
     } catch (err) {
       console.warn('API delete registration warning:', err);
     }
-    const updated = registrations.filter((r) => r.id !== id);
-    setRegistrations(updated);
-    try {
-      localStorage.setItem('tuntong_coop_registrations', JSON.stringify(updated));
-    } catch {}
-    setToastMessage(`Registration ${id} removed from onboarding queue.`);
   };
 
-  // Clear all registrations in queue
+  // Clear all registrations in queue in Firebase
   const handleClearAllRegistrations = async () => {
-    if (!confirm('Are you sure you want to remove all existing records in the Coop Onboarding Queue?')) {
+    if (!confirm('Are you sure you want to remove all existing records in the Coop Onboarding Queue in Firebase?')) {
       return;
     }
     try {
       await fetch(`${getApiBaseUrl()}/operator/registrations`, { method: 'DELETE' });
+      setToastMessage('All records in Coop Onboarding Queue removed from Firebase.');
+      await fetchRegistrations();
     } catch (err) {
       console.warn('API clear registrations warning:', err);
     }
-    setRegistrations([]);
-    try {
-      localStorage.removeItem('tuntong_coop_registrations');
-    } catch {}
-    setToastMessage('All records in Coop Onboarding Queue have been removed.');
   };
 
-  // Fetch operator fleet and registrations once authenticated
+  // Fetch operator fleet, registrations, credit ledger, broadcasts, and operators once authenticated
   useEffect(() => {
     if (!operatorSession) return;
 
     fetchRegistrations();
-
-    // Fetch live tenant fleet from API
-    fetch(`${getApiBaseUrl()}/operator/tenants`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && Array.isArray(json.data)) {
-          setTenants(json.data);
-        }
-      })
-      .catch((err) => console.warn('Fleet API load warning:', err));
-
-    // Fetch system broadcasts from API
-    fetch(`${getApiBaseUrl()}/operator/broadcasts`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && Array.isArray(json.data)) {
-          setBroadcasts(json.data);
-        }
-      })
-      .catch((err) => console.warn('Broadcasts API load warning:', err));
+    fetchFleet();
+    fetchCreditTransactions();
+    fetchBroadcasts();
+    fetchOperators();
   }, [operatorSession]);
 
   // Fleet Totals
@@ -485,69 +543,109 @@ export default function OperatorPortalPage() {
     return matchesSearch;
   });
 
-  // Handlers for Operator Actions
-  const handleExecuteCreditAdjustment = (e: React.FormEvent) => {
+  // Handlers for Operator Actions (Directly updating Firebase Firestore)
+  const handleExecuteCreditAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTenantForCredit) return;
 
-    const delta = creditAdjustmentType === 'FEE_DEDUCTION' ? -Math.abs(creditAdjustmentAmount) : Math.abs(creditAdjustmentAmount);
-    const balanceBefore = selectedTenantForCredit.platformCreditBalance;
-    const balanceAfter = Math.max(0, balanceBefore + delta);
+    setIsSubmittingAction(true);
+    try {
+      const delta = creditAdjustmentType === 'FEE_DEDUCTION' ? -Math.abs(creditAdjustmentAmount) : Math.abs(creditAdjustmentAmount);
+      const res = await fetch(`${getApiBaseUrl()}/operator/tenants/${selectedTenantForCredit.id}/credit/adjust`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: delta,
+          type: creditAdjustmentType,
+          reference: creditAdjustmentRef || `ADJ-${Date.now().toString().slice(-6)}`,
+          notes: creditAdjustmentNotes || 'Manual operator credit adjustment in Firebase',
+          performedBy: operatorSession?.name || 'Platform Operator',
+        }),
+      });
 
-    setTenants((prev) =>
-      prev.map((t) => (t.id === selectedTenantForCredit.id ? { ...t, platformCreditBalance: balanceAfter } : t))
-    );
-
-    const newTx: CreditTx = {
-      id: `ctx_${Date.now()}`,
-      tenantId: selectedTenantForCredit.id,
-      tenantName: selectedTenantForCredit.name,
-      type: creditAdjustmentType,
-      amount: delta,
-      balanceBefore,
-      balanceAfter,
-      reference: creditAdjustmentRef || `ADJ-${Date.now().toString().slice(-6)}`,
-      notes: creditAdjustmentNotes || 'Manual operator credit adjustment',
-      performedBy: 'Lex (Platform Operator)',
-      createdAt: 'Just now',
-    };
-    setCreditTransactions((prev) => [newTx, ...prev]);
-
-    setSelectedTenantForCredit(null);
-    setCreditAdjustmentRef('');
-    setCreditAdjustmentNotes('');
-    setToastMessage(`Platform credit updated successfully for ${selectedTenantForCredit.name}.`);
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Platform credit updated successfully in Firebase for ${selectedTenantForCredit.name}.`);
+        await fetchFleet();
+        await fetchCreditTransactions();
+      } else {
+        alert(json.error || 'Failed to adjust platform credit.');
+      }
+    } catch (err) {
+      console.error('Credit adjustment error:', err);
+      alert('Failed to connect to API server.');
+    } finally {
+      setIsSubmittingAction(false);
+      setSelectedTenantForCredit(null);
+      setCreditAdjustmentRef('');
+      setCreditAdjustmentNotes('');
+    }
   };
 
-  const handleToggleTenantStatus = (newStatus: 'ACTIVE' | 'SUSPENDED') => {
+  const handleToggleTenantStatus = async (newStatus: 'ACTIVE' | 'SUSPENDED') => {
     if (!selectedTenantForStatus) return;
 
-    setTenants((prev) =>
-      prev.map((t) => (t.id === selectedTenantForStatus.id ? { ...t, status: newStatus } : t))
-    );
-    setSelectedTenantForStatus(null);
-    setStatusChangeReason('');
-    setToastMessage(`Tenant status changed to ${newStatus}.`);
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/tenants/${selectedTenantForStatus.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newStatus,
+          reason: statusChangeReason || '',
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Tenant status changed to ${newStatus} in Firebase.`);
+        await fetchFleet();
+      } else {
+        alert(json.error || 'Failed to update tenant status.');
+      }
+    } catch (err) {
+      console.error('Status update error:', err);
+      alert('Failed to connect to API server.');
+    } finally {
+      setIsSubmittingAction(false);
+      setSelectedTenantForStatus(null);
+      setStatusChangeReason('');
+    }
   };
 
-  const handleCreateBroadcast = (e: React.FormEvent) => {
+  const handleCreateBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!broadcastTitle || !broadcastMessage) return;
 
-    const newBroadcast: BroadcastItem = {
-      id: `bc_${Date.now()}`,
-      title: broadcastTitle,
-      message: broadcastMessage,
-      severity: broadcastSeverity,
-      isActive: true,
-      createdAt: 'Just now',
-    };
+    setIsSubmittingAction(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/broadcasts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: broadcastTitle,
+          message: broadcastMessage,
+          severity: broadcastSeverity,
+          createdBy: operatorSession?.name || 'Platform Operator',
+        }),
+      });
 
-    setBroadcasts((prev) => [newBroadcast, ...prev]);
-    setShowNewBroadcastModal(false);
-    setBroadcastTitle('');
-    setBroadcastMessage('');
-    setToastMessage('System announcement published to all active cooperative tenants.');
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage('System announcement published and saved to Firebase.');
+        setShowNewBroadcastModal(false);
+        setBroadcastTitle('');
+        setBroadcastMessage('');
+        await fetchBroadcasts();
+      } else {
+        alert(json.error || 'Failed to publish broadcast.');
+      }
+    } catch (err) {
+      console.error('Broadcast creation error:', err);
+      alert('Failed to connect to API server.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
   };
 
   // APPROVE REGISTRATION HANDLER
@@ -664,6 +762,9 @@ https://tuntongtech.com`;
         });
       }
 
+      await fetchRegistrations();
+      await fetchFleet();
+
       setSelectedRegForApprove(null);
       setToastMessage(`Registration approved! Credentials dispatched from support@tuntongtech.com to ${approvedReg.adminEmail}`);
       setSelectedRegForEmailView(emailNotice);
@@ -753,6 +854,8 @@ https://tuntongtech.com`;
         } catch (e) {}
         return updated;
       });
+
+      await fetchRegistrations();
 
       setSelectedRegForReject(null);
       setRejectionReasonInput('');
@@ -1038,6 +1141,19 @@ https://tuntongtech.com`;
             <Megaphone className="w-3.5 h-3.5" />
             <span>System Broadcasts</span>
             <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">{broadcasts.length}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('OPERATORS')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'OPERATORS'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-700/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>Operator Users</span>
+            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">{operators.length}</span>
           </button>
         </div>
 
@@ -1612,6 +1728,90 @@ https://tuntongtech.com`;
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* TAB 5: OPERATOR USERS (Stored in Firebase Firestore) */}
+        {activeTab === 'OPERATORS' && (
+          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-purple-400" />
+                <h3 className="font-bold text-sm text-white">Platform Operator Users & Access Control</h3>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono">
+                  Firebase Database: operators
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddOperatorModal(true)}
+                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-purple-700/20"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Operator User</span>
+              </button>
+            </div>
+
+            {operators.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 space-y-2 bg-slate-950/40 rounded-xl border border-slate-800">
+                <Shield className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">Loading Operator Users...</p>
+                <p className="text-xs">Fetching operator profiles stored in Firebase Firestore.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">Username</th>
+                      <th className="py-2.5 px-3">Full Name</th>
+                      <th className="py-2.5 px-3">Authorized Email (PIN Target)</th>
+                      <th className="py-2.5 px-3">Role</th>
+                      <th className="py-2.5 px-3">Database Persistence</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50 text-slate-300">
+                    {operators.map((op) => (
+                      <tr key={op.username} className="hover:bg-slate-800/20">
+                        <td className="py-2.5 px-3 font-mono font-bold text-white">{op.username}</td>
+                        <td className="py-2.5 px-3 font-medium text-slate-200">{op.name}</td>
+                        <td className="py-2.5 px-3 font-mono text-emerald-400">{op.email}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                            op.role === 'PLATFORM_SUPER_OPERATOR'
+                              ? 'bg-purple-950 text-purple-300 border border-purple-800'
+                              : 'bg-slate-800 text-slate-300 border border-slate-700'
+                          }`}>
+                            {op.role}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="inline-flex items-center gap-1.5 text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Firebase Cloud Firestore
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {op.username === 'tuntongtech' ? (
+                            <span className="text-[10px] text-slate-500 font-mono italic">Primary Super Operator</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteOperator(op.username)}
+                              className="text-rose-400 hover:text-rose-300 p-1 hover:bg-rose-950/40 rounded transition"
+                              title="Delete operator user from Firebase"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>
@@ -2288,6 +2488,103 @@ https://tuntongtech.com`;
                 >
                   <Megaphone className="w-3.5 h-3.5" />
                   <span>Publish to All Tenancies</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD OPERATOR USER (Stored in Firebase) */}
+      {showAddOperatorModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-purple-400" />
+                <h3 className="font-bold text-white text-base">New Operator User Account</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddOperatorModal(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddOperator} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Username *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. jdoe_operator"
+                  value={newOperatorUsername}
+                  onChange={(e) => setNewOperatorUsername(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. John Doe"
+                  value={newOperatorName}
+                  onChange={(e) => setNewOperatorName(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Authorized Email (Target for One-Time PIN) *</label>
+                <input
+                  type="email"
+                  placeholder="e.g. john.doe@tuntongtech.com"
+                  value={newOperatorEmail}
+                  onChange={(e) => setNewOperatorEmail(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Role *</label>
+                <select
+                  value={newOperatorRole}
+                  onChange={(e) => setNewOperatorRole(e.target.value as any)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="PLATFORM_SUPPORT">PLATFORM_SUPPORT (Fleet & Ticket Support)</option>
+                  <option value="PLATFORM_SUPER_OPERATOR">PLATFORM_SUPER_OPERATOR (Full Platform Admin)</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-purple-950/30 border border-purple-800/50 rounded-xl text-xs text-purple-200">
+                This operator user will be immediately persisted in Firebase Cloud Firestore collection <span className="font-mono text-purple-300 font-bold">operators</span>. They will sign in passwordlessly via email One-Time PIN.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddOperatorModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAction}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-purple-700/30"
+                >
+                  {isSubmittingAction ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>Save Operator in Firebase</span>
                 </button>
               </div>
             </form>
