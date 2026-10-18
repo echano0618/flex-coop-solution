@@ -2112,7 +2112,7 @@ export default function MemberPortalPage() {
                       </div>
                       <div className="font-bold text-slate-900 text-sm">In-Person Counter Cashiering</div>
                       <div className="text-xs text-slate-500 max-w-xs mt-1">
-                        Pay cash directly at any Bayani Coop counter. Full ₱{repayAmount.toFixed(2)} goes to your loan with zero fees.
+                        Pay cash directly at any cooperative counter. Full ₱{repayAmount.toFixed(2)} goes to your loan with zero fees.
                       </div>
                     </>
                   )}
@@ -2161,7 +2161,7 @@ export default function MemberPortalPage() {
               <div className="grid grid-cols-2 gap-4 text-xs text-slate-700">
                 <div>
                   <span className="text-slate-500">Creditor: </span>
-                  <strong>Bayani Multi-Purpose Cooperative</strong> (CDA Reg: CDA-NCR-2024-00921)
+                  <strong>Cooperative Enterprise</strong> (CDA Regulated)
                 </div>
                 <div>
                   <span className="text-slate-500">Borrower: </span>
@@ -2356,7 +2356,7 @@ export default function MemberPortalPage() {
                   Statutory Deductions Compliance (RA 9520 Art. 86)
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Before distributing the net surplus, Bayani Multi-Purpose Cooperative deducted statutory reserves: General Reserve Fund (10%), Cooperative Education and Training Fund (10% - 5% Local, 5% Apex Federation), Community Development Fund (3%), and Optional Reserve Fund (7%). Pursuant to the Cooperative Code, these dividends are 100% tax-exempt.
+                  Before distributing the net surplus, the Cooperative deducted statutory reserves: General Reserve Fund (10%), Cooperative Education and Training Fund (10% - 5% Local, 5% Apex Federation), Community Development Fund (3%), and Optional Reserve Fund (7%). Pursuant to the Cooperative Code, these dividends are 100% tax-exempt.
                 </p>
               </div>
 
@@ -2509,7 +2509,7 @@ export default function MemberPortalPage() {
 
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs text-slate-500 gap-2">
                     <p className="text-[11px]">
-                      Original Certificate of Registration (CR) annotated with Chattel Mortgage in favor of Bayani Cooperative. Release of Chattel Mortgage will be executed upon loan payoff.
+                      Original Certificate of Registration (CR) annotated with Chattel Mortgage in favor of the Cooperative. Release of Chattel Mortgage will be executed upon loan payoff.
                     </p>
                     <button
                       type="button"
@@ -2539,7 +2539,7 @@ export default function MemberPortalPage() {
                     Republic of the Philippines • CDA Registered
                   </div>
                   <h2 className="font-black text-base sm:text-lg text-slate-900 leading-tight">
-                    Bayani Multi-Purpose Cooperative
+                    Cooperative Member Portal
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Member Online Banking & Lending Portal • Reg # CDA-NCR-2024-00921
@@ -2812,7 +2812,7 @@ export default function MemberPortalPage() {
                       {depositModalType === 'SHARES' ? 'Purchase Cooperative Shares' : 'Deposit to Savings'}
                     </h3>
                     <div className="text-[11px] text-slate-300">
-                      Bayani Multi-Purpose Cooperative • Member: <strong>Maria Clara Santos</strong>
+                      Cooperative Member Services • Member: <strong>{currentMember.name}</strong>
                     </div>
                   </div>
                 </div>
@@ -3117,7 +3117,7 @@ export default function MemberPortalPage() {
                       PayMongo QR Ph Repayment & Deposit Terminal
                     </h3>
                     <div className="text-[11px] text-slate-300">
-                      Bayani Multi-Purpose Cooperative • Member: <strong>{currentMember.name}</strong>
+                      Cooperative Payment Terminal • Member: <strong>{currentMember.name}</strong>
                     </div>
                   </div>
                 </div>
@@ -3285,7 +3285,7 @@ export default function MemberPortalPage() {
                 </div>
                 <h3 className="font-black text-lg">Official Electronic Receipt</h3>
                 <div className="text-xs text-emerald-100 font-mono">
-                  Bayani Multi-Purpose Cooperative • TIN: 004-912-340-000
+                  Cooperative Electronic Receipt • Official Transaction
                 </div>
               </div>
 
@@ -3403,7 +3403,7 @@ export default function MemberPortalPage() {
                     Republic of the Philippines • Cooperative Development Authority
                   </div>
                   <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                    Bayani Multi-Purpose Cooperative
+                    Cooperative Enterprise
                   </h2>
                   <div className="text-slate-600 text-xs font-medium">
                     CDA Registration: <strong>CDA-NCR-2024-00921</strong> • BIR TIN: <strong>004-912-340-000</strong>
@@ -3487,7 +3487,7 @@ export default function MemberPortalPage() {
 
                 {/* Certification Affirmation */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-[11px] leading-relaxed">
-                  I hereby certify that the foregoing balances are true and correct transcripts of the Subsidiary Ledgers of Bayani Multi-Purpose Cooperative as maintained under the Standard Chart of Accounts prescribed by the Cooperative Development Authority.
+                  I hereby certify that the foregoing balances are true and correct transcripts of the Subsidiary Ledgers of the Cooperative as maintained under the Standard Chart of Accounts prescribed by the Cooperative Development Authority.
                 </div>
 
                 {/* Signatories Block */}

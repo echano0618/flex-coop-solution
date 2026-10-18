@@ -45,6 +45,11 @@ export class AppDataStore {
   }
 
   private seedInitialTenantData() {
+    // Only seed mock demonstration tenant records in test environment
+    if (process.env.NODE_ENV !== 'test') {
+      return;
+    }
+
     // 1. Seed Tenant: Bayani Multi-Purpose Cooperative
     const tenantId = 'tenant_bayani_001';
     const tenant: Tenant = {

@@ -2,9 +2,9 @@ import { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Bayani Cooperative Member Portal',
-    short_name: 'Bayani Member',
-    description: 'Bayani Multi-Purpose Cooperative Member Online Banking, Digital Passbook & Lending PWA',
+    name: 'Cooperative Member Portal',
+    short_name: 'Coop Member',
+    description: 'Cooperative Member Online Banking, Digital Passbook & Lending PWA powered by Tuntong Tech',
     start_url: '/member',
     display: 'standalone',
     background_color: '#ffffff',

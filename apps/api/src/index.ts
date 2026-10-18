@@ -93,8 +93,9 @@ export function resolveTenantId(req: Request): string {
     }
   }
 
-  // 4. Fallback to primary seeded tenant
-  return 'tenant_bayani_001';
+  // 4. Fallback to first available registered tenant
+  const firstTenant = Array.from(dbStore.tenants.keys())[0];
+  return firstTenant || '';
 }
 
 // ==========================================

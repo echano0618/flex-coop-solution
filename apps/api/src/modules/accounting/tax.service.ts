@@ -86,7 +86,7 @@ export class CooperativeTaxService {
 
     return {
       tenantId: params.tenantId,
-      cooperativeName: params.cooperativeName || 'Bayani Multi-Purpose Cooperative',
+      cooperativeName: params.cooperativeName || 'Cooperative Enterprise',
       tin: params.tin || '009-887-123-000',
       cdaRegistrationNo: params.cdaRegistrationNo || '9520-10028472',
       cdaGoodStandingCertNo: params.cdaGoodStandingCertNo || 'CGS-2026-NCR-0442',

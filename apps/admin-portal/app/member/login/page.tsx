@@ -53,12 +53,12 @@ export default function MemberLoginPage() {
           </div>
           <div>
             <div className="font-bold text-base text-white flex items-center gap-2">
-              Bayani Multi-Purpose Cooperative
+              Cooperative Member Portal
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
-                CDA Reg: 2024-00921
+                CDA Regulated
               </span>
             </div>
-            <div className="text-xs text-slate-400">Powered by Flex Coop Solution</div>
+            <div className="text-xs text-slate-400">Powered by Tuntong Tech Solution</div>
           </div>
         </div>
 
@@ -85,7 +85,7 @@ export default function MemberLoginPage() {
           </h1>
 
           <p className="text-sm text-slate-300 leading-relaxed">
-            Welcome to the official member online facility of Bayani Multi-Purpose Cooperative. Check your share capital, apply for regular and emergency loans, download Truth in Lending disclosures, and pay via QR Ph.
+            Welcome to your official member online facility. Check your share capital, apply for regular and emergency loans, download Truth in Lending disclosures, and pay via QR Ph.
           </p>
 
           <div className="space-y-3 pt-2">
@@ -216,7 +216,7 @@ export default function MemberLoginPage() {
       {/* Footer */}
       <div className="max-w-5xl w-full mx-auto pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
         <div>
-          © 2026 Bayani Multi-Purpose Cooperative. Registered with Cooperative Development Authority (CDA).
+          © 2026 Cooperative Member Portal. Registered with Cooperative Development Authority (CDA).
         </div>
         <div className="flex items-center space-x-4">
           <span className="hover:text-slate-400 cursor-pointer">Terms & Conditions</span>

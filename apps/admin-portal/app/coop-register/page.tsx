@@ -215,9 +215,8 @@ export default function CoopRegisterPage() {
             </div>
           </div>
           <div className="flex items-center gap-4 text-xs font-semibold">
-            <Link href="/operator" className="text-slate-300 hover:text-white transition flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Operator Portal</span>
+            <Link href="/" className="text-slate-300 hover:text-white transition flex items-center gap-1.5 bg-slate-800/80 px-3.5 py-1.5 rounded-lg border border-slate-700">
+              <span>Back to Home</span>
             </Link>
           </div>
         </div>
@@ -676,25 +675,14 @@ export default function CoopRegisterPage() {
             </div>
 
             {/* Action buttons */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+            <div className="flex justify-center pt-2">
               <Link
-                href="/operator"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm shadow-sm transition"
+                href="/"
+                className="inline-flex items-center justify-center gap-2 px-8 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-sm transition"
               >
-                <span>View in Operator Control Plane</span>
+                <span>Back to Home</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
-              <button
-                onClick={() => {
-                  setRegisteredResult(null);
-                  setValidIdFile(null);
-                  setValidIdFileName('');
-                  setValidIdSizeMb('');
-                }}
-                className="px-6 py-3 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-sm transition"
-              >
-                Submit Another Cooperative
-              </button>
             </div>
           </div>
         )}

@@ -11,15 +11,15 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Bayani Cooperative Member Portal & SaaS Platform',
+  title: 'Tuntong Tech Solution | Cooperative Enterprise Platform',
   description: 'Enterprise Multi-Tenant SaaS Cooperative Banking, Digital Passbook, and Lending Platform',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Bayani Member',
+    title: 'Coop Portal',
   },
-  applicationName: 'Bayani Cooperative',
+  applicationName: 'Tuntong Tech Solution',
 };
 
 export default function RootLayout({
@@ -34,7 +34,7 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="Bayani Member" />
+        <meta name="apple-mobile-web-app-title" content="Coop Portal" />
       </head>
       <body className="min-h-screen bg-slate-50 antialiased">{children}</body>
     </html>

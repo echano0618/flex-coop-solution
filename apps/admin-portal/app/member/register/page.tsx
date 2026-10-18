@@ -236,7 +236,7 @@ export default function MemberRegisterPage() {
           </div>
           <div>
             <div className="font-bold text-base text-white flex items-center gap-2">
-              Bayani Multi-Purpose Cooperative
+              Cooperative Member Onboarding
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
                 Statutory Member Onboarding
               </span>
@@ -1065,7 +1065,7 @@ export default function MemberRegisterPage() {
                 <span>NPC Circular 16-01 & RA 10173 Informed Consent</span>
               </div>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                By ticking below, I explicitly authorize Bayani Multi-Purpose Cooperative to collect, record, organize, store, and process my Sensitive Personal Information (SPI) solely for membership validation, statutory reporting to the Cooperative Development Authority (CDA), Anti-Money Laundering Council (AMLC), and Credit Information Corporation (CIC). All data at rest is encrypted with AES-256-GCM.
+                By ticking below, I explicitly authorize the Cooperative to collect, record, organize, store, and process my Sensitive Personal Information (SPI) solely for membership validation, statutory reporting to the Cooperative Development Authority (CDA), Anti-Money Laundering Council (AMLC), and Credit Information Corporation (CIC). All data at rest is encrypted with AES-256-GCM.
               </p>
               <label className="flex items-start gap-2.5 pt-1 text-xs text-white font-medium cursor-pointer">
                 <input
@@ -1249,7 +1249,7 @@ export default function MemberRegisterPage() {
                   className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
                 />
                 <span>
-                  I solemnly declare that the facts stated herein are true and correct, and I pledge to abide by the Articles of Cooperation and By-laws of Bayani Multi-Purpose Cooperative.
+                  I solemnly declare that the facts stated herein are true and correct, and I pledge to abide by the Articles of Cooperation and By-laws of the Cooperative.
                 </span>
               </label>
             </div>
@@ -1294,7 +1294,7 @@ export default function MemberRegisterPage() {
               </span>
               <h2 className="text-2xl font-black text-white">Membership Application Submitted!</h2>
               <p className="text-xs text-slate-300 max-w-md mx-auto">
-                Thank you, <strong>{firstName} {lastName}</strong>! Your application, PMES certificate, and eKYC documents have been forwarded to the Bayani Cooperative Membership Committee.
+                Thank you, <strong>{firstName} {lastName}</strong>! Your application, PMES certificate, and eKYC documents have been forwarded to the Cooperative Membership Committee.
               </p>
             </div>
 
@@ -1397,7 +1397,7 @@ export default function MemberRegisterPage() {
 
       {/* Footer */}
       <div className="max-w-4xl w-full mx-auto pt-6 border-t border-slate-800 text-center text-xs text-slate-500">
-        © 2026 Bayani Multi-Purpose Cooperative • CDA Registered • Regulated under RA 9520 & RA 10173
+        © 2026 Cooperative Member Portal • CDA Registered • Regulated under RA 9520 & RA 10173
       </div>
     </div>
   );

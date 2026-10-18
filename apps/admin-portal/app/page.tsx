@@ -900,7 +900,7 @@ export default function AdminDashboard() {
       type: 'PLATFORM_ONBOARDING_FEE',
       description: 'Flex Coop Platform Onboarding Charge (₱15.00/approved member)',
       reference: 'BIR-FLEX-INV-2026-0042',
-      memberOrCounterparty: 'Bayani Cooperative (Tenant)',
+      memberOrCounterparty: 'Cooperative (Tenant)',
       grossAmount: -15,
       platformFee: 13.39, // Net service fee
       vatAmount: 1.61, // 12% EVAT
@@ -989,7 +989,7 @@ export default function AdminDashboard() {
       type: 'TREASURY_SWEEP',
       description: `Daily Treasury Sweep to LandBank Mother Depository Account (1-01-01) #0012-9981-22`,
       reference: `SWEEP-LBP-${Math.floor(100000 + Math.random() * 900000)}`,
-      memberOrCounterparty: 'Land Bank of the Philippines (Bayani Coop Mother Account)',
+      memberOrCounterparty: 'Land Bank of the Philippines (Cooperative Mother Account)',
       grossAmount: -sweepAmount,
       platformFee: 0,
       vatAmount: 0,
@@ -2398,7 +2398,7 @@ export default function AdminDashboard() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="font-bold text-sm text-white leading-tight truncate">
-                Bayani Cooperative
+                Cooperative Admin Portal
               </div>
               <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
                 Powered by Tuntong Tech Solution
@@ -2481,7 +2481,7 @@ export default function AdminDashboard() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-bold text-sm text-white leading-tight truncate">
-                    Bayani Cooperative
+                    Cooperative Admin Portal
                   </div>
                   <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
                     Powered by Tuntong Tech Solution
@@ -2577,7 +2577,7 @@ export default function AdminDashboard() {
               </button>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium truncate">
-                  <span>Bayani Cooperative</span>
+                  <span>Cooperative Admin Portal</span>
                   <span>/</span>
                   <span className="text-emerald-700 font-semibold truncate">{currentModule?.label || 'Overview'}</span>
                 </div>
@@ -3760,7 +3760,7 @@ export default function AdminDashboard() {
                             <Receipt className="w-3.5 h-3.5 text-rose-600" /> Platform Onboarding Billing (₱15.00)
                           </div>
                           <div>
-                            Approving this member bills <strong>₱15.00</strong> to Bayani Cooperative (Electronic Invoice with 12% Output VAT).
+                            Approving this member bills <strong>₱15.00</strong> to the cooperative (Electronic Invoice with 12% Output VAT).
                           </div>
                         </div>
 
@@ -3926,7 +3926,7 @@ export default function AdminDashboard() {
                             </div>
                             <p className="text-[11px] text-indigo-900 leading-relaxed">
                               Share capital paid via QR payment (<strong>₱{pledge.toLocaleString()}</strong>) will be credited directly to 
-                              <strong> Bayani Cooperative&apos;s Platform Escrow</strong> (`1-01-05`). The 1.5% convenience fee (₱{convenienceFee.toFixed(2)}) is deducted for payment gateway processing.
+                              <strong> Cooperative Platform Escrow</strong> (`1-01-05`). The 1.5% convenience fee (₱{convenienceFee.toFixed(2)}) is deducted for payment gateway processing.
                             </p>
 
                             {/* Dynamic QR Ph Visual Mock */}
@@ -5073,7 +5073,7 @@ export default function AdminDashboard() {
                     <div>
                       <div className="text-xs uppercase font-bold text-emerald-700">Republic Act No. 3765 • Truth in Lending Act</div>
                       <h3 className="text-lg font-bold text-slate-900">Disclosure Statement on Loan/Credit Transaction</h3>
-                      <div className="text-xs text-slate-500">Bayani Multi-Purpose Cooperative • CDA-NCR-2024-00921</div>
+                      <div className="text-xs text-slate-500">Cooperative Enterprise • CDA Registered</div>
                     </div>
                     <button
                       onClick={() => setShowDisclosureModal(false)}
@@ -7769,7 +7769,7 @@ export default function AdminDashboard() {
                     { name: 'Corporate Income Tax (Category A)', rate: '0.00%', amount: 0, legalBasis: 'RA 9520 Art. 61(1) (Reserves ₱250k <= ₱10M ceiling)' },
                     { name: '12% Value-Added Tax', rate: '0.00% / 12.00%', amount: 0, legalBasis: 'Exempt unless non-member annual gross sales exceed ₱3,000,000' },
                   ];
-                  statutoryNotice = 'Because Bayani Cooperative has accumulated reserves under ₱10,000,000 (Category A), operations with non-members remain exempt from income tax. If reserves exceed ₱10M (Category B), non-member operations become subject to 25% CIT and 12% VAT.';
+                  statutoryNotice = 'Because the Cooperative has accumulated reserves under ₱10,000,000 (Category A), operations with non-members remain exempt from income tax. If reserves exceed ₱10M (Category B), non-member operations become subject to 25% CIT and 12% VAT.';
                   receiptText = 'NON-MEMBER TRANSACTION: TAX-EXEMPT UNDER RA 9520 ART. 61(1) (CATEGORY A)';
                   birFormNotice = 'Reported on BIR Form 1702-EX under Non-Member Activities Schedule';
                 }
@@ -7916,7 +7916,7 @@ export default function AdminDashboard() {
               <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-200 text-xs text-indigo-950 flex items-start gap-2.5">
                 <FileText className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
-                  <strong>Important Tax Distinction:</strong> Under RA 9520, Bayani Cooperative is <strong>100% tax-exempt</strong> on its loan services and share capital transactions with members. However, external commercial technology vendors (e.g. <em>Tuntong Tech Solution / Flex Coop Solution</em>), as registered corporate IT enterprises, are legally mandated by the BIR to issue 12% Output VAT sales invoices to the cooperative for software hosting and member onboarding fees.
+                  <strong>Important Tax Distinction:</strong> Under RA 9520, the Cooperative is <strong>100% tax-exempt</strong> on its loan services and share capital transactions with members. However, external commercial technology vendors (e.g. <em>Tuntong Tech Solution / Flex Coop Solution</em>), as registered corporate IT enterprises, are legally mandated by the BIR to issue 12% Output VAT sales invoices to the cooperative for software hosting and member onboarding fees.
                 </div>
               </div>
 
@@ -7936,7 +7936,7 @@ export default function AdminDashboard() {
                 <div className="text-xs space-y-1.5 text-slate-600">
                   <div className="flex justify-between">
                     <span>Customer (Cooperative):</span>
-                    <span className="font-semibold text-slate-800">Bayani Multi-Purpose Cooperative</span>
+                    <span className="font-semibold text-slate-800">Cooperative Enterprise</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Customer BIR TIN:</span>
@@ -9981,7 +9981,7 @@ export default function AdminDashboard() {
               <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Grant Portal Access & Provision User</h3>
-                  <p className="text-xs text-slate-500">Invite new administrative staff to Bayani Cooperative admin portal.</p>
+                  <p className="text-xs text-slate-500">Invite new administrative staff to the cooperative admin portal.</p>
                 </div>
                 <button
                   type="button"
@@ -10492,7 +10492,7 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base tracking-tight leading-tight">
-                      Bayani Multi-Purpose Cooperative
+                      Cooperative Enterprise
                     </h3>
                     <div className="text-[11px] text-slate-300 font-mono">
                       CDA Reg: CDA-NCR-2024-00921 • TIN: 009-887-123-000
