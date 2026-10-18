@@ -1438,6 +1438,37 @@ app.patch('/api/v1/members/:id', async (req: Request, res: Response) => {
   res.status(404).json({ success: false, error: 'Route handler not found' });
 });
 
+app.delete('/api/v1/members/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberId = req.params.id;
+
+    // Delete from Cloud Firestore
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.membersCol(tenantId).doc(memberId).delete();
+      if (memberId.startsWith('mem_app_')) {
+        const plainAppId = memberId.replace('mem_app_', '');
+        await fsService.applicationsCol(tenantId).doc(plainAppId).delete();
+      }
+    } catch (fsErr) {
+      console.warn('Firestore deleteMember fallback:', fsErr);
+    }
+
+    // Delete from dbStore
+    const memList = dbStore.members.get(tenantId) || [];
+    const filtered = memList.filter((m) => m.id !== memberId && m.id !== `mem_app_${memberId}` && `mem_app_${m.id}` !== memberId);
+    dbStore.members.set(tenantId, filtered);
+
+    res.json({
+      success: true,
+      message: `Member ${memberId} removed successfully.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/v1/system-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
