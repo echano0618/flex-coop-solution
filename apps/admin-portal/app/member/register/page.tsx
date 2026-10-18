@@ -375,6 +375,10 @@ export default function MemberRegisterPage() {
       totalSubscribedAmount: Number(totalSubscribedAmount),
       initialDeposit: Number(initialDeposit),
       paymentMethod,
+      idType,
+      idFrontFileName: idFrontFile?.name || null,
+      idFrontPreview: idFrontFile?.previewUrl || null,
+      selfiePreview: selfiePreview || null,
     };
     try {
       if (typeof window !== 'undefined') {

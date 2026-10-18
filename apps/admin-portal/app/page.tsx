@@ -1372,6 +1372,8 @@ export default function AdminDashboard() {
     reviewedBy?: string | null;
     reviewDate?: string | null;
     reviewNotes?: string | null;
+    idFrontPreview?: string | null;
+    selfiePreview?: string | null;
   }
 
   const [memberSearchQuery, setMemberSearchQuery] = useState<string>('');
@@ -1481,7 +1483,7 @@ export default function AdminDashboard() {
                       email: a.email,
                       classification: 'REGULAR',
                       kycStatus: a.status === 'APPROVED' ? 'VERIFIED' : 'PENDING_REVIEW',
-                      idType: 'PhilSys National ID',
+                      idType: a.idType || 'PhilSys National ID',
                       idNumber: a.tin || 'N/A',
                       address: a.address || 'Philippines',
                       paidUpShares: actualDeposit,
@@ -1508,6 +1510,8 @@ export default function AdminDashboard() {
                         year: 'numeric',
                       }),
                       reviewNotes: 'Online applicant registered via PMES onboarding portal.',
+                      idFrontPreview: a.idFrontPreview || null,
+                      selfiePreview: a.selfiePreview || null,
                     });
                   }
                 });
@@ -3180,11 +3184,21 @@ export default function AdminDashboard() {
                           {/* Mock Graphic of ID Document Card */}
                           <div className="bg-slate-800/90 border border-slate-600 rounded-lg p-3 flex gap-3 items-center">
                             <div className="w-16 h-20 bg-slate-700 rounded-md border border-slate-500 flex flex-col items-center justify-center shrink-0 relative overflow-hidden shadow-inner">
-                              <User className="w-8 h-8 text-slate-300" />
-                              <span className="text-[8px] text-slate-300 font-bold mt-1">PHOTO</span>
-                              <div className="absolute bottom-0 inset-x-0 bg-indigo-600/80 text-[7px] text-center font-mono py-0.5 text-white">
-                                GOV ID
-                              </div>
+                              {selectedMemberForReview.idFrontPreview ? (
+                                <img
+                                  src={selectedMemberForReview.idFrontPreview}
+                                  alt="Submitted ID"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <>
+                                  <User className="w-8 h-8 text-slate-300" />
+                                  <span className="text-[8px] text-slate-300 font-bold mt-1">PHOTO</span>
+                                  <div className="absolute bottom-0 inset-x-0 bg-indigo-600/80 text-[7px] text-center font-mono py-0.5 text-white">
+                                    GOV ID
+                                  </div>
+                                </>
+                              )}
                             </div>
                             <div className="space-y-1 text-[11px] flex-1">
                               <div className="text-white font-bold text-xs">{selectedMemberForReview.name}</div>
@@ -3222,12 +3236,22 @@ export default function AdminDashboard() {
                           {/* Mock Graphic of Live Selfie */}
                           <div className="bg-slate-800/90 border border-slate-600 rounded-lg p-3 flex gap-3 items-center">
                             <div className="w-16 h-20 bg-emerald-950/80 rounded-md border-2 border-emerald-500/70 flex flex-col items-center justify-center shrink-0 relative overflow-hidden shadow-inner">
-                              <User className="w-8 h-8 text-emerald-300" />
-                              <span className="text-[8px] text-emerald-300 font-bold mt-1">SELFIE</span>
-                              <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-                              <div className="absolute bottom-0 inset-x-0 bg-emerald-700/90 text-[7px] text-center font-mono py-0.5 text-white">
-                                LIVE 3D
-                              </div>
+                              {selectedMemberForReview.selfiePreview ? (
+                                <img
+                                  src={selectedMemberForReview.selfiePreview}
+                                  alt="Captured Live Selfie"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <>
+                                  <User className="w-8 h-8 text-emerald-300" />
+                                  <span className="text-[8px] text-emerald-300 font-bold mt-1">SELFIE</span>
+                                  <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                                  <div className="absolute bottom-0 inset-x-0 bg-emerald-700/90 text-[7px] text-center font-mono py-0.5 text-white">
+                                    LIVE 3D
+                                  </div>
+                                </>
+                              )}
                             </div>
                             <div className="space-y-1 text-[11px] flex-1">
                               <div className="text-white font-bold text-xs">{selectedMemberForReview.name}</div>
