@@ -886,7 +886,7 @@ console.log('\n--- 19. System Admin, IAM, Dynamic RBAC & Platform Escrow Utiliza
 
   const defaultRolePermissions: Record<StaffRole, ModuleTab[]> = {
     SYSTEM_ADMIN: ['overview', 'iam', 'rbac', 'platform_usage', 'reports'],
-    GENERAL_MANAGER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'platform_usage'],
+    GENERAL_MANAGER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'iam', 'rbac', 'platform_usage'],
     LOAN_OFFICER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral'],
     CREDIT_COMMITTEE: ['overview', 'products', 'los', 'calculator', 'collateral'],
     BOD: ['overview', 'products', 'los', 'calculator', 'collateral', 'surplus', 'reports'],
@@ -895,9 +895,11 @@ console.log('\n--- 19. System Admin, IAM, Dynamic RBAC & Platform Escrow Utiliza
     COMPLIANCE_OFFICER: ['overview', 'members', 'collateral', 'surplus', 'reports'],
   };
 
-  // Visibility Verification: System Admin and General Manager (Super Admin) both access platform_usage
+  // Visibility Verification: System Admin and General Manager (Super Admin) both access platform_usage, IAM and RBAC
   assert(defaultRolePermissions.SYSTEM_ADMIN.includes('platform_usage'), 'System Admin has authorized access to Platform Usage module');
   assert(defaultRolePermissions.GENERAL_MANAGER.includes('platform_usage'), 'Super Admin (General Manager) has authorized access to Platform Usage module');
+  assert(defaultRolePermissions.GENERAL_MANAGER.includes('iam'), 'Super Admin (General Manager) has authorized access to IAM module');
+  assert(defaultRolePermissions.GENERAL_MANAGER.includes('rbac'), 'Super Admin (General Manager) has authorized access to RBAC module');
   assert(!defaultRolePermissions.CASHIER.includes('platform_usage'), 'Cashier is restricted from Platform Usage module');
   assert(!defaultRolePermissions.LOAN_OFFICER.includes('iam'), 'Loan Officer is strictly restricted from IAM root admin module');
 
