@@ -216,6 +216,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     minTermMonths: 6,
     maxTermMonths: 24,
     amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
     serviceFeeRate: 0.015,
     finesRateMonthly: 0.03,
     requiresCoMaker: true,
@@ -224,6 +227,10 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+      { id: 'opt_fee_2', name: 'Loan Protection Insurance', type: 'FIXED', value: 500 },
+    ],
   },
   {
     id: 'prod_emergency',
@@ -236,6 +243,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     minTermMonths: 3,
     maxTermMonths: 12,
     amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
     serviceFeeRate: 0.005,
     finesRateMonthly: 0.02,
     requiresCoMaker: true,
@@ -244,6 +254,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+    ],
   },
   {
     id: 'prod_educational',
@@ -256,6 +269,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     minTermMonths: 6,
     maxTermMonths: 18,
     amortizationMethod: 'STRAIGHT_LINE',
+    advanceInterestOption: 'FIRST_YEAR',
+    succeedingMethod: 'STRAIGHT_LINE',
+    fixedMonthlyInstallment: true,
     serviceFeeRate: 0.01,
     finesRateMonthly: 0.02,
     requiresCoMaker: false,
@@ -264,6 +280,10 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+      { id: 'opt_fee_2', name: 'Student Assistance Insurance', type: 'FIXED', value: 350 },
+    ],
   },
 ];
 
@@ -1046,6 +1066,41 @@ export default function AdminDashboard() {
   const [newProductMinTerm, setNewProductMinTerm] = useState<number>(6);
   const [newProductMaxTerm, setNewProductMaxTerm] = useState<number>(36);
   const [newProductMethod, setNewProductMethod] = useState<string>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
+  const [newProductAdvanceInterest, setNewProductAdvanceInterest] = useState<'NONE' | 'FIRST_YEAR' | 'ENTIRE_LOAN'>('NONE');
+  const [newProductSucceedingMethod, setNewProductSucceedingMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
+  const [newProductFixedInstallment, setNewProductFixedInstallment] = useState<boolean>(true);
+  const [newProductOptionalFees, setNewProductOptionalFees] = useState<Array<{
+    id: string;
+    name: string;
+    type: 'FIXED' | 'PERCENTAGE';
+    value: number;
+  }>>([
+    { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+    { id: 'opt_fee_2', name: 'Loan Protection Insurance', type: 'FIXED', value: 500 },
+  ]);
+
+  const handleAddNewProductOptionalFee = () => {
+    if (newProductOptionalFees.length >= 5) return;
+    const newId = `opt_fee_${Date.now()}`;
+    setNewProductOptionalFees((prev) => [
+      ...prev,
+      { id: newId, name: `Optional Fee #${prev.length + 1}`, type: 'FIXED', value: 200 },
+    ]);
+  };
+
+  const handleUpdateNewProductOptionalFee = (
+    id: string,
+    updates: Partial<{ name: string; type: 'FIXED' | 'PERCENTAGE'; value: number }>
+  ) => {
+    setNewProductOptionalFees((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
+    );
+  };
+
+  const handleRemoveNewProductOptionalFee = (id: string) => {
+    setNewProductOptionalFees((prev) => prev.filter((f) => f.id !== id));
+  };
+
   const [newProductRequiresCoMaker, setNewProductRequiresCoMaker] = useState<boolean>(true);
   const [newProductMinCoMakers, setNewProductMinCoMakers] = useState<number>(1);
   const [newProductCoMakerRule, setNewProductCoMakerRule] = useState<string>('Borrower must designate co-maker by Member ID. Co-maker must accept joint & solidary liability on their account.');
@@ -1053,6 +1108,75 @@ export default function AdminDashboard() {
   const [newProductServiceFeeRate, setNewProductServiceFeeRate] = useState<number>(1.5);
   const [newProductFinesRate, setNewProductFinesRate] = useState<number>(3.0);
   const [newProductStatus, setNewProductStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+
+  // Walk-In Loan Application State for Staff / Loan Officer
+  const [showWalkInLoanModal, setShowWalkInLoanModal] = useState<boolean>(false);
+  const [walkInMemberId, setWalkInMemberId] = useState<string>('mem_1');
+  const [walkInProductId, setWalkInProductId] = useState<string>('prod_regular');
+  const [walkInAmount, setWalkInAmount] = useState<number>(50000);
+  const [walkInTerm, setWalkInTerm] = useState<number>(12);
+  const [walkInPurpose, setWalkInPurpose] = useState<string>('Working Capital & Retail Inventory');
+  const [walkInCoMakerId, setWalkInCoMakerId] = useState<string>('mem_2');
+  const [walkInSettlementChannel, setWalkInSettlementChannel] = useState<'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER'>('BANK_TRANSFER');
+  const [walkInSettlementInstitution, setWalkInSettlementInstitution] = useState<string>('Land Bank of the Philippines');
+  const [walkInSettlementAccountNo, setWalkInSettlementAccountNo] = useState<string>('0123-4567-89');
+  const [walkInSettlementAccountName, setWalkInSettlementAccountName] = useState<string>('Maria Clara Santos');
+
+  // Active Loan Application for LOS Pipeline Display
+  const [activeLoanApplication, setActiveLoanApplication] = useState<{
+    id: string;
+    memberId: string;
+    memberName: string;
+    memberNo: string;
+    memberClassification: string;
+    productId: string;
+    productName: string;
+    annualRate: number;
+    termMonths: number;
+    amount: number;
+    purpose: string;
+    coMakerId?: string;
+    coMakerName?: string;
+    coMakerNo?: string;
+    settlement: {
+      channel: 'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER';
+      institutionName: string;
+      accountNumber: string;
+      accountName: string;
+    };
+    advanceInterestOption?: string;
+    succeedingMethod?: string;
+    fixedMonthlyInstallment?: boolean;
+    submissionSource: 'MEMBER_SELF_SERVICE' | 'STAFF_WALK_IN';
+    submittedBy?: string;
+    submittedAt: string;
+  }>({
+    id: 'LN-2026-00001',
+    memberId: 'mem_1',
+    memberName: 'Maria Clara Santos',
+    memberNo: 'MEM-2026-0001',
+    memberClassification: 'Regular Member',
+    productId: 'prod_regular',
+    productName: 'Regular Member Loan',
+    annualRate: 0.12,
+    termMonths: 12,
+    amount: 50000,
+    purpose: 'Micro-enterprise Working Capital & Inventory Replenishment',
+    coMakerId: 'mem_2',
+    coMakerName: 'Juan Perez Dela Cruz',
+    coMakerNo: 'MEM-2026-0002',
+    settlement: {
+      channel: 'BANK_TRANSFER',
+      institutionName: 'Land Bank of the Philippines',
+      accountNumber: '0123-4567-89',
+      accountName: 'Maria Clara Santos',
+    },
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
+    submissionSource: 'MEMBER_SELF_SERVICE',
+    submittedAt: 'Oct 15, 2026, 09:30 AM',
+  });
 
   const handleAddLoanProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1067,6 +1191,10 @@ export default function AdminDashboard() {
       minTermMonths: Number(newProductMinTerm),
       maxTermMonths: Number(newProductMaxTerm),
       amortizationMethod: newProductMethod as any,
+      advanceInterestOption: newProductAdvanceInterest,
+      succeedingMethod: newProductSucceedingMethod,
+      fixedMonthlyInstallment: newProductFixedInstallment,
+      optionalFees: newProductOptionalFees,
       serviceFeeRate: Number(newProductServiceFeeRate) / 100,
       finesRateMonthly: Number(newProductFinesRate) / 100,
       requiresCoMaker: newProductRequiresCoMaker,
@@ -1505,6 +1633,71 @@ export default function AdminDashboard() {
       reviewNotes: 'Suspended pending updated KYC identity documentation.',
     },
   ]);
+
+  // Synchronize Walk-In Form with selected member and product
+  useEffect(() => {
+    const mem = members.find((m) => m.id === walkInMemberId);
+    if (mem) {
+      setWalkInSettlementAccountName(mem.name);
+    }
+  }, [walkInMemberId, members]);
+
+  useEffect(() => {
+    const prod = loanProducts.find((p) => p.id === walkInProductId);
+    if (prod) {
+      if (walkInAmount > prod.maxAmount) setWalkInAmount(prod.maxAmount);
+      if (walkInAmount < prod.minAmount) setWalkInAmount(prod.minAmount);
+      if (walkInTerm > prod.maxTermMonths) setWalkInTerm(prod.maxTermMonths);
+      if (walkInTerm < prod.minTermMonths) setWalkInTerm(prod.minTermMonths);
+    }
+  }, [walkInProductId, loanProducts]);
+
+  const handleSubmitWalkInLoan = (e: React.FormEvent) => {
+    e.preventDefault();
+    const applicant = members.find((m) => m.id === walkInMemberId) || members[0];
+    const prod = loanProducts.find((p) => p.id === walkInProductId) || loanProducts[0];
+    const coMaker = prod.requiresCoMaker ? members.find((m) => m.id === walkInCoMakerId) : null;
+
+    const newAppId = `LN-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+    const newStatus = prod.requiresCoMaker ? 'PENDING_CO_MAKER_ACCEPTANCE' : 'SUBMITTED';
+
+    const newApp = {
+      id: newAppId,
+      memberId: applicant.id,
+      memberName: applicant.name,
+      memberNo: applicant.memberNo,
+      memberClassification: applicant.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member',
+      productId: prod.id,
+      productName: prod.name,
+      annualRate: prod.annualInterestRate,
+      termMonths: Number(walkInTerm),
+      amount: Number(walkInAmount),
+      purpose: walkInPurpose,
+      coMakerId: coMaker ? coMaker.id : undefined,
+      coMakerName: coMaker ? coMaker.name : undefined,
+      coMakerNo: coMaker ? coMaker.memberNo : undefined,
+      settlement: {
+        channel: walkInSettlementChannel,
+        institutionName: walkInSettlementChannel === 'CASH_COUNTER' ? 'Cooperative Branch Cashier Counter' : walkInSettlementInstitution,
+        accountNumber: walkInSettlementChannel === 'CASH_COUNTER' ? 'OTC-CASHIER-PICKUP' : walkInSettlementAccountNo,
+        accountName: walkInSettlementAccountName || applicant.name,
+      },
+      advanceInterestOption: prod.advanceInterestOption,
+      succeedingMethod: prod.succeedingMethod,
+      fixedMonthlyInstallment: prod.fixedMonthlyInstallment,
+      submissionSource: 'STAFF_WALK_IN' as const,
+      submittedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
+      submittedAt: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setActiveLoanApplication(newApp);
+    setLoanStatus(newStatus);
+    setShowWalkInLoanModal(false);
+    setLosNotification(
+      `Walk-In Loan Application ${newAppId} submitted for ${applicant.name} (${applicant.memberNo}) by ${currentStaff.name}! Status: ${newStatus}. Settlement: ${newApp.settlement.institutionName} (${newApp.settlement.accountNumber}).`
+    );
+    setTimeout(() => setLosNotification(null), 6000);
+  };
 
   const filteredMembers = members.filter((m) => {
     const q = memberSearchQuery.toLowerCase().trim();
@@ -3868,6 +4061,48 @@ export default function AdminDashboard() {
                             {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
                           </span>
                         </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-500">Advance Interest:</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            p.advanceInterestOption === 'FIRST_YEAR'
+                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                              : p.advanceInterestOption === 'ENTIRE_LOAN'
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {p.advanceInterestOption === 'FIRST_YEAR'
+                              ? '1st Year Deducted Upfront'
+                              : p.advanceInterestOption === 'ENTIRE_LOAN'
+                              ? 'Entire Loan Upfront'
+                              : 'None (Standard)'}
+                          </span>
+                        </div>
+                        {p.advanceInterestOption === 'FIRST_YEAR' && (
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-slate-500">Succeeding Period:</span>
+                            <span className="text-slate-700 font-medium">
+                              {p.succeedingMethod === 'STRAIGHT_LINE' ? 'Straight-Line' : 'Diminishing Balance'}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-500">Installment Type:</span>
+                          <span className="text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {p.fixedMonthlyInstallment !== false ? 'Fixed Level Monthly' : 'Variable Installment'}
+                          </span>
+                        </div>
+                        {Array.isArray(p.optionalFees) && p.optionalFees.length > 0 && (
+                          <div className="pt-1 border-t border-slate-100">
+                            <span className="text-[10px] text-slate-500 block mb-1">Optional Pass-Through Fees ({p.optionalFees.length}/5):</span>
+                            <div className="flex flex-wrap gap-1">
+                              {p.optionalFees.map((fee: any) => (
+                                <span key={fee.id} className="text-[9px] bg-slate-200/80 text-slate-700 font-mono px-1.5 py-0.5 rounded">
+                                  {fee.name} ({fee.type === 'PERCENTAGE' ? `${fee.value}%` : `₱${fee.value}`})
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <div className="flex justify-between items-center pt-1">
                           <span className="text-slate-500">Co-Maker Rule:</span>
                           {p.requiresCoMaker ? (
@@ -4040,6 +4275,126 @@ export default function AdminDashboard() {
                       </select>
                     </div>
 
+                    {/* Advanced Loan Options (Synchronized from Loan Calculator) */}
+                    <div className="p-3.5 bg-blue-50/60 border border-blue-200 rounded-xl space-y-3">
+                      <div>
+                        <span className="font-bold text-blue-950 block">Advance Interest Configuration</span>
+                        <p className="text-[11px] text-blue-800">Choose whether interest is deducted upfront upon loan disbursement.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {[
+                          { id: 'NONE', label: 'None', desc: 'Amortized monthly' },
+                          { id: 'FIRST_YEAR', label: 'First Year', desc: '12 mos upfront deduction' },
+                          { id: 'ENTIRE_LOAN', label: 'Entire Loan', desc: 'All interest deducted' },
+                        ].map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setNewProductAdvanceInterest(opt.id as any)}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              newProductAdvanceInterest === opt.id
+                                ? 'border-blue-600 bg-white font-bold text-blue-950 shadow-xs'
+                                : 'border-blue-200 bg-blue-50/40 text-blue-900 hover:bg-white'
+                            }`}
+                          >
+                            <div className="text-xs">{opt.label}</div>
+                            <div className="text-[10px] text-blue-700 font-normal">{opt.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {newProductAdvanceInterest === 'FIRST_YEAR' && (
+                        <div className="pt-2 border-t border-blue-200 space-y-1">
+                          <label className="block font-semibold text-blue-950 text-xs">
+                            Succeeding Year Amortization Method (Term &gt; 12 Months)
+                          </label>
+                          <select
+                            value={newProductSucceedingMethod}
+                            onChange={(e) => setNewProductSucceedingMethod(e.target.value as any)}
+                            className="w-full border border-blue-300 rounded-lg p-2 text-xs bg-white text-blue-950 focus:ring-2 focus:ring-blue-500 outline-none"
+                          >
+                            <option value="DIMINISHING_BALANCE_EQUAL_INSTALLMENT">Diminishing Balance for succeeding years</option>
+                            <option value="STRAIGHT_LINE">Straight-Line for succeeding years</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="pt-2 border-t border-blue-200 flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-blue-950 text-xs">Fixed Monthly Installment</span>
+                          <p className="text-[10px] text-blue-800">Enforce equal level monthly installment for the entire loan period.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={newProductFixedInstallment}
+                          onChange={(e) => setNewProductFixedInstallment(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 rounded"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Up to 5 Optional Pass-Through Fees Configurator */}
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-slate-900">Pass-Through Optional Fees ({newProductOptionalFees.length}/5)</span>
+                          <p className="text-[11px] text-slate-500">Configure default documentary stamp tax, insurance, or notarial fees.</p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={newProductOptionalFees.length >= 5}
+                          onClick={handleAddNewProductOptionalFee}
+                          className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 disabled:text-slate-400 bg-white border border-slate-300 hover:bg-slate-50 px-2.5 py-1 rounded-lg flex items-center gap-1 transition"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Fee
+                        </button>
+                      </div>
+
+                      {newProductOptionalFees.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic">No optional fees configured for this product.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {newProductOptionalFees.map((fee, idx) => (
+                            <div key={fee.id} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
+                              <span className="text-xs font-mono text-slate-400 w-4">{idx + 1}.</span>
+                              <input
+                                type="text"
+                                placeholder="Fee Name (e.g. DST)"
+                                value={fee.name}
+                                onChange={(e) => handleUpdateNewProductOptionalFee(fee.id, { name: e.target.value })}
+                                className="flex-1 border border-slate-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+                              />
+                              <select
+                                value={fee.type}
+                                onChange={(e) => handleUpdateNewProductOptionalFee(fee.id, { type: e.target.value as 'FIXED' | 'PERCENTAGE' })}
+                                className="border border-slate-200 rounded px-2 py-1 text-xs bg-slate-50 text-slate-700 focus:ring-1 focus:ring-emerald-500 outline-none"
+                              >
+                                <option value="FIXED">₱ Fixed</option>
+                                <option value="PERCENTAGE">% Rate</option>
+                              </select>
+                              <input
+                                type="number"
+                                step={fee.type === 'PERCENTAGE' ? '0.01' : '1'}
+                                placeholder="Value"
+                                value={fee.value}
+                                onChange={(e) => handleUpdateNewProductOptionalFee(fee.id, { value: Number(e.target.value) })}
+                                className="w-20 border border-slate-200 rounded px-2 py-1 text-xs font-mono focus:ring-1 focus:ring-emerald-500 outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveNewProductOptionalFee(fee.id)}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                                title="Remove Fee"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -4140,13 +4495,22 @@ export default function AdminDashboard() {
                 <p className="text-xs text-slate-500">Pipeline: Co-Maker Endorsement $\rightarrow$ Loan Officer Triage $\rightarrow$ Credit Committee $\rightarrow$ Board of Directors $\rightarrow$ Net Proceeds Disbursement.</p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowDisclosureModal(true)}
-                className="border border-emerald-600 text-emerald-700 hover:bg-emerald-50 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
-              >
-                <FileText className="w-4 h-4" /> View RA 3765 Disclosure & Promissory Note
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setShowWalkInLoanModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <UserPlus className="w-4 h-4" /> New Walk-In Loan Application
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDisclosureModal(true)}
+                  className="border border-emerald-600 text-emerald-700 hover:bg-emerald-50 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                >
+                  <FileText className="w-4 h-4" /> View RA 3765 Disclosure & Promissory Note
+                </button>
+              </div>
             </div>
 
             {/* Live Co-Maker Status Banner & Simulator Controller */}
@@ -4257,17 +4621,47 @@ export default function AdminDashboard() {
             <div className="p-5 border border-slate-200 rounded-xl bg-slate-50 space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-start border-b border-slate-200 pb-3 gap-3">
                 <div>
-                  <div className="text-xs font-mono text-slate-500">Application: LN-2026-00001</div>
-                  <div className="text-base font-bold text-slate-900">Maria Clara Santos (Regular Member)</div>
-                  <div className="text-xs text-slate-600">Product: Regular Member Loan • 12% p.a. • 12 Months term</div>
-                  <div className="text-xs text-amber-900 mt-1 font-semibold flex items-center gap-1">
-                    <span>Designated Co-Maker:</span>
-                    <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">Juan Perez Dela Cruz (MEM-2026-0002)</span>
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-xs font-mono text-slate-500">Application: {activeLoanApplication.id}</span>
+                    {activeLoanApplication.submissionSource === 'STAFF_WALK_IN' ? (
+                      <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-purple-200">
+                        <UserPlus className="w-3 h-3" /> Staff Assisted (Walk-In)
+                      </span>
+                    ) : (
+                      <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-blue-200">
+                        Member Portal Self-Service
+                      </span>
+                    )}
                   </div>
+                  <div className="text-base font-bold text-slate-900">
+                    {activeLoanApplication.memberName} ({activeLoanApplication.memberClassification})
+                  </div>
+                  <div className="text-xs text-slate-600">
+                    Product: {activeLoanApplication.productName} • {(activeLoanApplication.annualRate * 100).toFixed(1)}% p.a. • {activeLoanApplication.termMonths} Months term
+                  </div>
+                  {activeLoanApplication.coMakerName ? (
+                    <div className="text-xs text-amber-900 mt-1 font-semibold flex items-center gap-1">
+                      <span>Designated Co-Maker:</span>
+                      <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                        {activeLoanApplication.coMakerName} ({activeLoanApplication.coMakerNo || 'Co-Maker'})
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 mt-1">
+                      Co-Maker: None required for this product.
+                    </div>
+                  )}
+                  {activeLoanApplication.submittedBy && (
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      Submitted By: {activeLoanApplication.submittedBy} • {activeLoanApplication.submittedAt}
+                    </div>
+                  )}
                 </div>
                 <div className="text-left sm:text-right flex flex-col items-start sm:items-end">
                   <div className="text-xs uppercase text-slate-500 font-semibold">Principal Requested</div>
-                  <div className="text-2xl font-black text-slate-900">₱50,000.00</div>
+                  <div className="text-2xl font-black text-slate-900">
+                    ₱{activeLoanApplication.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
                   {loanStatus !== 'CANCELLED' && loanStatus !== 'DISBURSED' && (
                     <button
                       type="button"
@@ -4277,7 +4671,7 @@ export default function AdminDashboard() {
                           targetStatus: 'CANCELLED',
                           stageTitle: 'Application Cancellation',
                           actionTitle: 'Confirm Loan Application Cancellation',
-                          message: 'Are you sure you want to cancel and void loan application LN-2026-00001 (Maria Clara Santos, ₱50,000.00)?',
+                          message: `Are you sure you want to cancel and void loan application ${activeLoanApplication.id} (${activeLoanApplication.memberName}, ₱${activeLoanApplication.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})?`,
                           statutoryDetail: 'Under cooperative credit regulations, this will cancel the underwriting process, void pending co-maker solidary liabilities, and issue a cancellation audit log.',
                           confirmBtnText: 'Confirm Cancellation',
                           confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
@@ -4288,6 +4682,46 @@ export default function AdminDashboard() {
                       <Ban className="w-3.5 h-3.5" /> Cancel Application
                     </button>
                   )}
+                </div>
+              </div>
+
+              {/* Settlement & Disbursement Account Details Section */}
+              <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Landmark className="w-4 h-4 text-emerald-700" />
+                    <span className="text-xs font-bold text-emerald-950 uppercase tracking-wide">
+                      Disbursement & Settlement Details
+                    </span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                    activeLoanApplication.settlement.channel === 'BANK_TRANSFER'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                      : activeLoanApplication.settlement.channel === 'E_WALLET'
+                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                  }`}>
+                    {activeLoanApplication.settlement.channel === 'BANK_TRANSFER'
+                      ? 'Bank Transfer (InstaPay / PESONet)'
+                      : activeLoanApplication.settlement.channel === 'E_WALLET'
+                      ? 'E-Wallet (GCash / Maya)'
+                      : 'Cash Counter Pick-Up (OTC)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-200/80 shadow-2xs">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block">Settlement Channel / Bank</span>
+                    <span className="font-bold text-slate-900">{activeLoanApplication.settlement.institutionName}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-200/80 shadow-2xs">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block">Account / Mobile Number</span>
+                    <span className="font-mono font-bold text-emerald-800">{activeLoanApplication.settlement.accountNumber}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-200/80 shadow-2xs">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block">Account Holder Name</span>
+                    <span className="font-bold text-slate-900">{activeLoanApplication.settlement.accountName}</span>
+                  </div>
                 </div>
               </div>
 
@@ -4693,6 +5127,362 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+
+            {/* Walk-In Loan Application Modal */}
+            {showWalkInLoanModal && (() => {
+              const selectedWalkInMember = members.find((m) => m.id === walkInMemberId) || members[0];
+              const selectedWalkInProd = loanProducts.find((p) => p.id === walkInProductId) || loanProducts[0];
+              const requiresCoMaker = Boolean(selectedWalkInProd.requiresCoMaker);
+              const eligibleCoMakers = members.filter((m) => m.id !== walkInMemberId);
+
+              const safeWalkInAmt = Math.max(1000, Number(walkInAmount) || 0);
+              const safeWalkInTerm = Math.max(1, Number(walkInTerm) || 12);
+              const rate = Number(selectedWalkInProd.annualInterestRate) || 0.12;
+              const mRate = rate / 12.0;
+
+              // Upfront deductions
+              const techFee = Math.round(safeWalkInAmt * 0.01 * 100) / 100; // 1% tech fee
+              const serviceFee = Math.round(safeWalkInAmt * (Number(selectedWalkInProd.serviceFeeRate) || 0.015) * 100) / 100;
+
+              let advanceInterest = 0;
+              if (selectedWalkInProd.advanceInterestOption === 'FIRST_YEAR') {
+                advanceInterest = Math.round(safeWalkInAmt * rate * (Math.min(12, safeWalkInTerm) / 12.0) * 100) / 100;
+              } else if (selectedWalkInProd.advanceInterestOption === 'ENTIRE_LOAN') {
+                advanceInterest = Math.round(safeWalkInAmt * rate * (safeWalkInTerm / 12.0) * 100) / 100;
+              }
+
+              let optFeesTotal = 0;
+              if (Array.isArray(selectedWalkInProd.optionalFees)) {
+                optFeesTotal = selectedWalkInProd.optionalFees.reduce((acc: number, f: any) => {
+                  if (f.type === 'PERCENTAGE') {
+                    return acc + Math.round(safeWalkInAmt * (Number(f.value) / 100) * 100) / 100;
+                  }
+                  return acc + (Number(f.value) || 0);
+                }, 0);
+              }
+
+              const netProceeds = Math.max(0, safeWalkInAmt - techFee - serviceFee - advanceInterest - optFeesTotal);
+
+              // Approx Monthly installment
+              const factor = Math.pow(1.0 + mRate, safeWalkInTerm);
+              const estInstallment = (factor > 1 && mRate > 0)
+                ? Math.round(((safeWalkInAmt * (mRate * factor)) / (factor - 1.0)) * 100) / 100
+                : Math.round((safeWalkInAmt / safeWalkInTerm) * 100) / 100;
+
+              return (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+                  <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4">
+                    <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                          <UserPlus className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-slate-900">New Walk-In Loan Application (Staff Assisted)</h3>
+                          <p className="text-xs text-slate-500">
+                            Loan officer assisted application entry on behalf of a walk-in member with settlement account specification.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowWalkInLoanModal(false)}
+                        className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSubmitWalkInLoan} className="space-y-4 text-xs">
+                      {/* Step 1: Member Selection */}
+                      <div className="space-y-2">
+                        <label className="block font-bold text-slate-800">1. Select Applicant Member (Walk-In)</label>
+                        <select
+                          value={walkInMemberId}
+                          onChange={(e) => setWalkInMemberId(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-2.5 text-xs bg-white text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          {members.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.memberNo}) • {m.classification} • Shares: ₱{(m.paidUpShares || 0).toLocaleString()} • Savings: ₱{(m.savingsBalance || 0).toLocaleString()}
+                            </option>
+                          ))}
+                        </select>
+
+                        {selectedWalkInMember && (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-[11px] text-slate-600">
+                            <div>
+                              <span className="font-semibold text-slate-900">{selectedWalkInMember.name}</span>
+                              <span className="text-slate-400 ml-2">ID: {selectedWalkInMember.idNumber || 'KYC Verified'}</span>
+                            </div>
+                            <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[10px]">
+                              {selectedWalkInMember.kycStatus === 'VERIFIED' ? '✓ PMES & KYC Verified' : 'Standard Member'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Step 2: Loan Product Selection */}
+                      <div className="space-y-2">
+                        <label className="block font-bold text-slate-800">2. Select Loan Facility / Product</label>
+                        <select
+                          value={walkInProductId}
+                          onChange={(e) => setWalkInProductId(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-2.5 text-xs bg-white text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          {loanProducts.filter((p) => p.isActive !== false).map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.code}) • {(p.annualInterestRate * 100).toFixed(1)}% p.a. • Range: ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()} ({p.minTermMonths}-{p.maxTermMonths} mos)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Step 3: Loan Principal, Term & Purpose */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Principal (₱{selectedWalkInProd.minAmount.toLocaleString()} - ₱{selectedWalkInProd.maxAmount.toLocaleString()})
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={selectedWalkInProd.minAmount || 1000}
+                            max={selectedWalkInProd.maxAmount || 500000}
+                            step={1000}
+                            value={walkInAmount}
+                            onChange={(e) => setWalkInAmount(Number(e.target.value))}
+                            className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Term (Months: {selectedWalkInProd.minTermMonths} - {selectedWalkInProd.maxTermMonths})
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={selectedWalkInProd.minTermMonths || 1}
+                            max={selectedWalkInProd.maxTermMonths || 60}
+                            value={walkInTerm}
+                            onChange={(e) => setWalkInTerm(Number(e.target.value))}
+                            className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Loan Purpose</label>
+                          <input
+                            type="text"
+                            required
+                            value={walkInPurpose}
+                            onChange={(e) => setWalkInPurpose(e.target.value)}
+                            placeholder="e.g. Working Capital"
+                            className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Step 4: Designated Co-Maker */}
+                      {requiresCoMaker && (
+                        <div className="p-3.5 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2">
+                          <label className="block font-bold text-amber-950">
+                            Designated Co-Maker Member (Mandatory Credit Rule)
+                          </label>
+                          <select
+                            value={walkInCoMakerId}
+                            onChange={(e) => setWalkInCoMakerId(e.target.value)}
+                            className="w-full border border-amber-300 rounded-lg p-2 text-xs bg-white text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                          >
+                            {eligibleCoMakers.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.memberNo}) • Shares: ₱{(m.paidUpShares || 0).toLocaleString()} • Savings: ₱{(m.savingsBalance || 0).toLocaleString()}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-amber-800">
+                            {selectedWalkInProd.coMakerRuleDescription || 'Co-maker must acknowledge joint & solidary liability.'}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Step 5: Settlement & Disbursement Details (Mandatory) */}
+                      <div className="p-4 bg-emerald-50/80 border border-emerald-300 rounded-xl space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Landmark className="w-4 h-4 text-emerald-800" />
+                          <h4 className="font-bold text-emerald-950 text-xs uppercase tracking-wide">
+                            Settlement & Disbursement Details
+                          </h4>
+                        </div>
+                        <p className="text-[11px] text-emerald-800">
+                          Specify the payout channel and verified account where net loan proceeds will be disbursed.
+                        </p>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Disbursement / Settlement Channel</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {[
+                              { id: 'BANK_TRANSFER', label: 'Bank Transfer', sub: 'InstaPay / PESONet' },
+                              { id: 'E_WALLET', label: 'E-Wallet', sub: 'GCash / Maya' },
+                              { id: 'CASH_COUNTER', label: 'Cash Counter', sub: 'Over-The-Counter' },
+                            ].map((ch) => (
+                              <button
+                                key={ch.id}
+                                type="button"
+                                onClick={() => {
+                                  setWalkInSettlementChannel(ch.id as any);
+                                  if (ch.id === 'BANK_TRANSFER' && !walkInSettlementInstitution) {
+                                    setWalkInSettlementInstitution('Land Bank of the Philippines');
+                                  } else if (ch.id === 'E_WALLET') {
+                                    setWalkInSettlementInstitution('GCash');
+                                  } else if (ch.id === 'CASH_COUNTER') {
+                                    setWalkInSettlementInstitution('Cooperative Branch Cashier Counter');
+                                  }
+                                }}
+                                className={`p-2.5 rounded-lg border text-left transition-all ${
+                                  walkInSettlementChannel === ch.id
+                                    ? 'border-emerald-600 bg-white font-bold text-emerald-950 shadow-xs'
+                                    : 'border-emerald-200 bg-emerald-50/40 text-emerald-800 hover:bg-white'
+                                }`}
+                              >
+                                <div className="text-xs">{ch.label}</div>
+                                <div className="text-[10px] text-emerald-700 font-normal">{ch.sub}</div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {walkInSettlementChannel !== 'CASH_COUNTER' ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                              <label className="block font-semibold text-slate-700 mb-1">
+                                {walkInSettlementChannel === 'BANK_TRANSFER' ? 'Bank Name' : 'E-Wallet Provider'}
+                              </label>
+                              {walkInSettlementChannel === 'BANK_TRANSFER' ? (
+                                <select
+                                  value={walkInSettlementInstitution}
+                                  onChange={(e) => setWalkInSettlementInstitution(e.target.value)}
+                                  className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                                >
+                                  <option value="Land Bank of the Philippines">Land Bank of the Philippines</option>
+                                  <option value="BDO Unibank">BDO Unibank</option>
+                                  <option value="Bank of the Philippine Islands (BPI)">Bank of the Philippine Islands (BPI)</option>
+                                  <option value="Metrobank">Metrobank</option>
+                                  <option value="UnionBank of the Philippines">UnionBank of the Philippines</option>
+                                  <option value="Security Bank">Security Bank</option>
+                                  <option value="RCBC">RCBC</option>
+                                  <option value="Philippine National Bank (PNB)">Philippine National Bank (PNB)</option>
+                                  <option value="Other Commercial / Thrift Bank">Other Commercial / Thrift Bank</option>
+                                </select>
+                              ) : (
+                                <select
+                                  value={walkInSettlementInstitution}
+                                  onChange={(e) => setWalkInSettlementInstitution(e.target.value)}
+                                  className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                                >
+                                  <option value="GCash">GCash</option>
+                                  <option value="Maya (PayMaya)">Maya (PayMaya)</option>
+                                  <option value="GrabPay Philippines">GrabPay Philippines</option>
+                                </select>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block font-semibold text-slate-700 mb-1">
+                                {walkInSettlementChannel === 'BANK_TRANSFER' ? 'Bank Account Number' : 'E-Wallet Mobile Number'}
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={walkInSettlementAccountNo}
+                                onChange={(e) => setWalkInSettlementAccountNo(e.target.value)}
+                                placeholder={walkInSettlementChannel === 'BANK_TRANSFER' ? 'e.g. 1092837465' : 'e.g. 09171234567'}
+                                className="w-full border border-slate-300 rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-semibold text-slate-700 mb-1">Account Holder Name</label>
+                              <input
+                                type="text"
+                                required
+                                value={walkInSettlementAccountName}
+                                onChange={(e) => setWalkInSettlementAccountName(e.target.value)}
+                                placeholder="Full name on account"
+                                className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-white border border-emerald-200 rounded-lg text-slate-700 leading-relaxed">
+                            <strong>Over-the-Counter Cash Pick-Up:</strong> Borrower will receive an authorized disbursement voucher for OTC cash collection at the cooperative branch cashier. Valid government ID and physical signature required upon claiming.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Real-Time Calculation & Deduction Summary */}
+                      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                        <div className="flex justify-between font-bold text-slate-800">
+                          <span>Requested Principal Amount:</span>
+                          <span>₱{safeWalkInAmt.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-600 text-[11px]">
+                          <span>1% Technology Fee:</span>
+                          <span>- ₱{techFee.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-600 text-[11px]">
+                          <span>Coop Service Fee ({(Number(selectedWalkInProd.serviceFeeRate) * 100 || 1.5).toFixed(1)}%):</span>
+                          <span>- ₱{serviceFee.toFixed(2)}</span>
+                        </div>
+                        {advanceInterest > 0 && (
+                          <div className="flex justify-between text-blue-800 text-[11px] font-semibold">
+                            <span>
+                              Advance Interest ({selectedWalkInProd.advanceInterestOption === 'FIRST_YEAR' ? '1st Year' : 'Entire Loan'}):
+                            </span>
+                            <span>- ₱{advanceInterest.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {optFeesTotal > 0 && (
+                          <div className="flex justify-between text-slate-600 text-[11px]">
+                            <span>Pass-Through Optional Fees:</span>
+                            <span>- ₱{optFeesTotal.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="pt-2 border-t border-slate-200 flex justify-between items-center font-bold text-emerald-950">
+                          <div>
+                            <span className="block">Net Disbursement Proceeds:</span>
+                            <span className="text-[10px] text-slate-500 font-normal">
+                              Est. Monthly Installment: ₱{estInstallment.toFixed(2)}/mo
+                            </span>
+                          </div>
+                          <span className="text-base text-emerald-700 font-black">
+                            ₱{netProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Modal Footer Actions */}
+                      <div className="pt-3 border-t border-slate-200 flex justify-end gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setShowWalkInLoanModal(false)}
+                          className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-semibold transition"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition shadow-sm flex items-center gap-1.5"
+                        >
+                          <CheckCircle className="w-4 h-4" /> Submit Walk-In Application
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 

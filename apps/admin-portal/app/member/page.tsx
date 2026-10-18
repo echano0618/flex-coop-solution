@@ -49,6 +49,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     minTermMonths: 6,
     maxTermMonths: 24,
     amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
     serviceFeeRate: 0.015,
     finesRateMonthly: 0.03,
     requiresCoMaker: true,
@@ -57,6 +60,10 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+      { id: 'opt_fee_2', name: 'Loan Protection Insurance', type: 'FIXED', value: 500 },
+    ],
   },
   {
     id: 'prod_emergency',
@@ -69,6 +76,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     minTermMonths: 3,
     maxTermMonths: 12,
     amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
     serviceFeeRate: 0.005,
     finesRateMonthly: 0.02,
     requiresCoMaker: true,
@@ -77,6 +87,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+    ],
   },
   {
     id: 'prod_educational',
@@ -89,6 +102,9 @@ const DEFAULT_LOAN_PRODUCTS = [
     minTermMonths: 6,
     maxTermMonths: 18,
     amortizationMethod: 'STRAIGHT_LINE',
+    advanceInterestOption: 'FIRST_YEAR',
+    succeedingMethod: 'STRAIGHT_LINE',
+    fixedMonthlyInstallment: true,
     serviceFeeRate: 0.01,
     finesRateMonthly: 0.02,
     requiresCoMaker: false,
@@ -97,6 +113,10 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+      { id: 'opt_fee_2', name: 'Student Assistance Insurance', type: 'FIXED', value: 350 },
+    ],
   },
 ];
 
@@ -245,6 +265,22 @@ export default function MemberPortalPage() {
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [applicationSubmitted, setApplicationSubmitted] = useState<boolean>(false);
 
+  // Loan Settlement & Disbursement Details State
+  const [settlementChannel, setSettlementChannel] = useState<'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER'>('BANK_TRANSFER');
+  const [settlementInstitution, setSettlementInstitution] = useState<string>('Land Bank of the Philippines');
+  const [settlementAccountNumber, setSettlementAccountNumber] = useState<string>('1092-8374-65');
+  const [settlementAccountName, setSettlementAccountName] = useState<string>('Maria Clara Santos');
+  const [submittedSettlementRecord, setSubmittedSettlementRecord] = useState<{
+    channel: 'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER';
+    institutionName: string;
+    accountNumber: string;
+    accountName: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setSettlementAccountName(currentMember.name);
+  }, [currentPersona, currentMember.name]);
+
   // Repayment State
   const [repayChannel, setRepayChannel] = useState<'PAYMONGO_QRPH' | 'IN_PERSON'>('PAYMONGO_QRPH');
   const [repayAmount, setRepayAmount] = useState<number>(4442.44);
@@ -280,14 +316,32 @@ export default function MemberPortalPage() {
 
   const platformFee = Math.max(loanAmount * 0.02, 100.0);
   const coopServiceFee = loanAmount * (selectedProduct.serviceFeeRate || 0.015);
-  const netProceeds = loanAmount - platformFee - coopServiceFee;
+
+  let advanceInterest = 0;
+  if (selectedProduct.advanceInterestOption === 'FIRST_YEAR') {
+    advanceInterest = Math.round(loanAmount * annualRate * (Math.min(12, loanTerm) / 12.0) * 100) / 100;
+  } else if (selectedProduct.advanceInterestOption === 'ENTIRE_LOAN') {
+    advanceInterest = Math.round(loanAmount * annualRate * (loanTerm / 12.0) * 100) / 100;
+  }
+
+  let optionalFeesTotal = 0;
+  if (Array.isArray(selectedProduct.optionalFees)) {
+    optionalFeesTotal = selectedProduct.optionalFees.reduce((acc: number, f: any) => {
+      if (f.type === 'PERCENTAGE') {
+        return acc + Math.round(loanAmount * (Number(f.value) / 100) * 100) / 100;
+      }
+      return acc + (Number(f.value) || 0);
+    }, 0);
+  }
+
+  const netProceeds = Math.max(0, loanAmount - platformFee - coopServiceFee - advanceInterest - optionalFeesTotal);
 
   // Monthly annuity installment
   const monthlyRate = annualRate / 12.0;
   const factor = Math.pow(1.0 + monthlyRate, loanTerm);
   const monthlyInstallment = Math.round(((loanAmount * (monthlyRate * factor)) / (factor - 1.0)) * 100) / 100;
   const totalInterest = Math.round(((monthlyInstallment * loanTerm) - loanAmount) * 100) / 100;
-  const eir = Math.round((((totalInterest + platformFee + coopServiceFee) / netProceeds) / (loanTerm / 12.0)) * 10000) / 100;
+  const eir = Math.round((((totalInterest + platformFee + coopServiceFee + advanceInterest + optionalFeesTotal) / netProceeds) / (loanTerm / 12.0)) * 10000) / 100;
 
   // Pass-On Fee for QR Ph
   const passOnFee = repayChannel === 'PAYMONGO_QRPH' ? Math.max(15.0, Math.round(repayAmount * 0.015 * 100) / 100) : 0.0;
@@ -1295,6 +1349,37 @@ export default function MemberPortalPage() {
                   <br /><br />
                   Co-maker <strong>Juan Perez Dela Cruz ({coMakerMemberIdInput})</strong> must log into their own account and accept the Joint & Solidary Liability Undertaking before this application can be pushed to the Loan Officer review pipeline.
                 </p>
+
+                {submittedSettlementRecord && (
+                  <div className="max-w-md mx-auto bg-white p-4 rounded-xl border border-emerald-300 text-left space-y-2 text-xs shadow-2xs">
+                    <div className="font-bold text-emerald-950 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                      <Landmark className="w-4 h-4 text-emerald-700" />
+                      Disbursement Settlement Details
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Method:</span>
+                      <span className="font-semibold text-slate-800">
+                        {submittedSettlementRecord.channel === 'BANK_TRANSFER'
+                          ? 'Bank Transfer (InstaPay / PESONet)'
+                          : submittedSettlementRecord.channel === 'E_WALLET'
+                          ? 'E-Wallet (GCash / Maya)'
+                          : 'Cash Counter Pick-Up (OTC)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Institution / Bank:</span>
+                      <span className="font-semibold text-slate-900">{submittedSettlementRecord.institutionName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Account / Mobile Number:</span>
+                      <span className="font-mono font-bold text-emerald-800">{submittedSettlementRecord.accountNumber}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Account Name:</span>
+                      <span className="font-semibold text-slate-900">{submittedSettlementRecord.accountName}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="pt-2 flex flex-col sm:flex-row justify-center gap-3">
                   <button
                     onClick={() => {
@@ -1412,10 +1497,127 @@ export default function MemberPortalPage() {
                     </div>
                   </div>
 
+                  {/* Step 4: Disbursement & Settlement Details */}
+                  <div className="p-4 bg-emerald-50/70 border border-emerald-300 rounded-xl space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Landmark className="w-4 h-4 text-emerald-800" />
+                      <label className="text-xs font-bold text-emerald-950 uppercase tracking-wide">
+                        4. Disbursement & Settlement Details
+                      </label>
+                    </div>
+                    <p className="text-[11px] text-emerald-800">
+                      Specify the payout account where your approved loan proceeds will be directly credited.
+                    </p>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1.5">Settlement Channel</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {[
+                          { id: 'BANK_TRANSFER', label: 'Bank Transfer', sub: 'InstaPay / PESONet' },
+                          { id: 'E_WALLET', label: 'E-Wallet', sub: 'GCash / Maya' },
+                          { id: 'CASH_COUNTER', label: 'Cash Counter', sub: 'Branch OTC' },
+                        ].map((ch) => (
+                          <button
+                            key={ch.id}
+                            type="button"
+                            onClick={() => {
+                              setSettlementChannel(ch.id as any);
+                              if (ch.id === 'BANK_TRANSFER' && !settlementInstitution) {
+                                setSettlementInstitution('Land Bank of the Philippines');
+                              } else if (ch.id === 'E_WALLET') {
+                                setSettlementInstitution('GCash');
+                              } else if (ch.id === 'CASH_COUNTER') {
+                                setSettlementInstitution('Cooperative Branch Cashier Counter');
+                              }
+                            }}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              settlementChannel === ch.id
+                                ? 'border-emerald-600 bg-white font-bold text-emerald-950 shadow-xs'
+                                : 'border-emerald-200 bg-emerald-50/40 text-emerald-800 hover:bg-white'
+                            }`}
+                          >
+                            <div className="text-xs">{ch.label}</div>
+                            <div className="text-[10px] text-emerald-700 font-normal">{ch.sub}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {settlementChannel !== 'CASH_COUNTER' ? (
+                      <div className="space-y-2.5 pt-1">
+                        <div>
+                          <label className="block font-semibold text-slate-700 text-xs mb-1">
+                            {settlementChannel === 'BANK_TRANSFER' ? 'Bank / Institution Name' : 'E-Wallet Provider'}
+                          </label>
+                          {settlementChannel === 'BANK_TRANSFER' ? (
+                            <select
+                              value={settlementInstitution}
+                              onChange={(e) => setSettlementInstitution(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            >
+                              <option value="Land Bank of the Philippines">Land Bank of the Philippines</option>
+                              <option value="BDO Unibank">BDO Unibank</option>
+                              <option value="Bank of the Philippine Islands (BPI)">Bank of the Philippine Islands (BPI)</option>
+                              <option value="Metrobank">Metrobank</option>
+                              <option value="UnionBank of the Philippines">UnionBank of the Philippines</option>
+                              <option value="Security Bank">Security Bank</option>
+                              <option value="RCBC">RCBC</option>
+                              <option value="Philippine National Bank (PNB)">Philippine National Bank (PNB)</option>
+                              <option value="Other Commercial / Rural Bank">Other Commercial / Rural Bank</option>
+                            </select>
+                          ) : (
+                            <select
+                              value={settlementInstitution}
+                              onChange={(e) => setSettlementInstitution(e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                            >
+                              <option value="GCash">GCash</option>
+                              <option value="Maya (PayMaya)">Maya (PayMaya)</option>
+                              <option value="GrabPay Philippines">GrabPay Philippines</option>
+                            </select>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="block font-semibold text-slate-700 text-xs mb-1">
+                              {settlementChannel === 'BANK_TRANSFER' ? 'Bank Account Number' : 'E-Wallet Mobile Number'}
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={settlementAccountNumber}
+                              onChange={(e) => setSettlementAccountNumber(e.target.value)}
+                              placeholder={settlementChannel === 'BANK_TRANSFER' ? 'e.g. 1092837465' : 'e.g. 09171234567'}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-semibold text-slate-700 text-xs mb-1">
+                              Account Holder Name
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={settlementAccountName}
+                              onChange={(e) => setSettlementAccountName(e.target.value)}
+                              placeholder="Name on account"
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-white border border-emerald-200 rounded-lg text-slate-700 text-xs leading-relaxed">
+                        <strong>Cash Counter Pick-Up:</strong> Loan disbursement voucher will be issued for in-person cash collection at the cooperative branch cashier. Valid government ID and signature required.
+                      </div>
+                    )}
+                  </div>
+
                   {requiresCoMaker && (
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="text-xs font-bold text-slate-700 block">4. Designated Co-Maker Member ID</label>
+                        <label className="text-xs font-bold text-slate-700 block">5. Designated Co-Maker Member ID</label>
                         <span className="text-[11px] text-amber-700 font-semibold">Mandatory Joint Solidary Rule</span>
                       </div>
                       <input
@@ -1473,6 +1675,12 @@ export default function MemberPortalPage() {
                           return;
                         }
                       }
+                      setSubmittedSettlementRecord({
+                        channel: settlementChannel,
+                        institutionName: settlementChannel === 'CASH_COUNTER' ? 'Cooperative Branch Cashier Counter' : settlementInstitution,
+                        accountNumber: settlementChannel === 'CASH_COUNTER' ? 'OTC-CASHIER-PICKUP' : settlementAccountNumber,
+                        accountName: settlementAccountName || currentMember.name,
+                      });
                       setApplicationSubmitted(true);
                     }}
                     className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 rounded-xl shadow-sm transition-colors"
@@ -1503,6 +1711,22 @@ export default function MemberPortalPage() {
                         <span>Coop Filing & Service Fee:</span>
                         <span className="font-bold">- ₱{coopServiceFee.toFixed(2)}</span>
                       </div>
+
+                      {advanceInterest > 0 && (
+                        <div className="flex justify-between text-blue-800 font-semibold">
+                          <span>
+                            Advance Interest ({selectedProduct.advanceInterestOption === 'FIRST_YEAR' ? '1st Year' : 'Entire Loan'}):
+                          </span>
+                          <span className="font-bold">- ₱{advanceInterest.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {optionalFeesTotal > 0 && (
+                        <div className="flex justify-between text-slate-600">
+                          <span>Pass-Through Optional Fees:</span>
+                          <span className="font-bold">- ₱{optionalFeesTotal.toFixed(2)}</span>
+                        </div>
+                      )}
 
                       <div className="border-t border-slate-200 pt-3 flex justify-between items-center bg-emerald-100/70 p-3 rounded-xl border border-emerald-200">
                         <div>
