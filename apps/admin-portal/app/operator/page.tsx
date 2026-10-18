@@ -143,6 +143,7 @@ export default function OperatorPortalPage() {
   const [selectedRegForReject, setSelectedRegForReject] = useState<CooperativeRegistration | null>(null);
   const [rejectionReasonInput, setRejectionReasonInput] = useState<string>('');
   const [selectedRegForIdView, setSelectedRegForIdView] = useState<CooperativeRegistration | null>(null);
+  const [idPreviewHasError, setIdPreviewHasError] = useState<boolean>(false);
   const [selectedRegForEmailView, setSelectedRegForEmailView] = useState<RegistrationEmailNotification | null>(null);
   const [isSubmittingAction, setIsSubmittingAction] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -297,12 +298,16 @@ export default function OperatorPortalPage() {
             try {
               const parsed: CooperativeRegistration[] = JSON.parse(localSaved);
               parsed.forEach((item) => {
+                // Strip broken legacy /uploads/ paths
+                if (item.validIdUrl && item.validIdUrl.startsWith('/uploads/')) {
+                  delete (item as any).validIdUrl;
+                }
                 const idx = merged.findIndex((m) => m.id === item.id);
                 if (idx === -1) {
                   merged.unshift(item);
                 } else {
-                  // Server has authoritative status; preserve local validIdUrl if server doesn't have it
-                  if (item.validIdUrl && !merged[idx].validIdUrl) {
+                  // Server has authoritative status; preserve local validIdUrl if valid and server doesn't have it
+                  if (item.validIdUrl && !merged[idx].validIdUrl && !item.validIdUrl.startsWith('/uploads/')) {
                     merged[idx].validIdUrl = item.validIdUrl;
                   }
                   if (item.rejectionReason && !merged[idx].rejectionReason) {
@@ -314,6 +319,14 @@ export default function OperatorPortalPage() {
               console.error(e);
             }
           }
+          // Sanitize merged items too
+          merged = merged.map((m) => {
+            if (m.validIdUrl && m.validIdUrl.startsWith('/uploads/')) {
+              const { validIdUrl, ...rest } = m;
+              return rest as CooperativeRegistration;
+            }
+            return m;
+          });
           try {
             localStorage.setItem('tuntong_coop_registrations', JSON.stringify(merged));
           } catch (e) {}
@@ -330,8 +343,15 @@ export default function OperatorPortalPage() {
     try {
       const localSaved = localStorage.getItem('tuntong_coop_registrations');
       if (localSaved) {
-        const parsed = JSON.parse(localSaved);
+        let parsed = JSON.parse(localSaved);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed = parsed.map((m: any) => {
+            if (m.validIdUrl && m.validIdUrl.startsWith('/uploads/')) {
+              const { validIdUrl, ...rest } = m;
+              return rest;
+            }
+            return m;
+          });
           setRegistrations(parsed);
         }
       }
@@ -1485,7 +1505,10 @@ https://tuntongtech.com`;
 
                         <button
                           type="button"
-                          onClick={() => setSelectedRegForIdView(reg)}
+                          onClick={() => {
+                            setIdPreviewHasError(false);
+                            setSelectedRegForIdView(reg);
+                          }}
                           className="w-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5 text-amber-400" />
@@ -1893,57 +1916,77 @@ https://tuntongtech.com`;
             </div>
 
             {/* Document Viewer Container */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span className="font-bold flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-emerald-400" /> Document Preview
-                </span>
-                {selectedRegForIdView.validIdUrl && (
-                  <a
-                    href={selectedRegForIdView.validIdUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg border border-slate-700 transition"
-                  >
-                    <span>Open in Full Screen / New Tab</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
-              </div>
+            {(() => {
+              const isViewable = Boolean(
+                selectedRegForIdView.validIdUrl &&
+                !idPreviewHasError &&
+                (selectedRegForIdView.validIdUrl.startsWith('data:') ||
+                 selectedRegForIdView.validIdUrl.startsWith('http://') ||
+                 selectedRegForIdView.validIdUrl.startsWith('https://')) &&
+                !selectedRegForIdView.validIdUrl.startsWith('/uploads/')
+              );
 
-              {selectedRegForIdView.validIdUrl ? (
-                selectedRegForIdView.validIdUrl.startsWith('data:application/pdf') ||
-                selectedRegForIdView.validIdFileName?.toLowerCase().endsWith('.pdf') ? (
-                  <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-950">
-                    <iframe
-                      src={selectedRegForIdView.validIdUrl}
-                      title="Submitted Government ID PDF"
-                      className="w-full h-[450px] bg-white"
-                    />
+              const isPdf = Boolean(
+                isViewable &&
+                (selectedRegForIdView.validIdUrl?.startsWith('data:application/pdf') ||
+                 selectedRegForIdView.validIdFileName?.toLowerCase().endsWith('.pdf'))
+              );
+
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-300">
+                    <span className="font-bold flex items-center gap-1.5">
+                      <Eye className="w-4 h-4 text-emerald-400" /> Document Preview
+                    </span>
+                    {isViewable && (
+                      <a
+                        href={selectedRegForIdView.validIdUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg border border-slate-700 transition"
+                      >
+                        <span>Open in Full Screen / New Tab</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-700 bg-slate-950 p-3 flex flex-col items-center justify-center min-h-[300px] max-h-[500px] overflow-hidden">
-                    <img
-                      src={selectedRegForIdView.validIdUrl}
-                      alt="Submitted Government ID"
-                      className="max-h-[460px] w-auto max-w-full rounded-lg object-contain shadow-2xl border border-slate-800"
-                    />
-                  </div>
-                )
-              ) : (
-                <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-8 text-center space-y-3">
-                  <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                    <UserCheck className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-white text-sm">Document File Record: {selectedRegForIdView.validIdFileName || 'Philippine_National_ID.pdf'}</h4>
-                    <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
-                      File size: {selectedRegForIdView.validIdFileSizeMb || '2.40'} MB. The document signature and CDA credentials have been recorded under compliance reference #{selectedRegForIdView.id}.
-                    </p>
-                  </div>
+
+                  {isViewable ? (
+                    isPdf ? (
+                      <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-950">
+                        <iframe
+                          src={selectedRegForIdView.validIdUrl}
+                          title="Submitted Government ID PDF"
+                          className="w-full h-[450px] bg-white"
+                          onError={() => setIdPreviewHasError(true)}
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-slate-700 bg-slate-950 p-3 flex flex-col items-center justify-center min-h-[300px] max-h-[500px] overflow-hidden">
+                        <img
+                          src={selectedRegForIdView.validIdUrl}
+                          alt="Submitted Government ID"
+                          onError={() => setIdPreviewHasError(true)}
+                          className="max-h-[460px] w-auto max-w-full rounded-lg object-contain shadow-2xl border border-slate-800"
+                        />
+                      </div>
+                    )
+                  ) : (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-8 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                        <UserCheck className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white text-sm">Document File Record: {selectedRegForIdView.validIdFileName || 'Philippine_National_ID.pdf'}</h4>
+                        <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                          File size: {selectedRegForIdView.validIdFileSizeMb || '2.40'} MB. The document signature and CDA credentials have been recorded under compliance reference #{selectedRegForIdView.id}.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* Compliance Verification Checklist */}
             <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
