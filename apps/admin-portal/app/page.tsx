@@ -496,16 +496,7 @@ export default function AdminDashboard() {
         const tenantInfo = resolveTenantCoop();
         const gm = resolveGeneralManager(tenantInfo.slug);
 
-        const storageKey = `flexcoop_iam_users_${tenantInfo.slug}`;
-        const stored = localStorage.getItem(storageKey);
         let list: PortalUser[] = [];
-
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed)) list = parsed;
-          } catch {}
-        }
 
         // Strictly purge legacy dummy test accounts
         const dummyNames = [
@@ -569,7 +560,6 @@ export default function AdminDashboard() {
         }
 
         setPortalUsers(list);
-        localStorage.setItem(storageKey, JSON.stringify(list));
       }
     } catch (e) {
       console.warn('IAM user synchronization error:', e);
@@ -754,29 +744,24 @@ export default function AdminDashboard() {
     setTimeout(() => setIamNotification(null), 3000);
   };
 
-  // Membership Registration Fields Configuration State (System Admin Control)
-  const [registrationFields, setRegistrationFields] = useState<MemberRegistrationFieldConfig[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('flexcoop_registration_fields');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          // fallback to default
-        }
-      }
-    }
-    return DEFAULT_MEMBER_REGISTRATION_FIELDS;
-  });
-
+  // Membership Registration Fields Configuration State (System Admin Control via Cloud Firestore)
+  const [registrationFields, setRegistrationFields] = useState<MemberRegistrationFieldConfig[]>(DEFAULT_MEMBER_REGISTRATION_FIELDS);
   const [editingField, setEditingField] = useState<MemberRegistrationFieldConfig | null>(null);
   const [fieldsNotification, setFieldsNotification] = useState<string | null>(null);
 
-  // Sync registration fields to localStorage
+  // Sync registration fields online to Cloud Firestore
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('flexcoop_registration_fields', JSON.stringify(registrationFields));
-    }
+    const tenantInfo = resolveTenantCoop();
+    fetch(`${getApiBaseUrl()}/system-config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-slug': tenantInfo.slug,
+      },
+      body: JSON.stringify({
+        registrationFields,
+      }),
+    }).catch((e) => console.warn('Failed to sync registration fields online:', e));
   }, [registrationFields]);
 
   const handleToggleFieldEnabled = (fieldId: string) => {
@@ -832,49 +817,10 @@ export default function AdminDashboard() {
     }
   };
 
-  // Share Capital & Stock Parameters State (Superadmin Configurable)
-  const [stockParValue, setStockParValue] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const tenant = resolveTenantCoop();
-      const saved = localStorage.getItem(`flexcoop_share_capital_config_${tenant.slug}`) || localStorage.getItem('flexcoop_share_capital_config');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.parValuePerShare) return Number(parsed.parValuePerShare);
-        } catch {}
-      }
-    }
-    return 100;
-  });
-
-  const [minSubscribedShares, setMinSubscribedShares] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const tenant = resolveTenantCoop();
-      const saved = localStorage.getItem(`flexcoop_share_capital_config_${tenant.slug}`) || localStorage.getItem('flexcoop_share_capital_config');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.minSubscribedShares) return Number(parsed.minSubscribedShares);
-        } catch {}
-      }
-    }
-    return 50;
-  });
-
-  const [minPaidUpAmount, setMinPaidUpAmount] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const tenant = resolveTenantCoop();
-      const saved = localStorage.getItem(`flexcoop_share_capital_config_${tenant.slug}`) || localStorage.getItem('flexcoop_share_capital_config');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.minPaidUpAmount) return Number(parsed.minPaidUpAmount);
-        } catch {}
-      }
-    }
-    return 1000;
-  });
-
+  // Share Capital & Stock Parameters State (Superadmin Configurable via Cloud Firestore)
+  const [stockParValue, setStockParValue] = useState<number>(100);
+  const [minSubscribedShares, setMinSubscribedShares] = useState<number>(50);
+  const [minPaidUpAmount, setMinPaidUpAmount] = useState<number>(1000);
   const [shareConfigNotification, setShareConfigNotification] = useState<string | null>(null);
 
   const handleSaveShareCapitalConfig = (e: React.FormEvent) => {
@@ -886,11 +832,7 @@ export default function AdminDashboard() {
       minPaidUpAmount: Math.max(0, Number(minPaidUpAmount) || 1000),
       updatedAt: new Date().toISOString(),
     };
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`flexcoop_share_capital_config_${tenant.slug}`, JSON.stringify(config));
-      localStorage.setItem('flexcoop_share_capital_config', JSON.stringify(config));
-    }
-    // Sync online to Cloud Firestore
+    // Sync online directly to Cloud Firestore
     fetch(`${getApiBaseUrl()}/system-config`, {
       method: 'POST',
       headers: {
@@ -910,20 +852,10 @@ export default function AdminDashboard() {
 
   const handleResetShareCapitalConfig = () => {
     const tenant = resolveTenantCoop();
-    const defaultConfig = {
-      parValuePerShare: 100,
-      minSubscribedShares: 50,
-      minPaidUpAmount: 1000,
-      updatedAt: new Date().toISOString(),
-    };
     setStockParValue(100);
     setMinSubscribedShares(50);
     setMinPaidUpAmount(1000);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`flexcoop_share_capital_config_${tenant.slug}`, JSON.stringify(defaultConfig));
-      localStorage.setItem('flexcoop_share_capital_config', JSON.stringify(defaultConfig));
-    }
-    // Sync online to Cloud Firestore
+    // Sync online directly to Cloud Firestore
     fetch(`${getApiBaseUrl()}/system-config`, {
       method: 'POST',
       headers: {
@@ -941,37 +873,14 @@ export default function AdminDashboard() {
     setTimeout(() => setShareConfigNotification(null), 4000);
   };
 
-  // Technology Fee Treatment Configuration (Superadmin Configurable: Pass-Through vs OPEX)
-  const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>(() => {
-    if (typeof window !== 'undefined') {
-      const tenant = resolveTenantCoop();
-      const saved = localStorage.getItem(`flexcoop_tech_fee_config_${tenant.slug}`) || localStorage.getItem('flexcoop_tech_fee_config');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.treatment === 'PASS_THROUGH' || parsed.treatment === 'OPEX') {
-            return parsed.treatment;
-          }
-        } catch {}
-      }
-    }
-    return 'PASS_THROUGH';
-  });
+  // Technology Fee Treatment Configuration (Superadmin Configurable: Pass-Through vs OPEX via Cloud Firestore)
+  const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
   const [techFeeNotification, setTechFeeNotification] = useState<string | null>(null);
 
   const handleSaveTechFeeConfig = (treatmentToSave: 'PASS_THROUGH' | 'OPEX') => {
     const tenant = resolveTenantCoop();
-    const config = {
-      treatment: treatmentToSave,
-      ratePercent: 1,
-      updatedAt: new Date().toISOString(),
-    };
     setTechFeeTreatment(treatmentToSave);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`flexcoop_tech_fee_config_${tenant.slug}`, JSON.stringify(config));
-      localStorage.setItem('flexcoop_tech_fee_config', JSON.stringify(config));
-    }
-    // Sync online to Cloud Firestore
+    // Sync online directly to Cloud Firestore
     fetch(`${getApiBaseUrl()}/system-config`, {
       method: 'POST',
       headers: {
@@ -1081,22 +990,8 @@ export default function AdminDashboard() {
   const [loanProducts, setLoanProducts] = useState<any[]>(DEFAULT_LOAN_PRODUCTS);
   const [productSaveNotification, setProductSaveNotification] = useState<string | null>(null);
 
-  // Load persisted products from localStorage and backend API
+  // Load persisted products from backend API
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('flexcoop_loan_products');
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setLoanProducts(parsed);
-          }
-        } catch (e) {
-          console.error('Failed to parse stored loan products:', e);
-        }
-      }
-    }
-
     fetch(`${getApiBaseUrl()}/loan-products`)
       .then((res) => res.json())
       .then((resData) => {
@@ -1108,9 +1003,6 @@ export default function AdminDashboard() {
               if (!map.has(p.code || p.id)) map.set(p.code || p.id, p);
             });
             const merged = Array.from(map.values());
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('flexcoop_loan_products', JSON.stringify(merged));
-            }
             return merged;
           });
         }
@@ -1244,9 +1136,6 @@ export default function AdminDashboard() {
 
     const updated = [createdProduct, ...loanProducts];
     setLoanProducts(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('flexcoop_loan_products', JSON.stringify(updated));
-    }
 
     try {
       await fetch(`${getApiBaseUrl()}/loan-products`, {
@@ -1273,9 +1162,6 @@ export default function AdminDashboard() {
       p.id === productId ? { ...p, isActive: newIsActive, status: newStatus } : p
     );
     setLoanProducts(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('flexcoop_loan_products', JSON.stringify(updated));
-    }
 
     try {
       await fetch(`${getApiBaseUrl()}/loan-products/${productId}`, {
@@ -1468,281 +1354,143 @@ export default function AdminDashboard() {
   const [members, setMembers] = useState<MemberRecord[]>([]);
 
   // Load authentic cooperative members (strictly guaranteeing General Manager as Member #1)
-  const loadAndSyncMembers = useCallback(() => {
+  // Load authentic cooperative members directly from Google Cloud Firestore (100% Online Single Database)
+  const loadAndSyncMembers = useCallback(async () => {
     try {
-      if (typeof window !== 'undefined') {
-        const tenantInfo = resolveTenantCoop();
-        const gm = resolveGeneralManager(tenantInfo.slug);
-        const isTestTenant = isTestCoopTenant(tenantInfo.slug);
+      const tenantInfo = resolveTenantCoop();
+      const gm = resolveGeneralManager(tenantInfo.slug);
+      const isTestTenant = isTestCoopTenant(tenantInfo.slug);
 
-        // Purge dummy/test records for production cooperatives (e.g. family-coop)
-        if (!isTestTenant) {
-          purgeTenantDummyRecords(tenantInfo.slug);
-        }
+      // Statutory Requirement: The General Manager is Member #1 (Regular Member)
+      const gmMember: MemberRecord = {
+        id: 'mem_gm_0001',
+        memberNo: 'MEM-2026-0001',
+        name: gm.name,
+        email: gm.email,
+        classification: 'REGULAR',
+        kycStatus: 'VERIFIED',
+        idType: 'PhilSys National ID (Verified General Manager)',
+        idNumber: gm.idNumber || 'CDA-GM-AUTH-0001',
+        address: gm.address || 'Philippines',
+        paidUpShares: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
+        sharesCount: 100,
+        subscribedShares: 100,
+        initialPledge: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
+        sharePaymentStatus: 'PAID_OTC',
+        savingsBalance: isTestTenant ? 10000 : 0,
+        loanBalance: 0,
+        npcConsent: 'Agreed (Statutory GM Undertaking)',
+        pmesStatus: 'COMPLETED',
+        pmesCertNo: 'PMES-CDA-GM-0001',
+        pmesDate: 'Jan 15, 2026',
+        biometricScore: 99.8,
+        amlaStatus: 'PASSED (Negative on AMLC / UN Sanctions / PEP List)',
+        reviewedBy: 'Cooperative Development Authority (CDA)',
+        reviewDate: 'Jan 15, 2026',
+        reviewNotes: 'Declared General Manager registered as Member #1 upon cooperative accreditation pursuant to RA 9520.',
+      };
 
-        const storageKey = `flexcoop_members_${tenantInfo.slug}`;
-        const stored = localStorage.getItem(storageKey);
-        let list: MemberRecord[] = [];
+      const list: MemberRecord[] = [gmMember];
 
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed)) list = parsed;
-          } catch {}
-        }
+      const [appsRes, memsRes] = await Promise.allSettled([
+        fetch(`${getApiBaseUrl()}/members/applications?coop=${tenantInfo.slug}`, {
+          headers: { 'x-tenant-slug': tenantInfo.slug },
+        }),
+        fetch(`${getApiBaseUrl()}/members?coop=${tenantInfo.slug}`, {
+          headers: { 'x-tenant-slug': tenantInfo.slug },
+        }),
+      ]);
 
-        // Strictly filter out any legacy dummy members
-        const dummyMemberNames = ['Maria Clara Santos', 'Juan Perez Dela Cruz'];
-        list = list.filter((m) => !dummyMemberNames.includes(m.name) && m.id !== 'mem_1' && m.id !== 'mem_2' && m.id !== 'mem_maria_santos');
+      if (appsRes.status === 'fulfilled' && appsRes.value.ok) {
+        const appsData = await appsRes.value.json();
+        if (appsData.success && Array.isArray(appsData.data)) {
+          appsData.data.forEach((onlineApp: any) => {
+            if (onlineApp.applicantName === gm.name) return;
+            const appId = `mem_app_${onlineApp.id}`;
+            const existingIdx = list.findIndex(
+              (m) => m.id === appId || (onlineApp.email && m.email?.toLowerCase() === onlineApp.email.toLowerCase())
+            );
 
-        // Statutory Requirement: The General Manager is Member #1 (Regular Member)
-        const gmMember: MemberRecord = {
-          id: 'mem_gm_0001',
-          memberNo: 'MEM-2026-0001',
-          name: gm.name,
-          email: gm.email,
-          classification: 'REGULAR',
-          kycStatus: 'VERIFIED',
-          idType: 'PhilSys National ID (Verified General Manager)',
-          idNumber: gm.idNumber || 'CDA-GM-AUTH-0001',
-          address: gm.address || 'Philippines',
-          paidUpShares: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
-          sharesCount: 100,
-          subscribedShares: 100,
-          initialPledge: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
-          sharePaymentStatus: 'PAID_OTC',
-          savingsBalance: isTestTenant ? 10000 : 0, // Clean 0 in production; no dummy transactions
-          loanBalance: 0,
-          npcConsent: 'Agreed (Statutory GM Undertaking)',
-          pmesStatus: 'COMPLETED',
-          pmesCertNo: 'PMES-CDA-GM-0001',
-          pmesDate: 'Jan 15, 2026',
-          biometricScore: 99.8,
-          amlaStatus: 'PASSED (Negative on AMLC / UN Sanctions / PEP List)',
-          reviewedBy: 'Cooperative Development Authority (CDA)',
-          reviewDate: 'Jan 15, 2026',
-          reviewNotes: 'Declared General Manager registered as Member #1 upon cooperative accreditation pursuant to RA 9520.',
-        };
+            const actualSubShares = onlineApp.subscribedShares !== undefined ? Number(onlineApp.subscribedShares) : 0;
+            const actualDeposit = onlineApp.initialDeposit !== undefined ? Number(onlineApp.initialDeposit) : 0;
+            const actualPledge = onlineApp.totalSubscribedAmount !== undefined ? Number(onlineApp.totalSubscribedAmount) : 0;
+            const paymentStatus = actualDeposit > 0 ? (onlineApp.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
+            const appKycStatus = onlineApp.status === 'APPROVED' ? 'VERIFIED' : (onlineApp.status === 'INACTIVE' || onlineApp.status === 'REJECTED') ? 'INACTIVE' : 'PENDING_REVIEW';
 
-        const existingGmIndex = list.findIndex(
-          (m) => m.id === 'mem_gm_0001' || m.memberNo === 'MEM-2026-0001'
-        );
-        if (existingGmIndex >= 0) {
-          list[existingGmIndex] = {
-            ...list[existingGmIndex],
-            name: gm.name,
-            email: gm.email,
-            address: gm.address || list[existingGmIndex].address,
-            loanBalance: list[existingGmIndex].loanBalance || 0,
-          };
-        } else {
-          list.unshift(gmMember);
-        }
-
-        // Sync submitted member applications from PMES registration wizard (NO dummy transactions)
-        try {
-          const appStr = localStorage.getItem('tuntong_member_applications');
-          if (appStr) {
-            const apps = JSON.parse(appStr);
-            if (Array.isArray(apps)) {
-              apps
-                .filter(
-                  (a: any) =>
-                    isCoopSlugMatch(a.coopSlug, tenantInfo.slug) &&
-                    a.applicantName &&
-                    a.applicantName !== gm.name
-                )
-                .forEach((a: any, idx: number) => {
-                  const appId = `mem_app_${a.id || idx}`;
-                  const existingIdx = list.findIndex(
-                    (m) => m.id === appId || (a.email && m.email?.toLowerCase() === a.email.toLowerCase())
-                  );
-
-                  const actualSubShares = a.subscribedShares !== undefined ? Number(a.subscribedShares) : 0;
-                  const actualDeposit = a.initialDeposit !== undefined ? Number(a.initialDeposit) : 0;
-                  const actualPledge = a.totalSubscribedAmount !== undefined ? Number(a.totalSubscribedAmount) : 0;
-                  const paymentStatus = actualDeposit > 0 ? (a.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
-                  const appKycStatus = a.status === 'APPROVED' ? 'VERIFIED' : (a.status === 'INACTIVE' || a.status === 'REJECTED') ? 'INACTIVE' : 'PENDING_REVIEW';
-
-                  const recordData: MemberRecord = {
-                    id: appId,
-                    memberNo: existingIdx >= 0 ? list[existingIdx].memberNo : `MEM-2026-${String(list.length + 1).padStart(4, '0')}`,
-                    name: a.applicantName,
-                    email: a.email,
-                    classification: 'REGULAR',
-                    kycStatus: existingIdx >= 0 ? list[existingIdx].kycStatus : appKycStatus,
-                    idType: a.idType || 'PhilSys National ID',
-                    idNumber: a.tin || a.idNumber || 'N/A',
-                    address: a.address || 'Philippines',
-                    paidUpShares: existingIdx >= 0 ? list[existingIdx].paidUpShares : actualDeposit,
-                    sharesCount: existingIdx >= 0 ? list[existingIdx].sharesCount : actualSubShares,
-                    subscribedShares: actualSubShares,
-                    initialPledge: actualPledge,
-                    sharePaymentStatus: existingIdx >= 0 ? list[existingIdx].sharePaymentStatus : paymentStatus,
-                    savingsBalance: 0, // Clean 0 - Do not create dummy savings transactions
-                    loanBalance: 0, // Clean 0 - No dummy loans
-                    npcConsent: 'Agreed (Republic Act No. 10173)',
-                    pmesStatus: 'COMPLETED',
-                    pmesCertNo: `CERT-PMES-${idx + 1000}`,
-                    pmesDate: new Date().toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    }),
-                    biometricScore: 98.5,
-                    amlaStatus: 'PASSED',
-                    reviewedBy: 'Membership & Credit Committee',
-                    reviewDate: new Date().toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    }),
-                    reviewNotes: 'Online applicant registered via PMES onboarding portal. Action Required for eKYC & Admission.',
-                    idFrontPreview: a.idFrontPreview || null,
-                    selfiePreview: a.selfiePreview || null,
-                  };
-
-                  if (existingIdx >= 0) {
-                    list[existingIdx] = {
-                      ...list[existingIdx],
-                      idFrontPreview: a.idFrontPreview || list[existingIdx].idFrontPreview,
-                      selfiePreview: a.selfiePreview || list[existingIdx].selfiePreview,
-                      address: a.address || list[existingIdx].address,
-                      idNumber: a.tin || a.idNumber || list[existingIdx].idNumber,
-                    };
-                  } else {
-                    list.push(recordData);
-                  }
-                });
-            }
-          }
-        } catch {}
-
-        setMembers(list);
-        localStorage.setItem(storageKey, JSON.stringify(list));
-
-        // Background Online Sync with Cloud Firestore via Cloud Run API
-        (async () => {
-          try {
-            const [appsRes, memsRes] = await Promise.allSettled([
-              fetch(`${getApiBaseUrl()}/members/applications`, {
-                headers: { 'x-tenant-slug': tenantInfo.slug },
+            const recordData: MemberRecord = {
+              id: appId,
+              memberNo: existingIdx >= 0 ? list[existingIdx].memberNo : `MEM-2026-${String(list.length + 1).padStart(4, '0')}`,
+              name: onlineApp.applicantName,
+              email: onlineApp.email,
+              classification: 'REGULAR',
+              kycStatus: existingIdx >= 0 ? list[existingIdx].kycStatus : appKycStatus,
+              idType: onlineApp.idType || 'PhilSys National ID',
+              idNumber: onlineApp.tin || onlineApp.idNumber || 'N/A',
+              address: onlineApp.address || 'Philippines',
+              paidUpShares: existingIdx >= 0 ? list[existingIdx].paidUpShares : actualDeposit,
+              sharesCount: existingIdx >= 0 ? list[existingIdx].sharesCount : actualSubShares,
+              subscribedShares: actualSubShares,
+              initialPledge: actualPledge,
+              sharePaymentStatus: existingIdx >= 0 ? list[existingIdx].sharePaymentStatus : paymentStatus,
+              savingsBalance: 0,
+              loanBalance: 0,
+              npcConsent: 'Agreed (Republic Act No. 10173)',
+              pmesStatus: 'COMPLETED',
+              pmesCertNo: `CERT-PMES-${onlineApp.id || 'SYNC'}`,
+              pmesDate: new Date(onlineApp.dateSubmitted || Date.now()).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
               }),
-              fetch(`${getApiBaseUrl()}/members`, {
-                headers: { 'x-tenant-slug': tenantInfo.slug },
-              }),
-            ]);
+              biometricScore: 98.5,
+              amlaStatus: 'PASSED',
+              reviewedBy: onlineApp.reviewedBy || 'Membership & Credit Committee',
+              reviewDate: onlineApp.reviewDate ? new Date(onlineApp.reviewDate).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              }) : undefined,
+              reviewNotes: onlineApp.reviewNotes || 'Online applicant registered via PMES onboarding portal. Action Required for eKYC & Admission.',
+              idFrontPreview: onlineApp.idFrontPreview || null,
+              selfiePreview: onlineApp.selfiePreview || null,
+            };
 
-            let hasUpdates = false;
-            let currentList = [...list];
-
-            if (appsRes.status === 'fulfilled' && appsRes.value.ok) {
-              const appsData = await appsRes.value.json();
-              if (appsData.success && Array.isArray(appsData.data) && appsData.data.length > 0) {
-                const rawLocalApps = localStorage.getItem('tuntong_member_applications');
-                const localApps = rawLocalApps ? JSON.parse(rawLocalApps) : [];
-                const mergedApps = [...localApps];
-
-                appsData.data.forEach((onlineApp: any) => {
-                  const existingLocalIdx = mergedApps.findIndex((a: any) => a.id === onlineApp.id || (onlineApp.email && a.email?.toLowerCase() === onlineApp.email.toLowerCase()));
-                  if (existingLocalIdx >= 0) {
-                    mergedApps[existingLocalIdx] = { ...mergedApps[existingLocalIdx], ...onlineApp };
-                  } else {
-                    mergedApps.unshift(onlineApp);
-                  }
-
-                  const appId = `mem_app_${onlineApp.id}`;
-                  const existingMemIdx = currentList.findIndex((m) => m.id === appId || (onlineApp.email && m.email?.toLowerCase() === onlineApp.email.toLowerCase()));
-                  const actualSubShares = onlineApp.subscribedShares !== undefined ? Number(onlineApp.subscribedShares) : 0;
-                  const actualDeposit = onlineApp.initialDeposit !== undefined ? Number(onlineApp.initialDeposit) : 0;
-                  const actualPledge = onlineApp.totalSubscribedAmount !== undefined ? Number(onlineApp.totalSubscribedAmount) : 0;
-                  const paymentStatus = actualDeposit > 0 ? (onlineApp.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
-                  const appKycStatus = onlineApp.status === 'APPROVED' ? 'VERIFIED' : (onlineApp.status === 'INACTIVE' || onlineApp.status === 'REJECTED') ? 'INACTIVE' : 'PENDING_REVIEW';
-
-                  const recordData: MemberRecord = {
-                    id: appId,
-                    memberNo: existingMemIdx >= 0 ? currentList[existingMemIdx].memberNo : `MEM-2026-${String(currentList.length + 1).padStart(4, '0')}`,
-                    name: onlineApp.applicantName,
-                    email: onlineApp.email,
-                    classification: 'REGULAR',
-                    kycStatus: existingMemIdx >= 0 ? currentList[existingMemIdx].kycStatus : appKycStatus,
-                    idType: onlineApp.idType || 'PhilSys National ID',
-                    idNumber: onlineApp.tin || onlineApp.idNumber || 'N/A',
-                    address: onlineApp.address || 'Philippines',
-                    paidUpShares: existingMemIdx >= 0 ? currentList[existingMemIdx].paidUpShares : actualDeposit,
-                    sharesCount: existingMemIdx >= 0 ? currentList[existingMemIdx].sharesCount : actualSubShares,
-                    subscribedShares: actualSubShares,
-                    initialPledge: actualPledge,
-                    sharePaymentStatus: existingMemIdx >= 0 ? currentList[existingMemIdx].sharePaymentStatus : paymentStatus,
-                    savingsBalance: 0,
-                    loanBalance: 0,
-                    npcConsent: 'Agreed (Republic Act No. 10173)',
-                    pmesStatus: 'COMPLETED',
-                    pmesCertNo: `CERT-PMES-${onlineApp.id || 'SYNC'}`,
-                    pmesDate: new Date(onlineApp.dateSubmitted || Date.now()).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    }),
-                    biometricScore: 98.5,
-                    amlaStatus: 'PASSED',
-                    reviewedBy: onlineApp.reviewedBy || 'Membership & Credit Committee',
-                    reviewDate: onlineApp.reviewDate ? new Date(onlineApp.reviewDate).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    }) : undefined,
-                    reviewNotes: onlineApp.reviewNotes || 'Online applicant registered via PMES onboarding portal. Action Required for eKYC & Admission.',
-                    idFrontPreview: onlineApp.idFrontPreview || null,
-                    selfiePreview: onlineApp.selfiePreview || null,
-                  };
-
-                  if (existingMemIdx >= 0) {
-                    currentList[existingMemIdx] = {
-                      ...currentList[existingMemIdx],
-                      kycStatus: recordData.kycStatus,
-                      reviewedBy: recordData.reviewedBy,
-                      reviewDate: recordData.reviewDate,
-                      reviewNotes: recordData.reviewNotes,
-                      idFrontPreview: recordData.idFrontPreview || currentList[existingMemIdx].idFrontPreview,
-                      selfiePreview: recordData.selfiePreview || currentList[existingMemIdx].selfiePreview,
-                    };
-                  } else {
-                    currentList.push(recordData);
-                  }
-                  hasUpdates = true;
-                });
-
-                localStorage.setItem('tuntong_member_applications', JSON.stringify(mergedApps));
-              }
+            if (existingIdx >= 0) {
+              list[existingIdx] = {
+                ...list[existingIdx],
+                kycStatus: recordData.kycStatus,
+                reviewedBy: recordData.reviewedBy,
+                reviewDate: recordData.reviewDate,
+                reviewNotes: recordData.reviewNotes,
+                idFrontPreview: recordData.idFrontPreview || list[existingIdx].idFrontPreview,
+                selfiePreview: recordData.selfiePreview || list[existingIdx].selfiePreview,
+              };
+            } else {
+              list.push(recordData);
             }
-
-            if (memsRes.status === 'fulfilled' && memsRes.value.ok) {
-              const memsData = await memsRes.value.json();
-              if (memsData.success && Array.isArray(memsData.data) && memsData.data.length > 0) {
-                memsData.data.forEach((onlineMem: any) => {
-                  const idx = currentList.findIndex((m) => m.id === onlineMem.id || (onlineMem.email && m.email?.toLowerCase() === onlineMem.email.toLowerCase()));
-                  if (idx >= 0) {
-                    currentList[idx] = { ...currentList[idx], ...onlineMem };
-                  } else {
-                    currentList.push(onlineMem);
-                  }
-                  hasUpdates = true;
-                });
-              }
-            }
-
-            if (hasUpdates) {
-              setMembers(currentList);
-              localStorage.setItem(storageKey, JSON.stringify(currentList));
-            }
-          } catch (syncErr) {
-            console.warn('Background online members sync error:', syncErr);
-          }
-        })();
+          });
+        }
       }
+
+      if (memsRes.status === 'fulfilled' && memsRes.value.ok) {
+        const memsData = await memsRes.value.json();
+        if (memsData.success && Array.isArray(memsData.data)) {
+          memsData.data.forEach((onlineMem: any) => {
+            const idx = list.findIndex(
+              (m) => m.id === onlineMem.id || (onlineMem.email && m.email?.toLowerCase() === onlineMem.email.toLowerCase())
+            );
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...onlineMem };
+            } else {
+              list.push(onlineMem);
+            }
+          });
+        }
+      }
+
+      setMembers(list);
     } catch (e) {
-      console.warn('Members load error:', e);
+      console.warn('Online members fetch error:', e);
     }
   }, [stockParValue]);
 
@@ -1777,6 +1525,9 @@ export default function AdminDashboard() {
             if (data.stockParValue) setStockParValue(Number(data.stockParValue));
             if (data.minSubscribedShares) setMinSubscribedShares(Number(data.minSubscribedShares));
             if (data.minPaidUpAmount !== undefined) setMinPaidUpAmount(Number(data.minPaidUpAmount));
+            if (Array.isArray(data.registrationFields) && data.registrationFields.length > 0) {
+              setRegistrationFields(data.registrationFields);
+            }
           }
         }
       } catch (err) {
@@ -1916,7 +1667,7 @@ export default function AdminDashboard() {
   const [sharePaymentMember, setSharePaymentMember] = useState<any | null>(null);
   const [sharePaymentMethod, setSharePaymentMethod] = useState<'OTC' | 'QRPH'>('QRPH');
 
-  const handleExecuteMemberDecision = () => {
+  const handleExecuteMemberDecision = async () => {
     if (!memberConfirmModal) return;
     const { action, member, notes } = memberConfirmModal;
 
@@ -1927,7 +1678,7 @@ export default function AdminDashboard() {
         : member.id;
       if (targetAppId) {
         const tenantInfo = resolveTenantCoop();
-        fetch(`${getApiBaseUrl()}/members/applications/${targetAppId}/review`, {
+        await fetch(`${getApiBaseUrl()}/members/applications/${targetAppId}/review`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1987,41 +1738,6 @@ export default function AdminDashboard() {
       );
       setMembers(updatedMembers);
 
-      try {
-        if (typeof window !== 'undefined') {
-          const tenantInfo = resolveTenantCoop();
-          localStorage.setItem(`flexcoop_members_${tenantInfo.slug}`, JSON.stringify(updatedMembers));
-
-          // Also synchronize tuntong_member_applications
-          const rawApps = localStorage.getItem('tuntong_member_applications');
-          if (rawApps) {
-            const apps = JSON.parse(rawApps);
-            if (Array.isArray(apps)) {
-              const updatedApps = apps.map((a: any) => {
-                if (
-                  `mem_app_${a.id}` === member.id ||
-                  a.email?.toLowerCase() === member.email?.toLowerCase() ||
-                  a.applicantName === member.name
-                ) {
-                  return {
-                    ...a,
-                    status: 'APPROVED',
-                    reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
-                    reviewDate: new Date().toISOString(),
-                    reviewNotes: notes || 'Application approved.',
-                  };
-                }
-                return a;
-              });
-              localStorage.setItem('tuntong_member_applications', JSON.stringify(updatedApps));
-            }
-          }
-          window.dispatchEvent(new Event('storage'));
-        }
-      } catch (err) {
-        console.warn('Error saving approved member:', err);
-      }
-
       setMemberActionNotification(
         `Member ${member.memberNo} (${member.name}) APPROVED! ${isFreeTier ? `Free onboarding tier (Member #${currentMemberSequence} of 15 free).` : `Coop charged ₱50.00 onboarding fee (Member #${currentMemberSequence}, Invoice ${newInvoice.id}).`} Member can now pay initial Share Capital (₱${(member.initialPledge || 3000).toLocaleString()}) via OTC (₱0 fee) or QR Ph (1.5% fee).`
       );
@@ -2039,44 +1755,12 @@ export default function AdminDashboard() {
       );
       setMembers(updatedMembers);
 
-      try {
-        if (typeof window !== 'undefined') {
-          const tenantInfo = resolveTenantCoop();
-          localStorage.setItem(`flexcoop_members_${tenantInfo.slug}`, JSON.stringify(updatedMembers));
-
-          const rawApps = localStorage.getItem('tuntong_member_applications');
-          if (rawApps) {
-            const apps = JSON.parse(rawApps);
-            if (Array.isArray(apps)) {
-              const updatedApps = apps.map((a: any) => {
-                if (
-                  `mem_app_${a.id}` === member.id ||
-                  a.email?.toLowerCase() === member.email?.toLowerCase() ||
-                  a.applicantName === member.name
-                ) {
-                  return {
-                    ...a,
-                    status: 'INACTIVE',
-                    reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
-                    reviewDate: new Date().toISOString(),
-                    reviewNotes: notes || 'Application set to INACTIVE / Returned for correction.',
-                  };
-                }
-                return a;
-              });
-              localStorage.setItem('tuntong_member_applications', JSON.stringify(updatedApps));
-            }
-          }
-          window.dispatchEvent(new Event('storage'));
-        }
-      } catch (err) {
-        console.warn('Error saving deactivated member:', err);
-      }
-
       setMemberActionNotification(
         `Member ${member.memberNo} (${member.name}) application set to INACTIVE / Returned for correction.`
       );
     }
+
+    loadAndSyncMembers();
 
     setTimeout(() => setMemberActionNotification(null), 6000);
     setMemberConfirmModal(null);
@@ -2100,14 +1784,6 @@ export default function AdminDashboard() {
     );
     setMembers(updatedMembers);
 
-    try {
-      if (typeof window !== 'undefined') {
-        const tenantInfo = resolveTenantCoop();
-        localStorage.setItem(`flexcoop_members_${tenantInfo.slug}`, JSON.stringify(updatedMembers));
-        window.dispatchEvent(new Event('storage'));
-      }
-    } catch {}
-
     if (sharePaymentMethod === 'QRPH') {
       // Requirement: Share Capital paid via QR payment must be added in Coops Platform Escrow
       setCoopPlatformEscrowBalance((prev) => prev + pledge);
@@ -2118,6 +1794,24 @@ export default function AdminDashboard() {
       setMemberActionNotification(
         `Share Capital ₱${pledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} paid Over-The-Counter (₱0 fee). Official Receipt generated!`
       );
+    }
+
+    try {
+      const tenantInfo = resolveTenantCoop();
+      fetch(`${getApiBaseUrl()}/shares/deposit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          memberId: sharePaymentMember.id,
+          amount: pledge,
+          channel: sharePaymentMethod === 'QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
+        }),
+      }).catch((e) => console.warn('Online shares deposit sync error:', e));
+    } catch (e) {
+      console.warn('Error initiating online shares deposit:', e);
     }
 
     setTimeout(() => setMemberActionNotification(null), 6000);

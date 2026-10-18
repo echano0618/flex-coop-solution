@@ -261,24 +261,7 @@ export default function MemberRegisterPage() {
           }
         }
       } catch (err) {
-        // Fallback to local
-      }
-
-      if (typeof window !== 'undefined') {
-        const savedShareConfig = localStorage.getItem(`flexcoop_share_capital_config_${slug}`) || localStorage.getItem('flexcoop_share_capital_config');
-        if (savedShareConfig) {
-          try {
-            const parsed = JSON.parse(savedShareConfig);
-            const par = Number(parsed.parValuePerShare) || 100;
-            const minShares = Number(parsed.minSubscribedShares) || 50;
-            const minDeposit = Number(parsed.minPaidUpAmount) || 1000;
-            setParValuePerShare(par);
-            setMinSubscribedShares(minShares);
-            setMinInitialDeposit(minDeposit);
-            setSubscribedShares(minShares);
-            setInitialDeposit(minDeposit);
-          } catch {}
-        }
+        console.warn('Could not load online share capital configuration:', err);
       }
     }
     loadConfig();
@@ -442,7 +425,7 @@ export default function MemberRegisterPage() {
 
     // 1. Submit online to Cloud Run API / Cloud Firestore
     try {
-      await fetch(`${getApiBaseUrl()}/auth/member/register`, {
+      const res = await fetch(`${getApiBaseUrl()}/auth/member/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -486,115 +469,22 @@ export default function MemberRegisterPage() {
           coopName: effectiveCoopName,
         }),
       });
-    } catch (apiErr) {
-      console.warn('Online registration API error (falling back to local cache):', apiErr);
-    }
-
-    try {
-      if (typeof window !== 'undefined') {
-        // 1. Save to global member applications queue
-        const existingApps = JSON.parse(localStorage.getItem('tuntong_member_applications') || '[]');
-        localStorage.setItem('tuntong_member_applications', JSON.stringify([newApp, ...existingApps]));
-
-        // 2. Persist portal credentials for strict authentication
-        const credEntry = {
-          username: newApp.username,
-          email: newApp.email,
-          phone: newApp.phone,
-          pin: (password || '123456').trim(),
-          name: fullName,
-          applicantId: appId,
-          coopSlug: effectiveSlug,
-          coopName: effectiveCoopName,
-          status: 'UNDER_REVIEW',
-          createdAt: new Date().toISOString(),
-        };
-
-        const scopedCredsKey = `flexcoop_member_credentials_${effectiveSlug}`;
-        const existingScopedCreds = JSON.parse(localStorage.getItem(scopedCredsKey) || '[]');
-        localStorage.setItem(
-          scopedCredsKey,
-          JSON.stringify([
-            credEntry,
-            ...existingScopedCreds.filter((c: any) => c.username !== credEntry.username && c.email !== credEntry.email),
-          ])
-        );
-
-        const globalCreds = JSON.parse(localStorage.getItem('flexcoop_member_credentials') || '[]');
-        localStorage.setItem(
-          'flexcoop_member_credentials',
-          JSON.stringify([
-            credEntry,
-            ...globalCreds.filter((c: any) => c.username !== credEntry.username && c.email !== credEntry.email),
-          ])
-        );
-
-        // 3. Immediately register applicant into the active tenant member directory
-        const membersKey = `flexcoop_members_${effectiveSlug}`;
-        const existingMembers = JSON.parse(localStorage.getItem(membersKey) || '[]');
-        const actualDeposit = Number(initialDeposit);
-        const actualSubShares = Number(subscribedShares);
-        const paymentStatus = actualDeposit > 0 ? (paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
-
-        const memberEntry = {
-          id: `mem_app_${appId}`,
-          memberNo: `MEM-2026-${String(existingMembers.length + 2).padStart(4, '0')}`,
-          name: fullName,
-          username: newApp.username,
-          email: newApp.email,
-          phone: newApp.phone,
-          classification: 'REGULAR',
-          kycStatus: 'PENDING_REVIEW',
-          idType: idType || 'PhilSys National ID',
-          idNumber: tin || 'N/A',
-          address: formattedPsgcAddress || 'Philippines',
-          paidUpShares: actualDeposit,
-          sharesCount: actualSubShares,
-          subscribedShares: actualSubShares,
-          initialPledge: Number(totalSubscribedAmount),
-          sharePaymentStatus: paymentStatus,
-          savingsBalance: 0,
-          loanBalance: 0,
-          npcConsent: 'Agreed (Republic Act No. 10173)',
-          pmesStatus: 'COMPLETED',
-          pmesCertNo: `CERT-PMES-${Math.floor(1000 + Math.random() * 9000)}`,
-          pmesDate: new Date().toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          }),
-          biometricScore: 98.5,
-          amlaStatus: 'PASSED',
-          reviewedBy: 'Membership & Credit Committee',
-          reviewDate: new Date().toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          }),
-          reviewNotes: 'Online applicant registered via PMES onboarding portal. Pending eKYC review & sign-off.',
-          idFrontPreview: idFrontFile?.previewUrl || null,
-          selfiePreview: selfiePreview || null,
-        };
-
-        const updatedMembers = [
-          memberEntry,
-          ...existingMembers.filter((m: any) => m.email !== memberEntry.email && m.id !== memberEntry.id),
-        ];
-        localStorage.setItem(membersKey, JSON.stringify(updatedMembers));
-
-        // 4. Notify open windows/tabs of the new registration
-        window.dispatchEvent(new CustomEvent('flexcoop_member_registered', { detail: newApp }));
-        window.dispatchEvent(new Event('storage'));
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || 'Failed to submit registration. Please verify your details.');
+        setIsSubmitting(false);
+        return;
       }
-    } catch (err) {
-      console.warn('Error saving member registration:', err);
+    } catch (apiErr) {
+      console.error('Online registration API error:', apiErr);
+      alert('Unable to connect to the cooperative online server. Please verify your connection.');
+      setIsSubmitting(false);
+      return;
     }
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setApplicationId(appId);
-      setStep(5); // Success step
-    }, 1000);
+    setIsSubmitting(false);
+    setApplicationId(appId);
+    setStep(5); // Success step
   };
 
   return (

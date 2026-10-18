@@ -348,23 +348,6 @@ export default function MemberPortalPage() {
   const [selectedProductId, setSelectedProductId] = useState<string>('prod_regular');
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('flexcoop_loan_products');
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setLoanProducts(parsed);
-            const activeOnes = parsed.filter((p: any) => p.isActive !== false && p.status !== 'INACTIVE');
-            if (activeOnes.length > 0) {
-              setSelectedProductId(activeOnes[0].id);
-            }
-          }
-        } catch (e) {
-          console.error('Failed to parse loan products:', e);
-        }
-      }
-    }
 
     fetch(`${getApiBaseUrl()}/loan-products`)
       .then((r) => r.json())
@@ -497,21 +480,21 @@ export default function MemberPortalPage() {
   const requiresCoMaker = Boolean(selectedProduct.requiresCoMaker);
   const coMakerRuleText = selectedProduct.coMakerRuleDescription || 'Requires active co-maker endorsement with joint solidary liability.';
 
-  // Technology Fee Treatment (Pass-Through vs OPEX)
-  const techFeeConfig = useMemo(() => {
-    if (typeof window !== 'undefined') {
-      const slug = tenantInfo.slug || 'default';
-      const saved = localStorage.getItem(`flexcoop_tech_fee_config_${slug}`) || localStorage.getItem('flexcoop_tech_fee_config');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {}
-      }
-    }
-    return { treatment: 'PASS_THROUGH', ratePercent: 1 };
+  // Technology Fee Treatment (Online Single Database Config: Pass-Through vs OPEX)
+  const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
+
+  useEffect(() => {
+    fetch(`${getApiBaseUrl()}/system-config?coop=${tenantInfo.slug}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res && res.success && res.data?.techFeeTreatment) {
+          setTechFeeTreatment(res.data.techFeeTreatment);
+        }
+      })
+      .catch(() => {});
   }, [tenantInfo.slug]);
 
-  const isTechFeePassThrough = (techFeeConfig?.treatment || 'PASS_THROUGH') === 'PASS_THROUGH';
+  const isTechFeePassThrough = techFeeTreatment === 'PASS_THROUGH';
   const techFeeAmount = Math.round(loanAmount * 0.01 * 100) / 100;
   const memberTechFeeDeduction = isTechFeePassThrough ? techFeeAmount : 0;
   const coopServiceFee = loanAmount * (selectedProduct.serviceFeeRate || 0.015);
