@@ -261,3 +261,88 @@ export function clearTenantAdminSession(slug?: string) {
   }
   document.cookie = 'flexcoop_admin_session=; path=/; max-age=0';
 }
+
+export interface GeneralManagerInfo {
+  name: string;
+  email: string;
+  address?: string;
+  tin?: string;
+  idNumber?: string;
+  phone?: string;
+}
+
+/**
+ * Resolves the officially registered General Manager for the cooperative.
+ * Sources from coop-register records, active authenticated session, or tenant identity.
+ */
+export function resolveGeneralManager(targetSlug?: string): GeneralManagerInfo {
+  if (typeof window === 'undefined') {
+    return {
+      name: 'General Manager',
+      email: 'gm@coop.tuntongtech.com',
+      address: 'Philippines',
+    };
+  }
+
+  const tenantInfo = resolveTenantCoop();
+  const slug = targetSlug || tenantInfo.slug;
+
+  // 1. Check registrations in localStorage (from coop-register or approved queue)
+  try {
+    const regStr = localStorage.getItem('tuntong_coop_registrations');
+    if (regStr) {
+      const regs = JSON.parse(regStr);
+      if (Array.isArray(regs) && regs.length > 0) {
+        const match =
+          slug && slug !== 'default'
+            ? regs.find((r: any) => r.slug?.toLowerCase() === slug.toLowerCase())
+            : regs.find((r: any) => r.status === 'APPROVED') || regs[0];
+
+        if (match) {
+          const fullName =
+            [match.adminFirstName, match.adminMiddleName, match.adminLastName]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || match.adminFullName;
+          const email = match.adminEmail || match.contactEmail;
+          if (fullName && email) {
+            return {
+              name: fullName,
+              email: email,
+              address: match.address || 'Philippines',
+              tin: match.tin,
+              idNumber: match.cdaRegistrationNumber,
+              phone: match.contactPhone,
+            };
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Check active admin session if logged in
+  try {
+    const sess = getTenantAdminSession(slug);
+    if (sess) {
+      if (
+        sess.role === 'GENERAL_MANAGER' ||
+        sess.roleTitle?.toLowerCase().includes('general manager')
+      ) {
+        return {
+          name: sess.name || 'General Manager',
+          email: sess.email || `gm@${slug !== 'default' ? slug + '-coop.' : ''}tuntongtech.com`,
+          address: 'Philippines',
+        };
+      }
+    }
+  } catch {}
+
+  // 3. Known / fallback defaults
+  const emailDomain =
+    slug && slug !== 'default' ? `${slug}-coop.tuntongtech.com` : 'coop.tuntongtech.com';
+  return {
+    name: 'General Manager',
+    email: `gm@${emailDomain}`,
+    address: 'Philippines',
+  };
+}

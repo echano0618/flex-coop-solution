@@ -43,6 +43,7 @@ import {
   getTenantMemberSession,
   getTenantAdminSession,
   clearTenantMemberSession,
+  resolveGeneralManager,
   TenantInfo,
 } from '../tenant-utils';
 
@@ -215,14 +216,31 @@ export default function MemberPortalPage() {
                 name: fullName,
                 initials: initials || 'GM',
                 type: 'General Manager (Regular Member)',
-                paidUpCapital: 25000,
-                sharesCount: 250,
-                savingsBalance: 10000,
+                paidUpCapital: 10000,
+                sharesCount: 100,
+                savingsBalance: 5000,
                 idType: 'CDA General Manager Verified PhilSys ID',
               });
               return;
             }
           } catch {}
+        }
+
+        const gm = resolveGeneralManager(info.slug);
+        if (gm && gm.name) {
+          const initials = gm.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+          setCustomMember({
+            id: 'mem_gm_0001',
+            memberNumber: 'MEM-2026-0001',
+            name: gm.name,
+            initials: initials || 'GM',
+            type: 'General Manager (Regular Member)',
+            paidUpCapital: 10000,
+            sharesCount: 100,
+            savingsBalance: 5000,
+            idType: 'CDA General Manager Verified PhilSys ID',
+          });
+          return;
         }
       }
     } catch (e) {
@@ -230,29 +248,27 @@ export default function MemberPortalPage() {
     }
   }, []);
 
-  const currentMember = customMember || (currentPersona === 'maria'
-    ? {
-        id: 'mem_1',
-        memberNumber: 'MEM-2026-0001',
-        name: 'Maria Clara Santos',
-        initials: 'MS',
-        type: 'Regular Member',
-        paidUpCapital: 15000,
-        sharesCount: 150,
-        savingsBalance: 5000,
-        idType: 'PhilSys National ID (Encrypted SPI)',
-      }
-    : {
-        id: 'mem_2',
-        memberNumber: 'MEM-2026-0002',
-        name: 'Juan Perez Dela Cruz',
-        initials: 'JD',
-        type: 'Regular Member',
-        paidUpCapital: 10000,
-        sharesCount: 100,
-        savingsBalance: 2000,
-        idType: "Driver's License (Encrypted SPI)",
-      });
+  const gmInfo = resolveGeneralManager(tenantInfo.slug);
+  const gmInitials = gmInfo.name
+    ? gmInfo.name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+    : 'GM';
+
+  const currentMember = customMember || {
+    id: 'mem_gm_0001',
+    memberNumber: 'MEM-2026-0001',
+    name: gmInfo.name || 'General Manager',
+    initials: gmInitials || 'GM',
+    type: 'General Manager (Regular Member)',
+    paidUpCapital: 10000,
+    sharesCount: 100,
+    savingsBalance: 5000,
+    idType: 'CDA General Manager Verified PhilSys ID',
+  };
 
   const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
 
@@ -367,7 +383,7 @@ export default function MemberPortalPage() {
   // Member Loan Application State
   const [loanAmount, setLoanAmount] = useState<number>(50000);
   const [loanTerm, setLoanTerm] = useState<number>(12);
-  const [coMaker, setCoMaker] = useState<string>('Juan Perez Dela Cruz (MEM-2026-0002)');
+  const [coMaker, setCoMaker] = useState<string>('Co-Maker Member (MEM-2026-0002)');
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [applicationSubmitted, setApplicationSubmitted] = useState<boolean>(false);
 
@@ -375,7 +391,7 @@ export default function MemberPortalPage() {
   const [settlementChannel, setSettlementChannel] = useState<'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER'>('BANK_TRANSFER');
   const [settlementInstitution, setSettlementInstitution] = useState<string>('Land Bank of the Philippines');
   const [settlementAccountNumber, setSettlementAccountNumber] = useState<string>('1092-8374-65');
-  const [settlementAccountName, setSettlementAccountName] = useState<string>('Maria Clara Santos');
+  const [settlementAccountName, setSettlementAccountName] = useState<string>('');
   const [submittedSettlementRecord, setSubmittedSettlementRecord] = useState<{
     channel: 'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER';
     institutionName: string;
@@ -791,7 +807,12 @@ export default function MemberPortalPage() {
                   <div>
                     <span className="font-bold text-amber-950 text-sm">You have a Pending Co-Maker Endorsement Request!</span>
                     <p className="text-amber-800 mt-0.5">
-                      Maria Clara Santos designated your Member ID (MEM-2026-0002) as loan co-maker. Your joint solidary acceptance is required before her loan is reviewed.
+                      {(() => {
+                        const req = endorsementRequests.find(
+                          (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
+                        );
+                        return `${req?.borrowerName || 'A member'} designated your Member ID (${currentMember.memberNumber}) as loan co-maker. Your joint solidary acceptance is required before the loan is reviewed.`;
+                      })()}
                     </p>
                   </div>
                 </div>
@@ -1452,12 +1473,12 @@ export default function MemberPortalPage() {
                       </div>
                     </>
                   ) : (
-                    /* Juan Has Zero Loans */
+                    /* Zero Active Borrowings */
                     <div className="p-12 text-center bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
                       <CreditCard className="w-12 h-12 text-slate-400 mx-auto" />
                       <h3 className="font-bold text-base text-slate-800">Zero Active Borrowings</h3>
                       <p className="text-xs text-slate-500 max-w-md mx-auto">
-                        Juan Perez Dela Cruz ({currentMember.memberNumber}) has clean credit standing with no outstanding loan obligations. Juan is eligible to co-make or apply for up to 3x his share capital.
+                        {currentMember.name} ({currentMember.memberNumber}) has clean credit standing with no outstanding loan obligations. Member is eligible to co-make or apply for up to 3x their share capital.
                       </p>
                       <div className="pt-2">
                         <button
@@ -1504,7 +1525,7 @@ export default function MemberPortalPage() {
                     PENDING_CO_MAKER_ACCEPTANCE
                   </span>.
                   <br /><br />
-                  Co-maker <strong>Juan Perez Dela Cruz ({coMakerMemberIdInput})</strong> must log into their own account and accept the Joint & Solidary Liability Undertaking before this application can be pushed to the Loan Officer review pipeline.
+                  Co-maker <strong>{coMaker || `Member (${coMakerMemberIdInput})`}</strong> must log into their own account and accept the Joint & Solidary Liability Undertaking before this application can be pushed to the Loan Officer review pipeline.
                 </p>
 
                 {submittedSettlementRecord && (
@@ -2293,11 +2314,11 @@ export default function MemberPortalPage() {
               <div className="grid grid-cols-2 gap-4 text-xs text-slate-700">
                 <div>
                   <span className="text-slate-500">Creditor: </span>
-                  <strong>Cooperative Enterprise</strong> (CDA Regulated)
+                  <strong>{tenantInfo.name || 'Cooperative Enterprise'}</strong> (CDA Regulated)
                 </div>
                 <div>
                   <span className="text-slate-500">Borrower: </span>
-                  <strong>Maria Clara Santos</strong> (MEM-2026-0001)
+                  <strong>{currentMember.name}</strong> ({currentMember.memberNumber})
                 </div>
                 <div>
                   <span className="text-slate-500">Gross Loan Principal: </span>
@@ -2323,7 +2344,7 @@ export default function MemberPortalPage() {
 
               <div className="p-4 bg-white rounded-lg border border-slate-200 text-xs font-mono text-slate-700 leading-relaxed">
                 <div className="font-bold text-slate-900 uppercase mb-1">PROMISSORY NOTE & LOAN AGREEMENT SUMMARY</div>
-                "FOR VALUE RECEIVED, I, MARIA CLARA SANTOS, promise to pay to the order of THE COOPERATIVE the sum of PESOS FIFTY THOUSAND (PHP 50,000.00) in 12 equal monthly installments of PHP 4,442.44. In case of default, a 3% monthly surcharge applies. Solidary liability acknowledged pursuant to the Cooperative Bylaws."
+                {`"FOR VALUE RECEIVED, I, ${currentMember.name.toUpperCase()}, promise to pay to the order of ${(tenantInfo.name || 'THE COOPERATIVE').toUpperCase()} the sum of PESOS FIFTY THOUSAND (PHP 50,000.00) in 12 equal monthly installments of PHP 4,442.44. In case of default, a 3% monthly surcharge applies. Solidary liability acknowledged pursuant to the Cooperative Bylaws."`}
               </div>
             </div>
           </div>
@@ -2349,16 +2370,16 @@ export default function MemberPortalPage() {
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Full Name:</span>
-                  <span className="font-bold text-slate-900">Maria Clara Santos</span>
+                  <span className="font-bold text-slate-900">{currentMember.name}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Membership Number:</span>
-                  <span className="font-mono font-bold text-slate-900">MEM-2026-0001</span>
+                  <span className="font-mono font-bold text-slate-900">{currentMember.memberNumber}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Verified ID Type:</span>
                   <span className="font-semibold text-emerald-700 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> PhilSys National ID (Encrypted SPI)
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> {currentMember.idType || 'PhilSys National ID (Encrypted SPI)'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -3630,12 +3651,12 @@ export default function MemberPortalPage() {
                     <div className="text-[10px] text-slate-500 uppercase mt-1">Cooperative Member</div>
                   </div>
                   <div>
-                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">Danilo Macapagal</div>
+                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">{gmInfo.name || 'General Manager'}</div>
                     <div className="text-[10px] text-slate-500 uppercase mt-1">General Manager</div>
                   </div>
                   <div>
-                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">Corazon Aquino-Santos, CPA</div>
-                    <div className="text-[10px] text-slate-500 uppercase mt-1">Chief Accountant</div>
+                    <div className="border-b border-slate-800 pb-1 font-bold text-slate-900">Chief Accountant</div>
+                    <div className="text-[10px] text-slate-500 uppercase mt-1">Certified Public Accountant</div>
                   </div>
                 </div>
               </div>
