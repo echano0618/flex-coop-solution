@@ -5,7 +5,6 @@ WORKDIR /app
 
 # Copy monorepo configuration
 COPY package*.json ./
-COPY tsconfig*.json ./
 COPY packages ./packages
 COPY apps/admin-portal ./apps/admin-portal
 
