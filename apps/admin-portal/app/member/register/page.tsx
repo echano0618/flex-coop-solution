@@ -242,9 +242,28 @@ export default function MemberRegisterPage() {
     async function loadConfig() {
       const info = resolveTenantCoop();
       const slug = info.slug || 'default';
+      const cleanSlug = slug.replace(/[-_]coop$/, '');
+      const tenantId = `tenant_${cleanSlug}`;
+      const storageKey = `flexcoop_registration_fields_${slug}`;
+
+      // 1. Instantly load from local storage cache if available
+      try {
+        const cached = localStorage.getItem(storageKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setFieldConfigs(parsed);
+          }
+        }
+      } catch {}
+
+      // 2. Fetch authoritative configuration from Cloud Firestore
       try {
         const res = await fetch(`${getApiBaseUrl()}/system-config`, {
-          headers: { 'x-tenant-slug': slug },
+          headers: {
+            'x-tenant-slug': slug,
+            'x-tenant-id': tenantId,
+          },
         });
         if (res.ok) {
           const cfgData = await res.json();
@@ -259,15 +278,33 @@ export default function MemberRegisterPage() {
             setInitialDeposit(minDeposit);
             if (Array.isArray(cfgData.data.registrationFields) && cfgData.data.registrationFields.length > 0) {
               setFieldConfigs(cfgData.data.registrationFields);
+              try {
+                localStorage.setItem(storageKey, JSON.stringify(cfgData.data.registrationFields));
+              } catch {}
             }
             return;
           }
         }
       } catch (err) {
-        console.warn('Could not load online share capital configuration:', err);
+        console.warn('Could not load online system configuration:', err);
       }
     }
     loadConfig();
+
+    const handleStorageChange = (e: StorageEvent) => {
+      const info = resolveTenantCoop();
+      const slug = info.slug || 'default';
+      if (e.key === `flexcoop_registration_fields_${slug}` && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setFieldConfigs(parsed);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   // Cleanup camera stream on unmount

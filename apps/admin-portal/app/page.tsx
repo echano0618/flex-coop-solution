@@ -71,6 +71,8 @@ import {
   DollarSign,
   Sparkles,
   Briefcase,
+  Save,
+  Loader2,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -749,72 +751,96 @@ export default function AdminDashboard() {
   const [registrationFields, setRegistrationFields] = useState<MemberRegistrationFieldConfig[]>(DEFAULT_MEMBER_REGISTRATION_FIELDS);
   const [editingField, setEditingField] = useState<MemberRegistrationFieldConfig | null>(null);
   const [fieldsNotification, setFieldsNotification] = useState<string | null>(null);
+  const [isSavingFields, setIsSavingFields] = useState(false);
 
-  // Sync registration fields online to Cloud Firestore
-  useEffect(() => {
+  // Explicitly persist registration fields to Cloud Firestore & local cache (NO destructive auto-overwrite on mount)
+  const saveRegistrationFieldsOnline = async (fieldsToSave: MemberRegistrationFieldConfig[], customSuccessMsg?: string) => {
+    setIsSavingFields(true);
     const tenantInfo = resolveTenantCoop();
-    fetch(`${getApiBaseUrl()}/system-config`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-slug': tenantInfo.slug,
-      },
-      body: JSON.stringify({
-        registrationFields,
-      }),
-    }).catch((e) => console.warn('Failed to sync registration fields online:', e));
-  }, [registrationFields]);
+    const cleanSlug = tenantInfo.slug.replace(/[-_]coop$/, '');
+    const tenantId = `tenant_${cleanSlug}`;
+    const storageKey = `flexcoop_registration_fields_${tenantInfo.slug}`;
+
+    // 1. Instantly persist to localStorage for seamless cross-refresh and offline resilience
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(fieldsToSave));
+    } catch {}
+
+    // 2. Persist to Cloud Firestore via backend API
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/system-config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': tenantId,
+        },
+        body: JSON.stringify({
+          registrationFields: fieldsToSave,
+        }),
+      });
+
+      if (res.ok) {
+        setFieldsNotification(customSuccessMsg || 'Dynamic fields saved to Cloud Firestore & updated for Member Registration.');
+      } else {
+        setFieldsNotification('Saved to local storage. Syncing with Cloud Firestore...');
+      }
+    } catch (e) {
+      console.warn('Failed to sync registration fields online:', e);
+      setFieldsNotification('Saved locally in offline mode.');
+    } finally {
+      setIsSavingFields(false);
+      setTimeout(() => setFieldsNotification(null), 4000);
+    }
+  };
 
   const handleToggleFieldEnabled = (fieldId: string) => {
-    setRegistrationFields((prev) =>
-      prev.map((f) => {
-        if (f.id === fieldId) {
-          if (f.isSystemCore) {
-            alert(`The field "${f.label}" is a core statutory identification field and cannot be disabled.`);
-            return f;
-          }
-          const updated = { ...f, enabled: !f.enabled };
-          setFieldsNotification(`Field "${f.label}" is now ${updated.enabled ? 'ENABLED' : 'DISABLED'} for member registration.`);
-          setTimeout(() => setFieldsNotification(null), 3500);
-          return updated;
-        }
-        return f;
-      })
-    );
+    const target = registrationFields.find((f) => f.id === fieldId);
+    if (!target) return;
+    if (target.isSystemCore) {
+      alert(`The field "${target.label}" is a core statutory identification field and cannot be disabled.`);
+      return;
+    }
+    const updated = registrationFields.map((f) => {
+      if (f.id === fieldId) {
+        return { ...f, enabled: !f.enabled };
+      }
+      return f;
+    });
+    setRegistrationFields(updated);
+    const newStatus = !target.enabled ? 'ENABLED' : 'DISABLED';
+    saveRegistrationFieldsOnline(updated, `Field "${target.label}" is now ${newStatus} on member self-registration.`);
   };
 
   const handleToggleFieldRequired = (fieldId: string) => {
-    setRegistrationFields((prev) =>
-      prev.map((f) => {
-        if (f.id === fieldId) {
-          if (f.isSystemCore) {
-            alert(`The field "${f.label}" is a statutory requirement and must remain required.`);
-            return f;
-          }
-          const updated = { ...f, required: !f.required };
-          setFieldsNotification(`Field "${f.label}" is now ${updated.required ? 'MANDATORY (*)' : 'OPTIONAL'} on registration.`);
-          setTimeout(() => setFieldsNotification(null), 3500);
-          return updated;
-        }
-        return f;
-      })
-    );
+    const target = registrationFields.find((f) => f.id === fieldId);
+    if (!target) return;
+    if (target.isSystemCore) {
+      alert(`The field "${target.label}" is a statutory requirement and must remain required.`);
+      return;
+    }
+    const updated = registrationFields.map((f) => {
+      if (f.id === fieldId) {
+        return { ...f, required: !f.required };
+      }
+      return f;
+    });
+    setRegistrationFields(updated);
+    const newRequirement = !target.required ? 'MANDATORY (*)' : 'OPTIONAL';
+    saveRegistrationFieldsOnline(updated, `Field "${target.label}" is now ${newRequirement} on member self-registration.`);
   };
 
   const handleSaveFieldEdit = (updatedField: MemberRegistrationFieldConfig) => {
-    setRegistrationFields((prev) =>
-      prev.map((f) => (f.id === updatedField.id ? updatedField : f))
-    );
+    const updated = registrationFields.map((f) => (f.id === updatedField.id ? updatedField : f));
+    setRegistrationFields(updated);
     setEditingField(null);
-    setFieldsNotification(`Field settings for "${updatedField.label}" updated successfully.`);
-    setTimeout(() => setFieldsNotification(null), 3500);
+    saveRegistrationFieldsOnline(updated, `Field settings for "${updatedField.label}" updated & saved to Cloud Firestore.`);
   };
 
   const handleResetRegistrationFields = () => {
     if (confirm('Reset all membership registration fields to standard cooperative defaults?')) {
       setRegistrationFields(DEFAULT_MEMBER_REGISTRATION_FIELDS);
-      setFieldsNotification('Registration fields reset to default template.');
-      setTimeout(() => setFieldsNotification(null), 3500);
+      saveRegistrationFieldsOnline(DEFAULT_MEMBER_REGISTRATION_FIELDS, 'Registration fields reset to default CDA template & saved to Cloud Firestore.');
     }
   };
 
@@ -1665,10 +1691,29 @@ export default function AdminDashboard() {
   // Load system configuration online from Cloud Firestore
   useEffect(() => {
     async function loadOnlineSystemConfig() {
+      const tenantInfo = resolveTenantCoop();
+      const cleanSlug = tenantInfo.slug.replace(/[-_]coop$/, '');
+      const tenantId = `tenant_${cleanSlug}`;
+      const storageKey = `flexcoop_registration_fields_${tenantInfo.slug}`;
+
+      // 1. Instantly preload from localStorage cache if available
       try {
-        const tenantInfo = resolveTenantCoop();
+        const cached = localStorage.getItem(storageKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setRegistrationFields(parsed);
+          }
+        }
+      } catch {}
+
+      // 2. Fetch authoritative configuration from Cloud Firestore
+      try {
         const res = await fetch(`${getApiBaseUrl()}/system-config`, {
-          headers: { 'x-tenant-slug': tenantInfo.slug },
+          headers: {
+            'x-tenant-slug': tenantInfo.slug,
+            'x-tenant-id': tenantId,
+          },
         });
         if (res.ok) {
           const resData = await res.json();
@@ -1684,6 +1729,9 @@ export default function AdminDashboard() {
             if (data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(data.coopFilingFeeRatePercent));
             if (Array.isArray(data.registrationFields) && data.registrationFields.length > 0) {
               setRegistrationFields(data.registrationFields);
+              try {
+                localStorage.setItem(storageKey, JSON.stringify(data.registrationFields));
+              } catch {}
             }
           }
         }
@@ -9591,6 +9639,19 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isSavingFields}
+                        onClick={() => saveRegistrationFieldsOnline(registrationFields, 'Membership dynamic fields successfully saved to Cloud Firestore & live on Member Registration.')}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs border border-emerald-500/30 flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                      >
+                        {isSavingFields ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Save className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isSavingFields ? 'Saving...' : 'Save Configuration'}</span>
+                      </button>
                       <button
                         type="button"
                         onClick={handleResetRegistrationFields}

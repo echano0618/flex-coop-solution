@@ -40,6 +40,7 @@ export class AppDataStore {
   public creditTransactions: PlatformCreditTransaction[] = [];
   public systemBroadcasts: SystemBroadcast[] = [];
   public coopRegistrations: CooperativeRegistration[] = [];
+  public systemConfigs: Map<string, any> = new Map(); // tenantId -> SystemConfig
 
   constructor() {
     this.seedInitialTenantData();

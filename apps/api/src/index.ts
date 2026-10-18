@@ -1301,8 +1301,15 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
     try {
       const fsService = FirestoreCoopService.getInstance();
       config = await fsService.getSystemConfig(tenantId);
+      if (config) {
+        dbStore.systemConfigs.set(tenantId, config);
+      }
     } catch (fsErr) {
       console.warn('Firestore getSystemConfig fallback:', fsErr);
+    }
+
+    if (!config) {
+      config = dbStore.systemConfigs.get(tenantId) || null;
     }
 
     res.json({
@@ -1326,6 +1333,10 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
 app.post('/api/v1/system-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
+    const existing = dbStore.systemConfigs.get(tenantId) || {};
+    const merged = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
+    dbStore.systemConfigs.set(tenantId, merged);
+
     try {
       const fsService = FirestoreCoopService.getInstance();
       await fsService.saveSystemConfig(tenantId, req.body);
@@ -1336,7 +1347,7 @@ app.post('/api/v1/system-config', async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: 'System configuration updated online in Cloud Firestore.',
-      data: req.body,
+      data: merged,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
