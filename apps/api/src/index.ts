@@ -1294,6 +1294,150 @@ app.post('/api/v1/members/:id/kyc/review', async (req: Request, res: Response) =
   }
 });
 
+app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberId = req.params.id;
+    const {
+      firstName,
+      middleName,
+      lastName,
+      suffix,
+      name,
+      email,
+      phone,
+      landline,
+      address,
+      psgcAddress,
+      idType,
+      idNumber,
+      tin,
+      employeeIdNumber,
+      position,
+      officeUnitSection,
+      dateOfAppointment,
+      classification,
+      status,
+      kycStatus,
+      remarks,
+      reviewNotes,
+    } = req.body;
+
+    let targetMember: any = null;
+
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      targetMember = await fsService.getMember(tenantId, memberId);
+
+      if (!targetMember && memberId.startsWith('mem_app_')) {
+        const plainAppId = memberId.replace('mem_app_', '');
+        targetMember = await fsService.getMember(tenantId, plainAppId);
+      }
+    } catch (fsErr) {
+      console.warn('Firestore getMember fallback:', fsErr);
+    }
+
+    if (!targetMember) {
+      const mems = dbStore.members.get(tenantId) || [];
+      targetMember = mems.find((m) => m.id === memberId || m.id === `mem_app_${memberId}` || `mem_app_${m.id}` === memberId);
+    }
+
+    const computedName =
+      name ||
+      [firstName, middleName, lastName, suffix].filter(Boolean).join(' ') ||
+      targetMember?.name ||
+      targetMember?.firstName ||
+      'Member';
+
+    const updatedMember = {
+      ...(targetMember || {}),
+      id: memberId,
+      name: computedName,
+      ...(firstName !== undefined && { firstName }),
+      ...(middleName !== undefined && { middleName }),
+      ...(lastName !== undefined && { lastName }),
+      ...(suffix !== undefined && { suffix }),
+      ...(email !== undefined && { email }),
+      ...(phone !== undefined && { phone }),
+      ...(landline !== undefined && { landline }),
+      ...(address !== undefined && { address }),
+      ...(psgcAddress !== undefined && { psgcAddress }),
+      ...(idType !== undefined && { idType }),
+      ...(idNumber !== undefined && { idNumber }),
+      ...(tin !== undefined && { tin }),
+      ...(employeeIdNumber !== undefined && { employeeIdNumber }),
+      ...(position !== undefined && { position }),
+      ...(officeUnitSection !== undefined && { officeUnitSection }),
+      ...(dateOfAppointment !== undefined && { dateOfAppointment }),
+      ...(classification !== undefined && { classification }),
+      ...(status !== undefined && { status }),
+      ...(kycStatus !== undefined && { kycStatus }),
+      ...(remarks !== undefined && { remarks }),
+      ...(reviewNotes !== undefined && { reviewNotes }),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Save to Cloud Firestore
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveMember(tenantId, updatedMember);
+
+      // If tied to an application, keep applications collection in sync
+      const rawAppId = memberId.startsWith('mem_app_') ? memberId.replace('mem_app_', '') : memberId;
+      try {
+        const appDoc = await fsService.applicationsCol(tenantId).doc(rawAppId).get();
+        if (appDoc.exists) {
+          await fsService.applicationsCol(tenantId).doc(rawAppId).set({
+            applicantName: computedName,
+            ...(email && { email }),
+            ...(phone && { phone }),
+            ...(address && { address }),
+            ...(idType && { idType }),
+            ...(idNumber && { idNumber }),
+            ...(tin && { tin }),
+            ...(reviewNotes && { reviewNotes }),
+            ...(remarks && { remarks }),
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      } catch {}
+    } catch (fsErr) {
+      console.warn('Firestore updateMember fallback:', fsErr);
+    }
+
+    // Update in-memory dbStore
+    const memList = dbStore.members.get(tenantId) || [];
+    const idx = memList.findIndex((m) => m.id === memberId || m.id === `mem_app_${memberId}` || `mem_app_${m.id}` === memberId);
+    if (idx >= 0) {
+      memList[idx] = { ...memList[idx], ...updatedMember };
+      dbStore.members.set(tenantId, memList);
+    } else {
+      memList.push(updatedMember as Member);
+      dbStore.members.set(tenantId, memList);
+    }
+
+    res.json({
+      success: true,
+      message: `Member ${computedName} profile updated successfully.`,
+      data: updatedMember,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/v1/members/:id', async (req: Request, res: Response) => {
+  // Delegate directly to PUT logic
+  req.method = 'PUT';
+  const handlers = (app._router.stack as any[])
+    .filter((layer) => layer.route && layer.route.path === '/api/v1/members/:id' && layer.route.methods.put)
+    .map((layer) => layer.route.stack[0].handle);
+  if (handlers.length > 0) {
+    return handlers[0](req, res);
+  }
+  res.status(404).json({ success: false, error: 'Route handler not found' });
+});
+
 app.get('/api/v1/system-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);

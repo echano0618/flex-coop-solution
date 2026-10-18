@@ -1369,9 +1369,24 @@ export default function AdminDashboard() {
     id: string;
     memberNo: string;
     name: string;
+    firstName?: string;
+    middleName?: string;
+    lastName?: string;
+    suffix?: string;
     email: string;
+    phone?: string;
+    landline?: string;
+    birthdate?: string;
+    gender?: string;
+    civilStatus?: string;
+    tin?: string;
+    employeeIdNumber?: string;
+    position?: string;
+    officeUnitSection?: string;
+    dateOfAppointment?: string;
     classification: 'REGULAR' | 'ASSOCIATE' | string;
     kycStatus: 'VERIFIED' | 'PENDING_REVIEW' | 'INACTIVE' | string;
+    status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | string;
     idType: string;
     idNumber?: string;
     address?: string;
@@ -1405,6 +1420,7 @@ export default function AdminDashboard() {
     reviewedBy?: string | null;
     reviewDate?: string | null;
     reviewNotes?: string | null;
+    remarks?: string | null;
     idFrontPreview?: string | null;
     selfiePreview?: string | null;
   }
@@ -1414,6 +1430,38 @@ export default function AdminDashboard() {
   const [memberStatusFilter, setMemberStatusFilter] = useState<string>('ALL');
 
   const [members, setMembers] = useState<MemberRecord[]>([]);
+
+  // Admin Edit Member Modal State
+  const [editingMember, setEditingMember] = useState<MemberRecord | null>(null);
+  const [isSubmittingMemberEdit, setIsSubmittingMemberEdit] = useState<boolean>(false);
+  const [editMemberError, setEditMemberError] = useState<string | null>(null);
+  const [editMemberSuccessNotification, setEditMemberSuccessNotification] = useState<string | null>(null);
+
+  const [editMemberForm, setEditMemberForm] = useState({
+    firstName: '',
+    middleName: '',
+    lastName: '',
+    suffix: '',
+    email: '',
+    phone: '',
+    landline: '',
+    birthdate: '',
+    gender: 'FEMALE',
+    civilStatus: 'SINGLE',
+    address: '',
+    idType: 'PhilSys National ID',
+    idNumber: '',
+    tin: '',
+    employeeIdNumber: '',
+    position: '',
+    officeUnitSection: '',
+    dateOfAppointment: '',
+    classification: 'REGULAR',
+    kycStatus: 'VERIFIED',
+    status: 'ACTIVE',
+    remarks: '',
+    reviewNotes: '',
+  });
 
   // Admin Register New Member Modal State
   const [showRegisterMemberModal, setShowRegisterMemberModal] = useState<boolean>(false);
@@ -1531,6 +1579,120 @@ export default function AdminDashboard() {
     } catch (err: any) {
       setNewMemberError('Unable to connect to the cooperative API server: ' + (err.message || 'Network error'));
       setIsSubmittingNewMember(false);
+    }
+  };
+
+  const handleOpenEditMember = (m: MemberRecord) => {
+    // If first / middle / last name aren't separate, break down m.name
+    let fName = m.firstName || '';
+    let mName = m.middleName || '';
+    let lName = m.lastName || '';
+    let sfx = m.suffix || '';
+
+    if (!fName && !lName && m.name) {
+      const parts = m.name.trim().split(/\s+/);
+      if (parts.length === 1) {
+        fName = parts[0];
+      } else if (parts.length === 2) {
+        fName = parts[0];
+        lName = parts[1];
+      } else if (parts.length >= 3) {
+        fName = parts[0];
+        mName = parts.slice(1, parts.length - 1).join(' ');
+        lName = parts[parts.length - 1];
+      }
+    }
+
+    setEditMemberForm({
+      firstName: fName,
+      middleName: mName,
+      lastName: lName,
+      suffix: sfx,
+      email: m.email || '',
+      phone: m.phone || '',
+      landline: m.landline || '',
+      birthdate: m.birthdate || '',
+      gender: m.gender || 'FEMALE',
+      civilStatus: m.civilStatus || 'SINGLE',
+      address: m.address || m.psgcAddress?.formattedAddress || '',
+      idType: m.idType || 'PhilSys National ID',
+      idNumber: m.idNumber || '',
+      tin: m.tin || '',
+      employeeIdNumber: m.employeeIdNumber || '',
+      position: m.position || '',
+      officeUnitSection: m.officeUnitSection || '',
+      dateOfAppointment: m.dateOfAppointment || '',
+      classification: m.classification || 'REGULAR',
+      kycStatus: m.kycStatus || 'VERIFIED',
+      status: m.status || 'ACTIVE',
+      remarks: m.remarks || '',
+      reviewNotes: m.reviewNotes || '',
+    });
+    setEditMemberError(null);
+    setEditingMember(m);
+  };
+
+  const handleSaveMemberEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    setIsSubmittingMemberEdit(true);
+    setEditMemberError(null);
+
+    const tenantInfo = resolveTenantCoop();
+    const effectiveSlug = tenantInfo.slug && tenantInfo.slug !== 'default' ? tenantInfo.slug : 'family-coop';
+    const computedFullName = [editMemberForm.firstName, editMemberForm.middleName, editMemberForm.lastName, editMemberForm.suffix]
+      .filter(Boolean)
+      .join(' ') || editingMember.name;
+
+    try {
+      const cleanSlug = effectiveSlug.replace(/[-_]coop$/, '');
+      const tenantId = `tenant_${cleanSlug}`;
+
+      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(editingMember.id)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': effectiveSlug,
+          'x-tenant-id': tenantId,
+        },
+        body: JSON.stringify({
+          ...editMemberForm,
+          name: computedFullName,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update member profile in Cloud Firestore');
+      }
+
+      // Update local members state
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === editingMember.id
+            ? {
+                ...m,
+                ...editMemberForm,
+                name: computedFullName,
+              }
+            : m
+        )
+      );
+
+      const successMsg = `Member ${computedFullName} (${editingMember.memberNo}) updated successfully in Cloud Firestore.`;
+      setEditMemberSuccessNotification(successMsg);
+      setMemberActionNotification(successMsg);
+      setIsSubmittingMemberEdit(false);
+      setEditingMember(null);
+
+      await loadAndSyncMembers();
+      setTimeout(() => {
+        setEditMemberSuccessNotification(null);
+        setMemberActionNotification(null);
+      }, 5000);
+    } catch (err: any) {
+      setEditMemberError(err.message || 'Error updating member record');
+      setIsSubmittingMemberEdit(false);
     }
   };
 
@@ -3398,6 +3560,15 @@ export default function AdminDashboard() {
                         </td>
                         <td className="p-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditMember(m)}
+                              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-indigo-200 transition"
+                              title="Edit Member Profile & eKYC Details"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
+                              Edit
+                            </button>
                             {m.kycStatus === 'PENDING_REVIEW' ? (
                               <button
                                 type="button"
@@ -3927,13 +4098,27 @@ export default function AdminDashboard() {
 
                   {/* Modal Footer Actions */}
                   <div className="bg-slate-100 p-4 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedMemberForReview(null)}
-                      className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200 rounded-lg transition"
-                    >
-                      Close Dossier
-                    </button>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMemberForReview(null)}
+                        className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200 rounded-lg transition"
+                      >
+                        Close Dossier
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const memToEdit = selectedMemberForReview;
+                          setSelectedMemberForReview(null);
+                          handleOpenEditMember(memToEdit);
+                        }}
+                        className="px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-lg transition flex items-center gap-1.5"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
+                        Edit Profile
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                       {selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? (
@@ -11244,6 +11429,387 @@ export default function AdminDashboard() {
                       <>
                         <CheckCircle2 className="w-4 h-4" />
                         <span>Enroll &amp; Register Member</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: EDIT MEMBER PROFILE & eKYC DOSSIER */}
+        {editingMember && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 my-8">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                    <Edit3 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Update Member Profile &amp; eKYC Dossier</h3>
+                    <p className="text-xs text-slate-500">
+                      Editing <span className="font-semibold text-slate-800">{editingMember.name}</span> ({editingMember.memberNo}) • Cloud Firestore Synchronized
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {editMemberError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{editMemberError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveMemberEdit} className="space-y-4 text-xs">
+                {/* 1. Legal Name & Identity Breakdown */}
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-indigo-800">
+                    <User className="w-3.5 h-3.5" />
+                    <span>1. Legal Name &amp; Identity Breakdown</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">First Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editMemberForm.firstName}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, firstName: e.target.value })}
+                        placeholder="e.g. Maria"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Middle Name</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.middleName}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, middleName: e.target.value })}
+                        placeholder="e.g. Dela"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Last Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editMemberForm.lastName}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, lastName: e.target.value })}
+                        placeholder="e.g. Cruz"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Suffix</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.suffix}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, suffix: e.target.value })}
+                        placeholder="e.g. Jr., III"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2.5">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Date of Birth</label>
+                      <input
+                        type="date"
+                        value={editMemberForm.birthdate}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, birthdate: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Gender</label>
+                      <select
+                        value={editMemberForm.gender}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, gender: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="FEMALE">Female</option>
+                        <option value="MALE">Male</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Civil Status</label>
+                      <select
+                        value={editMemberForm.civilStatus}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, civilStatus: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="SINGLE">Single</option>
+                        <option value="MARRIED">Married</option>
+                        <option value="WIDOWED">Widowed</option>
+                        <option value="SEPARATED">Separated</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Contact Information & Physical Residence */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-blue-800">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>2. Contact Details &amp; Residence Address</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Email Address *</label>
+                      <input
+                        type="email"
+                        required
+                        value={editMemberForm.email}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, email: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Mobile Number (+63)</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.phone}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, phone: e.target.value })}
+                        placeholder="09171234567"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Landline / Alternate</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.landline}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, landline: e.target.value })}
+                        placeholder="e.g. (02) 8123-4567"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5">
+                    <label className="block text-slate-700 font-semibold mb-1">Complete Physical / Postal Address *</label>
+                    <textarea
+                      rows={2}
+                      required
+                      value={editMemberForm.address}
+                      onChange={(e) => setEditMemberForm({ ...editMemberForm, address: e.target.value })}
+                      placeholder="House/Unit No., Street, Barangay, City/Municipality, Province, Postal Code"
+                      className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Statutory Identification & Tax ID */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-emerald-800">
+                    <FileCheck className="w-3.5 h-3.5" />
+                    <span>3. Statutory Identification &amp; Tax Information</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Primary Government ID Type</label>
+                      <select
+                        value={editMemberForm.idType}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, idType: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="PhilSys National ID">PhilSys National ID</option>
+                        <option value="Passport">Philippine Passport</option>
+                        <option value="Driver's License">Driver's License (LTO)</option>
+                        <option value="SSS / GSIS UMID">SSS / GSIS UMID Card</option>
+                        <option value="Voter's ID / Comelec Certificate">Voter's ID / Comelec Certificate</option>
+                        <option value="PRC Professional License">PRC Professional ID</option>
+                        <option value="Postal ID">Postal ID</option>
+                        <option value="Company / Office Identification">Company / Office ID</option>
+                        <option value="Senior Citizen / PWD ID">Senior Citizen / PWD ID</option>
+                        <option value="Barangay / Police Clearance ID">Barangay / Police Clearance</option>
+                        <option value="Other Government-Issued ID">Other Government-Issued ID</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">ID Number / Serial</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.idNumber}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, idNumber: e.target.value })}
+                        placeholder="e.g. 1234-5678-9012-3456"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Tax Identification Number (TIN)</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.tin}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, tin: e.target.value })}
+                        placeholder="000-000-000-000"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Institutional / Workplace Affiliation (Optional) */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-amber-800">
+                    <Briefcase className="w-3.5 h-3.5" />
+                    <span>4. Institutional / Employment Details</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Employee ID Number</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.employeeIdNumber}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, employeeIdNumber: e.target.value })}
+                        placeholder="e.g. EMP-2026-0814"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Position / Job Title</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.position}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, position: e.target.value })}
+                        placeholder="e.g. Administrative Officer"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2.5">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Office / Unit / Section</label>
+                      <input
+                        type="text"
+                        value={editMemberForm.officeUnitSection}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, officeUnitSection: e.target.value })}
+                        placeholder="e.g. Finance &amp; Accounting Division"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Date of Appointment</label>
+                      <input
+                        type="date"
+                        value={editMemberForm.dateOfAppointment}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, dateOfAppointment: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Classification, eKYC Status & Account Status */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-purple-800">
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>5. Membership Classification &amp; eKYC Status</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Classification *</label>
+                      <select
+                        value={editMemberForm.classification}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, classification: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="REGULAR">REGULAR Member (With Voting Rights)</option>
+                        <option value="ASSOCIATE">ASSOCIATE Member (Non-Voting)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">eKYC Verification Status *</label>
+                      <select
+                        value={editMemberForm.kycStatus}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, kycStatus: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="VERIFIED">✓ VERIFIED / Cleared</option>
+                        <option value="PENDING_REVIEW">PENDING REVIEW</option>
+                        <option value="INACTIVE">INACTIVE / Suspended</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Membership Account Status</label>
+                      <select
+                        value={editMemberForm.status}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, status: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="ACTIVE">ACTIVE</option>
+                        <option value="INACTIVE">INACTIVE</option>
+                        <option value="SUSPENDED">SUSPENDED</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. Administrative Remarks & Underwriting Review Notes */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5 text-slate-800">
+                    <Award className="w-3.5 h-3.5" />
+                    <span>6. Administrative Remarks &amp; Underwriting Notes</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Administrative Remarks</label>
+                      <textarea
+                        rows={3}
+                        value={editMemberForm.remarks}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, remarks: e.target.value })}
+                        placeholder="Internal notes, compliance findings, board resolutions, or member history..."
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-slate-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">eKYC &amp; Underwriting Notes</label>
+                      <textarea
+                        rows={3}
+                        value={editMemberForm.reviewNotes}
+                        onChange={(e) => setEditMemberForm({ ...editMemberForm, reviewNotes: e.target.value })}
+                        placeholder="Document verification details, PMES certifications, committee notes..."
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-slate-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Actions */}
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setEditingMember(null)}
+                    className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-semibold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingMemberEdit}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2"
+                  >
+                    {isSubmittingMemberEdit ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving Changes...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Save Changes &amp; Update Member</span>
                       </>
                     )}
                   </button>

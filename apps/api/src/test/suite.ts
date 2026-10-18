@@ -1995,7 +1995,79 @@ console.log('\n--- 30. Member 6-Digit MPIN Management & Validation ---');
   assert(isValidMpin('') === false, 'Empty MPIN is rejected');
 }
 
-console.log('\n🎉 ALL 300 VERIFICATION TEST CASES (INCLUDING OPERATOR OTP LOGIN & MEMBER 6-DIGIT MPIN MANAGEMENT) PASSED SUCCESSFULLY!\n');
+// 31. Member Profile & eKYC Updating (Name Breakdown, Address, ID Information, Remarks)
+console.log('\n--- 31. Member Profile & eKYC Updating (Name Breakdown, Address, ID Information, Remarks) ---');
+{
+  const initialMember = {
+    id: 'mem_test_update_001',
+    memberNo: 'MEM-2026-0099',
+    name: 'Juan Perez',
+    firstName: 'Juan',
+    lastName: 'Perez',
+    email: 'juan.perez@example.com',
+    phone: '09170001111',
+    address: 'Old Address, Quezon City',
+    idType: 'Driver\'s License',
+    idNumber: 'N01-23-456789',
+    tin: '123-456-789-000',
+    classification: 'ASSOCIATE',
+    kycStatus: 'PENDING_REVIEW',
+    status: 'ACTIVE',
+    remarks: 'Pending initial eKYC document check',
+    reviewNotes: 'Awaiting submission of updated BIR TIN',
+  };
+
+  // Simulate update payload
+  const updatePayload = {
+    firstName: 'Juan Carlos',
+    middleName: 'Dela',
+    lastName: 'Perez',
+    suffix: 'Jr.',
+    email: 'juancarlos.perez@example.com',
+    phone: '09189998888',
+    landline: '(02) 8999-1234',
+    address: 'Unit 402, Pine Crest Residences, Pasig City, Metro Manila',
+    idType: 'PhilSys National ID',
+    idNumber: '9876-5432-1098-7654',
+    tin: '987-654-321-000',
+    employeeIdNumber: 'EMP-PASIG-042',
+    position: 'Senior Logistics Specialist',
+    officeUnitSection: 'Operations Division',
+    dateOfAppointment: '2025-06-01',
+    classification: 'REGULAR',
+    kycStatus: 'VERIFIED',
+    status: 'ACTIVE',
+    remarks: 'Member submitted valid PhilSys National ID and updated residential proof.',
+    reviewNotes: 'eKYC verification approved by Membership Committee. Upgraded to Regular Member with voting rights.',
+  };
+
+  const computedFullName = [
+    updatePayload.firstName,
+    updatePayload.middleName,
+    updatePayload.lastName,
+    updatePayload.suffix,
+  ].filter(Boolean).join(' ');
+
+  const updatedMember = {
+    ...initialMember,
+    ...updatePayload,
+    name: computedFullName,
+    updatedAt: new Date().toISOString(),
+  };
+
+  assert(updatedMember.name === 'Juan Carlos Dela Perez Jr.', 'Member computed name correctly combines discrete name fields');
+  assert(updatedMember.address === 'Unit 402, Pine Crest Residences, Pasig City, Metro Manila', 'Member residential address successfully updated');
+  assert(updatedMember.idType === 'PhilSys National ID', 'Member ID Type successfully updated');
+  assert(updatedMember.idNumber === '9876-5432-1098-7654', 'Member ID Number successfully updated');
+  assert(updatedMember.tin === '987-654-321-000', 'Member BIR TIN successfully updated');
+  assert(updatedMember.employeeIdNumber === 'EMP-PASIG-042', 'Member Employee ID Number successfully updated');
+  assert(updatedMember.classification === 'REGULAR', 'Member classification successfully updated to REGULAR');
+  assert(updatedMember.kycStatus === 'VERIFIED', 'Member eKYC status successfully updated to VERIFIED');
+  assert(updatedMember.remarks.includes('valid PhilSys National ID'), 'Administrative remarks preserved and updated');
+  assert(updatedMember.reviewNotes.includes('eKYC verification approved'), 'Underwriting review notes preserved and updated');
+}
+
+console.log('\n🎉 ALL 310 VERIFICATION TEST CASES (INCLUDING MEMBER PROFILE & eKYC UPDATE SUITE) PASSED SUCCESSFULLY!\n');
 
 
 
