@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -26,6 +26,12 @@ import {
   Phone,
   Briefcase,
   Calendar,
+  Upload,
+  RotateCcw,
+  Trash2,
+  Eye,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 import {
   PSGC_REGIONS,
@@ -95,100 +101,91 @@ export default function MemberRegisterPage() {
     );
   };
 
-  // Step 2: Personal & Contact Details
-  const [firstName, setFirstName] = useState<string>('Clara');
-  const [middleName, setMiddleName] = useState<string>('Bautista');
-  const [lastName, setLastName] = useState<string>('Magdalo');
-  const [email, setEmail] = useState<string>('clara.magdalo@gmail.com');
-  const [phone, setPhone] = useState<string>('09191234567');
-  const [landline, setLandline] = useState<string>('(044) 940-2819');
-  const [birthdate, setBirthdate] = useState<string>('1994-08-15');
-  const [gender, setGender] = useState<'FEMALE' | 'MALE'>('FEMALE');
-  const [civilStatus, setCivilStatus] = useState<'SINGLE' | 'MARRIED' | 'WIDOWED'>('SINGLE');
+  // Step 2: Personal & Contact Details (Strictly blank per requirement)
+  const [firstName, setFirstName] = useState<string>('');
+  const [middleName, setMiddleName] = useState<string>('');
+  const [lastName, setLastName] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
+  const [landline, setLandline] = useState<string>('');
+  const [birthdate, setBirthdate] = useState<string>('');
+  const [gender, setGender] = useState<'FEMALE' | 'MALE' | ''>('');
+  const [civilStatus, setCivilStatus] = useState<'SINGLE' | 'MARRIED' | 'WIDOWED' | ''>('');
 
-  // Step 2: Employment & Institutional Details (New Fields)
-  const [employeeIdNumber, setEmployeeIdNumber] = useState<string>('EMP-2026-0814');
-  const [position, setPosition] = useState<string>('Senior Administrative Officer');
-  const [officeUnitSection, setOfficeUnitSection] = useState<string>('Budget & Treasury Management Division');
-  const [dateOfAppointment, setDateOfAppointment] = useState<string>('2021-03-15');
+  // Step 2: Employment & Institutional Details (Blank)
+  const [employeeIdNumber, setEmployeeIdNumber] = useState<string>('');
+  const [position, setPosition] = useState<string>('');
+  const [officeUnitSection, setOfficeUnitSection] = useState<string>('');
+  const [dateOfAppointment, setDateOfAppointment] = useState<string>('');
 
-  // Government & Livelihood
-  const [tin, setTin] = useState<string>('321-456-789-000');
-  const [occupation, setOccupation] = useState<string>('Government Employee / Civil Servant');
-  const [monthlyIncome, setMonthlyIncome] = useState<number>(45000);
+  // Government & Livelihood (Blank)
+  const [tin, setTin] = useState<string>('');
+  const [occupation, setOccupation] = useState<string>('');
+  const [monthlyIncome, setMonthlyIncome] = useState<number | string>('');
 
-
-  // Step 2: PSGC-Compliant Hierarchical Address State
-  // Default pre-population: Central Luzon (Region III) -> Nueva Ecija -> City of San Jose -> Malasin
-  const [psgcRegionCode, setPsgcRegionCode] = useState<string>('030000000');
-  const [psgcProvinceCode, setPsgcProvinceCode] = useState<string>('034900000');
-  const [psgcCityCode, setPsgcCityCode] = useState<string>('034919000');
-  const [psgcBarangayCode, setPsgcBarangayCode] = useState<string>('034919018');
+  // Step 2: PSGC-Compliant Hierarchical Address State (Blank)
+  const [psgcRegionCode, setPsgcRegionCode] = useState<string>('');
+  const [psgcProvinceCode, setPsgcProvinceCode] = useState<string>('');
+  const [psgcCityCode, setPsgcCityCode] = useState<string>('');
+  const [psgcBarangayCode, setPsgcBarangayCode] = useState<string>('');
   const [psgcCustomBarangay, setPsgcCustomBarangay] = useState<string>('');
-  const [psgcStreetAddress, setPsgcStreetAddress] = useState<string>('128 Rizal Avenue, Zone 4');
-  const [psgcPostalCode, setPsgcPostalCode] = useState<string>('3121');
+  const [psgcStreetAddress, setPsgcStreetAddress] = useState<string>('');
+  const [psgcPostalCode, setPsgcPostalCode] = useState<string>('');
   const [psgcAddressError, setPsgcAddressError] = useState<string | null>(null);
 
   // Dynamic lists derived from PSGC hierarchy
-  const availableProvinces = getProvincesByRegion(psgcRegionCode);
-  const availableCities = getCitiesByProvince(psgcProvinceCode);
-  const availableBarangays = getBarangaysByCity(psgcCityCode);
+  const availableProvinces = psgcRegionCode ? getProvincesByRegion(psgcRegionCode) : [];
+  const availableCities = psgcProvinceCode ? getCitiesByProvince(psgcProvinceCode) : [];
+  const availableBarangays = psgcCityCode ? getBarangaysByCity(psgcCityCode) : [];
 
-  const selectedRegion = PSGC_REGIONS.find((r) => r.code === psgcRegionCode) || PSGC_REGIONS[0];
-  const selectedProvince = availableProvinces.find((p) => p.code === psgcProvinceCode) || availableProvinces[0];
-  const selectedCity = availableCities.find((c) => c.code === psgcCityCode) || availableCities[0];
+  const selectedRegion = PSGC_REGIONS.find((r) => r.code === psgcRegionCode);
+  const selectedProvince = availableProvinces.find((p) => p.code === psgcProvinceCode);
+  const selectedCity = availableCities.find((c) => c.code === psgcCityCode);
   const selectedBarangay = availableBarangays.find((b) => b.code === psgcBarangayCode);
   const activeBarangayName = psgcBarangayCode === 'OTHER' ? psgcCustomBarangay : (selectedBarangay?.name || '');
 
-  const formattedPsgcAddress = formatPSGCAddress({
-    streetAddress: psgcStreetAddress,
-    barangayName: activeBarangayName,
-    cityMunicipalityName: selectedCity?.name,
-    provinceName: selectedProvince?.name,
-    regionName: selectedRegion?.name,
-    postalCode: psgcPostalCode,
-  });
+  const formattedPsgcAddress = (psgcRegionCode && psgcProvinceCode && psgcCityCode && psgcBarangayCode && psgcStreetAddress)
+    ? formatPSGCAddress({
+        streetAddress: psgcStreetAddress,
+        barangayName: activeBarangayName,
+        cityMunicipalityName: selectedCity?.name,
+        provinceName: selectedProvince?.name,
+        regionName: selectedRegion?.name,
+        postalCode: psgcPostalCode,
+      })
+    : '';
 
   const currentPsgcCode = psgcBarangayCode !== 'OTHER' && psgcBarangayCode ? psgcBarangayCode : (psgcCityCode || psgcProvinceCode || psgcRegionCode);
-  const [address, setAddress] = useState<string>(formattedPsgcAddress);
+  const [address, setAddress] = useState<string>('');
 
   // Cascading Selection Handlers
   const handleRegionChange = (newRegionCode: string) => {
     setPsgcRegionCode(newRegionCode);
-    const newProvinces = getProvincesByRegion(newRegionCode);
-    const firstProv = newProvinces[0]?.code || '';
-    setPsgcProvinceCode(firstProv);
-
-    const newCities = getCitiesByProvince(firstProv);
-    const firstCity = newCities[0];
-    setPsgcCityCode(firstCity?.code || '');
-    setPsgcPostalCode(firstCity?.defaultPostalCode || '');
-
-    const newBarangays = getBarangaysByCity(firstCity?.code || '');
-    setPsgcBarangayCode(newBarangays[0]?.code || 'OTHER');
+    setPsgcProvinceCode('');
+    setPsgcCityCode('');
+    setPsgcBarangayCode('');
     setPsgcCustomBarangay('');
+    setPsgcPostalCode('');
   };
 
   const handleProvinceChange = (newProvinceCode: string) => {
     setPsgcProvinceCode(newProvinceCode);
-    const newCities = getCitiesByProvince(newProvinceCode);
-    const firstCity = newCities[0];
-    setPsgcCityCode(firstCity?.code || '');
-    setPsgcPostalCode(firstCity?.defaultPostalCode || '');
-
-    const newBarangays = getBarangaysByCity(firstCity?.code || '');
-    setPsgcBarangayCode(newBarangays[0]?.code || 'OTHER');
+    setPsgcCityCode('');
+    setPsgcBarangayCode('');
     setPsgcCustomBarangay('');
+    setPsgcPostalCode('');
   };
 
   const handleCityChange = (newCityCode: string) => {
     setPsgcCityCode(newCityCode);
-    const foundCity = availableCities.find((c) => c.code === newCityCode);
+    const cities = psgcProvinceCode ? getCitiesByProvince(psgcProvinceCode) : [];
+    const foundCity = cities.find((c) => c.code === newCityCode);
     if (foundCity?.defaultPostalCode) {
       setPsgcPostalCode(foundCity.defaultPostalCode);
+    } else {
+      setPsgcPostalCode('');
     }
-    const newBarangays = getBarangaysByCity(newCityCode);
-    setPsgcBarangayCode(newBarangays[0]?.code || 'OTHER');
+    setPsgcBarangayCode('');
     setPsgcCustomBarangay('');
   };
 
@@ -199,16 +196,31 @@ export default function MemberRegisterPage() {
     }
   };
 
-  // Step 3: eKYC & NPC Privacy Consent
+  // Step 3: eKYC & NPC Privacy Consent State
   const [idType, setIdType] = useState<string>('PHILSYS_NATIONAL_ID');
-  const [idNumber, setIdNumber] = useState<string>('1234-5678-9012-3456');
-  const [idFrontUploaded, setIdFrontUploaded] = useState<boolean>(true);
-  const [selfieUploaded, setSelfieUploaded] = useState<boolean>(true);
-  const [npcConsent, setNpcConsent] = useState<boolean>(true);
+  const [idNumber, setIdNumber] = useState<string>('');
+  const [idFrontUploaded, setIdFrontUploaded] = useState<boolean>(false);
+  const [idFrontFile, setIdFrontFile] = useState<{ name: string; size: string; previewUrl: string } | null>(null);
+  const idFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Step 4: Share Capital Subscription
-  const [subscribedShares, setSubscribedShares] = useState<number>(50); // 50 shares @ ₱100 = ₱5,000
-  const [initialDeposit, setInitialDeposit] = useState<number>(1000); // ₱1,000 minimum paid-up
+  // Live Facial Liveness Selfie State & Media Stream
+  const [selfieUploaded, setSelfieUploaded] = useState<boolean>(false);
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const selfieFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [npcConsent, setNpcConsent] = useState<boolean>(false);
+
+  // Step 4: Share Capital Subscription (Superadmin Configured via Admin Portal)
+  const [parValuePerShare, setParValuePerShare] = useState<number>(100);
+  const [minSubscribedShares, setMinSubscribedShares] = useState<number>(50);
+  const [minInitialDeposit, setMinInitialDeposit] = useState<number>(1000);
+
+  const [subscribedShares, setSubscribedShares] = useState<number>(50);
+  const [initialDeposit, setInitialDeposit] = useState<number>(1000);
   const [paymentMethod, setPaymentMethod] = useState<'QRPH' | 'CASHIER'>('QRPH');
   const [signatureAgreed, setSignatureAgreed] = useState<boolean>(true);
 
@@ -216,8 +228,125 @@ export default function MemberRegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [applicationId, setApplicationId] = useState<string>('');
 
-  const parValuePerShare = 100;
   const totalSubscribedAmount = subscribedShares * parValuePerShare;
+
+  // Load superadmin share capital parameters from localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      const slug = info.slug || 'default';
+      const savedShareConfig = localStorage.getItem(`flexcoop_share_capital_config_${slug}`) || localStorage.getItem('flexcoop_share_capital_config');
+      if (savedShareConfig) {
+        try {
+          const parsed = JSON.parse(savedShareConfig);
+          const par = Number(parsed.parValuePerShare) || 100;
+          const minShares = Number(parsed.minSubscribedShares) || 50;
+          const minDeposit = Number(parsed.minPaidUpAmount) || 1000;
+          setParValuePerShare(par);
+          setMinSubscribedShares(minShares);
+          setMinInitialDeposit(minDeposit);
+          setSubscribedShares(minShares);
+          setInitialDeposit(minDeposit);
+        } catch {}
+      }
+    }
+  }, []);
+
+  // Cleanup camera stream on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
+  const handleIdFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        alert('File size exceeds 10MB limit. Please upload a smaller image or PDF.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setIdFrontFile({
+          name: file.name,
+          size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+          previewUrl: reader.result as string,
+        });
+        setIdFrontUploaded(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const startCamera = async () => {
+    setCameraError(null);
+    setIsCameraActive(true);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera access is not supported by your browser. Please use the device photo capture option.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+    } catch (err: any) {
+      console.warn('Camera access error:', err);
+      setCameraError(err.message || 'Camera permission denied or camera not available. Please allow camera permissions or upload your selfie.');
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const captureSelfie = () => {
+    if (videoRef.current) {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Mirror horizontally so it feels natural like a real selfie mirror
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setSelfiePreview(dataUrl);
+        setSelfieUploaded(true);
+      }
+      stopCamera();
+    }
+  };
+
+  const handleSelfieFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setSelfiePreview(reader.result as string);
+        setSelfieUploaded(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleVerifyPmes = () => {
     if (pmesQuiz1 === 'service' && pmesQuiz2 === 'patronage') {
@@ -599,6 +728,7 @@ export default function MemberRegisterPage() {
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   required
+                  placeholder="e.g. Juan"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -608,6 +738,7 @@ export default function MemberRegisterPage() {
                   type="text"
                   value={middleName}
                   onChange={(e) => setMiddleName(e.target.value)}
+                  placeholder="e.g. Santos"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -618,6 +749,7 @@ export default function MemberRegisterPage() {
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   required
+                  placeholder="e.g. Dela Cruz"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -639,8 +771,10 @@ export default function MemberRegisterPage() {
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value as any)}
+                  required
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
+                  <option value="">Select Gender</option>
                   <option value="FEMALE">Female</option>
                   <option value="MALE">Male</option>
                 </select>
@@ -650,8 +784,10 @@ export default function MemberRegisterPage() {
                 <select
                   value={civilStatus}
                   onChange={(e) => setCivilStatus(e.target.value as any)}
+                  required
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
+                  <option value="">Select Civil Status</option>
                   <option value="SINGLE">Single</option>
                   <option value="MARRIED">Married</option>
                   <option value="WIDOWED">Widowed</option>
@@ -857,6 +993,7 @@ export default function MemberRegisterPage() {
                     required
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
+                    <option value="">-- Select Administrative Region --</option>
                     {PSGC_REGIONS.map((reg) => (
                       <option key={reg.code} value={reg.code}>
                         {reg.name} ({reg.designation})
@@ -873,8 +1010,10 @@ export default function MemberRegisterPage() {
                     value={psgcProvinceCode}
                     onChange={(e) => handleProvinceChange(e.target.value)}
                     required
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    disabled={!psgcRegionCode}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
+                    <option value="">{psgcRegionCode ? '-- Select Province / District --' : '-- Select Region First --'}</option>
                     {availableProvinces.map((prov) => (
                       <option key={prov.code} value={prov.code}>
                         {prov.name}
@@ -894,8 +1033,10 @@ export default function MemberRegisterPage() {
                     value={psgcCityCode}
                     onChange={(e) => handleCityChange(e.target.value)}
                     required
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    disabled={!psgcProvinceCode}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
+                    <option value="">{psgcProvinceCode ? '-- Select City / Municipality --' : '-- Select Province First --'}</option>
                     {availableCities.map((city) => (
                       <option key={city.code} value={city.code}>
                         {city.name} {city.isCity ? '(City)' : '(Municipality)'}
@@ -912,14 +1053,16 @@ export default function MemberRegisterPage() {
                     value={psgcBarangayCode}
                     onChange={(e) => handleBarangayChange(e.target.value)}
                     required
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    disabled={!psgcCityCode}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
+                    <option value="">{psgcCityCode ? '-- Select Barangay --' : '-- Select City First --'}</option>
                     {availableBarangays.map((brgy) => (
                       <option key={brgy.code} value={brgy.code}>
                         Brgy. {brgy.name}
                       </option>
                     ))}
-                    <option value="OTHER">Other Barangay (Specify Manually)</option>
+                    {psgcCityCode && <option value="OTHER">Other Barangay (Specify Manually)</option>}
                   </select>
                 </div>
               </div>
@@ -983,7 +1126,7 @@ export default function MemberRegisterPage() {
                   <span className="font-mono text-[10px] text-emerald-400">PSA PSGC Standard</span>
                 </div>
                 <div className="text-xs text-emerald-200 font-medium pl-5 leading-relaxed">
-                  {formattedPsgcAddress || 'Please complete all address fields above.'}
+                  {formattedPsgcAddress || <span className="text-slate-500 italic">Please select Region, Province, City, Barangay and enter Street Address above.</span>}
                 </div>
               </div>
             </div>
@@ -995,6 +1138,7 @@ export default function MemberRegisterPage() {
                   type="text"
                   value={tin}
                   onChange={(e) => setTin(e.target.value)}
+                  placeholder="e.g. 123-456-789-000"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
               </div>
@@ -1004,6 +1148,7 @@ export default function MemberRegisterPage() {
                   type="text"
                   value={occupation}
                   onChange={(e) => setOccupation(e.target.value)}
+                  placeholder="e.g. Government Employee / Civil Servant"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -1012,7 +1157,8 @@ export default function MemberRegisterPage() {
                 <input
                   type="number"
                   value={monthlyIncome}
-                  onChange={(e) => setMonthlyIncome(Number(e.target.value))}
+                  onChange={(e) => setMonthlyIncome(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="e.g. 35000"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
               </div>
@@ -1043,6 +1189,14 @@ export default function MemberRegisterPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (!idFrontUploaded) {
+                alert('Please upload your Front ID Document Photo from your device before proceeding.');
+                return;
+              }
+              if (!selfieUploaded) {
+                alert('Please perform your Live Facial Liveness Selfie before proceeding.');
+                return;
+              }
               if (!npcConsent) {
                 alert('You must accept the Data Privacy terms under RA 10173 to proceed.');
                 return;
@@ -1051,6 +1205,23 @@ export default function MemberRegisterPage() {
             }}
             className="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl"
           >
+            {/* Hidden File Inputs for Document & Camera Fallback */}
+            <input
+              type="file"
+              ref={idFileInputRef}
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              className="hidden"
+              onChange={handleIdFileUpload}
+            />
+            <input
+              type="file"
+              ref={selfieFileInputRef}
+              accept="image/*"
+              capture="user"
+              className="hidden"
+              onChange={handleSelfieFileUpload}
+            />
+
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
                 <ShieldCheck className="w-5 h-5" />
@@ -1092,24 +1263,224 @@ export default function MemberRegisterPage() {
               </div>
             </div>
 
-            {/* Simulated Document Uploads */}
+            {/* Document Upload & Live Camera Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 rounded-xl border border-dashed border-slate-700 bg-slate-900/60 flex flex-col items-center justify-center text-center space-y-2">
-                <Camera className="w-6 h-6 text-emerald-400" />
-                <div className="text-xs font-bold text-white">Front ID Document Photo</div>
-                <div className="text-[11px] text-slate-400">Clear snapshot showing photo and date of birth</div>
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Captured (id_front_sample.jpg)
-                </span>
+              {/* 1. FRONT ID DOCUMENT UPLOAD */}
+              <div className="p-5 rounded-2xl border border-slate-700 bg-slate-900/80 flex flex-col justify-between space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                        <Upload className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white">Front ID Document Photo *</div>
+                        <div className="text-[11px] text-slate-400">Upload official government photo ID from device</div>
+                      </div>
+                    </div>
+                    {idFrontUploaded && (
+                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1 font-semibold">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Uploaded
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {!idFrontFile ? (
+                  <div
+                    onClick={() => idFileInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-xl p-6 text-center cursor-pointer transition-all bg-slate-950/40 hover:bg-slate-900/60 flex flex-col items-center justify-center space-y-2 group"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-slate-800 group-hover:bg-emerald-500/20 text-slate-400 group-hover:text-emerald-400 flex items-center justify-center transition-colors">
+                      <Upload className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors">
+                        Click to Browse Device Files
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        Supports JPG, PNG, WebP or PDF (Max 10MB)
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold mt-1 shadow-sm flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Choose Front ID</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="relative rounded-xl border border-slate-700 overflow-hidden bg-slate-950 flex items-center justify-center p-2">
+                      {idFrontFile.previewUrl.startsWith('data:image') ? (
+                        <img
+                          src={idFrontFile.previewUrl}
+                          alt="Front ID Preview"
+                          className="max-h-36 w-auto object-contain rounded-lg"
+                        />
+                      ) : (
+                        <div className="py-6 flex flex-col items-center justify-center text-slate-400 space-y-1">
+                          <FileCheck className="w-10 h-10 text-emerald-400" />
+                          <span className="text-xs font-mono">{idFrontFile.name}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                      <div className="truncate pr-2">
+                        <span className="font-mono text-white text-[11px] block truncate">{idFrontFile.name}</span>
+                        <span className="text-[10px] text-slate-400">{idFrontFile.size}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => idFileInputRef.current?.click()}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-medium transition"
+                        >
+                          Replace
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIdFrontFile(null);
+                            setIdFrontUploaded(false);
+                            if (idFileInputRef.current) idFileInputRef.current.value = '';
+                          }}
+                          className="p-1 hover:bg-red-950/60 text-slate-400 hover:text-red-400 rounded-lg transition"
+                          title="Remove file"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="p-4 rounded-xl border border-dashed border-slate-700 bg-slate-900/60 flex flex-col items-center justify-center text-center space-y-2">
-                <Camera className="w-6 h-6 text-emerald-400" />
-                <div className="text-xs font-bold text-white">Live Facial Liveness Selfie</div>
-                <div className="text-[11px] text-slate-400">Neutral expression, eye level liveness audit</div>
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Verified (selfie_sample.jpg)
-                </span>
+              {/* 2. LIVE FACIAL LIVENESS SELFIE */}
+              <div className="p-5 rounded-2xl border border-slate-700 bg-slate-900/80 flex flex-col justify-between space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                        <Camera className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white">Live Facial Liveness Selfie *</div>
+                        <div className="text-[11px] text-slate-400">Eye-level camera capture for KYC biometric match</div>
+                      </div>
+                    </div>
+                    {selfieUploaded && (
+                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1 font-semibold">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Verified
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {isCameraActive ? (
+                  <div className="space-y-3">
+                    <div className="relative rounded-xl overflow-hidden bg-black border border-emerald-500/50 aspect-4/3 flex items-center justify-center">
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover transform -scale-x-100"
+                      />
+                      {/* Face Positioning Oval Guide */}
+                      <div className="absolute inset-0 m-auto w-28 h-36 border-2 border-dashed border-emerald-400/80 rounded-full pointer-events-none flex items-center justify-center shadow-lg">
+                        <span className="text-[9px] text-emerald-300 bg-slate-900/80 px-2 py-0.5 rounded-full font-mono">
+                          Fit Face Here
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={captureSelfie}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-700/30 transition"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>Take Selfie Now</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={stopCamera}
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : selfiePreview ? (
+                  <div className="space-y-3 text-center">
+                    <div className="relative inline-block mx-auto">
+                      <img
+                        src={selfiePreview}
+                        alt="Captured Selfie"
+                        className="w-32 h-32 object-cover rounded-full border-2 border-emerald-400 shadow-xl mx-auto"
+                      />
+                      <span className="absolute bottom-0 right-1 w-6 h-6 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shadow">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </span>
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-bold text-white">Live Liveness Selfie Verified</div>
+                      <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Biometric Facial Vector Match Confirmed</div>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelfiePreview(null);
+                          setSelfieUploaded(false);
+                          startCamera();
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Retake Selfie</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-xl p-6 text-center transition-all bg-slate-950/40 flex flex-col items-center justify-center space-y-2.5">
+                    <div className="w-12 h-12 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white">Live Facial Liveness Selfie</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        Position your face at eye level in good lighting
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={startCamera}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-md shadow-emerald-700/20"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>Open Camera &amp; Take Selfie</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => selfieFileInputRef.current?.click()}
+                      className="text-[10px] text-slate-400 hover:text-slate-300 underline"
+                    >
+                      or upload photo from device
+                    </button>
+
+                    {cameraError && (
+                      <div className="p-2.5 bg-amber-950/60 border border-amber-800/80 rounded-xl text-[11px] text-amber-300 text-left w-full mt-2">
+                        {cameraError}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1173,31 +1544,31 @@ export default function MemberRegisterPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Number of Subscribed Shares (Min: 50 Shares)
+                    Number of Subscribed Shares (Min: {minSubscribedShares} Shares)
                   </label>
                   <input
                     type="number"
-                    min={50}
+                    min={minSubscribedShares}
                     step={10}
                     value={subscribedShares}
-                    onChange={(e) => setSubscribedShares(Number(e.target.value))}
+                    onChange={(e) => setSubscribedShares(Math.max(0, Number(e.target.value)))}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                   <span className="text-[11px] text-slate-400 mt-1 block">
-                    Par Value: ₱{parValuePerShare}.00 per share
+                    Par Value: ₱{parValuePerShare.toLocaleString()}.00 per share
                   </span>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Initial Paid-Up Deposit Amount (Min: ₱1,000.00)
+                    Initial Paid-Up Deposit Amount (Min: ₱{minInitialDeposit.toLocaleString()}.00)
                   </label>
                   <input
                     type="number"
-                    min={1000}
-                    step={500}
+                    min={minInitialDeposit}
+                    step={100}
                     value={initialDeposit}
-                    onChange={(e) => setInitialDeposit(Number(e.target.value))}
+                    onChange={(e) => setInitialDeposit(Math.max(0, Number(e.target.value)))}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>

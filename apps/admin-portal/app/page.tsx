@@ -68,6 +68,8 @@ import {
   BadgeCheck,
   Trash2,
   Edit3,
+  DollarSign,
+  Sparkles,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -433,7 +435,7 @@ export default function AdminDashboard() {
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
 
   // System Configuration Sub-Section State
-  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies'>('membership_registration');
+  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital'>('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -821,6 +823,87 @@ export default function AdminDashboard() {
       setFieldsNotification('Registration fields reset to default template.');
       setTimeout(() => setFieldsNotification(null), 3500);
     }
+  };
+
+  // Share Capital & Stock Parameters State (Superadmin Configurable)
+  const [stockParValue, setStockParValue] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const tenant = resolveTenantCoop();
+      const saved = localStorage.getItem(`flexcoop_share_capital_config_${tenant.slug}`) || localStorage.getItem('flexcoop_share_capital_config');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.parValuePerShare) return Number(parsed.parValuePerShare);
+        } catch {}
+      }
+    }
+    return 100;
+  });
+
+  const [minSubscribedShares, setMinSubscribedShares] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const tenant = resolveTenantCoop();
+      const saved = localStorage.getItem(`flexcoop_share_capital_config_${tenant.slug}`) || localStorage.getItem('flexcoop_share_capital_config');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.minSubscribedShares) return Number(parsed.minSubscribedShares);
+        } catch {}
+      }
+    }
+    return 50;
+  });
+
+  const [minPaidUpAmount, setMinPaidUpAmount] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const tenant = resolveTenantCoop();
+      const saved = localStorage.getItem(`flexcoop_share_capital_config_${tenant.slug}`) || localStorage.getItem('flexcoop_share_capital_config');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.minPaidUpAmount) return Number(parsed.minPaidUpAmount);
+        } catch {}
+      }
+    }
+    return 1000;
+  });
+
+  const [shareConfigNotification, setShareConfigNotification] = useState<string | null>(null);
+
+  const handleSaveShareCapitalConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    const tenant = resolveTenantCoop();
+    const config = {
+      parValuePerShare: Math.max(1, Number(stockParValue) || 100),
+      minSubscribedShares: Math.max(1, Number(minSubscribedShares) || 50),
+      minPaidUpAmount: Math.max(0, Number(minPaidUpAmount) || 1000),
+      updatedAt: new Date().toISOString(),
+    };
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`flexcoop_share_capital_config_${tenant.slug}`, JSON.stringify(config));
+      localStorage.setItem('flexcoop_share_capital_config', JSON.stringify(config));
+    }
+    setShareConfigNotification(`Share capital parameters saved! New applicant registrations now enforce ₱${config.parValuePerShare.toLocaleString()}.00 par value and min ${config.minSubscribedShares} shares.`);
+    setTimeout(() => setShareConfigNotification(null), 4000);
+  };
+
+  const handleResetShareCapitalConfig = () => {
+    const tenant = resolveTenantCoop();
+    const defaultConfig = {
+      parValuePerShare: 100,
+      minSubscribedShares: 50,
+      minPaidUpAmount: 1000,
+      updatedAt: new Date().toISOString(),
+    };
+    setStockParValue(100);
+    setMinSubscribedShares(50);
+    setMinPaidUpAmount(1000);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`flexcoop_share_capital_config_${tenant.slug}`, JSON.stringify(defaultConfig));
+      localStorage.setItem('flexcoop_share_capital_config', JSON.stringify(defaultConfig));
+    }
+    setShareConfigNotification('Restored default share capital parameters (₱100.00 par value, 50 min shares, ₱1,000 min paid-up).');
+    setTimeout(() => setShareConfigNotification(null), 4000);
   };
 
   // Platform Escrow & Usage State
@@ -9005,10 +9088,23 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               )}
+
+              {systemConfigSection === 'share_capital' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetShareCapitalConfig}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Stock Defaults</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Sub-Section Navigation / Module Selector */}
-            <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3 flex-wrap">
               <button
                 type="button"
                 onClick={() => setSystemConfigSection('membership_registration')}
@@ -9024,6 +9120,24 @@ export default function AdminDashboard() {
                   systemConfigSection === 'membership_registration' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
                 }`}>
                   {registrationFields.filter((f) => f.enabled).length} Active
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSystemConfigSection('share_capital')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'share_capital'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>Share Capital & Stock Parameters</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'share_capital' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  ₱{stockParValue} / {minSubscribedShares} Shares
                 </span>
               </button>
 
@@ -9412,6 +9526,202 @@ export default function AdminDashboard() {
                       <strong>Audit Trail Integrity Protocol:</strong> All account unlocks require the entry of a verified administrative justification note. Unlocking is recorded with the operator's timestamp, operator identity, target account, and justification in the immutable audit log under CDA Article 52 regulations.
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-SECTION 3: SHARE CAPITAL & STOCK PARAMETERS */}
+            {systemConfigSection === 'share_capital' && (
+              <div className="space-y-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                          <DollarSign className="w-3 h-3 text-emerald-600" />
+                          <span>Superadmin Stock Configuration</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">
+                          Statutory CBU Parameters (RA 9520)
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                        Share Capital Stock Price & Minimum Subscription Settings
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+                        Configure the cooperative stock par value price and minimum share commitment enforced during member self-registration (<code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">/member/register</code>). Changes take effect immediately for all new applicants.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetShareCapitalConfig}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset Defaults</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notification Banner */}
+                  {shareConfigNotification && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{shareConfigNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShareConfigNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveShareCapitalConfig} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* Par Value (Stock Price) */}
+                      <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-800">
+                            Par Value per Share (Stock Price) *
+                          </label>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded">
+                            PHP (₱)
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2.5 text-sm font-bold text-slate-400">₱</span>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={stockParValue}
+                            onChange={(e) => setStockParValue(Math.max(1, Number(e.target.value)))}
+                            required
+                            className="w-full pl-8 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          Fixed nominal par value per common share as stipulated in the Articles of Cooperation.
+                        </p>
+                      </div>
+
+                      {/* Minimum Subscribed Shares */}
+                      <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-800">
+                            Minimum Subscribed Shares *
+                          </label>
+                          <span className="text-[10px] bg-indigo-100 text-indigo-800 font-mono font-bold px-2 py-0.5 rounded">
+                            Shares Count
+                          </span>
+                        </div>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={minSubscribedShares}
+                          onChange={(e) => setMinSubscribedShares(Math.max(1, Number(e.target.value)))}
+                          required
+                          className="w-full px-4 py-2 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          Minimum share count pledge required during registration. Total pledge = <strong>₱{(stockParValue * minSubscribedShares).toLocaleString()}.00</strong>.
+                        </p>
+                      </div>
+
+                      {/* Minimum Initial Paid-Up */}
+                      <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-800">
+                            Minimum Initial Paid-Up *
+                          </label>
+                          <span className="text-[10px] bg-amber-100 text-amber-800 font-mono font-bold px-2 py-0.5 rounded">
+                            Initial Capital
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2.5 text-sm font-bold text-slate-400">₱</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={100}
+                            value={minPaidUpAmount}
+                            onChange={(e) => setMinPaidUpAmount(Math.max(0, Number(e.target.value)))}
+                            required
+                            className="w-full pl-8 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          Initial capital down payment. RA 9520 Art 14 requires at least 25% of subscribed capital (₱{(stockParValue * minSubscribedShares * 0.25).toLocaleString()}.00).
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Live Registration Preview Widget */}
+                    <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-emerald-400" />
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">
+                            Live Member Registration Preview (/member/register Step 4)
+                          </span>
+                        </div>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono">
+                          Applicant Perspective
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                        <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700">
+                          <div className="text-slate-400 text-[11px]">Configured Stock Par Value:</div>
+                          <div className="text-base font-black text-emerald-400 font-mono mt-1">
+                            ₱{stockParValue.toLocaleString()}.00
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">Fixed price per common share</div>
+                        </div>
+
+                        <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700">
+                          <div className="text-slate-400 text-[11px]">Min. Subscription Commitment:</div>
+                          <div className="text-base font-black text-indigo-400 font-mono mt-1">
+                            {minSubscribedShares} Shares (₱{(stockParValue * minSubscribedShares).toLocaleString()}.00)
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">Enforced minimum input on registration</div>
+                        </div>
+
+                        <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700">
+                          <div className="text-slate-400 text-[11px]">Min. Initial Paid-Up:</div>
+                          <div className="text-base font-black text-amber-400 font-mono mt-1">
+                            ₱{minPaidUpAmount.toLocaleString()}.00
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">Initial post-approval payment</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={handleResetShareCapitalConfig}
+                        className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                      >
+                        Discard Changes
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Save Stock &amp; Share Parameters</span>
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </div>
             )}
