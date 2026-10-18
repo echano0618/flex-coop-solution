@@ -1372,11 +1372,11 @@ export default function AdminDashboard() {
         idType: 'PhilSys National ID (Verified General Manager)',
         idNumber: gm.idNumber || 'CDA-GM-AUTH-0001',
         address: gm.address || 'Philippines',
-        paidUpShares: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
-        sharesCount: 100,
-        subscribedShares: 100,
-        initialPledge: isTestTenant ? 25000 : (Number(stockParValue) * 100 || 10000),
-        sharePaymentStatus: 'PAID_OTC',
+        paidUpShares: isTestTenant ? 25000 : 0,
+        sharesCount: isTestTenant ? 100 : 0,
+        subscribedShares: isTestTenant ? 100 : (Number(minSubscribedShares) || 50),
+        initialPledge: isTestTenant ? 25000 : (Number(minSubscribedShares) || 50) * (Number(stockParValue) || 100),
+        sharePaymentStatus: isTestTenant ? 'PAID_OTC' : 'UNPAID',
         savingsBalance: isTestTenant ? 10000 : 0,
         loanBalance: 0,
         npcConsent: 'Agreed (Statutory GM Undertaking)',
@@ -2349,6 +2349,49 @@ export default function AdminDashboard() {
   const [selectedGlAccountCode, setSelectedGlAccountCode] = useState<string>('1-02-01');
   const [glAccountSearchQuery, setGlAccountSearchQuery] = useState<string>('');
   const [slFilterCategory, setSlFilterCategory] = useState<'ALL' | 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN'>('ALL');
+  const [trialBalanceData, setTrialBalanceData] = useState<{
+    items: any[];
+    totalDebit: number;
+    totalCredit: number;
+    isBalanced: boolean;
+  }>({ items: [], totalDebit: 0, totalCredit: 0, isBalanced: true });
+  const [journalEntriesList, setJournalEntriesList] = useState<any[]>([]);
+
+  const loadAccountingData = useCallback(async () => {
+    try {
+      const tenantInfo = resolveTenantCoop();
+      const [tbRes, jeRes] = await Promise.allSettled([
+        fetch(`${getApiBaseUrl()}/accounting/trial-balance?coop=${tenantInfo.slug}`, {
+          headers: { 'x-tenant-slug': tenantInfo.slug },
+        }),
+        fetch(`${getApiBaseUrl()}/accounting/journal-entries?coop=${tenantInfo.slug}`, {
+          headers: { 'x-tenant-slug': tenantInfo.slug },
+        }),
+      ]);
+
+      if (tbRes.status === 'fulfilled' && tbRes.value.ok) {
+        const tbData = await tbRes.value.json();
+        if (tbData.success && tbData.data) {
+          setTrialBalanceData(tbData.data);
+        }
+      }
+
+      if (jeRes.status === 'fulfilled' && jeRes.value.ok) {
+        const jeData = await jeRes.value.json();
+        if (jeData.success && Array.isArray(jeData.data)) {
+          setJournalEntriesList(jeData.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Accounting load error:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'accounting') {
+      loadAccountingData();
+    }
+  }, [activeTab, loadAccountingData]);
 
   if (isCheckingAuth || !isAuthenticated) {
     return (
@@ -2740,8 +2783,8 @@ export default function AdminDashboard() {
                 <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">
                   {techFeeTreatment === 'PASS_THROUGH' ? 'Technology Fees (Pass-Through)' : 'Technology Fees (OPEX Absorbed)'}
                 </div>
-                <div className="text-2xl font-bold text-emerald-600 mt-2">₱{isTestTenant ? '500.00' : '0.00'}</div>
-                <div className="text-xs text-slate-500 font-medium mt-1">₱{isTestTenant ? '53.57' : '0.00'} Output VAT Remitted</div>
+                <div className="text-2xl font-bold text-emerald-600 mt-2">₱0.00</div>
+                <div className="text-xs text-slate-500 font-medium mt-1">₱0.00 Output VAT Remitted</div>
               </div>
 
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
@@ -6787,19 +6830,28 @@ export default function AdminDashboard() {
 
             {/* SUB-VIEW 1: CDA TRIAL BALANCE */}
             {ledgerSubTab === 'trial_balance' && (() => {
-              const tbPaidUpShares = isTestTenant ? 30000 : members.reduce((s, m) => s + (m.paidUpShares || 0), 0);
-              const tbCompulsorySavings = isTestTenant ? 7000 : members.reduce((s, m) => s + (m.savingsBalance || 0), 0);
-              const tbVoluntarySavings = isTestTenant ? 1200 : 0;
-              const tbProcessingFeePayable = isTestTenant ? 1000 : 0;
-              const tbInterestIncome = isTestTenant ? 3270 : 0;
-              const tbServiceFeeIncome = isTestTenant ? 750 : 0;
-              const tbEscrow = isTestTenant ? 48250 : 0;
-              const tbPaymongo = isTestTenant ? 48470 : 0;
-              const tbLoans = isTestTenant ? 47000 : members.reduce((s, m) => s + (m.loanBalance || 0), 0);
-              const tbCashOnHand = isTestTenant ? 15000 : Math.max(0, tbPaidUpShares + tbCompulsorySavings + tbVoluntarySavings - tbLoans);
+              const standardAccounts = [
+                { code: '1-01-01', title: 'Cash on Hand (Cashier Counter)', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-01-04', title: 'Platform Escrow Settlement Account', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-01-05', title: 'Digital Wallet / PayMongo Float', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-02-01', title: 'Loans Receivable - Regular (Control Account)', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '2-01-01', title: 'Savings Deposits - Compulsory (Control Account)', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '2-01-02', title: 'Savings Deposits - Voluntary (Control Account)', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '2-02-02', title: 'Platform Loan Processing Fee Payable', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '3-01-03', title: 'Paid-Up Share Capital - Common (Control Account)', category: 'EQUITY', normal: 'CREDIT' },
+                { code: '4-01-01', title: 'Interest Income from Loans', category: 'REVENUE', normal: 'CREDIT' },
+                { code: '4-01-02', title: 'Service and Filing Fees Income', category: 'REVENUE', normal: 'CREDIT' },
+              ];
 
-              const tbTotalDebits = tbCashOnHand + tbEscrow + tbPaymongo + tbLoans;
-              const tbTotalCredits = tbEscrow + tbCompulsorySavings + tbVoluntarySavings + tbProcessingFeePayable + tbPaidUpShares + tbInterestIncome + tbServiceFeeIncome;
+              const rows = standardAccounts.map((acc) => {
+                const item = trialBalanceData.items?.find((i: any) => i.accountCode === acc.code);
+                const dr = item ? (item.netDebit || 0) : 0;
+                const cr = item ? (item.netCredit || 0) : 0;
+                return { ...acc, dr, cr };
+              });
+
+              const tbTotalDebits = trialBalanceData.totalDebit || rows.reduce((s, r) => s + r.dr, 0);
+              const tbTotalCredits = trialBalanceData.totalCredit || rows.reduce((s, r) => s + r.cr, 0);
 
               return (
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
@@ -6833,176 +6885,38 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">1-01-01</td>
-                          <td className="p-3 font-medium text-slate-800">Cash on Hand (Cashier Counter)</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbCashOnHand.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('1-01-01'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">1-01-04</td>
-                          <td className="p-3 font-medium text-slate-800">Platform Escrow Settlement Account</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbEscrow.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('1-01-04'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">1-01-05</td>
-                          <td className="p-3 font-medium text-slate-800">Digital Wallet / PayMongo Float</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbPaymongo.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('1-01-05'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">1-02-01</td>
-                          <td className="p-3 font-medium text-slate-800">Loans Receivable - Regular (Control Account)</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">ASSETS</span></td>
-                          <td className="p-3 font-mono text-slate-500">DEBIT</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbLoans.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('1-02-01'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">2-01-01</td>
-                          <td className="p-3 font-medium text-slate-800">Savings Deposits - Compulsory (Control Account)</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbCompulsorySavings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('2-01-01'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">2-01-02</td>
-                          <td className="p-3 font-medium text-slate-800">Savings Deposits - Voluntary (Control Account)</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbVoluntarySavings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('2-01-02'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">2-02-02</td>
-                          <td className="p-3 font-medium text-slate-800">Platform Loan Processing Fee Payable</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">LIABILITIES</span></td>
-                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbProcessingFeePayable.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('2-02-02'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">3-01-03</td>
-                          <td className="p-3 font-medium text-slate-800">Paid-Up Share Capital - Common (Control Account)</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">EQUITY</span></td>
-                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbPaidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('3-01-03'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">4-01-01</td>
-                          <td className="p-3 font-medium text-slate-800">Interest Income from Loans</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
-                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbInterestIncome.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('4-01-01'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
-                        <tr className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3 font-mono font-bold text-slate-900">4-01-02</td>
-                          <td className="p-3 font-medium text-slate-800">Service and Filing Fees Income</td>
-                          <td className="p-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">REVENUE</span></td>
-                          <td className="p-3 font-mono text-slate-500">CREDIT</td>
-                          <td className="p-3 text-right font-mono text-slate-400">0.00</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{tbServiceFeeIncome.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedGlAccountCode('4-01-02'); setLedgerSubTab('gl_statement'); }}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
-                            >
-                              View GL Ledger
-                            </button>
-                          </td>
-                        </tr>
+                        {rows.map((r) => (
+                          <tr key={r.code} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-3 font-mono font-bold text-slate-900">{r.code}</td>
+                            <td className="p-3 font-medium text-slate-800">{r.title}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                r.category === 'ASSETS' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                r.category === 'LIABILITIES' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                r.category === 'EQUITY' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {r.category}
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono text-slate-500">{r.normal}</td>
+                            <td className="p-3 text-right font-mono font-bold text-slate-900">
+                              {r.dr > 0 ? r.dr.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '0.00'}
+                            </td>
+                            <td className="p-3 text-right font-mono text-slate-400">
+                              {r.cr > 0 ? r.cr.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '0.00'}
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => { setSelectedGlAccountCode(r.code); setLedgerSubTab('gl_statement'); }}
+                                className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                              >
+                                View GL Ledger
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                       <tfoot className="bg-emerald-50 border-t-2 border-emerald-500 font-bold text-slate-900 text-xs">
                         <tr>
@@ -7024,9 +6938,54 @@ export default function AdminDashboard() {
                 id: 'mem_gm_0001',
                 name: 'General Manager',
                 memberNo: 'MEM-2026-0001',
-                paidUpShares: 10000,
+                paidUpShares: 0,
                 savingsBalance: 0,
                 loanBalance: 0,
+              };
+
+              const getMemberAccountTxs = (accCode: string, normalBal: 'DEBIT' | 'CREDIT') => {
+                const memberTxs: Array<{
+                  date: string;
+                  ref: string;
+                  desc: string;
+                  dr: number;
+                  cr: number;
+                  bal: number;
+                }> = [];
+
+                let runBal = 0;
+                const sorted = [...journalEntriesList].sort(
+                  (a, b) => new Date(a.postingDate || a.date).getTime() - new Date(b.postingDate || b.date).getTime()
+                );
+
+                sorted.forEach((je) => {
+                  const line = je.lines?.find(
+                    (l: any) =>
+                      l.accountCode === accCode &&
+                      (l.memberId === activeMember.id ||
+                        l.memberNumber === activeMember.memberNo ||
+                        (activeMember.email && l.memo?.toLowerCase().includes(activeMember.email.toLowerCase())))
+                  );
+                  if (line) {
+                    const dr = line.debit || 0;
+                    const cr = line.credit || 0;
+                    if (normalBal === 'DEBIT') {
+                      runBal += dr - cr;
+                    } else {
+                      runBal += cr - dr;
+                    }
+                    memberTxs.push({
+                      date: je.postingDate || je.date,
+                      ref: je.entryNumber || je.id,
+                      desc: line.memo || je.description || 'Subsidiary ledger entry',
+                      dr,
+                      cr,
+                      bal: runBal,
+                    });
+                  }
+                });
+
+                return memberTxs;
               };
 
               // Member Subsidiary Ledger accounts strictly reflecting authentic member balances
@@ -7035,52 +6994,25 @@ export default function AdminDashboard() {
                   code: '3-01-03',
                   title: 'Paid-Up Share Capital - Common',
                   type: 'SHARE_CAPITAL',
-                  normal: 'CREDIT',
+                  normal: 'CREDIT' as const,
                   balance: activeMember.paidUpShares || 0,
-                  txs: isTestTenant && (activeMember.paidUpShares || 0) > 0 ? [
-                    {
-                      date: '2026-01-20',
-                      ref: 'OR-SHR-2026-001',
-                      desc: 'Initial Share Capital Paid-Up Contribution (In-Person Cashier)',
-                      dr: 0,
-                      cr: activeMember.paidUpShares,
-                      bal: activeMember.paidUpShares,
-                    },
-                  ] : [],
+                  txs: getMemberAccountTxs('3-01-03', 'CREDIT'),
                 },
                 {
                   code: '2-01-01',
                   title: 'Savings Deposits - Compulsory',
                   type: 'SAVINGS',
-                  normal: 'CREDIT',
+                  normal: 'CREDIT' as const,
                   balance: activeMember.savingsBalance || 0,
-                  txs: isTestTenant && (activeMember.savingsBalance || 0) > 0 ? [
-                    {
-                      date: '2026-01-20',
-                      ref: 'OR-SAV-2026-001',
-                      desc: 'Compulsory Monthly Savings Deposit (Auto-Credit)',
-                      dr: 0,
-                      cr: activeMember.savingsBalance,
-                      bal: activeMember.savingsBalance,
-                    },
-                  ] : [],
+                  txs: getMemberAccountTxs('2-01-01', 'CREDIT'),
                 },
                 {
                   code: '1-02-01',
                   title: 'Loans Receivable - Regular',
                   type: 'LOAN',
-                  normal: 'DEBIT',
+                  normal: 'DEBIT' as const,
                   balance: activeMember.loanBalance || 0,
-                  txs: isTestTenant && (activeMember.loanBalance || 0) > 0 ? [
-                    {
-                      date: '2026-02-01',
-                      ref: `LN-2026-${(activeMember.memberNo || '0001').replace(/\D/g, '')}`,
-                      desc: 'Loan Principal Disbursed via Platform Escrow',
-                      dr: activeMember.loanBalance,
-                      cr: 0,
-                      bal: activeMember.loanBalance,
-                    },
-                  ] : [],
+                  txs: getMemberAccountTxs('1-02-01', 'DEBIT'),
                 },
               ];
 
@@ -7275,7 +7207,7 @@ export default function AdminDashboard() {
 
               const currentAccount = coaOptions.find((a) => a.code === selectedGlAccountCode) || coaOptions[3];
 
-              // Production: Clean ledger initialized with zero dummy records
+              // Populate chronological entries directly from online journal entries
               const activeEntries: Array<{
                 date: string;
                 voucher: string;
@@ -7287,7 +7219,35 @@ export default function AdminDashboard() {
                 bal: number;
               }> = [];
 
-              const endingBal = activeEntries.length > 0 ? (activeEntries[activeEntries.length - 1]?.bal || 0) : 0;
+              let runningBalance = 0;
+              const sorted = [...journalEntriesList].sort(
+                (a, b) => new Date(a.postingDate || a.date).getTime() - new Date(b.postingDate || b.date).getTime()
+              );
+
+              sorted.forEach((je) => {
+                const line = je.lines?.find((l: any) => l.accountCode === selectedGlAccountCode);
+                if (line) {
+                  const dr = line.debit || 0;
+                  const cr = line.credit || 0;
+                  if (currentAccount.normal === 'DEBIT') {
+                    runningBalance += dr - cr;
+                  } else {
+                    runningBalance += cr - dr;
+                  }
+                  activeEntries.push({
+                    date: je.postingDate || je.date,
+                    voucher: je.entryNumber || je.id,
+                    ref: je.referenceType || 'JOURNAL',
+                    desc: line.memo || je.description || 'General ledger entry',
+                    member: line.memberName ? `${line.memberName} (${line.memberNumber || ''})` : '—',
+                    dr,
+                    cr,
+                    bal: runningBalance,
+                  });
+                }
+              });
+
+              const endingBal = runningBalance;
 
               return (
                 <div className="space-y-6">
@@ -7398,20 +7358,20 @@ export default function AdminDashboard() {
 
             {/* SUB-VIEW 4: GL VS SL CONTROL RECONCILIATION */}
             {ledgerSubTab === 'reconciliation' && (() => {
-              const recLoansCount = isTestTenant ? 1 : members.filter((m) => (m.loanBalance || 0) > 0).length;
-              const recLoansGl = isTestTenant ? 47000 : members.reduce((s, m) => s + (m.loanBalance || 0), 0);
+              const recLoansCount = members.filter((m) => (m.loanBalance || 0) > 0).length;
+              const recLoansGl = members.reduce((s, m) => s + (m.loanBalance || 0), 0);
               const recLoansSl = recLoansGl;
 
-              const recCompSavingsCount = isTestTenant ? 2 : members.filter((m) => (m.savingsBalance || 0) > 0).length;
-              const recCompSavingsGl = isTestTenant ? 7000 : members.reduce((s, m) => s + (m.savingsBalance || 0), 0);
+              const recCompSavingsCount = members.filter((m) => (m.savingsBalance || 0) > 0).length;
+              const recCompSavingsGl = members.reduce((s, m) => s + (m.savingsBalance || 0), 0);
               const recCompSavingsSl = recCompSavingsGl;
 
-              const recVolSavingsCount = isTestTenant ? 1 : 0;
-              const recVolSavingsGl = isTestTenant ? 1200 : 0;
-              const recVolSavingsSl = recVolSavingsGl;
+              const recVolSavingsCount: number = 0;
+              const recVolSavingsGl: number = 0;
+              const recVolSavingsSl: number = 0;
 
-              const recSharesCount = isTestTenant ? 3 : members.filter((m) => (m.paidUpShares || 0) > 0).length;
-              const recSharesGl = isTestTenant ? 30000 : members.reduce((s, m) => s + (m.paidUpShares || 0), 0);
+              const recSharesCount = members.filter((m) => (m.paidUpShares || 0) > 0).length;
+              const recSharesGl = members.reduce((s, m) => s + (m.paidUpShares || 0), 0);
               const recSharesSl = recSharesGl;
 
               const recTotalGl = recLoansGl + recCompSavingsGl + recVolSavingsGl + recSharesGl;
@@ -8531,52 +8491,14 @@ export default function AdminDashboard() {
                 <div className="bg-slate-100 p-3 border-b border-slate-200 font-bold text-xs text-slate-700 flex justify-between items-center">
                   <span>Pro-Rata Member Surplus Allocation Roster (Fiscal Year 2025)</span>
                   <span className="font-normal text-slate-500">
-                    Total Share Capital: ₱{(isTestTenant ? 25000 : members.reduce((s, m) => s + (m.paidUpShares || 0), 0)).toLocaleString('en-PH', { minimumFractionDigits: 2 })} Common
+                    Total Share Capital: ₱{members.reduce((s, m) => s + (m.paidUpShares || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} Common
                   </span>
                 </div>
-                {isTestTenant ? (
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                      <tr>
-                        <th className="p-3">Member Details</th>
-                        <th className="p-3 text-right">Paid-Up Capital</th>
-                        <th className="p-3 text-right">Interest on Capital (ISC)</th>
-                        <th className="p-3 text-right">Patronage Refund (PR)</th>
-                        <th className="p-3 text-right">Total Net Dividend</th>
-                        <th className="p-3">Settlement Account</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-800">
-                      <tr>
-                        <td className="p-3">
-                          <div className="font-semibold text-slate-900">Maria Clara Santos</div>
-                          <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0001 (60.0% Capital Weight)</div>
-                        </td>
-                        <td className="p-3 text-right font-mono font-medium">₱15,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mariaPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(mariaIsc + mariaPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
-                      </tr>
-                      <tr>
-                        <td className="p-3">
-                          <div className="font-semibold text-slate-900">Juan Perez Dela Cruz</div>
-                          <div className="text-[11px] text-slate-500 font-mono">MEM-2026-0002 (40.0% Capital Weight)</div>
-                        </td>
-                        <td className="p-3 text-right font-mono font-medium">₱10,000.00</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-3 text-right font-mono font-bold text-slate-900">₱{juanPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(juanIsc + juanPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                {members.filter((m) => (m.paidUpShares || 0) > 0).length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 text-xs">
+                    No member share capital subscriptions have been registered or closed for statutory dividend distribution in this fiscal period.
+                  </div>
                 ) : (
-                  members.filter((m) => (m.paidUpShares || 0) > 0).length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 text-xs">
-                      No member share capital subscriptions have been registered or closed for statutory dividend distribution in this fiscal period.
-                    </div>
-                  ) : (
                     <table className="w-full text-left text-xs">
                       <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                         <tr>
@@ -8610,8 +8532,7 @@ export default function AdminDashboard() {
                         })}
                       </tbody>
                     </table>
-                  )
-                )}
+                  )}
               </div>
             </div>
           </div>

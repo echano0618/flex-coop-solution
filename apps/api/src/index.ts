@@ -14,7 +14,7 @@ import { AuthService, UserRole } from './core/auth';
 import { FirestoreCoopService } from './core/firestore.service';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
-import { Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult, PSGCAddress, validatePSGCAddress, formatPSGCAddress } from '@flexcoop/shared-types';
+import { JournalEntry, Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult, PSGCAddress, validatePSGCAddress, formatPSGCAddress } from '@flexcoop/shared-types';
 import { NetSurplusService } from './modules/accounting/surplus.service';
 import { CollateralService } from './modules/lending/collateral.service';
 import { OperatorService } from './modules/operator/operator.service';
@@ -2073,31 +2073,50 @@ app.get('/api/v1/accounting/coa', (_req: Request, res: Response) => {
   res.json({ success: true, count: accounts.length, data: accounts });
 });
 
-app.get('/api/v1/accounting/journal-entries', (req: Request, res: Response) => {
+// Helpers to retrieve online accounting data from Cloud Firestore
+async function getTenantJournalEntries(tenantId: string): Promise<JournalEntry[]> {
+  try {
+    const fsService = FirestoreCoopService.getInstance();
+    const fsEntries = await fsService.listJournalEntries(tenantId);
+    if (fsEntries && fsEntries.length > 0) return fsEntries;
+  } catch {}
+  return dbStore.journalEntries.get(tenantId) || [];
+}
+
+async function getTenantAccountingMembers(tenantId: string): Promise<Member[]> {
+  try {
+    const fsService = FirestoreCoopService.getInstance();
+    const fsMembers = await fsService.listMembers(tenantId);
+    if (fsMembers && fsMembers.length > 0) return fsMembers;
+  } catch {}
+  return dbStore.members.get(tenantId) || [];
+}
+
+app.get('/api/v1/accounting/journal-entries', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const entries = await getTenantJournalEntries(tenantId);
   res.json({ success: true, count: entries.length, data: entries });
 });
 
-app.get('/api/v1/accounting/trial-balance', (req: Request, res: Response) => {
+app.get('/api/v1/accounting/trial-balance', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const entries = await getTenantJournalEntries(tenantId);
   const trialBalance = GeneralLedgerService.generateTrialBalance(entries);
   res.json({ success: true, data: trialBalance });
 });
 
-app.get('/api/v1/accounting/financial-statements', (req: Request, res: Response) => {
+app.get('/api/v1/accounting/financial-statements', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const entries = await getTenantJournalEntries(tenantId);
   const statements = GeneralLedgerService.generateFinancialStatements(entries);
   res.json({ success: true, data: statements });
 });
 
 // GET /api/v1/accounting/gl-statement/:accountCode - Full Account Ledger with Chronological Running Balances
-app.get('/api/v1/accounting/gl-statement/:accountCode', (req: Request, res: Response) => {
+app.get('/api/v1/accounting/gl-statement/:accountCode', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const { accountCode } = req.params;
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const entries = await getTenantJournalEntries(tenantId);
   const statement = GeneralLedgerService.generateGeneralLedgerStatement(accountCode, entries);
 
   if (!statement) {
@@ -2108,19 +2127,19 @@ app.get('/api/v1/accounting/gl-statement/:accountCode', (req: Request, res: Resp
 });
 
 // GET /api/v1/accounting/member-subsidiary-ledgers - All members' SL summaries
-app.get('/api/v1/accounting/member-subsidiary-ledgers', (req: Request, res: Response) => {
+app.get('/api/v1/accounting/member-subsidiary-ledgers', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const members = dbStore.members.get(tenantId) || [];
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const members = await getTenantAccountingMembers(tenantId);
+  const entries = await getTenantJournalEntries(tenantId);
   const ledgers = GeneralLedgerService.getAllMemberSubsidiaryLedgers(members, entries);
   res.json({ success: true, count: ledgers.length, data: ledgers });
 });
 
 // GET /api/v1/accounting/member-subsidiary-ledgers/:memberIdOrNumber - Specific Member's SL Statement
-app.get('/api/v1/accounting/member-subsidiary-ledgers/:memberIdOrNumber', (req: Request, res: Response) => {
+app.get('/api/v1/accounting/member-subsidiary-ledgers/:memberIdOrNumber', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const { memberIdOrNumber } = req.params;
-  const members = dbStore.members.get(tenantId) || [];
+  const members = await getTenantAccountingMembers(tenantId);
   const member = members.find(
     (m) => m.id === memberIdOrNumber || m.memberNumber.toLowerCase() === memberIdOrNumber.toLowerCase()
   );
@@ -2129,16 +2148,16 @@ app.get('/api/v1/accounting/member-subsidiary-ledgers/:memberIdOrNumber', (req: 
     return res.status(404).json({ success: false, error: `Member '${memberIdOrNumber}' not found.` });
   }
 
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const entries = await getTenantJournalEntries(tenantId);
   const sl = GeneralLedgerService.generateMemberSubsidiaryLedger(member, entries);
   res.json({ success: true, data: sl });
 });
 
 // GET /api/v1/accounting/gl-sl-reconciliation - Control Accounts Audit (GL vs Sum of SL)
-app.get('/api/v1/accounting/gl-sl-reconciliation', (req: Request, res: Response) => {
+app.get('/api/v1/accounting/gl-sl-reconciliation', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const members = dbStore.members.get(tenantId) || [];
-  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const members = await getTenantAccountingMembers(tenantId);
+  const entries = await getTenantJournalEntries(tenantId);
   const reconciliation = GeneralLedgerService.generateGLSLReconciliation(members, entries);
   res.json({ success: true, data: reconciliation });
 });

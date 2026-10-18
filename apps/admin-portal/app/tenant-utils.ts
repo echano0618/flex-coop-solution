@@ -124,11 +124,11 @@ export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; t
 export function resolveTenantCoop(searchParams?: URLSearchParams | null): TenantInfo {
   if (typeof window === 'undefined') {
     return {
-      slug: 'default',
-      name: 'Cooperative Enterprise',
+      slug: 'family-coop',
+      name: 'Family Multi-Purpose Cooperative',
       isSubdomain: false,
-      registrationNumber: 'CDA Registered',
-      logoLetter: 'C',
+      registrationNumber: 'CDA-NCR-2024-00892',
+      logoLetter: 'F',
       coopType: 'Multi-Purpose',
       isTest: false,
     };
@@ -207,34 +207,37 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
   } catch {}
 
   // 5. Match against known cooperatives
-  if (slug && KNOWN_COOPERATIVES[slug]) {
-    const known = KNOWN_COOPERATIVES[slug];
+  // 5. Fallback to default production cooperative if no slug resolved
+  const effectiveSlug = slug && slug !== 'default' ? slug : 'family-coop';
+
+  if (KNOWN_COOPERATIVES[effectiveSlug]) {
+    const known = KNOWN_COOPERATIVES[effectiveSlug];
     if (!resolvedName) resolvedName = known.name;
     if (!resolvedRegNo) resolvedRegNo = known.regNo;
     if (!resolvedType && known.type) resolvedType = known.type;
   }
 
   // 6. Natural Language Formatter if slug exists but no name registered yet
-  if (!resolvedName && slug && slug !== 'default') {
-    const words = slug
+  if (!resolvedName && effectiveSlug) {
+    const words = effectiveSlug
       .split(/[-_]/)
       .filter(Boolean)
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
     resolvedName = `${words.join(' ')} Multi-Purpose Cooperative`;
   }
 
-  const finalName = resolvedName || 'Cooperative Enterprise';
-  const logoLetter = finalName.trim().charAt(0).toUpperCase() || 'C';
+  const finalName = resolvedName || 'Family Multi-Purpose Cooperative';
+  const logoLetter = finalName.trim().charAt(0).toUpperCase() || 'F';
 
   return {
-    slug: slug || 'default',
+    slug: effectiveSlug,
     name: finalName,
     isSubdomain,
-    registrationNumber: resolvedRegNo || 'CDA Registered',
+    registrationNumber: resolvedRegNo || 'CDA-NCR-2024-00892',
     logoLetter,
     tin: resolvedTin,
     coopType: resolvedType || 'Multi-Purpose',
-    isTest: isTestCoopTenant(slug),
+    isTest: isTestCoopTenant(effectiveSlug),
   };
 }
 
