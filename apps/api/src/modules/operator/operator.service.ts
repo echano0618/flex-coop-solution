@@ -396,8 +396,8 @@ export class OperatorService {
 
     // Provision declared General Manager as Member #1 of the cooperative
     const gmFullName = [reg.adminFirstName, reg.adminMiddleName, reg.adminLastName].filter(Boolean).join(' ');
-    const gmMemberId = `mem_${reg.slug}_0001`;
-    const gmMemberNumber = `MEM-${new Date().getFullYear()}-0001`;
+    const gmMemberId = 'MEM-2026-0001';
+    const gmMemberNumber = 'MEM-2026-0001';
 
     const gmMember: Member = {
       id: gmMemberId,
@@ -424,6 +424,13 @@ export class OperatorService {
     dbStore.members.set(tenantId, [gmMember]);
     dbStore.loans.set(tenantId, []);
     dbStore.journalEntries.set(tenantId, []);
+
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fsService = FirestoreCoopService.getInstance();
+        fsService.saveMember(tenantId, gmMember).catch(() => {});
+      } catch {}
+    }
 
     // Initial Share Capital and Savings Account for the General Manager
     dbStore.shareAccounts.set(tenantId, [

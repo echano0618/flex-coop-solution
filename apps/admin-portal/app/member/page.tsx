@@ -219,7 +219,7 @@ export default function MemberPortalPage() {
               const fullName = parsedAdmin.name;
               const initials = fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
               setCustomMember({
-                id: parsedAdmin.id || 'mem_gm_0001',
+                id: parsedAdmin.id || 'MEM-2026-0001',
                 memberNumber: 'MEM-2026-0001',
                 name: fullName,
                 initials: initials || 'GM',
@@ -238,7 +238,7 @@ export default function MemberPortalPage() {
         if (gm && gm.name) {
           const initials = gm.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
           setCustomMember({
-            id: 'mem_gm_0001',
+            id: 'MEM-2026-0001',
             memberNumber: 'MEM-2026-0001',
             name: gm.name,
             initials: initials || 'GM',
@@ -267,7 +267,7 @@ export default function MemberPortalPage() {
     : 'GM';
 
   const currentMember = customMember || {
-    id: 'mem_gm_0001',
+    id: 'MEM-2026-0001',
     memberNumber: 'MEM-2026-0001',
     name: gmInfo.name || 'General Manager',
     initials: gmInitials || 'GM',

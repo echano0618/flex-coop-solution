@@ -1295,6 +1295,41 @@ app.get('/api/v1/members', async (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/v1/members/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberId = req.params.id;
+
+    let member: Member | null = null;
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      member = await fsService.getMember(tenantId, memberId);
+    } catch (fsErr) {
+      console.warn('Firestore getMember fallback:', fsErr);
+    }
+
+    if (!member) {
+      const members = dbStore.members.get(tenantId) || [];
+      member =
+        members.find(
+          (m) =>
+            m.id === memberId ||
+            m.memberNumber === memberId ||
+            (m as any).memberNo === memberId ||
+            (memberId === 'mem_gm_0001' && (m.memberNumber === 'MEM-2026-0001' || m.id === 'MEM-2026-0001'))
+        ) || null;
+    }
+
+    if (!member) {
+      return res.status(404).json({ success: false, error: `Member '${memberId}' not found.` });
+    }
+
+    res.json({ success: true, tenantId, data: member });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/v1/members', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);

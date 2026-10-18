@@ -1810,7 +1810,7 @@ export default function AdminDashboard() {
 
       // Statutory Requirement: The General Manager is Member #1 (Regular Member)
       const gmMember: MemberRecord = {
-        id: 'mem_gm_0001',
+        id: 'MEM-2026-0001',
         memberNo: 'MEM-2026-0001',
         name: gm.name,
         email: gm.email,
@@ -1924,12 +1924,22 @@ export default function AdminDashboard() {
         if (memsData.success && Array.isArray(memsData.data)) {
           memsData.data.forEach((onlineMem: any) => {
             const idx = list.findIndex(
-              (m) => m.id === onlineMem.id || (onlineMem.email && m.email?.toLowerCase() === onlineMem.email.toLowerCase())
+              (m) =>
+                m.id === onlineMem.id ||
+                m.memberNo === onlineMem.memberNumber ||
+                m.memberNo === onlineMem.memberNo ||
+                m.id === onlineMem.memberNumber ||
+                (onlineMem.email && m.email?.toLowerCase() === onlineMem.email.toLowerCase())
             );
+            const normalizedMem = {
+              ...onlineMem,
+              id: onlineMem.id || onlineMem.memberNumber || onlineMem.memberNo,
+              memberNo: onlineMem.memberNumber || onlineMem.memberNo || onlineMem.id,
+            };
             if (idx >= 0) {
-              list[idx] = { ...list[idx], ...onlineMem };
+              list[idx] = { ...list[idx], ...normalizedMem };
             } else {
-              list.push(onlineMem);
+              list.push(normalizedMem);
             }
           });
         }
