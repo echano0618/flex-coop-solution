@@ -570,10 +570,6 @@ export default function CooperativeLandingPage() {
             <a href="https://tuntongtech.com" target="_blank" rel="noreferrer" className="hover:text-slate-300">
               Tuntong Tech
             </a>
-            <span>•</span>
-            <Link href="/operator/login" className="text-slate-500 hover:text-emerald-400">
-              Operator Sign In
-            </Link>
           </div>
         </div>
       </footer>

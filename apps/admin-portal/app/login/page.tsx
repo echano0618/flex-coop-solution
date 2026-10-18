@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
-  Shield,
   KeyRound,
   ExternalLink,
   Users,
@@ -150,13 +149,6 @@ export default function AdminLoginPage() {
           >
             <Users className="w-3.5 h-3.5 text-emerald-400" />
             <span>Member Portal</span>
-          </Link>
-          <Link
-            href="/operator/login"
-            className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
-          >
-            <Shield className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Operator</span>
           </Link>
         </div>
       </div>
