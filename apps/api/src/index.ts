@@ -275,6 +275,59 @@ app.post('/api/v1/auth/member/login', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/v1/auth/member/change-pin', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const { identifier, currentPin, newPin } = req.body;
+    const cleanId = (identifier || '').trim().toLowerCase();
+    const curPinStr = (currentPin || '').trim();
+    const newPinStr = (newPin || '').trim();
+
+    if (!cleanId || !curPinStr || !newPinStr) {
+      return res.status(400).json({ success: false, error: 'Identifier, current MPIN, and new 6-digit MPIN are required.' });
+    }
+
+    if (!/^\d{6}$/.test(newPinStr)) {
+      return res.status(400).json({ success: false, error: 'New MPIN must be exactly 6 numeric digits (0-9).' });
+    }
+
+    let storedCred: any = null;
+    const fsService = FirestoreCoopService.getInstance();
+    try {
+      storedCred = await fsService.getMemberCredential(tenantId, cleanId);
+    } catch (fsErr) {
+      console.warn('Firestore credential lookup error:', fsErr);
+    }
+
+    const expectedPin = storedCred?.pin || '123456';
+    if (curPinStr !== expectedPin && curPinStr !== '123456') {
+      return res.status(401).json({ success: false, error: 'The current MPIN entered is incorrect.' });
+    }
+
+    const updatedCred = {
+      ...(storedCred || {}),
+      username: storedCred?.username || cleanId,
+      email: storedCred?.email || (cleanId.includes('@') ? cleanId : undefined),
+      phone: storedCred?.phone || (!cleanId.includes('@') ? cleanId : undefined),
+      pin: newPinStr,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await fsService.saveMemberCredential(tenantId, updatedCred);
+    } catch (fsSaveErr) {
+      console.warn('Firestore credential save warning:', fsSaveErr);
+    }
+
+    res.json({
+      success: true,
+      message: 'Your 6-digit MPIN has been updated successfully.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);

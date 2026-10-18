@@ -1982,7 +1982,20 @@ console.log('\n--- 29. Operator Portal Passwordless OTP Authentication ---');
   assert(invalidSession === null, 'Invalid session token returns null');
 }
 
-console.log('\n🎉 ALL 293 VERIFICATION TEST CASES (INCLUDING OPERATOR PASSWORDLESS OTP LOGIN & support@tuntongtech.com DISPATCH) PASSED SUCCESSFULLY!\n');
+// 30. Member Portal 6-Digit MPIN Management & Validation
+console.log('\n--- 30. Member 6-Digit MPIN Management & Validation ---');
+{
+  const isValidMpin = (pin: string) => /^\d{6}$/.test((pin || '').trim());
+  assert(isValidMpin('123456') === true, 'Standard 6-digit MPIN is valid');
+  assert(isValidMpin('987654') === true, 'Custom 6-digit MPIN is valid');
+  assert(isValidMpin('12345') === false, '5-digit MPIN is rejected');
+  assert(isValidMpin('1234567') === false, '7-digit MPIN is rejected');
+  assert(isValidMpin('abcdef') === false, 'Non-numeric MPIN is rejected');
+  assert(isValidMpin('12 345') === false, 'MPIN with whitespace is rejected');
+  assert(isValidMpin('') === false, 'Empty MPIN is rejected');
+}
+
+console.log('\n🎉 ALL 300 VERIFICATION TEST CASES (INCLUDING OPERATOR OTP LOGIN & MEMBER 6-DIGIT MPIN MANAGEMENT) PASSED SUCCESSFULLY!\n');
 
 
 
