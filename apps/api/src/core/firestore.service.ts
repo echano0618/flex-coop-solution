@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, Firestore, QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { getFirestore, Firestore, QueryDocumentSnapshot, Transaction } from 'firebase-admin/firestore';
 import {
   Tenant,
   Member,
@@ -177,7 +177,7 @@ export class FirestoreCoopService {
     }
 
     // 2. Execute atomic Firestore Transaction
-    return await this.db.runTransaction(async (transaction) => {
+    return await this.db.runTransaction(async (transaction: Transaction) => {
       // Create journal entry record (Immutable)
       const entryRef = this.journalEntriesCol(tenantId).doc(entry.id);
       transaction.set(entryRef, {
@@ -228,7 +228,7 @@ export class FirestoreCoopService {
     tenantId: string,
     payment: PaymentTransaction
   ): Promise<void> {
-    await this.db.runTransaction(async (transaction) => {
+    await this.db.runTransaction(async (transaction: Transaction) => {
       // 1. Save payment record
       const paymentRef = this.paymentsCol(tenantId).doc(payment.id);
       transaction.set(paymentRef, payment);
