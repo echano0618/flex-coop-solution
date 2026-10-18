@@ -40,6 +40,7 @@ export default function CoopRegisterPage() {
   const [validIdFileName, setValidIdFileName] = useState<string>('');
   const [validIdSizeMb, setValidIdSizeMb] = useState<string>('');
   const [validIdError, setValidIdError] = useState<string>('');
+  const [validIdDataUrl, setValidIdDataUrl] = useState<string>('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredResult, setRegisteredResult] = useState<{
@@ -86,6 +87,7 @@ export default function CoopRegisterPage() {
       setValidIdFileName('');
       setValidIdSizeMb('');
       setValidIdError('');
+      setValidIdDataUrl('');
       return;
     }
 
@@ -96,6 +98,7 @@ export default function CoopRegisterPage() {
       setValidIdFile(null);
       setValidIdFileName('');
       setValidIdSizeMb('');
+      setValidIdDataUrl('');
       return;
     }
 
@@ -103,6 +106,14 @@ export default function CoopRegisterPage() {
     setValidIdFile(file);
     setValidIdFileName(file.name);
     setValidIdSizeMb((file.size / (1024 * 1024)).toFixed(2));
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setValidIdDataUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -137,7 +148,7 @@ export default function CoopRegisterPage() {
       adminEmail: formData.adminEmail,
       validIdFileName: validIdFileName || 'government_id.pdf',
       validIdFileSizeMb: validIdSizeMb || '1.80',
-      validIdUrl: validIdFileName ? `/uploads/kyc/${validIdFileName}` : undefined,
+      validIdUrl: validIdDataUrl || undefined,
     };
 
     let generatedRegId = `REG-2026-${Math.floor(1000 + Math.random() * 9000)}`;

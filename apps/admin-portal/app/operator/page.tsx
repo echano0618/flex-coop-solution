@@ -300,14 +300,23 @@ export default function OperatorPortalPage() {
                 const idx = merged.findIndex((m) => m.id === item.id);
                 if (idx === -1) {
                   merged.unshift(item);
-                } else if (item.status !== merged[idx].status) {
-                  merged[idx] = item;
+                } else {
+                  // Server has authoritative status; preserve local validIdUrl if server doesn't have it
+                  if (item.validIdUrl && !merged[idx].validIdUrl) {
+                    merged[idx].validIdUrl = item.validIdUrl;
+                  }
+                  if (item.rejectionReason && !merged[idx].rejectionReason) {
+                    merged[idx].rejectionReason = item.rejectionReason;
+                  }
                 }
               });
             } catch (e) {
               console.error(e);
             }
           }
+          try {
+            localStorage.setItem('tuntong_coop_registrations', JSON.stringify(merged));
+          } catch (e) {}
           setRegistrations(merged);
           return;
         }
@@ -491,7 +500,7 @@ export default function OperatorPortalPage() {
 
       if (res.ok) {
         const result = await res.json();
-        approvedReg = result.registration;
+        approvedReg = result.registration || result.data;
         emailNotice = approvedReg.emailNotification!;
         provisionedTenant = result.tenant;
       } else {
@@ -618,8 +627,23 @@ https://tuntongtech.com`;
 
       if (res.ok) {
         const result = await res.json();
-        rejectedReg = result.registration;
-        emailNotice = rejectedReg.emailNotification!;
+        rejectedReg = result.registration || result.data;
+        if (!rejectedReg) {
+          rejectedReg = {
+            ...selectedRegForReject,
+            status: 'REJECTED',
+            rejectionReason: rejectionReasonInput.trim(),
+            reviewedAt: new Date().toISOString(),
+            reviewedBy: 'Tuntong Tech Operator',
+          };
+        }
+        emailNotice = rejectedReg.emailNotification || {
+          from: 'support@tuntongtech.com',
+          to: selectedRegForReject.adminEmail,
+          subject: `[Tuntong Tech] Update on your Cooperative Registration Application (${selectedRegForReject.name})`,
+          sentAt: new Date().toISOString(),
+          body: `Notice of decline: ${rejectionReasonInput.trim()}`,
+        };
       } else {
         const emailBody = `Dear ${selectedRegForReject.adminFirstName} ${selectedRegForReject.adminLastName},
 
@@ -1817,102 +1841,113 @@ https://tuntongtech.com`;
       {/* MODAL: INSPECT SUBMITTED GOVERNMENT ID */}
       {selectedRegForIdView && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full p-6 space-y-5 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <FileBadge className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-white text-base">Submitted Government ID Document</h3>
+                <div>
+                  <h3 className="font-bold text-white text-base">Submitted Government ID Document Inspection</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Application #{selectedRegForIdView.id} • {selectedRegForIdView.name}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedRegForIdView(null)}
-                className="text-slate-400 hover:text-white p-1"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* PhilID / National ID Card Visual Component */}
-            <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-sky-950/80 to-slate-900 border-2 border-amber-500/40 p-5 text-white shadow-xl space-y-4 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none"></div>
-
-              {/* ID Header */}
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-full bg-amber-400/20 border border-amber-400/50 flex items-center justify-center text-amber-300 font-black text-xs">
-                    PH
-                  </div>
-                  <div>
-                    <div className="font-bold text-xs uppercase tracking-wider text-amber-200">
-                      Republic of the Philippines
-                    </div>
-                    <div className="text-[10px] text-slate-300 font-mono">
-                      Philippine National Identification System (PhilSys) / Official Government ID
-                    </div>
-                  </div>
-                </div>
-                <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-mono font-bold">
-                  VERIFIED
+            {/* Signatory Metadata Banner */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Signatory / Admin:</span>
+                <strong className="text-white text-sm block mt-0.5 truncate">
+                  {selectedRegForIdView.adminLastName}, {selectedRegForIdView.adminFirstName} {selectedRegForIdView.adminMiddleName || ''}
+                </strong>
+                <span className="text-[11px] text-slate-400 truncate block">{selectedRegForIdView.adminEmail}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">CDA Registration:</span>
+                <strong className="text-emerald-400 text-sm font-mono block mt-0.5">
+                  {selectedRegForIdView.cdaRegistrationNumber}
+                </strong>
+                <span className="text-[11px] text-slate-400 block font-mono">TIN: {selectedRegForIdView.tin}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Attached Document:</span>
+                <span className="font-mono text-slate-200 text-xs font-semibold block mt-0.5 truncate" title={selectedRegForIdView.validIdFileName}>
+                  {selectedRegForIdView.validIdFileName || 'government_id.pdf'}
+                </span>
+                <span className="text-[11px] text-slate-400 block font-mono">{selectedRegForIdView.validIdFileSizeMb || '1.80'} MB</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Compliance Status:</span>
+                <span className="inline-flex items-center gap-1 mt-1 text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-mono font-bold">
+                  {selectedRegForIdView.status}
                 </span>
               </div>
+            </div>
 
-              {/* ID Body with Photo & Particulars */}
-              <div className="flex gap-4 items-center">
-                {/* Photo Placeholder */}
-                <div className="w-24 h-28 rounded-xl bg-slate-800 border border-white/20 flex flex-col items-center justify-center text-slate-400 relative overflow-hidden shrink-0 shadow-inner">
-                  {selectedRegForIdView.validIdUrl ? (
+            {/* Document Viewer Container */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span className="font-bold flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-emerald-400" /> Document Preview
+                </span>
+                {selectedRegForIdView.validIdUrl && (
+                  <a
+                    href={selectedRegForIdView.validIdUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg border border-slate-700 transition"
+                  >
+                    <span>Open in Full Screen / New Tab</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+
+              {selectedRegForIdView.validIdUrl ? (
+                selectedRegForIdView.validIdUrl.startsWith('data:application/pdf') ||
+                selectedRegForIdView.validIdFileName?.toLowerCase().endsWith('.pdf') ? (
+                  <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-950">
+                    <iframe
+                      src={selectedRegForIdView.validIdUrl}
+                      title="Submitted Government ID PDF"
+                      className="w-full h-[450px] bg-white"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-700 bg-slate-950 p-3 flex flex-col items-center justify-center min-h-[300px] max-h-[500px] overflow-hidden">
                     <img
                       src={selectedRegForIdView.validIdUrl}
-                      alt="Signatory Government ID"
-                      className="w-full h-full object-cover"
+                      alt="Submitted Government ID"
+                      className="max-h-[460px] w-auto max-w-full rounded-lg object-contain shadow-2xl border border-slate-800"
                     />
-                  ) : (
-                    <>
-                      <UserCheck className="w-8 h-8 text-slate-400 mb-1" />
-                      <span className="text-[9px] text-slate-500 font-mono">PHILID PHOTO</span>
-                    </>
-                  )}
-                </div>
-
-                {/* ID Particulars */}
-                <div className="space-y-1.5 text-xs flex-1">
-                  <div>
-                    <div className="text-[9px] text-slate-400 font-mono uppercase">Full Legal Name</div>
-                    <div className="font-bold text-white text-sm">
-                      {selectedRegForIdView.adminLastName}, {selectedRegForIdView.adminFirstName} {selectedRegForIdView.adminMiddleName || ''}
-                    </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-white/10 font-mono">
-                    <div>
-                      <div className="text-[9px] text-slate-400">BIR TIN</div>
-                      <div className="text-amber-300 font-bold">{selectedRegForIdView.tin}</div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-slate-400">CDA REG NO</div>
-                      <div className="text-white font-bold">{selectedRegForIdView.cdaRegistrationNumber}</div>
-                    </div>
+                )
+              ) : (
+                <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-8 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                    <UserCheck className="w-6 h-6" />
                   </div>
-
                   <div>
-                    <div className="text-[9px] text-slate-400 font-mono uppercase">Representing Entity</div>
-                    <div className="text-slate-200 font-semibold truncate text-[11px]">
-                      {selectedRegForIdView.name}
-                    </div>
+                    <h4 className="font-bold text-white text-sm">Document File Record: {selectedRegForIdView.validIdFileName || 'Philippine_National_ID.pdf'}</h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                      File size: {selectedRegForIdView.validIdFileSizeMb || '2.40'} MB. The document signature and CDA credentials have been recorded under compliance reference #{selectedRegForIdView.id}.
+                    </p>
                   </div>
                 </div>
-              </div>
-
-              {/* Footer chip & watermark */}
-              <div className="pt-2 border-t border-white/10 flex justify-between items-center text-[10px] text-slate-400 font-mono">
-                <span>File: {selectedRegForIdView.validIdFileName || 'Philippine_National_ID.pdf'}</span>
-                <span>Size: {selectedRegForIdView.validIdFileSizeMb || '2.40'} MB</span>
-              </div>
+              )}
             </div>
 
             {/* Compliance Verification Checklist */}
             <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
-              <div className="font-bold text-slate-300">Compliance & Regulatory Check:</div>
+              <div className="font-bold text-slate-300">Compliance &amp; Regulatory Check:</div>
               <div className="space-y-1.5 text-[11px] text-slate-300">
                 <div className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -1933,7 +1968,7 @@ https://tuntongtech.com`;
               <button
                 type="button"
                 onClick={() => setSelectedRegForIdView(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs"
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs transition"
               >
                 Close ID Viewer
               </button>

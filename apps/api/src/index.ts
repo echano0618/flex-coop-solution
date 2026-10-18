@@ -23,7 +23,8 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
 // Helper to resolve active tenant from subdomain, header, or JWT claim
 export function resolveTenantFromHost(hostHeader?: string): string | null {
@@ -605,6 +606,7 @@ app.post('/api/v1/operator/registrations/:id/approve', (req: Request, res: Respo
   res.json({
     success: true,
     message: `Cooperative '${result.registration?.name}' approved successfully. Subdomain '${result.registration?.subdomain}' activated and onboarding credentials dispatched via support@tuntongtech.com.`,
+    registration: result.registration,
     data: result.registration,
     tenant: result.tenant,
   });
@@ -626,6 +628,7 @@ app.post('/api/v1/operator/registrations/:id/reject', (req: Request, res: Respon
   res.json({
     success: true,
     message: `Cooperative registration '${result.registration?.name}' rejected. Official notice dispatched via support@tuntongtech.com.`,
+    registration: result.registration,
     data: result.registration,
   });
 });
