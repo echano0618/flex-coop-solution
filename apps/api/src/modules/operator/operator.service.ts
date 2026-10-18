@@ -14,6 +14,7 @@ import {
   OperatorOtpResponse,
 } from '@flexcoop/shared-types';
 import { dbStore } from '../../core/store';
+import { MailerService } from '../../core/mailer.service';
 
 export class OperatorService {
   /**
@@ -430,6 +431,13 @@ https://tuntongtech.com`;
     reg.oneTimePassword = oneTimePassword;
     reg.emailNotification = emailNotification;
 
+    // Dispatch real email via Zoho SMTP
+    MailerService.sendMail({
+      to: reg.adminEmail,
+      subject: emailSubject,
+      text: emailBody,
+    }).catch((err) => console.error('[MAILER ERROR] approveRegistration:', err));
+
     return {
       success: true,
       registration: reg,
@@ -477,6 +485,13 @@ https://tuntongtech.com`;
     reg.reviewedAt = new Date().toISOString();
     reg.reviewedBy = reviewedBy;
     reg.emailNotification = emailNotification;
+
+    // Dispatch real email via Zoho SMTP
+    MailerService.sendMail({
+      to: reg.adminEmail,
+      subject: emailSubject,
+      text: emailBody,
+    }).catch((err) => console.error('[MAILER ERROR] rejectRegistration:', err));
 
     return {
       success: true,
@@ -542,12 +557,19 @@ https://tuntongtech.com`;
 
     console.log(`[OPERATOR OTP DISPATCH] PIN ${otp} sent to ${op.email} from support@tuntongtech.com`);
 
+    // Dispatch real email via Zoho SMTP
+    MailerService.sendMail({
+      to: op.email,
+      subject: emailSubject,
+      text: emailBody,
+    }).catch((err) => console.error('[MAILER ERROR] requestOperatorOtp:', err));
+
     return {
       success: true,
       message: `A One-Time PIN has been dispatched to ${op.email} from support@tuntongtech.com.`,
       email: op.email,
       username: op.username,
-      otp, // included for seamless audit/display in administrative panel
+      otp, // included for audit/test verification
     };
   }
 
