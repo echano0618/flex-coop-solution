@@ -17,6 +17,12 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../../api-config';
+import {
+  resolveTenantCoop,
+  setTenantMemberSession,
+  getTenantMemberSession,
+  TenantInfo,
+} from '../../tenant-utils';
 
 export default function MemberLoginPage() {
   const router = useRouter();
@@ -24,11 +30,25 @@ export default function MemberLoginPage() {
   const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
+    slug: 'default',
+    name: 'Cooperative Enterprise',
+    isSubdomain: false,
+    registrationNumber: 'CDA Registered',
+    logoLetter: 'C',
+    coopType: 'Multi-Purpose',
+  });
 
   React.useEffect(() => {
+    const info = resolveTenantCoop();
+    setTenantInfo(info);
+
     try {
-      if (typeof window !== 'undefined' && localStorage.getItem('flexcoop_auth_member')) {
-        router.replace('/member');
+      if (typeof window !== 'undefined') {
+        const existing = getTenantMemberSession(info.slug);
+        if (existing) {
+          router.replace(info.slug && info.slug !== 'default' ? `/member?coop=${info.slug}` : '/member');
+        }
       }
     } catch (e) {}
   }, [router]);
@@ -45,16 +65,16 @@ export default function MemberLoginPage() {
     try {
       const res = await fetch(`${getApiBaseUrl()}/auth/member/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifier.trim(), pin: pin.trim() }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({ identifier: identifier.trim(), pin: pin.trim(), tenantSlug: tenantInfo.slug }),
       });
       const data = await res.json();
       if (res.ok && data.success && data.member) {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('flexcoop_auth_member', JSON.stringify(data.member));
-          document.cookie = `flexcoop_auth_member=${encodeURIComponent(data.token || data.member.email || identifier.trim())}; path=/; max-age=86400; SameSite=Lax`;
-        }
-        router.push('/member');
+        setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
+        router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
         return;
       }
     } catch (err) {
@@ -74,13 +94,12 @@ export default function MemberLoginPage() {
       sharesCount: isGm ? 250 : 150,
       savingsBalance: isGm ? 10000 : 5000,
       idType: 'PhilSys National ID (Encrypted SPI)',
+      coopSlug: tenantInfo.slug,
+      coopName: tenantInfo.name,
     };
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('flexcoop_auth_member', JSON.stringify(memberObj));
-      document.cookie = `flexcoop_auth_member=${encodeURIComponent(identifier.trim())}; path=/; max-age=86400; SameSite=Lax`;
-    }
-    router.push('/member');
+    setTenantMemberSession(memberObj, tenantInfo.slug, tenantInfo.name);
+    router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
   };
 
   return (
@@ -88,22 +107,22 @@ export default function MemberLoginPage() {
       {/* Header */}
       <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-6 border-b border-slate-700/60">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-bold text-xl shadow-lg shadow-emerald-500/20">
-            F
+          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-emerald-500/20 shrink-0">
+            {tenantInfo.logoLetter}
           </div>
           <div>
             <div className="font-bold text-base text-white flex items-center gap-2">
-              Cooperative Member Portal
+              <span>{tenantInfo.name}</span>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
-                CDA Regulated
+                Member Portal
               </span>
             </div>
-            <div className="text-xs text-slate-400">Powered by Tuntong Tech Solution</div>
+            <div className="text-xs text-slate-400">Powered by Tuntong Tech Solution • {tenantInfo.registrationNumber}</div>
           </div>
         </div>
 
         <Link
-          href="/"
+          href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/login?coop=${tenantInfo.slug}` : '/login'}
           className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-600/80 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
         >
           <span>Staff / Admin Portal</span>
@@ -125,7 +144,7 @@ export default function MemberLoginPage() {
           </h1>
 
           <p className="text-sm text-slate-300 leading-relaxed">
-            Welcome to your official member online facility. Check your share capital, apply for regular and emergency loans, download Truth in Lending disclosures, and pay via QR Ph.
+            Welcome to the official online facility of <strong className="text-white">{tenantInfo.name}</strong>. Check your share capital, apply for regular and emergency loans, download Truth in Lending disclosures, and pay via QR Ph.
           </p>
 
           <div className="space-y-3 pt-2">
@@ -154,16 +173,16 @@ export default function MemberLoginPage() {
           <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 space-y-2">
             <div className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
               <UserCheck className="w-4 h-4" />
-              Not yet a cooperative member?
+              Not yet a member of {tenantInfo.name}?
             </div>
             <p className="text-xs text-slate-400">
               Complete the online Pre-Membership Education Seminar (PMES) and submit your eKYC application in under 5 minutes.
             </p>
             <Link
-              href="/member/register"
+              href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/register?coop=${tenantInfo.slug}` : '/member/register'}
               className="inline-flex items-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg transition-colors mt-1 shadow-md shadow-emerald-700/30"
             >
-              <span>Apply for Membership</span>
+              <span>Apply for Membership at {tenantInfo.name}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
@@ -171,6 +190,20 @@ export default function MemberLoginPage() {
 
         {/* Right Side: Login Card */}
         <div className="md:col-span-6 bg-slate-800/90 border border-slate-700 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+          {/* Prominent Cooperative Identity Banner to ensure member is in the right coop */}
+          <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 block">
+              Cooperative Facility
+            </span>
+            <span className="font-extrabold text-base sm:text-lg text-white block mt-0.5">
+              {tenantInfo.name}
+            </span>
+            <div className="inline-flex items-center gap-1.5 text-[11px] text-emerald-300 font-mono mt-1 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
+              <span>{tenantInfo.registrationNumber}</span>
+              {tenantInfo.isSubdomain && <span>• Subdomain Scoped</span>}
+            </div>
+          </div>
+
           <div>
             <h2 className="text-xl font-bold text-white">Member Sign In</h2>
             <p className="text-xs text-slate-400 mt-1">

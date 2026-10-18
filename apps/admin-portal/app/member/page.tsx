@@ -38,6 +38,13 @@ import {
   LogOut,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
+import {
+  resolveTenantCoop,
+  getTenantMemberSession,
+  getTenantAdminSession,
+  clearTenantMemberSession,
+  TenantInfo,
+} from '../tenant-utils';
 
 const DEFAULT_LOAN_PRODUCTS = [
   {
@@ -126,13 +133,24 @@ export default function MemberPortalPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
+    slug: 'default',
+    name: 'Cooperative Enterprise',
+    isSubdomain: false,
+    registrationNumber: 'CDA Registered',
+    logoLetter: 'C',
+    coopType: 'Multi-Purpose',
+  });
 
-  // Authentication Guard: Redirect unauthenticated visitors to /member/login
+  // Authentication Guard: Redirect unauthenticated visitors to /member/login with tenant scoping
   useEffect(() => {
+    const info = resolveTenantCoop();
+    setTenantInfo(info);
+
     try {
       if (typeof window !== 'undefined') {
-        const auth = localStorage.getItem('flexcoop_auth_member');
-        const admin = localStorage.getItem('flexcoop_admin_session');
+        const auth = getTenantMemberSession(info.slug);
+        const admin = getTenantAdminSession(info.slug);
         if (auth || admin) {
           setIsAuthenticated(true);
           setIsCheckingAuth(false);
@@ -143,15 +161,12 @@ export default function MemberPortalPage() {
       console.warn('Member auth check error:', e);
     }
     setIsCheckingAuth(false);
-    router.replace('/member/login');
+    router.replace(info.slug && info.slug !== 'default' ? `/member/login?coop=${info.slug}` : '/member/login');
   }, [router]);
 
   const handleMemberSignOut = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('flexcoop_auth_member');
-      document.cookie = 'flexcoop_auth_member=; path=/; max-age=0';
-    }
-    router.replace('/member/login');
+    clearTenantMemberSession(tenantInfo.slug);
+    router.replace(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login');
   };
 
   // Member Persona Switcher (Maria = Borrower, Juan = Co-Maker)
@@ -162,12 +177,13 @@ export default function MemberPortalPage() {
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
-        const auth = localStorage.getItem('flexcoop_auth_member');
-        const admin = localStorage.getItem('flexcoop_admin_session');
+        const info = resolveTenantCoop();
+        const auth = getTenantMemberSession(info.slug);
+        const admin = getTenantAdminSession(info.slug);
 
         if (auth) {
           try {
-            const parsed = JSON.parse(auth);
+            const parsed = auth;
             if (parsed && (parsed.firstName || parsed.name)) {
               const fullName = parsed.name || `${parsed.firstName} ${parsed.lastName || ''}`.trim();
               const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
@@ -189,7 +205,7 @@ export default function MemberPortalPage() {
 
         if (admin) {
           try {
-            const parsedAdmin = JSON.parse(admin);
+            const parsedAdmin = admin;
             if (parsedAdmin && parsedAdmin.name) {
               const fullName = parsedAdmin.name;
               const initials = fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
@@ -719,6 +735,46 @@ export default function MemberPortalPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
+      {/* Institutional Top Header Bar */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-700 text-white font-black text-xl flex items-center justify-center shadow-xs shrink-0">
+              {tenantInfo.logoLetter}
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider truncate">
+                Official Member Online Banking Facility
+              </div>
+              <h1 className="font-extrabold text-sm sm:text-base text-slate-900 leading-tight truncate" title={tenantInfo.name}>
+                {tenantInfo.name}
+              </h1>
+              <div className="text-[10px] text-slate-500 font-mono truncate">
+                Reg # {tenantInfo.registrationNumber}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/'}
+              className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-3 py-1.5 rounded-lg transition"
+            >
+              <span>Admin Portal</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+            <button
+              type="button"
+              onClick={handleMemberSignOut}
+              className="text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
       {/* Main Body with Safe Bottom Padding for Mobile Navigation Bar */}
       <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-5 sm:pt-6 pb-28 sm:pb-32">
 
@@ -2608,17 +2664,17 @@ export default function MemberPortalPage() {
             <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-3.5">
               <div className="flex items-center space-x-3.5">
                 <div className="w-12 h-12 rounded-2xl bg-emerald-700 text-white font-black text-2xl flex items-center justify-center shadow-sm shrink-0">
-                  F
+                  {tenantInfo.logoLetter}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
                     Republic of the Philippines • CDA Registered
                   </div>
                   <h2 className="font-black text-base sm:text-lg text-slate-900 leading-tight">
-                    Cooperative Member Portal
+                    {tenantInfo.name}
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Member Online Banking & Lending Portal • Reg # CDA-NCR-2024-00921
+                    Member Online Banking &amp; Lending Portal • Reg # {tenantInfo.registrationNumber}
                   </p>
                 </div>
               </div>

@@ -74,6 +74,11 @@ import {
   DEFAULT_MEMBER_REGISTRATION_FIELDS,
 } from '@flexcoop/shared-types';
 import { getApiBaseUrl } from './api-config';
+import {
+  resolveTenantCoop,
+  getTenantAdminSession,
+  clearTenantAdminSession,
+} from './tenant-utils';
 
 type StaffRole =
   | 'SYSTEM_ADMIN'
@@ -336,13 +341,16 @@ export default function AdminDashboard() {
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
 
-  // Authentication Guard: Redirect unauthenticated visitors to /login
+  // Authentication Guard: Redirect unauthenticated visitors to /login with tenant scoping
   useEffect(() => {
+    const tenantInfo = resolveTenantCoop();
+    setCoopName(tenantInfo.name);
+
     try {
       if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('flexcoop_admin_session');
+        const stored = getTenantAdminSession(tenantInfo.slug);
         if (stored) {
-          const parsed = JSON.parse(stored);
+          const parsed = stored;
           if (parsed && parsed.token) {
             const matched = STAFF_ACCOUNTS.find((a) => a.role === parsed.role || a.email === parsed.email) || {
               id: parsed.id || 'usr_session',
@@ -358,30 +366,8 @@ export default function AdminDashboard() {
             setIsAuthenticated(true);
             setIsCheckingAuth(false);
 
-            // Resolve Cooperative Name
             if (parsed.coopName) {
               setCoopName(parsed.coopName);
-            } else {
-              let detectedSlug = '';
-              const host = window.location.hostname;
-              if (host.includes('-coop.tuntongtech.com')) {
-                detectedSlug = host.split('-coop.tuntongtech.com')[0];
-              } else {
-                const params = new URLSearchParams(window.location.search);
-                detectedSlug = params.get('coop') || '';
-              }
-              const regStr = localStorage.getItem('tuntong_coop_registrations');
-              if (regStr) {
-                const regs = JSON.parse(regStr);
-                if (Array.isArray(regs)) {
-                  const found = detectedSlug
-                    ? regs.find((r: any) => r.slug === detectedSlug)
-                    : regs.find((r: any) => r.status === 'APPROVED') || regs[0];
-                  if (found && found.name) {
-                    setCoopName(found.name);
-                  }
-                }
-              }
             }
             return;
           }
@@ -391,15 +377,13 @@ export default function AdminDashboard() {
       console.warn('Admin auth session parse error:', e);
     }
     setIsCheckingAuth(false);
-    router.replace('/login');
+    router.replace(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/login?coop=${tenantInfo.slug}` : '/login');
   }, [router]);
 
   const handleAdminSignOut = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('flexcoop_admin_session');
-      document.cookie = 'flexcoop_admin_session=; path=/; max-age=0';
-    }
-    router.replace('/login');
+    const tenantInfo = resolveTenantCoop();
+    clearTenantAdminSession(tenantInfo.slug);
+    router.replace(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/login?coop=${tenantInfo.slug}` : '/login');
   };
 
   const ALL_MODULE_TABS: {

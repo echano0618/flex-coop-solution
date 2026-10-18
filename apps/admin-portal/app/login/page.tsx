@@ -16,6 +16,12 @@ import {
   Users,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
+import {
+  resolveTenantCoop,
+  setTenantAdminSession,
+  getTenantAdminSession,
+  TenantInfo,
+} from '../tenant-utils';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -23,6 +29,28 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
+    slug: 'default',
+    name: 'Cooperative Enterprise',
+    isSubdomain: false,
+    registrationNumber: 'CDA Registered',
+    logoLetter: 'C',
+    coopType: 'Multi-Purpose',
+  });
+
+  React.useEffect(() => {
+    const info = resolveTenantCoop();
+    setTenantInfo(info);
+
+    try {
+      if (typeof window !== 'undefined') {
+        const existing = getTenantAdminSession(info.slug);
+        if (existing) {
+          router.replace(info.slug && info.slug !== 'default' ? `/?coop=${info.slug}` : '/');
+        }
+      }
+    } catch (e) {}
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,34 +63,6 @@ export default function AdminLoginPage() {
     setIsLoading(true);
 
     try {
-      // Determine cooperative name from hostname or registrations
-      let coopName = 'Cooperative Enterprise';
-      let coopSlug = '';
-
-      if (typeof window !== 'undefined') {
-        const host = window.location.hostname;
-        if (host.includes('-coop.tuntongtech.com')) {
-          coopSlug = host.split('-coop.tuntongtech.com')[0];
-        } else {
-          const params = new URLSearchParams(window.location.search);
-          coopSlug = params.get('coop') || '';
-        }
-
-        const stored = localStorage.getItem('tuntong_coop_registrations');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed)) {
-            const found = coopSlug
-              ? parsed.find((r: any) => r.slug === coopSlug)
-              : parsed.find((r: any) => r.status === 'APPROVED') || parsed[0];
-            if (found && found.name) {
-              coopName = found.name;
-              coopSlug = found.slug || coopSlug;
-            }
-          }
-        }
-      }
-
       const cleanEmail = email.trim().toLowerCase();
       let role = 'GENERAL_MANAGER';
       let roleTitle = 'General Manager / Superadmin';
@@ -92,19 +92,16 @@ export default function AdminLoginPage() {
         email: email.trim(),
         role,
         roleTitle,
-        coopName,
-        coopSlug,
+        coopName: tenantInfo.name,
+        coopSlug: tenantInfo.slug,
         token: `adm_sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
         loginAt: new Date().toISOString(),
       };
 
-      // Set localStorage
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('flexcoop_admin_session', JSON.stringify(sessionData));
-        document.cookie = `flexcoop_admin_session=${encodeURIComponent(sessionData.token)}; path=/; max-age=86400; SameSite=Lax`;
-      }
+      // Set tenant-scoped session
+      setTenantAdminSession(sessionData, tenantInfo.slug, tenantInfo.name);
 
-      router.push('/');
+      router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/');
     } catch (err) {
       console.error(err);
       setErrorMessage('An unexpected error occurred during login. Please try again.');
@@ -118,23 +115,23 @@ export default function AdminLoginPage() {
       {/* Header */}
       <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-6 border-b border-slate-800">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-indigo-600/30">
-            <Building2 className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-indigo-600/30 shrink-0">
+            {tenantInfo.logoLetter}
           </div>
           <div>
             <div className="font-bold text-base text-white flex items-center gap-2">
-              Cooperative Enterprise Portal
+              <span>{tenantInfo.name}</span>
               <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full font-mono">
                 Staff &amp; Admin
               </span>
             </div>
-            <div className="text-xs text-slate-400">Powered by Tuntong Tech Solution</div>
+            <div className="text-xs text-slate-400">Powered by Tuntong Tech Solution • {tenantInfo.registrationNumber}</div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Link
-            href="/member/login"
+            href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login'}
             className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
           >
             <Users className="w-3.5 h-3.5 text-emerald-400" />
@@ -157,7 +154,7 @@ export default function AdminLoginPage() {
           </h1>
 
           <p className="text-sm text-slate-300 leading-relaxed">
-            Secure administrative control plane for cooperative General Managers, Loan Officers, Cashiers, Accountants, and Board Members.
+            Secure administrative control plane for General Managers, Loan Officers, Cashiers, Accountants, and Board Members of <strong className="text-white">{tenantInfo.name}</strong>.
           </p>
 
           <div className="space-y-3 pt-2">
@@ -196,10 +193,24 @@ export default function AdminLoginPage() {
 
         {/* Right Side: Login Card */}
         <div className="md:col-span-6 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+          {/* Prominent Cooperative Identity Banner to ensure staff is in the right coop */}
+          <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-center">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 block">
+              Official Officer Facility
+            </span>
+            <span className="font-extrabold text-base sm:text-lg text-white block mt-0.5">
+              {tenantInfo.name}
+            </span>
+            <div className="inline-flex items-center gap-1.5 text-[11px] text-indigo-300 font-mono mt-1 bg-indigo-950/60 border border-indigo-500/30 px-2.5 py-0.5 rounded-full">
+              <span>{tenantInfo.registrationNumber}</span>
+              {tenantInfo.isSubdomain && <span>• Subdomain Scoped</span>}
+            </div>
+          </div>
+
           <div>
             <h2 className="text-xl font-bold text-white">Staff Sign In</h2>
             <p className="text-xs text-slate-400 mt-1">
-              Enter your cooperative staff email address and password to access your role workspace.
+              Enter your designated cooperative staff credentials to access {tenantInfo.name}.
             </p>
           </div>
 

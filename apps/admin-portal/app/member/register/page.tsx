@@ -41,12 +41,23 @@ import {
   MemberRegistrationFieldConfig,
   DEFAULT_MEMBER_REGISTRATION_FIELDS,
 } from '@flexcoop/shared-types';
+import { resolveTenantCoop, TenantInfo } from '../../tenant-utils';
 
 export default function MemberRegisterPage() {
   const router = useRouter();
 
   // Step wizard: 1: PMES -> 2: Personal Profile -> 3: eKYC & Privacy -> 4: Share Capital
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+
+  // Tenant Resolution State
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
+    slug: 'default',
+    name: 'Cooperative Enterprise',
+    isSubdomain: false,
+    registrationNumber: 'CDA Registered',
+    logoLetter: 'C',
+    coopType: 'Multi-Purpose',
+  });
 
   // Step 1: PMES State
   const [pmesQuiz1, setPmesQuiz1] = useState<string>('');
@@ -57,6 +68,7 @@ export default function MemberRegisterPage() {
   const [fieldConfigs, setFieldConfigs] = useState<MemberRegistrationFieldConfig[]>(DEFAULT_MEMBER_REGISTRATION_FIELDS);
 
   useEffect(() => {
+    setTenantInfo(resolveTenantCoop());
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('flexcoop_registration_fields');
       if (saved) {
@@ -219,9 +231,27 @@ export default function MemberRegisterPage() {
     e.preventDefault();
     setIsSubmitting(true);
 
+    const newApp = {
+      id: `APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      applicantName: `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`,
+      email,
+      phone,
+      coopSlug: tenantInfo.slug,
+      coopName: tenantInfo.name,
+      tin,
+      dateSubmitted: new Date().toISOString(),
+      status: 'UNDER_REVIEW',
+    };
+    try {
+      if (typeof window !== 'undefined') {
+        const existing = JSON.parse(localStorage.getItem('tuntong_member_applications') || '[]');
+        localStorage.setItem('tuntong_member_applications', JSON.stringify([newApp, ...existing]));
+      }
+    } catch {}
+
     setTimeout(() => {
       setIsSubmitting(false);
-      setApplicationId(`APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
+      setApplicationId(newApp.id);
       setStep(5); // Success step
     }, 1000);
   };
@@ -231,22 +261,22 @@ export default function MemberRegisterPage() {
       {/* Top Bar */}
       <div className="max-w-4xl w-full mx-auto flex items-center justify-between pb-6 border-b border-slate-800">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-bold text-xl shadow-lg shadow-emerald-500/20">
-            F
+          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-emerald-500/20 shrink-0">
+            {tenantInfo.logoLetter}
           </div>
           <div>
             <div className="font-bold text-base text-white flex items-center gap-2">
-              Cooperative Member Onboarding
+              <span>{tenantInfo.name}</span>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
-                Statutory Member Onboarding
+                Member Onboarding
               </span>
             </div>
-            <div className="text-xs text-slate-400">Pursuant to Republic Act No. 9520 (Philippine Cooperative Code)</div>
+            <div className="text-xs text-slate-400">Pursuant to RA 9520 • {tenantInfo.registrationNumber}</div>
           </div>
         </div>
 
         <Link
-          href="/member/login"
+          href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login'}
           className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
         >
           <span>Existing Member Login</span>
@@ -256,7 +286,32 @@ export default function MemberRegisterPage() {
       {/* Main Container */}
       <div className="max-w-4xl w-full mx-auto my-8">
         {step !== 5 && (
-          <div className="mb-8">
+          <div className="mb-8 space-y-4">
+            {/* Prominent Cooperative Identity Banner to ensure applicant is applying to the right coop */}
+            <div className="p-4 bg-emerald-950/60 border border-emerald-500/40 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 font-black text-xl flex items-center justify-center shrink-0">
+                  {tenantInfo.logoLetter}
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
+                    Official Membership Application
+                  </div>
+                  <div className="text-base sm:text-lg font-extrabold text-white">
+                    {tenantInfo.name}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Statutory eKYC &amp; PMES Onboarding Portal • Reg: {tenantInfo.registrationNumber}
+                  </div>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="text-[11px] font-mono bg-emerald-900/60 text-emerald-200 border border-emerald-700/60 px-3 py-1 rounded-full">
+                  Coop Code: {tenantInfo.slug.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
             {/* Step Indicators */}
             <div className="grid grid-cols-4 gap-2 sm:gap-4 text-xs">
               <div
@@ -1384,10 +1439,10 @@ export default function MemberRegisterPage() {
             {/* Production Action Navigation */}
             <div className="pt-4 space-y-3">
               <Link
-                href="/member/login"
+                href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login'}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/30"
               >
-                <span>Proceed to Member Login Screen</span>
+                <span>Proceed to {tenantInfo.name} Member Login</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
@@ -1397,7 +1452,7 @@ export default function MemberRegisterPage() {
 
       {/* Footer */}
       <div className="max-w-4xl w-full mx-auto pt-6 border-t border-slate-800 text-center text-xs text-slate-500">
-        © 2026 Cooperative Member Portal • CDA Registered • Regulated under RA 9520 & RA 10173
+        © 2026 {tenantInfo.name} • {tenantInfo.registrationNumber} • Regulated under RA 9520 &amp; RA 10173
       </div>
     </div>
   );
