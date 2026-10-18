@@ -36,6 +36,7 @@ export class AppDataStore {
   public collaterals: Map<string, CollateralItem[]> = new Map();
   public surplusDistributions: Map<string, SurplusDistributionResult[]> = new Map();
   public platformCredits: Map<string, number> = new Map(); // tenantId -> available credit
+  public escrowFloats: Map<string, number> = new Map(); // tenantId -> escrow float balance
   public creditTransactions: PlatformCreditTransaction[] = [];
   public systemBroadcasts: SystemBroadcast[] = [];
   public coopRegistrations: CooperativeRegistration[] = [];

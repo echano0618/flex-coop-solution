@@ -134,17 +134,20 @@ export class OperatorService {
       // 1.0% Technology Fee generated
       const totalTechFeesGenerated = Math.round(totalLoanVolume * 0.01 * 100) / 100;
 
-      const creditBalance = dbStore.platformCredits.get(tenantId) ?? 1000.0;
+      const creditBalance = dbStore.platformCredits.get(tenantId) ?? 0.0;
       
       // Calculate escrow float for tenant
-      // For Bayani, standard escrow float demo is ₱48,470.00
-      let escrowFloat = 0;
-      if (tenantId === 'tenant_bayani_001') {
-        escrowFloat = 48470.0;
-      } else if (tenantId === 'tenant_maharlika_002') {
-        escrowFloat = 12100.0;
-      } else {
-        escrowFloat = 26500.0;
+      let escrowFloat = dbStore.escrowFloats?.get(tenantId) ?? 0.0;
+      if (!dbStore.escrowFloats?.has(tenantId)) {
+        if (tenantId === 'tenant_bayani_001') {
+          escrowFloat = 48470.0;
+        } else if (tenantId === 'tenant_maharlika_002') {
+          escrowFloat = 12100.0;
+        } else if (tenantId === 'tenant_silangan_003') {
+          escrowFloat = 26500.0;
+        } else {
+          escrowFloat = 0.0;
+        }
       }
 
       // Storage estimate: based on KYC documents (capped at 5MB per upload)
@@ -382,9 +385,8 @@ export class OperatorService {
     };
 
     dbStore.tenants.set(tenantId, tenant);
-    if (!dbStore.platformCredits.has(tenantId)) {
-      dbStore.platformCredits.set(tenantId, 1000.0); // Seed initial welcome platform credit
-    }
+    dbStore.platformCredits.set(tenantId, 0.0); // A new approved coop starts strictly with 0 Available Credit
+    dbStore.escrowFloats.set(tenantId, 0.0);    // A new approved coop starts strictly with 0 Escrow Float
     dbStore.members.set(tenantId, []);
     dbStore.loans.set(tenantId, []);
     dbStore.journalEntries.set(tenantId, []);

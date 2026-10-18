@@ -1859,6 +1859,12 @@ console.log('\n--- 28. Cooperative Registration, Operator Review, ID Inspection,
   assert(approveResult.tenant !== undefined, 'Tenant instance is provisioned into fleet');
   assert(approveResult.tenant?.status === 'ACTIVE', 'Provisioned tenant is ACTIVE');
 
+  // Verify newly approved cooperative starts strictly with 0 Available Credit and 0 Escrow Float
+  const approvedTenantFleet = OperatorService.getTenantFleetSummaries().find((t) => t.id === approveResult.tenant?.id);
+  assert(approvedTenantFleet !== undefined, 'Approved tenant is found in tenant fleet summaries');
+  assert(approvedTenantFleet?.platformCreditBalance === 0, 'New approved cooperative strictly has 0 Available Credit');
+  assert(approvedTenantFleet?.escrowFloatBalance === 0, 'New approved cooperative strictly has 0 Escrow Float');
+
   // Email Notification verification
   const emailNotification = approveResult.registration?.emailNotification;
   assert(emailNotification !== undefined, 'Official email notification record is generated');
