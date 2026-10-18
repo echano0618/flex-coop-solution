@@ -73,8 +73,22 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // C. ADMIN / STAFF PORTAL GUARD
+  // 4. Set Tenant Context Headers
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-tenant-slug', tenantSlug);
+  requestHeaders.set('x-tenant-domain', `${tenantSlug}-coop.tuntongtech.com`);
+  requestHeaders.set('x-is-tenant-subdomain', isTenantSubdomain ? 'true' : 'false');
+
+  // C. ROOT & ADMIN / STAFF PORTAL GUARD
   if (pathname === '/') {
+    // If accessing root on non-tenant subdomain (e.g. coop.tuntongtech.com or Cloud Run default host), serve Landing Page
+    if (!isTenantSubdomain) {
+      return NextResponse.rewrite(new URL('/landing', request.url), {
+        request: { headers: requestHeaders },
+      });
+    }
+
+    // On tenant subdomain (e.g. bayani-coop.tuntongtech.com), require admin session
     const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
     if (!adminCookie) {
       return NextResponse.redirect(new URL('/login', request.url));
@@ -87,12 +101,6 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/', request.url));
     }
   }
-
-  // 4. Set Tenant Context Headers
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-tenant-slug', tenantSlug);
-  requestHeaders.set('x-tenant-domain', `${tenantSlug}-coop.tuntongtech.com`);
-  requestHeaders.set('x-is-tenant-subdomain', isTenantSubdomain ? 'true' : 'false');
 
   return NextResponse.next({
     request: {
