@@ -442,7 +442,7 @@ export default function AdminDashboard() {
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
 
   // System Configuration Sub-Section State
-  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee'>('membership_registration');
+  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee'>('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -903,6 +903,41 @@ export default function AdminDashboard() {
 
   const handleResetTechFeeConfig = () => {
     handleSaveTechFeeConfig('PASS_THROUGH');
+  };
+
+  // Cooperative Service & Filing Fee Policy Configuration (Rate Adjustment & Enable/Disablement)
+  const [coopFilingFeeEnabled, setCoopFilingFeeEnabled] = useState<boolean>(true);
+  const [coopFilingFeeRatePercent, setCoopFilingFeeRatePercent] = useState<number>(1.5);
+  const [coopFilingFeeNotification, setCoopFilingFeeNotification] = useState<string | null>(null);
+
+  const handleSaveCoopFilingFeeConfig = (enabled: boolean, rate: number) => {
+    const tenant = resolveTenantCoop();
+    setCoopFilingFeeEnabled(enabled);
+    setCoopFilingFeeRatePercent(rate);
+
+    // Sync online directly to Cloud Firestore
+    fetch(`${getApiBaseUrl()}/system-config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-slug': tenant.slug,
+      },
+      body: JSON.stringify({
+        coopFilingFeeEnabled: enabled,
+        coopFilingFeeRatePercent: rate,
+      }),
+    }).catch((e) => console.warn('Failed to save coop filing fee config online:', e));
+
+    setCoopFilingFeeNotification(
+      enabled
+        ? `Coop Filing Fee ENABLED at ${rate.toFixed(2)}% of loan principal (credited to COA 4-01-02).`
+        : `Coop Filing Fee DISABLED (₱0.00 deducted from borrowers).`
+    );
+    setTimeout(() => setCoopFilingFeeNotification(null), 4000);
+  };
+
+  const handleResetCoopFilingFeeConfig = () => {
+    handleSaveCoopFilingFeeConfig(true, 1.5);
   };
 
   // Platform Escrow & Usage State
@@ -1525,6 +1560,8 @@ export default function AdminDashboard() {
             if (data.stockParValue) setStockParValue(Number(data.stockParValue));
             if (data.minSubscribedShares) setMinSubscribedShares(Number(data.minSubscribedShares));
             if (data.minPaidUpAmount !== undefined) setMinPaidUpAmount(Number(data.minPaidUpAmount));
+            if (data.coopFilingFeeEnabled !== undefined) setCoopFilingFeeEnabled(Boolean(data.coopFilingFeeEnabled));
+            if (data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(data.coopFilingFeeRatePercent));
             if (Array.isArray(data.registrationFields) && data.registrationFields.length > 0) {
               setRegistrationFields(data.registrationFields);
             }
@@ -2280,7 +2317,9 @@ export default function AdminDashboard() {
 
   const totalOptionalFees = optionalFees.reduce((acc, fee) => acc + calculateFeeAmount(fee), 0);
   const platformFee = Math.round(calcAmount * 0.01 * 100) / 100;
-  const coopServiceFee = Math.round(calcAmount * 0.015 * 100) / 100;
+  const coopServiceFee = coopFilingFeeEnabled
+    ? Math.round(calcAmount * (coopFilingFeeRatePercent / 100) * 100) / 100
+    : 0;
   const totalDeductions = Math.round((platformFee + coopServiceFee + totalOptionalFees + advanceInterestAmount) * 100) / 100;
   const netDisbursed = Math.max(0, Math.round((calcAmount - totalDeductions) * 100) / 100);
 
@@ -5164,7 +5203,9 @@ export default function AdminDashboard() {
                     const isPassThrough = techFeeTreatment === 'PASS_THROUGH';
                     const techFee = Math.round(principal * 0.01 * 100) / 100;
                     const techFeeDeduction = isPassThrough ? techFee : 0;
-                    const coopServiceFee = Math.round(principal * 0.015 * 100) / 100;
+                    const coopServiceFee = coopFilingFeeEnabled
+                      ? Math.round(principal * (coopFilingFeeRatePercent / 100) * 100) / 100
+                      : 0;
                     const netProceeds = principal - techFeeDeduction - coopServiceFee;
                     const borrowerName = activeLoanApplication?.memberName || 'MARIA CLARA SANTOS';
                     const memberNo = activeLoanApplication?.memberNo || 'MEM-2026-0001';
@@ -5189,7 +5230,7 @@ export default function AdminDashboard() {
                               </span>
                             </div>
                             <div className="flex justify-between text-slate-600">
-                              <span>b. Coop Service and Filing Fee (1.5%):</span>
+                              <span>b. Coop Service and Filing Fee ({coopFilingFeeEnabled ? `${coopFilingFeeRatePercent}%` : 'Disabled'}):</span>
                               <span className="font-mono">₱{coopServiceFee.toFixed(2)}</span>
                             </div>
                           </div>
@@ -5926,7 +5967,7 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="flex justify-between text-slate-600">
-                      <span>Coop Internal Service Fee (1.5%):</span>
+                      <span>Coop Internal Service Fee ({coopFilingFeeEnabled ? `${coopFilingFeeRatePercent}%` : 'Disabled'}):</span>
                       <span className="font-semibold">
                         - ₱{coopServiceFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                       </span>
@@ -9278,6 +9319,19 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               )}
+
+              {systemConfigSection === 'coop_filing_fee' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetCoopFilingFeeConfig}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Fee Defaults</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Sub-Section Navigation / Module Selector */}
@@ -9333,6 +9387,24 @@ export default function AdminDashboard() {
                   systemConfigSection === 'tech_fee' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
                 }`}>
                   {techFeeTreatment === 'PASS_THROUGH' ? 'Pass-Through' : 'Coop OPEX'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSystemConfigSection('coop_filing_fee')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'coop_filing_fee'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Coop Filing Fee Policy</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'coop_filing_fee' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {coopFilingFeeEnabled ? `${coopFilingFeeRatePercent}% Active` : 'Disabled'}
                 </span>
               </button>
 
@@ -10119,6 +10191,276 @@ export default function AdminDashboard() {
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Save Technology Fee Policy</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-SECTION: COOPERATIVE SERVICE & FILING FEE POLICY */}
+            {systemConfigSection === 'coop_filing_fee' && (
+              <div className="space-y-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+                  {/* Header */}
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
+                          <FileText className="w-3 h-3 text-blue-600" />
+                          <span>Coop Operating Revenue Parameter</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">
+                          CDA COA Account 4-01-02 (Service and Filing Fees Income)
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                        Cooperative Filing &amp; Service Fee Policy
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+                        Configure institutional rate adjustments and enable/disable the internal Cooperative Filing Fee deducted from gross loan proceeds upon disbursal. Recorded under standard CDA Chart of Accounts <strong>Account 4-01-02</strong> (<em>Service and Filing Fees Income</em>) and reflected across RA 3765 Truth in Lending Disclosures and Member Portal calculators.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetCoopFilingFeeConfig}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset Defaults</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notification Banner */}
+                  {coopFilingFeeNotification && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{coopFilingFeeNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCoopFilingFeeNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Status & Policy Selection Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* OPTION 1: ENABLED */}
+                    <div
+                      onClick={() => setCoopFilingFeeEnabled(true)}
+                      className={`p-6 rounded-2xl border-2 cursor-pointer transition-all space-y-4 ${
+                        coopFilingFeeEnabled
+                          ? 'border-blue-600 bg-blue-50/40 shadow-sm ring-2 ring-blue-500/20'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            coopFilingFeeEnabled
+                              ? 'border-blue-600 bg-blue-600 text-white'
+                              : 'border-slate-300 bg-white'
+                          }`}>
+                            {coopFilingFeeEnabled && <Check className="w-3 h-3 stroke-[3]" />}
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 block">Enabled (Deducted from Loan Principal)</span>
+                            <span className="text-[10px] text-slate-500 font-mono">Rate: {coopFilingFeeRatePercent.toFixed(2)}% of Gross Principal</span>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                          Active Policy
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-slate-600 leading-relaxed">
+                        <p>
+                          The Cooperative Filing Fee is active and deducted upfront from the member&apos;s gross loan proceeds during loan origination and cashier disbursement.
+                        </p>
+                        <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-1.5 font-mono text-[11px]">
+                          <div className="flex justify-between text-slate-700">
+                            <span>Sample Loan Principal:</span>
+                            <span className="font-bold">₱50,000.00</span>
+                          </div>
+                          <div className="flex justify-between text-blue-700 font-semibold">
+                            <span>- Coop Filing Fee ({coopFilingFeeRatePercent.toFixed(2)}%):</span>
+                            <span>- ₱{(50000 * (coopFilingFeeRatePercent / 100)).toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500">
+                            <span>- 1% Tech Fee ({techFeeTreatment === 'PASS_THROUGH' ? 'Pass-Through' : 'Coop OPEX'}):</span>
+                            <span>{techFeeTreatment === 'PASS_THROUGH' ? '- ₱500.00' : '₱0.00 (Absorbed)'}</span>
+                          </div>
+                          <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-slate-900">
+                            <span>Estimated Net Proceeds:</span>
+                            <span>₱{(50000 - (50000 * (coopFilingFeeRatePercent / 100)) - (techFeeTreatment === 'PASS_THROUGH' ? 500 : 0)).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span>Booked under CDA Account 4-01-02 (Service &amp; Filing Fees Income).</span>
+                      </div>
+                    </div>
+
+                    {/* OPTION 2: DISABLED / WAIVED */}
+                    <div
+                      onClick={() => setCoopFilingFeeEnabled(false)}
+                      className={`p-6 rounded-2xl border-2 cursor-pointer transition-all space-y-4 ${
+                        !coopFilingFeeEnabled
+                          ? 'border-emerald-600 bg-emerald-50/40 shadow-sm ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            !coopFilingFeeEnabled
+                              ? 'border-emerald-600 bg-emerald-600 text-white'
+                              : 'border-slate-300 bg-white'
+                          }`}>
+                            {!coopFilingFeeEnabled && <Check className="w-3 h-3 stroke-[3]" />}
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 block">Disabled (Waived / ₱0.00)</span>
+                            <span className="text-[10px] text-slate-500 font-mono">No Deduction from Borrower</span>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          Fee Waived
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-slate-600 leading-relaxed">
+                        <p>
+                          The Cooperative waives all filing and service fees for borrowers. <strong>₱0.00</strong> is deducted from the loan proceeds, maximizing the net disbursement to members.
+                        </p>
+                        <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-1.5 font-mono text-[11px]">
+                          <div className="flex justify-between text-slate-700">
+                            <span>Sample Loan Principal:</span>
+                            <span className="font-bold">₱50,000.00</span>
+                          </div>
+                          <div className="flex justify-between text-emerald-700 font-semibold">
+                            <span>- Coop Filing Fee:</span>
+                            <span>₱0.00 (Waived)</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500">
+                            <span>- 1% Tech Fee ({techFeeTreatment === 'PASS_THROUGH' ? 'Pass-Through' : 'Coop OPEX'}):</span>
+                            <span>{techFeeTreatment === 'PASS_THROUGH' ? '- ₱500.00' : '₱0.00 (Absorbed)'}</span>
+                          </div>
+                          <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-800">
+                            <span>Estimated Net Proceeds:</span>
+                            <span>₱{(50000 - (techFeeTreatment === 'PASS_THROUGH' ? 500 : 0)).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Displays as &quot;Waived (₱0.00)&quot; in RA 3765 Truth in Lending statements.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Rate Adjustment Module & Presets */}
+                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          <Sliders className="w-4 h-4 text-blue-600" />
+                          <span>Coop Filing Fee Percentage Rate Controller</span>
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Adjust the percentage rate applied to loan principal when the filing fee is enabled.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold">Active Rate:</span>
+                        <span className="px-3 py-1 bg-white border border-slate-300 rounded-lg text-sm font-black font-mono text-blue-600 shadow-xs">
+                          {coopFilingFeeRatePercent.toFixed(2)}%
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center pt-1">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Custom Rate Percentage (% of Principal)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="10"
+                            step="0.1"
+                            value={coopFilingFeeRatePercent}
+                            onChange={(e) => setCoopFilingFeeRatePercent(Math.max(0, parseFloat(e.target.value) || 0))}
+                            className="w-full pl-3.5 pr-8 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-sm font-bold text-slate-400 pointer-events-none">%</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Quick Rate Presets
+                        </label>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[0.5, 1.0, 1.5, 2.0, 2.5, 3.0].map((rate) => (
+                            <button
+                              key={rate}
+                              type="button"
+                              onClick={() => setCoopFilingFeeRatePercent(rate)}
+                              className={`px-3 py-2 rounded-xl text-xs font-bold font-mono transition border ${
+                                coopFilingFeeRatePercent === rate
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                  : 'bg-white text-slate-700 hover:bg-slate-100 border-slate-200'
+                              }`}
+                            >
+                              {rate.toFixed(1)}%
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Informational Guidance Box */}
+                  <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-blue-400">
+                      <ShieldCheck className="w-4 h-4 text-blue-400" />
+                      <span className="uppercase tracking-wider">Regulatory Compliance &amp; CDA Transparency</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Pursuant to <strong>RA 9520 (Philippine Cooperative Code)</strong> and <strong>RA 3765 (Truth in Lending Act)</strong>, any administrative filing fee deducted from loan proceeds must be explicitly itemized in the Promissory Note and Disclosure Statement prior to cash releasing. Changes made here apply immediately to all newly originated loan calculations, Member Portal loan simulations, and accounting vouchers.
+                    </p>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={handleResetCoopFilingFeeConfig}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                    >
+                      Reset Default (1.50% Active)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveCoopFilingFeeConfig(coopFilingFeeEnabled, coopFilingFeeRatePercent)}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Save Filing Fee Policy</span>
                     </button>
                   </div>
                 </div>

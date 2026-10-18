@@ -1206,6 +1206,8 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
         stockParValue: 100,
         minSubscribedShares: 50,
         minPaidUpAmount: 1000,
+        coopFilingFeeEnabled: true,
+        coopFilingFeeRatePercent: 1.5,
       },
     });
   } catch (err: any) {

@@ -491,13 +491,17 @@ export default function MemberPortalPage() {
 
   // Technology Fee Treatment (Online Single Database Config: Pass-Through vs OPEX)
   const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
+  const [coopFilingFeeEnabled, setCoopFilingFeeEnabled] = useState<boolean>(true);
+  const [coopFilingFeeRatePercent, setCoopFilingFeeRatePercent] = useState<number>(1.5);
 
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/system-config?coop=${tenantInfo.slug}`)
       .then((r) => r.json())
       .then((res) => {
-        if (res && res.success && res.data?.techFeeTreatment) {
-          setTechFeeTreatment(res.data.techFeeTreatment);
+        if (res && res.success && res.data) {
+          if (res.data.techFeeTreatment) setTechFeeTreatment(res.data.techFeeTreatment);
+          if (res.data.coopFilingFeeEnabled !== undefined) setCoopFilingFeeEnabled(Boolean(res.data.coopFilingFeeEnabled));
+          if (res.data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(res.data.coopFilingFeeRatePercent));
         }
       })
       .catch(() => {});
@@ -506,7 +510,9 @@ export default function MemberPortalPage() {
   const isTechFeePassThrough = techFeeTreatment === 'PASS_THROUGH';
   const techFeeAmount = Math.round(loanAmount * 0.01 * 100) / 100;
   const memberTechFeeDeduction = isTechFeePassThrough ? techFeeAmount : 0;
-  const coopServiceFee = loanAmount * (selectedProduct.serviceFeeRate || 0.015);
+  const coopServiceFee = coopFilingFeeEnabled
+    ? Math.round(loanAmount * (coopFilingFeeRatePercent / 100) * 100) / 100
+    : 0;
 
   let advanceInterest = 0;
   if (selectedProduct.advanceInterestOption === 'FIRST_YEAR') {
@@ -2110,8 +2116,10 @@ export default function MemberPortalPage() {
                       </div>
 
                       <div className="flex justify-between text-slate-600">
-                        <span>Coop Filing & Service Fee:</span>
-                        <span className="font-bold">- ₱{coopServiceFee.toFixed(2)}</span>
+                        <span>Coop Filing & Service Fee ({coopFilingFeeEnabled ? `${coopFilingFeeRatePercent}%` : 'Disabled'}):</span>
+                        <span className="font-bold">
+                          {coopFilingFeeEnabled ? `- ₱${coopServiceFee.toFixed(2)}` : '₱0.00 (Waived)'}
+                        </span>
                       </div>
 
                       {advanceInterest > 0 && (
