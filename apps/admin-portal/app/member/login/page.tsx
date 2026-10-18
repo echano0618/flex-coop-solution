@@ -88,6 +88,11 @@ export default function MemberLoginPage() {
         router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
         return;
       }
+      if (!res.ok && (res.status === 401 || res.status === 403)) {
+        setIsLoading(false);
+        setErrorMessage(data.error || 'Authentication failed. Please verify your credentials.');
+        return;
+      }
     } catch (err) {
       // offline / local registry mode
     }

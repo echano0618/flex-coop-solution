@@ -18,7 +18,11 @@ export class FirestoreCoopService {
 
   private constructor() {
     if (getApps().length === 0) {
-      const projectId = process.env.FIREBASE_PROJECT_ID || 'flex-coop-solution';
+      const projectId =
+        process.env.FIREBASE_PROJECT_ID ||
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        process.env.GCP_PROJECT ||
+        'coop-solution';
       initializeApp({
         projectId,
       });
@@ -54,6 +58,18 @@ export class FirestoreCoopService {
 
   public membersCol(tenantId: string) {
     return this.tenantDoc(tenantId).collection('members');
+  }
+
+  public applicationsCol(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('applications');
+  }
+
+  public credentialsCol(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('credentials');
+  }
+
+  public systemConfigDoc(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('system_config').doc('general');
   }
 
   public loansCol(tenantId: string) {
@@ -275,5 +291,142 @@ export class FirestoreCoopService {
   public async listAMLCAlerts(tenantId: string): Promise<AMLCCoveredTransactionAlert[]> {
     const snapshot = await this.amlcAlertsCol(tenantId).get();
     return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as AMLCCoveredTransactionAlert);
+  }
+
+  // --------------------------------------------------------------------------
+  // Applications Management (Online PMES & eKYC Queue)
+  // --------------------------------------------------------------------------
+
+  public async saveApplication(tenantId: string, application: any): Promise<void> {
+    await this.applicationsCol(tenantId).doc(application.id).set(application, { merge: true });
+  }
+
+  public async listApplications(tenantId: string): Promise<any[]> {
+    const snapshot = await this.applicationsCol(tenantId).get();
+    const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
+    return list.sort((a, b) => new Date(b.dateSubmitted || 0).getTime() - new Date(a.dateSubmitted || 0).getTime());
+  }
+
+  public async updateApplicationStatus(
+    tenantId: string,
+    applicationId: string,
+    status: string,
+    notes?: string,
+    reviewedBy?: string
+  ): Promise<void> {
+    await this.applicationsCol(tenantId).doc(applicationId).set(
+      {
+        status,
+        reviewedBy: reviewedBy || 'Cooperative Administration',
+        reviewNotes: notes || '',
+        reviewDate: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // Member Credentials Management (Strict Authentication)
+  // --------------------------------------------------------------------------
+
+  public async saveMemberCredential(tenantId: string, cred: any): Promise<void> {
+    const username = (cred.username || '').toLowerCase().trim();
+    const email = (cred.email || '').toLowerCase().trim();
+    const id = username || email || cred.phone;
+
+    await this.credentialsCol(tenantId).doc(id).set(
+      {
+        ...cred,
+        username,
+        email,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  public async getMemberCredential(tenantId: string, identifier: string): Promise<any | null> {
+    const idLower = identifier.toLowerCase().trim();
+
+    // 1. Check direct doc by username
+    const doc = await this.credentialsCol(tenantId).doc(idLower).get();
+    if (doc.exists) return doc.data();
+
+    // 2. Query by email
+    const byEmail = await this.credentialsCol(tenantId).where('email', '==', idLower).limit(1).get();
+    if (!byEmail.empty) return byEmail.docs[0].data();
+
+    // 3. Query by phone
+    const byPhone = await this.credentialsCol(tenantId).where('phone', '==', identifier.trim()).limit(1).get();
+    if (!byPhone.empty) return byPhone.docs[0].data();
+
+    return null;
+  }
+
+  // --------------------------------------------------------------------------
+  // System Configuration (General Settings, Technology Fee, Share Capital)
+  // --------------------------------------------------------------------------
+
+  public async saveSystemConfig(tenantId: string, config: any): Promise<void> {
+    await this.systemConfigDoc(tenantId).set(
+      {
+        ...config,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  public async getSystemConfig(tenantId: string): Promise<any | null> {
+    const doc = await this.systemConfigDoc(tenantId).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  // --------------------------------------------------------------------------
+  // Tenant Fleet Management
+  // --------------------------------------------------------------------------
+
+  public async saveTenant(tenant: Tenant): Promise<void> {
+    await this.tenantDoc(tenant.id).set(tenant, { merge: true });
+  }
+
+  public async getTenant(tenantId: string): Promise<Tenant | null> {
+    const doc = await this.tenantDoc(tenantId).get();
+    return doc.exists ? (doc.data() as Tenant) : null;
+  }
+
+  public async listTenants(): Promise<Tenant[]> {
+    const snapshot = await this.db.collection('tenants').get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as Tenant);
+  }
+
+  // --------------------------------------------------------------------------
+  // Ledger Clearance (Production Reset Support)
+  // --------------------------------------------------------------------------
+
+  public async clearTenantLedger(tenantId: string): Promise<void> {
+    // Delete all journal entries
+    const entries = await this.journalEntriesCol(tenantId).get();
+    if (!entries.empty) {
+      const batch = this.db.batch();
+      entries.docs.forEach((doc: QueryDocumentSnapshot) => batch.delete(doc.ref));
+      await batch.commit();
+    }
+
+    // Reset Chart of Accounts balances
+    const accounts = await this.coaCol(tenantId).get();
+    if (!accounts.empty) {
+      const coaBatch = this.db.batch();
+      accounts.docs.forEach((doc: QueryDocumentSnapshot) => {
+        coaBatch.update(doc.ref, {
+          currentDebit: 0,
+          currentCredit: 0,
+          netBalance: 0,
+          updatedAt: new Date().toISOString(),
+        });
+      });
+      await coaBatch.commit();
+    }
   }
 }

@@ -48,6 +48,7 @@ import {
   DEFAULT_MEMBER_REGISTRATION_FIELDS,
 } from '@flexcoop/shared-types';
 import { resolveTenantCoop, TenantInfo } from '../../tenant-utils';
+import { getApiBaseUrl } from '../../api-config';
 
 export default function MemberRegisterPage() {
   const router = useRouter();
@@ -236,26 +237,51 @@ export default function MemberRegisterPage() {
 
   const totalSubscribedAmount = subscribedShares * parValuePerShare;
 
-  // Load superadmin share capital parameters from localStorage
+  // Load superadmin share capital parameters from online API and localStorage
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    async function loadConfig() {
       const info = resolveTenantCoop();
       const slug = info.slug || 'default';
-      const savedShareConfig = localStorage.getItem(`flexcoop_share_capital_config_${slug}`) || localStorage.getItem('flexcoop_share_capital_config');
-      if (savedShareConfig) {
-        try {
-          const parsed = JSON.parse(savedShareConfig);
-          const par = Number(parsed.parValuePerShare) || 100;
-          const minShares = Number(parsed.minSubscribedShares) || 50;
-          const minDeposit = Number(parsed.minPaidUpAmount) || 1000;
-          setParValuePerShare(par);
-          setMinSubscribedShares(minShares);
-          setMinInitialDeposit(minDeposit);
-          setSubscribedShares(minShares);
-          setInitialDeposit(minDeposit);
-        } catch {}
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/system-config`, {
+          headers: { 'x-tenant-slug': slug },
+        });
+        if (res.ok) {
+          const cfgData = await res.json();
+          if (cfgData.success && cfgData.data) {
+            const par = Number(cfgData.data.stockParValue) || 100;
+            const minShares = Number(cfgData.data.minSubscribedShares) || 50;
+            const minDeposit = Number(cfgData.data.minPaidUpAmount) || 1000;
+            setParValuePerShare(par);
+            setMinSubscribedShares(minShares);
+            setMinInitialDeposit(minDeposit);
+            setSubscribedShares(minShares);
+            setInitialDeposit(minDeposit);
+            return;
+          }
+        }
+      } catch (err) {
+        // Fallback to local
+      }
+
+      if (typeof window !== 'undefined') {
+        const savedShareConfig = localStorage.getItem(`flexcoop_share_capital_config_${slug}`) || localStorage.getItem('flexcoop_share_capital_config');
+        if (savedShareConfig) {
+          try {
+            const parsed = JSON.parse(savedShareConfig);
+            const par = Number(parsed.parValuePerShare) || 100;
+            const minShares = Number(parsed.minSubscribedShares) || 50;
+            const minDeposit = Number(parsed.minPaidUpAmount) || 1000;
+            setParValuePerShare(par);
+            setMinSubscribedShares(minShares);
+            setMinInitialDeposit(minDeposit);
+            setSubscribedShares(minShares);
+            setInitialDeposit(minDeposit);
+          } catch {}
+        }
       }
     }
+    loadConfig();
   }, []);
 
   // Cleanup camera stream on unmount
@@ -362,7 +388,7 @@ export default function MemberRegisterPage() {
     }
   };
 
-  const handleFinalSubmit = (e: React.FormEvent) => {
+  const handleFinalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
@@ -413,6 +439,56 @@ export default function MemberRegisterPage() {
       idFrontPreview: idFrontFile?.previewUrl || null,
       selfiePreview: selfiePreview || null,
     };
+
+    // 1. Submit online to Cloud Run API / Cloud Firestore
+    try {
+      await fetch(`${getApiBaseUrl()}/auth/member/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': effectiveSlug,
+        },
+        body: JSON.stringify({
+          firstName,
+          middleName,
+          lastName,
+          username: newApp.username,
+          password: (password || '123456').trim(),
+          pin: (password || '123456').trim(),
+          email: newApp.email,
+          phone: newApp.phone,
+          landline: newApp.landline,
+          birthdate: newApp.birthdate,
+          gender: newApp.gender,
+          civilStatus: newApp.civilStatus,
+          employeeIdNumber: newApp.employeeIdNumber,
+          position: newApp.position,
+          officeUnitSection: newApp.officeUnitSection,
+          dateOfAppointment: newApp.dateOfAppointment,
+          tin: newApp.tin,
+          occupation: newApp.occupation,
+          monthlyIncome: newApp.monthlyIncome,
+          address: newApp.address,
+          completedPMES: true,
+          agreedToPrivacyPolicy: true,
+          subscribedShares: newApp.subscribedShares,
+          parValuePerShare: newApp.parValuePerShare,
+          totalSubscribedAmount: newApp.totalSubscribedAmount,
+          initialDeposit: newApp.initialDeposit,
+          initialPaidUpAmount: newApp.initialDeposit,
+          paymentMethod: newApp.paymentMethod,
+          idType: newApp.idType,
+          idNumber: newApp.idNumber,
+          idFrontFileName: newApp.idFrontFileName,
+          idFrontPreview: newApp.idFrontPreview,
+          selfiePreview: newApp.selfiePreview,
+          coopSlug: effectiveSlug,
+          coopName: effectiveCoopName,
+        }),
+      });
+    } catch (apiErr) {
+      console.warn('Online registration API error (falling back to local cache):', apiErr);
+    }
 
     try {
       if (typeof window !== 'undefined') {
