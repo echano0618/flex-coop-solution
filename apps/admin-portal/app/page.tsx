@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
+  LogOut,
   Building2,
   Users,
   CreditCard,
@@ -105,6 +107,7 @@ interface StaffAccount {
   role: StaffRole;
   roleTitle: string;
   name: string;
+  email?: string;
   initials: string;
   color: string;
   description: string;
@@ -334,11 +337,54 @@ const INITIAL_COLLATERALS = [
 ];
 
 export default function AdminDashboard() {
+  const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
+
+  // Authentication Guard: Redirect unauthenticated visitors to /login
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('flexcoop_admin_session');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.token) {
+            const matched = STAFF_ACCOUNTS.find((a) => a.role === parsed.role || a.email === parsed.email) || {
+              id: parsed.id || 'usr_session',
+              role: parsed.role || 'GENERAL_MANAGER',
+              roleTitle: parsed.roleTitle || 'Administrator',
+              name: parsed.name || 'Cooperative Administrator',
+              initials: (parsed.name || 'AD').split(' ').map((n: string) => n[0]).join('').slice(0, 2),
+              color: 'bg-indigo-600',
+              description: 'Authenticated Staff Session',
+              allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'system_config', 'platform_usage'],
+            };
+            setCurrentStaff(matched as any);
+            setIsAuthenticated(true);
+            setIsCheckingAuth(false);
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Admin auth session parse error:', e);
+    }
+    setIsCheckingAuth(false);
+    router.replace('/login');
+  }, [router]);
+
+  const handleAdminSignOut = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('flexcoop_admin_session');
+      document.cookie = 'flexcoop_admin_session=; path=/; max-age=0';
+    }
+    router.replace('/login');
+  };
 
   const ALL_MODULE_TABS: {
     id: TabType;
@@ -2386,6 +2432,17 @@ export default function AdminDashboard() {
   const [glAccountSearchQuery, setGlAccountSearchQuery] = useState<string>('');
   const [slFilterCategory, setSlFilterCategory] = useState<'ALL' | 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN'>('ALL');
 
+  if (isCheckingAuth || !isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300">
+        <RefreshCw className="w-8 h-8 animate-spin text-indigo-500 mb-3" />
+        <p className="text-xs font-mono uppercase tracking-widest text-slate-400">
+          Verifying Cooperative Staff Authorization...
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col lg:flex-row">
       {/* Desktop App Drawer on Left Side */}
@@ -2672,9 +2729,30 @@ export default function AdminDashboard() {
                         </div>
                       </button>
                     ))}
+                    <div className="pt-1.5 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={handleAdminSignOut}
+                        className="w-full text-left p-2 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2 transition cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out of Admin Portal</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
+
+              {/* Header Sign Out Button */}
+              <button
+                type="button"
+                onClick={handleAdminSignOut}
+                title="Sign out of Admin Portal"
+                className="flex items-center space-x-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
             </div>
           </div>
         </header>

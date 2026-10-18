@@ -4,11 +4,23 @@ import type { NextRequest } from 'next/server';
 export function middleware(request: NextRequest) {
   const host = request.headers.get('host') || '';
   const cleanHost = host.split(':')[0].toLowerCase();
+  const pathname = request.nextUrl.pathname;
 
-  // Pattern 1: <tenant>-coop.tuntongtech.com (Primary Production) or <tenant>-flexcoop.tuntongtech.com (Legacy Production)
-  // Pattern 2: <tenant>-flexcoop.localhost, <tenant>-coop.localhost, or <tenant>.localhost (Local development)
-  // Clean domain & suffix resolution
-  let tenantSlug = 'bayani'; // Default demonstration tenant
+  // 1. Bypass static assets, manifest, and API endpoints
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/icons') ||
+    pathname === '/favicon.ico' ||
+    pathname === '/favicon.png' ||
+    pathname === '/manifest.json' ||
+    pathname === '/manifest.webmanifest'
+  ) {
+    return NextResponse.next();
+  }
+
+  // 2. Multi-tenant Subdomain Resolution
+  let tenantSlug = 'bayani';
   let isTenantSubdomain = false;
 
   const coopProdSuffix = '-coop.tuntongtech.com';
@@ -33,7 +45,50 @@ export function middleware(request: NextRequest) {
     isTenantSubdomain = true;
   }
 
-  // Clone the request headers and pass tenant context
+  // 3. Security Route Guards: Prevent unauthenticated access across all portals
+  // A. OPERATOR PORTAL GUARD
+  if (pathname.startsWith('/operator')) {
+    const operatorCookie = request.cookies.get('tuntong_operator_session')?.value;
+    if (pathname === '/operator/login') {
+      if (operatorCookie) {
+        return NextResponse.redirect(new URL('/operator', request.url));
+      }
+      // Allow unauthenticated access to operator login
+    } else {
+      if (!operatorCookie) {
+        return NextResponse.redirect(new URL('/operator/login', request.url));
+      }
+    }
+  }
+
+  // B. MEMBER PORTAL GUARD
+  if (pathname.startsWith('/member')) {
+    const memberCookie = request.cookies.get('flexcoop_auth_member')?.value;
+    if (pathname === '/member/login' || pathname === '/member/register') {
+      // Allow unauthenticated access to member login and PMES registration
+    } else {
+      if (!memberCookie) {
+        return NextResponse.redirect(new URL('/member/login', request.url));
+      }
+    }
+  }
+
+  // C. ADMIN / STAFF PORTAL GUARD
+  if (pathname === '/') {
+    const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
+    if (!adminCookie) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+  }
+
+  if (pathname === '/login') {
+    const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
+    if (adminCookie) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
+  }
+
+  // 4. Set Tenant Context Headers
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-tenant-slug', tenantSlug);
   requestHeaders.set('x-tenant-domain', `${tenantSlug}-coop.tuntongtech.com`);
@@ -49,10 +104,7 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
+     * Match all request paths except for static files
      */
     '/((?!_next/static|_next/image|favicon.ico).*)',
   ],

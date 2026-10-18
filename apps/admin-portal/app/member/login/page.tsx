@@ -24,6 +24,14 @@ export default function MemberLoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  React.useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && localStorage.getItem('flexcoop_auth_member')) {
+        router.replace('/member');
+      }
+    } catch (e) {}
+  }, [router]);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier.trim() || !pin.trim()) {
@@ -35,12 +43,13 @@ export default function MemberLoginPage() {
 
     setTimeout(() => {
       setIsLoading(false);
-      // In production, persists session token to localStorage
+      // Persist session token to localStorage and cookie
       if (typeof window !== 'undefined') {
         localStorage.setItem('flexcoop_auth_member', identifier.trim());
+        document.cookie = `flexcoop_auth_member=${encodeURIComponent(identifier.trim())}; path=/; max-age=86400; SameSite=Lax`;
       }
       router.push('/member');
-    }, 600);
+    }, 400);
   };
 
   return (

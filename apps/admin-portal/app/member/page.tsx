@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Building2,
   Wallet,
@@ -122,6 +123,36 @@ const DEFAULT_LOAN_PRODUCTS = [
 ];
 
 export default function MemberPortalPage() {
+  const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+
+  // Authentication Guard: Redirect unauthenticated visitors to /member/login
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const auth = localStorage.getItem('flexcoop_auth_member');
+        if (auth) {
+          setIsAuthenticated(true);
+          setIsCheckingAuth(false);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Member auth check error:', e);
+    }
+    setIsCheckingAuth(false);
+    router.replace('/member/login');
+  }, [router]);
+
+  const handleMemberSignOut = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('flexcoop_auth_member');
+      document.cookie = 'flexcoop_auth_member=; path=/; max-age=0';
+    }
+    router.replace('/member/login');
+  };
+
   // Member Persona Switcher (Maria = Borrower, Juan = Co-Maker)
   const [currentPersona, setCurrentPersona] = useState<'maria' | 'juan'>('maria');
 
@@ -616,6 +647,17 @@ export default function MemberPortalPage() {
 
     setPassbookPayModal({ open: false, type: 'LOAN', amount: 0, description: '' });
   };
+
+  if (isCheckingAuth || !isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-slate-300">
+        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <p className="text-xs font-mono uppercase tracking-widest text-slate-400">
+          Verifying Member Authorization...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -2774,14 +2816,15 @@ export default function MemberPortalPage() {
                   <span>Switch to Admin Portal</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </Link>
-                <Link
-                  href="/member/login"
+                <button
+                  type="button"
+                  onClick={handleMemberSignOut}
                   title="Sign out of Member Portal"
-                  className="py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold text-center transition shadow-xs flex items-center justify-center gap-1.5"
+                  className="py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold text-center transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>Sign Out</span>
-                </Link>
+                </button>
               </div>
             </div>
           </div>
