@@ -12,6 +12,7 @@ import {
   OperatorAccount,
   OperatorSession,
   OperatorOtpResponse,
+  Member,
 } from '@flexcoop/shared-types';
 import { dbStore } from '../../core/store';
 import { MailerService } from '../../core/mailer.service';
@@ -391,11 +392,69 @@ export class OperatorService {
     dbStore.tenants.set(tenantId, tenant);
     dbStore.platformCredits.set(tenantId, 0.0); // A new approved coop starts strictly with 0 Available Credit
     dbStore.escrowFloats.set(tenantId, 0.0);    // A new approved coop starts strictly with 0 Escrow Float
-    dbStore.members.set(tenantId, []);
+
+    // Provision declared General Manager as Member #1 of the cooperative
+    const gmFullName = [reg.adminFirstName, reg.adminMiddleName, reg.adminLastName].filter(Boolean).join(' ');
+    const gmMemberId = `mem_${reg.slug}_0001`;
+    const gmMemberNumber = `MEM-${new Date().getFullYear()}-0001`;
+
+    const gmMember: Member = {
+      id: gmMemberId,
+      memberNumber: gmMemberNumber,
+      firstName: reg.adminFirstName,
+      middleName: reg.adminMiddleName,
+      lastName: reg.adminLastName,
+      email: reg.adminEmail,
+      phone: reg.contactPhone || '+63 900 000 0000',
+      birthdate: '1985-01-01',
+      gender: 'OTHER',
+      civilStatus: 'SINGLE',
+      address: reg.address || 'Philippines',
+      tin: reg.tin,
+      position: 'General Manager',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    dbStore.members.set(tenantId, [gmMember]);
     dbStore.loans.set(tenantId, []);
     dbStore.journalEntries.set(tenantId, []);
-    dbStore.shareAccounts.set(tenantId, []);
-    dbStore.savingsAccounts.set(tenantId, []);
+
+    // Initial Share Capital and Savings Account for the General Manager
+    dbStore.shareAccounts.set(tenantId, [
+      {
+        id: `sha_${gmMemberId}`,
+        memberId: gmMemberId,
+        memberNumber: gmMemberNumber,
+        memberName: gmFullName,
+        sharesCount: 100,
+        paidUpAmount: 10000,
+        parValue: 100,
+        subscribedShares: 100,
+        subscribedAmount: 10000,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as any,
+    ]);
+
+    dbStore.savingsAccounts.set(tenantId, [
+      {
+        id: `sav_${gmMemberId}`,
+        memberId: gmMemberId,
+        memberNumber: gmMemberNumber,
+        memberName: gmFullName,
+        accountNumber: `SA-${reg.slug.toUpperCase()}-0001`,
+        balance: 5000,
+        interestRate: 0.02,
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as any,
+    ]);
 
     // Create Email Notification payload from support@tuntongtech.com
     const emailSubject = `[Tuntong Tech] Congratulations! Your Cooperative Registration has been Approved (${reg.name})`;
@@ -405,12 +464,16 @@ We are pleased to inform you that your cooperative onboarding application (${reg
 
 Your dedicated cooperative instance has been provisioned and is now live under strict CDA double-entry and NPC data privacy compliance.
 
-Official Cooperative Portal:
-Domain: https://${subdomain}
+Official Cooperative Portals:
+- Administrative Control Plane: https://${subdomain}/login
+- Member Self-Service Portal: https://${subdomain}/member/login
 
-Primary Administrator Login Credentials:
-Username (Email): ${reg.adminEmail}
-1-Time Temporary Password: ${oneTimePassword}
+Primary Administrator & Member Credentials:
+- General Manager & Member ID: ${gmMemberNumber}
+- Username (Email): ${reg.adminEmail}
+- 1-Time Temporary Password: ${oneTimePassword}
+
+NOTE: As the declared General Manager, you are automatically registered as Member #1 of "${reg.name}" and granted full access to the Cooperative Member Portal with initialized share capital and savings accounts.
 
 IMPORTANT SECURITY NOTICE: This 1-time password is valid for your initial sign-in only. You will be required to change your password immediately upon your first login.
 

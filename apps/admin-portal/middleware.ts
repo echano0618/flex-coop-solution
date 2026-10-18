@@ -61,13 +61,14 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // B. MEMBER PORTAL GUARD
+  // B. MEMBER PORTAL GUARD (General Managers and Members)
   if (pathname.startsWith('/member')) {
     const memberCookie = request.cookies.get('flexcoop_auth_member')?.value;
+    const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
     if (pathname === '/member/login' || pathname === '/member/register') {
       // Allow unauthenticated access to member login and PMES registration
     } else {
-      if (!memberCookie) {
+      if (!memberCookie && !adminCookie) {
         return NextResponse.redirect(new URL('/member/login', request.url));
       }
     }

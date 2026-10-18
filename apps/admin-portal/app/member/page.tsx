@@ -132,7 +132,8 @@ export default function MemberPortalPage() {
     try {
       if (typeof window !== 'undefined') {
         const auth = localStorage.getItem('flexcoop_auth_member');
-        if (auth) {
+        const admin = localStorage.getItem('flexcoop_admin_session');
+        if (auth || admin) {
           setIsAuthenticated(true);
           setIsCheckingAuth(false);
           return;
@@ -155,8 +156,65 @@ export default function MemberPortalPage() {
 
   // Member Persona Switcher (Maria = Borrower, Juan = Co-Maker)
   const [currentPersona, setCurrentPersona] = useState<'maria' | 'juan'>('maria');
+  const [customMember, setCustomMember] = useState<any>(null);
 
-  const currentMember = currentPersona === 'maria'
+  // Load authenticated member or General Manager profile
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const auth = localStorage.getItem('flexcoop_auth_member');
+        const admin = localStorage.getItem('flexcoop_admin_session');
+
+        if (auth) {
+          try {
+            const parsed = JSON.parse(auth);
+            if (parsed && (parsed.firstName || parsed.name)) {
+              const fullName = parsed.name || `${parsed.firstName} ${parsed.lastName || ''}`.trim();
+              const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
+              setCustomMember({
+                id: parsed.id || 'mem_0001',
+                memberNumber: parsed.memberNumber || 'MEM-2026-0001',
+                name: fullName,
+                initials: initials || 'GM',
+                type: parsed.position ? `${parsed.position} (Regular Member)` : (parsed.type || 'Regular Member'),
+                paidUpCapital: parsed.paidUpCapital || 25000,
+                sharesCount: parsed.sharesCount || 250,
+                savingsBalance: parsed.savingsBalance || 10000,
+                idType: parsed.idType || 'PhilSys Verified Member ID',
+              });
+              return;
+            }
+          } catch {}
+        }
+
+        if (admin) {
+          try {
+            const parsedAdmin = JSON.parse(admin);
+            if (parsedAdmin && parsedAdmin.name) {
+              const fullName = parsedAdmin.name;
+              const initials = fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+              setCustomMember({
+                id: parsedAdmin.id || 'mem_gm_0001',
+                memberNumber: 'MEM-2026-0001',
+                name: fullName,
+                initials: initials || 'GM',
+                type: 'General Manager (Regular Member)',
+                paidUpCapital: 25000,
+                sharesCount: 250,
+                savingsBalance: 10000,
+                idType: 'CDA General Manager Verified PhilSys ID',
+              });
+              return;
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Member state parse error:', e);
+    }
+  }, []);
+
+  const currentMember = customMember || (currentPersona === 'maria'
     ? {
         id: 'mem_1',
         memberNumber: 'MEM-2026-0001',
@@ -178,7 +236,7 @@ export default function MemberPortalPage() {
         sharesCount: 100,
         savingsBalance: 2000,
         idType: "Driver's License (Encrypted SPI)",
-      };
+      });
 
   const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
 

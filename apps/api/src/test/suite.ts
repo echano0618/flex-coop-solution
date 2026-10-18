@@ -1865,6 +1865,27 @@ console.log('\n--- 28. Cooperative Registration, Operator Review, ID Inspection,
   assert(approvedTenantFleet?.platformCreditBalance === 0, 'New approved cooperative strictly has 0 Available Credit');
   assert(approvedTenantFleet?.escrowFloatBalance === 0, 'New approved cooperative strictly has 0 Escrow Float');
 
+  // 28.3.1 Verify General Manager is automatically registered as Member #1 of the cooperative
+  const tenantMembers = dbStore.members.get(approveResult.tenant!.id) || [];
+  assert(tenantMembers.length === 1, 'General Manager is automatically registered as Member #1 upon approval');
+  const gmMember = tenantMembers[0];
+  assert(gmMember.firstName === 'Eduardo', 'Member #1 first name matches declared General Manager');
+  assert(gmMember.lastName === 'Villanueva', 'Member #1 last name matches declared General Manager');
+  assert(gmMember.email === 'eduardo.villanueva@tagumpaycoop.ph', 'Member #1 email matches declared General Manager');
+  assert(gmMember.position === 'General Manager', 'Member #1 position is General Manager');
+  assert(gmMember.status === 'ACTIVE', 'Member #1 status is ACTIVE');
+  assert(gmMember.kycStatus === 'VERIFIED', 'Member #1 KYC status is VERIFIED');
+  assert(Boolean(gmMember.memberNumber.includes('0001')), 'Member #1 receives Member ID ending in 0001');
+
+  // Verify initial share capital and savings accounts for General Manager
+  const tenantShareAccounts = dbStore.shareAccounts.get(approveResult.tenant!.id) || [];
+  assert(tenantShareAccounts.length === 1, 'General Manager receives initial share capital account');
+  assert(tenantShareAccounts[0].paidUpAmount === 10000, 'General Manager initial paid-up capital is ₱10,000');
+
+  const tenantSavingsAccounts = dbStore.savingsAccounts.get(approveResult.tenant!.id) || [];
+  assert(tenantSavingsAccounts.length === 1, 'General Manager receives initial savings account');
+  assert(tenantSavingsAccounts[0].balance === 5000, 'General Manager initial savings balance is ₱5,000');
+
   // Email Notification verification
   const emailNotification = approveResult.registration?.emailNotification;
   assert(emailNotification !== undefined, 'Official email notification record is generated');
@@ -1875,6 +1896,7 @@ console.log('\n--- 28. Cooperative Registration, Operator Review, ID Inspection,
   assert(Boolean(emailNotification?.body.includes(approveResult.registration!.oneTimePassword!)), 'Email body conveys 1-time password');
   assert(Boolean(emailNotification?.body.includes('tagumpay-coop.tuntongtech.com')), 'Email body conveys dedicated domain');
   assert(Boolean(emailNotification?.body.includes('initial sign-in only')), 'Email body informs user password must be changed upon login');
+  assert(Boolean(emailNotification?.body.includes('Member #1')), 'Email body conveys General Manager Member #1 status');
 
   // 28.4 Submit another application and test operator Rejection
   const rejectedApp = OperatorService.submitRegistration({
