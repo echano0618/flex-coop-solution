@@ -10,8 +10,8 @@ export function getApiBaseUrl(): string {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       return 'http://localhost:4000/api/v1';
     }
-    // When served online behind Nginx or custom domain, route through same origin /api/v1
-    return `${window.location.origin}/api/v1`;
+    // Direct Cloud Run and production deployments
+    return 'https://flexcoop-api-607281616647.asia-southeast1.run.app/api/v1';
   }
-  return 'http://localhost:4000/api/v1';
+  return 'https://flexcoop-api-607281616647.asia-southeast1.run.app/api/v1';
 }

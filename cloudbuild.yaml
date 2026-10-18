@@ -19,6 +19,10 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app/api/v1'
+      - '--build-arg'
+      - 'INTERNAL_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app'
       - '-t'
       - 'asia-southeast1-docker.pkg.dev/coop-solution/cloud-run-source-deploy/flexcoop-web:latest'
       - '-f'

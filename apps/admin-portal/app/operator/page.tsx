@@ -151,23 +151,16 @@ export default function OperatorPortalPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
-  // Operator Authentication State (Default: tuntongtech / felix.echano@tuntongtech.com)
+  // Operator Authentication State
   const [operatorSession, setOperatorSession] = useState<OperatorSession | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
-  const [authIdentifier, setAuthIdentifier] = useState<string>('tuntongtech');
+  const [authIdentifier, setAuthIdentifier] = useState<string>('');
   const [otpInput, setOtpInput] = useState<string>('');
   const [authStep, setAuthStep] = useState<'IDENTIFIER' | 'OTP'>('IDENTIFIER');
   const [isSendingOtp, setIsSendingOtp] = useState<boolean>(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccessMsg, setAuthSuccessMsg] = useState<string | null>(null);
-  const [activeOtpPayload, setActiveOtpPayload] = useState<{
-    otp: string;
-    email: string;
-    username: string;
-    dispatchedAt: string;
-  } | null>(null);
-  const [showOtpEmailPreview, setShowOtpEmailPreview] = useState<boolean>(true);
 
   // Check existing operator session on mount
   useEffect(() => {
@@ -207,24 +200,28 @@ export default function OperatorPortalPage() {
         body: JSON.stringify({ usernameOrEmail: authIdentifier.trim() }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setAuthError(data.error || 'Failed to dispatch One-Time PIN. Only authorized Tuntong Tech operators are permitted.');
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        setAuthError(`Server error (${res.status}). Please try again.`);
         return;
       }
 
-      setActiveOtpPayload({
-        otp: data.otp || '',
-        email: data.email || 'felix.echano@tuntongtech.com',
-        username: data.username || 'tuntongtech',
-        dispatchedAt: new Date().toLocaleTimeString(),
-      });
+      if (!res.ok || !data.success) {
+        setAuthError(
+          data.error === 'OPERATOR_NOT_FOUND'
+            ? 'Invalid operator credentials. Access denied.'
+            : (data.error || 'Failed to dispatch One-Time PIN.')
+        );
+        return;
+      }
+
       setAuthStep('OTP');
-      setAuthSuccessMsg(data.message || `A One-Time PIN has been dispatched to ${data.email} from support@tuntongtech.com.`);
-      setShowOtpEmailPreview(true);
+      setAuthSuccessMsg('A 6-digit One-Time PIN has been dispatched to the registered operator email.');
     } catch (err: any) {
       console.error(err);
-      setAuthError('Network error connecting to Tuntong Tech Auth Service. Please try again.');
+      setAuthError('Connection error contacting Tuntong Tech Auth Service. Please try again.');
     } finally {
       setIsSendingOtp(false);
     }
@@ -251,7 +248,14 @@ export default function OperatorPortalPage() {
         }),
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        setAuthError(`Server error (${res.status}). Please try again.`);
+        return;
+      }
+
       if (!res.ok || !data.success) {
         setAuthError(data.error || 'Invalid or expired PIN. Please try again.');
         return;
@@ -277,8 +281,6 @@ export default function OperatorPortalPage() {
     setOtpInput('');
     setAuthError(null);
     setAuthSuccessMsg(null);
-    setActiveOtpPayload(null);
-    setShowOtpEmailPreview(false);
   };
 
   // Load Registrations from API or fallback
@@ -709,22 +711,6 @@ https://tuntongtech.com`;
 
           {/* Operator Authentication Card */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur space-y-5">
-            {/* Operator Account Verification Badge */}
-            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-start gap-3">
-              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
-                <KeyRound className="w-4 h-4" />
-              </div>
-              <div className="text-xs space-y-0.5">
-                <div className="font-semibold text-slate-200">Authorized Operator Account</div>
-                <div className="text-slate-400 font-mono text-[11px]">
-                  Username: <span className="text-emerald-400 font-bold">tuntongtech</span>
-                </div>
-                <div className="text-slate-400 font-mono text-[11px]">
-                  Email: <span className="text-indigo-400 font-bold">felix.echano@tuntongtech.com</span>
-                </div>
-              </div>
-            </div>
-
             {/* Error Notification */}
             {authError && (
               <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-600/50 text-rose-200 text-xs flex items-start gap-2.5">
@@ -746,22 +732,17 @@ https://tuntongtech.com`;
               <form onSubmit={handleRequestOtp} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-300">Operator Username or Email</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={authIdentifier}
-                      onChange={(e) => setAuthIdentifier(e.target.value)}
-                      placeholder="e.g. tuntongtech or felix.echano@tuntongtech.com"
-                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 transition-colors"
-                      required
-                      autoFocus
-                    />
-                    <div className="absolute right-3 top-2.5 text-slate-500 text-xs font-mono">
-                      @tuntongtech
-                    </div>
-                  </div>
+                  <input
+                    type="text"
+                    value={authIdentifier}
+                    onChange={(e) => setAuthIdentifier(e.target.value)}
+                    placeholder="Enter operator username or email"
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 transition-colors"
+                    required
+                    autoFocus
+                  />
                   <p className="text-[11px] text-slate-500">
-                    No password required. A 6-digit PIN will be dispatched to your email.
+                    A 6-digit One-Time PIN will be dispatched to your authorized email address.
                   </p>
                 </div>
 
@@ -813,7 +794,7 @@ https://tuntongtech.com`;
                       autoFocus
                     />
                     <p className="text-[11px] text-slate-400 text-center">
-                      PIN sent to <strong className="text-slate-200">{activeOtpPayload?.email || 'felix.echano@tuntongtech.com'}</strong>
+                      Please enter the 6-digit PIN dispatched to your email.
                     </p>
                   </div>
 
@@ -835,7 +816,7 @@ https://tuntongtech.com`;
                     )}
                   </button>
 
-                  <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center justify-center pt-1">
                     <button
                       type="button"
                       disabled={isSendingOtp}
@@ -845,54 +826,8 @@ https://tuntongtech.com`;
                       <RefreshCw className={`w-3 h-3 ${isSendingOtp ? 'animate-spin' : ''}`} />
                       <span>Resend PIN</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowOtpEmailPreview(!showOtpEmailPreview)}
-                      className="text-xs text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
-                    >
-                      <Eye className="w-3 h-3" />
-                      <span>{showOtpEmailPreview ? 'Hide Dispatched Email' : 'View Dispatched Email'}</span>
-                    </button>
                   </div>
                 </form>
-
-                {/* Simulated Email Preview (support@tuntongtech.com) */}
-                {showOtpEmailPreview && activeOtpPayload && (
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-3 font-sans">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <div className="flex items-center gap-1.5 text-indigo-400 font-bold">
-                        <Mail className="w-3.5 h-3.5" />
-                        <span>Dispatched Notification (support@tuntongtech.com)</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-mono">{activeOtpPayload.dispatchedAt}</span>
-                    </div>
-
-                    <div className="space-y-1 text-[11px] font-mono text-slate-400">
-                      <div>From: <strong className="text-slate-200">support@tuntongtech.com</strong></div>
-                      <div>To: <strong className="text-slate-200">{activeOtpPayload.email}</strong></div>
-                      <div>Subject: <span className="text-slate-300">[Tuntong Tech Operator] Your 1-Time Sign-In PIN: {activeOtpPayload.otp}</span></div>
-                    </div>
-
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center space-y-2">
-                      <div className="text-[11px] text-slate-400">Your 6-Digit One-Time Sign-In PIN:</div>
-                      <div className="font-mono text-2xl font-black text-emerald-400 tracking-[0.25em]">
-                        {activeOtpPayload.otp}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setOtpInput(activeOtpPayload.otp)}
-                        className="text-[11px] bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 px-2.5 py-1 rounded-lg font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        <span>Quick-Fill PIN</span>
-                      </button>
-                    </div>
-
-                    <p className="text-[10px] text-slate-500 leading-relaxed italic">
-                      Notice: PIN expires in 10 minutes. Tuntong Tech representatives will never request your PIN.
-                    </p>
-                  </div>
-                )}
               </div>
             )}
           </div>

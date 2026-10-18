@@ -3,6 +3,11 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+ARG NEXT_PUBLIC_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app/api/v1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG INTERNAL_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app
+ENV INTERNAL_API_URL=${INTERNAL_API_URL}
+
 # Copy monorepo configuration
 COPY package*.json ./
 COPY packages ./packages
@@ -20,6 +25,8 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV NEXT_PUBLIC_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app/api/v1
+ENV INTERNAL_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
