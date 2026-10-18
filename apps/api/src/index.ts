@@ -66,7 +66,11 @@ export function resolveTenantFromHost(hostHeader?: string): string | null {
 export function resolveTenantId(req: Request): string {
   // 1. Explicit headers (ID or slug)
   const headerTenantId = (req.headers['x-tenant-id'] as string || '').trim();
-  if (headerTenantId) return headerTenantId;
+  if (headerTenantId) {
+    if (headerTenantId.startsWith('tenant_')) return headerTenantId;
+    const clean = headerTenantId.replace(/[-_]coop$/, '');
+    return `tenant_${clean}`;
+  }
 
   const headerTenantSlug = (req.headers['x-tenant-slug'] as string || '').trim().toLowerCase();
   if (headerTenantSlug) {
