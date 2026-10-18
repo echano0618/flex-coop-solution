@@ -156,6 +156,36 @@ export class FirestoreCoopService {
     await batch.commit();
   }
 
+  public async ensureFamilyTenantInitialized(): Promise<void> {
+    try {
+      const familyDoc = await this.tenantDoc('tenant_family').get();
+      if (!familyDoc.exists) {
+        const tenant: Tenant = {
+          id: 'tenant_family',
+          name: 'Family Multi-Purpose Cooperative',
+          slug: 'family',
+          cdaRegistrationNumber: 'CDA-NCR-2024-00892',
+          tin: '009-887-123-000',
+          contactEmail: 'admin@familycoop.ph',
+          contactPhone: '+63 917 888 2468',
+          address: 'Family Coop Building, Ortigas Center, Pasig City, Metro Manila',
+          coopType: 'Multi-Purpose',
+          adminFirstName: 'Felix',
+          adminLastName: 'Echano',
+          billingMode: 'STANDARD_UNIFIED',
+          status: 'ACTIVE',
+          createdAt: '2026-01-01T08:00:00.000Z',
+          updatedAt: new Date().toISOString(),
+        };
+        (tenant as any).platformCreditBalance = 50000;
+        (tenant as any).escrowFloatBalance = 0;
+        await this.seedTenant(tenant);
+      }
+    } catch (err) {
+      console.warn('Error checking family tenant initialization in Firestore:', err);
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Members Management
   // --------------------------------------------------------------------------

@@ -22,8 +22,11 @@ export interface Tenant {
   adminLastName?: string;
   validIdUrl?: string;
   address: string;
+  coopType?: string;
   billingMode: TenantBillingMode;
   merchantAccountId?: string; // Connected PayMongo / Gateway ID if COOP_MERCHANT
+  platformCreditBalance?: number;
+  escrowFloatBalance?: number;
   status: TenantStatus;
   createdAt: string;
   updatedAt: string;

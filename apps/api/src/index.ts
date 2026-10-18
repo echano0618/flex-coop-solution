@@ -2713,5 +2713,10 @@ app.listen(PORT, () => {
   console.log(`🚀 Flex Coop Solution API running on http://localhost:${PORT}`);
   console.log(`📋 CDA Standard Chart of Accounts seeded`);
   console.log(`🏢 Multi-Tenant Schema & Firebase Firestore initialized`);
+  try {
+    FirestoreCoopService.getInstance().ensureFamilyTenantInitialized().catch((e) => console.warn('Family tenant auto-init:', e));
+  } catch (err) {
+    console.warn('Firestore instance startup init:', err);
+  }
 });
 
