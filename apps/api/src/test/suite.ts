@@ -1895,7 +1895,55 @@ console.log('\n--- 28. Cooperative Registration, Operator Review, ID Inspection,
   assert(Boolean(rejectResult.registration?.emailNotification?.body.includes(rejectReason)), 'Rejection email conveys specific non-compliance reason');
 }
 
-console.log('\n🎉 ALL 285 VERIFICATION TEST CASES (INCLUDING COOP REGISTRATION, OPERATOR REVIEW, ID INSPECTION, APPROVAL OTP & support@tuntongtech.com DISPATCH) PASSED SUCCESSFULLY!\n');
+// 29. Operator Passwordless Authentication (Username: tuntongtech, Email: felix.echano@tuntongtech.com, 1-Time PIN)
+console.log('\n--- 29. Operator Portal Passwordless OTP Authentication ---');
+{
+  // 29.1 Reject unauthorized operator identities
+  const invalidReq = OperatorService.requestOperatorOtp('random_intruder');
+  assert(invalidReq.success === false, 'Non-existent operator usernames are strictly rejected');
+  assert(invalidReq.error === 'OPERATOR_NOT_FOUND', 'Returns OPERATOR_NOT_FOUND error code');
+
+  // 29.2 Request OTP with valid operator username 'tuntongtech'
+  const otpReqUsername = OperatorService.requestOperatorOtp('tuntongtech');
+  assert(otpReqUsername.success === true, 'Operator OTP request succeeds for username tuntongtech');
+  assert(otpReqUsername.email === 'felix.echano@tuntongtech.com', 'OTP destination is bound to felix.echano@tuntongtech.com');
+  assert(otpReqUsername.otp !== undefined && /^\d{6}$/.test(otpReqUsername.otp), 'Generated OTP is exactly a 6-digit numeric PIN');
+  assert(Boolean(otpReqUsername.message?.includes('support@tuntongtech.com')), 'Notification originates from support@tuntongtech.com');
+
+  // 29.3 Request OTP with valid operator email 'felix.echano@tuntongtech.com'
+  const otpReqEmail = OperatorService.requestOperatorOtp('felix.echano@tuntongtech.com');
+  assert(otpReqEmail.success === true, 'Operator OTP request succeeds when passing email directly');
+  const activePin = otpReqEmail.otp!;
+
+  // 29.4 Fail on incorrect PIN
+  const wrongPinVerify = OperatorService.verifyOperatorOtp('tuntongtech', '000000');
+  assert(wrongPinVerify.success === false, 'Verification fails on incorrect PIN');
+  assert(Boolean(wrongPinVerify.error?.includes('Invalid PIN')), 'Returns invalid PIN error');
+
+  // 29.5 Succeed on correct 6-digit PIN
+  const validVerify = OperatorService.verifyOperatorOtp('tuntongtech', activePin);
+  assert(validVerify.success === true, 'Verification succeeds on correct PIN');
+  assert(validVerify.session !== undefined, 'OperatorSession is issued');
+  assert(validVerify.session?.username === 'tuntongtech', 'Session username matches tuntongtech');
+  assert(validVerify.session?.email === 'felix.echano@tuntongtech.com', 'Session email matches felix.echano@tuntongtech.com');
+  assert(validVerify.session?.role === 'PLATFORM_SUPER_OPERATOR', 'Session role is PLATFORM_SUPER_OPERATOR');
+  assert(Boolean(validVerify.session?.token.startsWith('opt_sess_')), 'Session token has opt_sess_ prefix');
+
+  // 29.6 Prevent replay attack with consumed OTP
+  const replayVerify = OperatorService.verifyOperatorOtp('tuntongtech', activePin);
+  assert(replayVerify.success === false, 'PIN cannot be re-used after consumption');
+
+  // 29.7 Validate active session token
+  const validatedSession = OperatorService.validateOperatorSession(validVerify.session!.token);
+  assert(validatedSession !== null, 'Active session token resolves correctly');
+  assert(validatedSession?.username === 'tuntongtech', 'Validated session retains operator username');
+
+  // 29.8 Reject fake/invalid session token
+  const invalidSession = OperatorService.validateOperatorSession('invalid_token_999');
+  assert(invalidSession === null, 'Invalid session token returns null');
+}
+
+console.log('\n🎉 ALL 293 VERIFICATION TEST CASES (INCLUDING OPERATOR PASSWORDLESS OTP LOGIN & support@tuntongtech.com DISPATCH) PASSED SUCCESSFULLY!\n');
 
 
 

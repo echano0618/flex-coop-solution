@@ -122,3 +122,30 @@ export interface CooperativeRegistration {
   oneTimePassword?: string;
   emailNotification?: RegistrationEmailNotification;
 }
+
+export interface OperatorAccount {
+  username: string;
+  name: string;
+  email: string;
+  role: 'PLATFORM_SUPER_OPERATOR' | 'PLATFORM_SUPPORT';
+}
+
+export interface OperatorSession {
+  token: string;
+  username: string;
+  name: string;
+  email: string;
+  role: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface OperatorOtpResponse {
+  success: boolean;
+  message: string;
+  email?: string;
+  username?: string;
+  otp?: string;
+  error?: string;
+}
+

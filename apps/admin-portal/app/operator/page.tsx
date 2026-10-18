@@ -40,11 +40,15 @@ import {
   UserCheck,
   FileBadge,
   Sparkles,
+  LogOut,
+  KeyRound,
+  Shield,
 } from 'lucide-react';
 import {
   CooperativeRegistration,
   RegistrationStatus,
   RegistrationEmailNotification,
+  OperatorSession,
 } from '@flexcoop/shared-types';
 import { getApiBaseUrl } from '../api-config';
 
@@ -147,6 +151,136 @@ export default function OperatorPortalPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
+  // Operator Authentication State (Default: tuntongtech / felix.echano@tuntongtech.com)
+  const [operatorSession, setOperatorSession] = useState<OperatorSession | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [authIdentifier, setAuthIdentifier] = useState<string>('tuntongtech');
+  const [otpInput, setOtpInput] = useState<string>('');
+  const [authStep, setAuthStep] = useState<'IDENTIFIER' | 'OTP'>('IDENTIFIER');
+  const [isSendingOtp, setIsSendingOtp] = useState<boolean>(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccessMsg, setAuthSuccessMsg] = useState<string | null>(null);
+  const [activeOtpPayload, setActiveOtpPayload] = useState<{
+    otp: string;
+    email: string;
+    username: string;
+    dispatchedAt: string;
+  } | null>(null);
+  const [showOtpEmailPreview, setShowOtpEmailPreview] = useState<boolean>(true);
+
+  // Check existing operator session on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('tuntong_operator_session');
+      if (stored) {
+        const parsed: OperatorSession = JSON.parse(stored);
+        if (parsed && parsed.token && new Date(parsed.expiresAt).getTime() > Date.now()) {
+          setOperatorSession(parsed);
+        } else {
+          localStorage.removeItem('tuntong_operator_session');
+        }
+      }
+    } catch (e) {
+      console.warn('Session parse error:', e);
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  }, []);
+
+  // Request One-Time PIN for Operator (No password)
+  const handleRequestOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!authIdentifier.trim()) {
+      setAuthError('Please enter your operator username or email.');
+      return;
+    }
+
+    setAuthError(null);
+    setAuthSuccessMsg(null);
+    setIsSendingOtp(true);
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/auth/request-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernameOrEmail: authIdentifier.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setAuthError(data.error || 'Failed to dispatch One-Time PIN. Only authorized Tuntong Tech operators are permitted.');
+        return;
+      }
+
+      setActiveOtpPayload({
+        otp: data.otp || '',
+        email: data.email || 'felix.echano@tuntongtech.com',
+        username: data.username || 'tuntongtech',
+        dispatchedAt: new Date().toLocaleTimeString(),
+      });
+      setAuthStep('OTP');
+      setAuthSuccessMsg(data.message || `A One-Time PIN has been dispatched to ${data.email} from support@tuntongtech.com.`);
+      setShowOtpEmailPreview(true);
+    } catch (err: any) {
+      console.error(err);
+      setAuthError('Network error connecting to Tuntong Tech Auth Service. Please try again.');
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  // Verify One-Time PIN and issue OperatorSession
+  const handleVerifyOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!otpInput.trim()) {
+      setAuthError('Please enter the 6-digit PIN sent to your email.');
+      return;
+    }
+
+    setAuthError(null);
+    setIsVerifyingOtp(true);
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usernameOrEmail: authIdentifier.trim(),
+          otp: otpInput.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setAuthError(data.error || 'Invalid or expired PIN. Please try again.');
+        return;
+      }
+
+      // Store authenticated session
+      localStorage.setItem('tuntong_operator_session', JSON.stringify(data.session));
+      setOperatorSession(data.session);
+      setToastMessage(`Welcome, ${data.session.name || data.session.username}! Operator Control Plane unlocked.`);
+    } catch (err: any) {
+      console.error(err);
+      setAuthError('Verification service error. Please try again.');
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  // Sign out operator
+  const handleSignOut = () => {
+    localStorage.removeItem('tuntong_operator_session');
+    setOperatorSession(null);
+    setAuthStep('IDENTIFIER');
+    setOtpInput('');
+    setAuthError(null);
+    setAuthSuccessMsg(null);
+    setActiveOtpPayload(null);
+    setShowOtpEmailPreview(false);
+  };
+
   // Load Registrations from API or fallback
   const fetchRegistrations = async () => {
     setIsLoadingRegistrations(true);
@@ -165,7 +299,6 @@ export default function OperatorPortalPage() {
                 if (idx === -1) {
                   merged.unshift(item);
                 } else if (item.status !== merged[idx].status) {
-                  // Keep newest state
                   merged[idx] = item;
                 }
               });
@@ -196,7 +329,10 @@ export default function OperatorPortalPage() {
     }
   };
 
+  // Fetch operator fleet and registrations once authenticated
   useEffect(() => {
+    if (!operatorSession) return;
+
     fetchRegistrations();
 
     // Fetch live tenant fleet from API
@@ -218,7 +354,7 @@ export default function OperatorPortalPage() {
         }
       })
       .catch((err) => console.warn('Broadcasts API load warning:', err));
-  }, []);
+  }, [operatorSession]);
 
   // Fleet Totals
   const totalTenants = tenants.length;
@@ -536,6 +672,247 @@ https://tuntongtech.com`;
     }
   };
 
+  // 1. Initial Session Validation Loader
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300">
+        <RefreshCw className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+        <p className="text-xs font-mono uppercase tracking-widest text-slate-500">Checking Operator Session Authorization...</p>
+      </div>
+    );
+  }
+
+  // 2. Operator Passwordless Login Screen (Restricted Operator Access)
+  if (!operatorSession) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Ambient aesthetic background */}
+        <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-25"></div>
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-emerald-600/15 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div className="max-w-md w-full relative z-10 space-y-6">
+          {/* Brand & Security Header */}
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-500 flex items-center justify-center text-white font-black shadow-xl shadow-indigo-500/20 mx-auto">
+              <Layers className="w-7 h-7" />
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[11px] font-mono font-bold tracking-wider uppercase mt-1">
+              <Shield className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Operator Control Plane</span>
+            </div>
+            <h1 className="text-2xl font-black text-white tracking-tight">Tuntong Tech Solution</h1>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              SaaS Multi-Tenant Fleet & Infrastructure Control. Passwordless sign-in via email One-Time PIN.
+            </p>
+          </div>
+
+          {/* Operator Authentication Card */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur space-y-5">
+            {/* Operator Account Verification Badge */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
+                <KeyRound className="w-4 h-4" />
+              </div>
+              <div className="text-xs space-y-0.5">
+                <div className="font-semibold text-slate-200">Authorized Operator Account</div>
+                <div className="text-slate-400 font-mono text-[11px]">
+                  Username: <span className="text-emerald-400 font-bold">tuntongtech</span>
+                </div>
+                <div className="text-slate-400 font-mono text-[11px]">
+                  Email: <span className="text-indigo-400 font-bold">felix.echano@tuntongtech.com</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Error Notification */}
+            {authError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-600/50 text-rose-200 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span className="leading-snug">{authError}</span>
+              </div>
+            )}
+
+            {/* Success Notification */}
+            {authSuccessMsg && (
+              <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-600/50 text-emerald-200 text-xs flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="leading-snug">{authSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* STEP 1: Enter Username/Email */}
+            {authStep === 'IDENTIFIER' ? (
+              <form onSubmit={handleRequestOtp} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Operator Username or Email</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={authIdentifier}
+                      onChange={(e) => setAuthIdentifier(e.target.value)}
+                      placeholder="e.g. tuntongtech or felix.echano@tuntongtech.com"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 transition-colors"
+                      required
+                      autoFocus
+                    />
+                    <div className="absolute right-3 top-2.5 text-slate-500 text-xs font-mono">
+                      @tuntongtech
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    No password required. A 6-digit PIN will be dispatched to your email.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSendingOtp}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/20 transition-all cursor-pointer"
+                >
+                  {isSendingOtp ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Sending PIN...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Send One-Time Sign-In PIN</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              /* STEP 2: Enter 6-digit PIN */
+              <div className="space-y-4">
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-slate-300">Enter 6-Digit One-Time PIN</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthStep('IDENTIFIER');
+                          setOtpInput('');
+                          setAuthError(null);
+                        }}
+                        className="text-[11px] text-slate-400 hover:text-emerald-400 transition-colors underline"
+                      >
+                        Change Username
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••••"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-3 text-center font-mono text-2xl font-black tracking-[0.4em] text-emerald-400 placeholder-slate-700 transition-colors"
+                      required
+                      autoFocus
+                    />
+                    <p className="text-[11px] text-slate-400 text-center">
+                      PIN sent to <strong className="text-slate-200">{activeOtpPayload?.email || 'felix.echano@tuntongtech.com'}</strong>
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isVerifyingOtp || otpInput.length < 6}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/20 transition-all cursor-pointer"
+                  >
+                    {isVerifyingOtp ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Verifying PIN...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Verify PIN & Access Portal</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      disabled={isSendingOtp}
+                      onClick={() => handleRequestOtp()}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isSendingOtp ? 'animate-spin' : ''}`} />
+                      <span>Resend PIN</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowOtpEmailPreview(!showOtpEmailPreview)}
+                      className="text-xs text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>{showOtpEmailPreview ? 'Hide Dispatched Email' : 'View Dispatched Email'}</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* Simulated Email Preview (support@tuntongtech.com) */}
+                {showOtpEmailPreview && activeOtpPayload && (
+                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-3 font-sans">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <div className="flex items-center gap-1.5 text-indigo-400 font-bold">
+                        <Mail className="w-3.5 h-3.5" />
+                        <span>Dispatched Notification (support@tuntongtech.com)</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-mono">{activeOtpPayload.dispatchedAt}</span>
+                    </div>
+
+                    <div className="space-y-1 text-[11px] font-mono text-slate-400">
+                      <div>From: <strong className="text-slate-200">support@tuntongtech.com</strong></div>
+                      <div>To: <strong className="text-slate-200">{activeOtpPayload.email}</strong></div>
+                      <div>Subject: <span className="text-slate-300">[Tuntong Tech Operator] Your 1-Time Sign-In PIN: {activeOtpPayload.otp}</span></div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center space-y-2">
+                      <div className="text-[11px] text-slate-400">Your 6-Digit One-Time Sign-In PIN:</div>
+                      <div className="font-mono text-2xl font-black text-emerald-400 tracking-[0.25em]">
+                        {activeOtpPayload.otp}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setOtpInput(activeOtpPayload.otp)}
+                        className="text-[11px] bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 px-2.5 py-1 rounded-lg font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Quick-Fill PIN</span>
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 leading-relaxed italic">
+                      Notice: PIN expires in 10 minutes. Tuntong Tech representatives will never request your PIN.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quick links footer */}
+          <div className="text-center text-xs text-slate-500 flex items-center justify-center gap-4">
+            <Link href="/" className="hover:text-slate-300 transition-colors">
+              Tenant Admin View
+            </Link>
+            <span>•</span>
+            <Link href="/coop-register" className="hover:text-slate-300 transition-colors">
+              Register Cooperative
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Authenticated Operator Control Plane
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* 1. TOP OPERATOR CONTROL BAR */}
@@ -566,6 +943,19 @@ https://tuntongtech.com`;
             <span>Multi-Tenant Fleet: <strong>{activeTenants} / {totalTenants} Live</strong></span>
           </div>
 
+          {/* Logged In Operator Badge */}
+          <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-3 py-1.5 rounded-lg text-slate-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <div className="flex flex-col text-left">
+              <span className="text-[11px] font-bold text-white leading-none">
+                {operatorSession?.name || operatorSession?.username}
+              </span>
+              <span className="text-[9px] text-slate-400 font-mono leading-tight">
+                {operatorSession?.email}
+              </span>
+            </div>
+          </div>
+
           <Link
             href="/"
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
@@ -581,6 +971,16 @@ https://tuntongtech.com`;
             <Plus className="w-3.5 h-3.5" />
             <span>Coop Registration Portal</span>
           </Link>
+
+          {/* Sign Out Button */}
+          <button
+            onClick={handleSignOut}
+            title="Sign out of Operator Control Plane"
+            className="bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 hover:border-rose-700 font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Sign Out</span>
+          </button>
         </div>
       </header>
 

@@ -395,6 +395,65 @@ app.post('/api/v1/tenants', (req: Request, res: Response) => {
 // ==========================================
 // 2.1 SAAS OPERATOR CONTROL PLANE (TUNTONG TECH SOLUTION)
 // ==========================================
+
+// Operator Authentication (Passwordless via One-Time PIN)
+app.post('/api/v1/operator/auth/request-otp', (req: Request, res: Response) => {
+  const { usernameOrEmail } = req.body;
+  if (!usernameOrEmail) {
+    return res.status(400).json({ success: false, error: 'Operator username or email is required.' });
+  }
+
+  const result = OperatorService.requestOperatorOtp(usernameOrEmail);
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  return res.json({
+    success: true,
+    message: result.message,
+    email: result.email,
+    username: result.username,
+    otp: result.otp,
+  });
+});
+
+app.post('/api/v1/operator/auth/verify-otp', (req: Request, res: Response) => {
+  const { usernameOrEmail, otp } = req.body;
+  if (!usernameOrEmail || !otp) {
+    return res.status(400).json({ success: false, error: 'Operator username/email and 6-digit PIN are required.' });
+  }
+
+  const result = OperatorService.verifyOperatorOtp(usernameOrEmail, otp);
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  return res.json({
+    success: true,
+    message: 'Operator authentication successful. Access granted.',
+    session: result.session,
+  });
+});
+
+app.get('/api/v1/operator/auth/session', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.headers['x-operator-token'] as string);
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'No operator session token provided.' });
+  }
+
+  const session = OperatorService.validateOperatorSession(token);
+  if (!session) {
+    return res.status(401).json({ success: false, error: 'Operator session invalid or expired.' });
+  }
+
+  return res.json({
+    success: true,
+    session,
+  });
+});
+
 app.get('/api/v1/operator/overview', (_req: Request, res: Response) => {
   const metrics = OperatorService.getOperatorOverviewMetrics();
   res.json({ success: true, data: metrics });

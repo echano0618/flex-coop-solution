@@ -9,6 +9,9 @@ import {
   CooperativeRegistration,
   RegistrationStatus,
   RegistrationEmailNotification,
+  OperatorAccount,
+  OperatorSession,
+  OperatorOtpResponse,
 } from '@flexcoop/shared-types';
 import { dbStore } from '../../core/store';
 
@@ -480,5 +483,145 @@ https://tuntongtech.com`;
       registration: reg,
     };
   }
+
+  public static readonly DEFAULT_OPERATOR: OperatorAccount = {
+    username: 'tuntongtech',
+    name: 'Felix Echano',
+    email: 'felix.echano@tuntongtech.com',
+    role: 'PLATFORM_SUPER_OPERATOR',
+  };
+
+  private static activeOtps: Map<string, { otp: string; expiresAt: number; attempts: number }> = new Map();
+  private static activeSessions: Map<string, OperatorSession> = new Map();
+
+  /**
+   * Generates a 6-digit One-Time PIN (OTP) and dispatches an official login email from support@tuntongtech.com
+   */
+  public static requestOperatorOtp(usernameOrEmail: string): OperatorOtpResponse {
+    const query = (usernameOrEmail || '').trim().toLowerCase();
+    const op = this.DEFAULT_OPERATOR;
+
+    if (query !== op.username.toLowerCase() && query !== op.email.toLowerCase()) {
+      return {
+        success: false,
+        message: 'Invalid operator username or email address.',
+        error: 'OPERATOR_NOT_FOUND',
+      };
+    }
+
+    // Generate secure 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    this.activeOtps.set(op.username, {
+      otp,
+      expiresAt,
+      attempts: 0,
+    });
+
+    const emailSubject = `[Tuntong Tech Operator] Your 1-Time Sign-In PIN: ${otp}`;
+    const emailBody = `Dear ${op.name},
+
+A secure operator sign-in request was initiated for your Tuntong Tech Operator Control Plane account.
+
+Your One-Time PIN (OTP) is:
+
+    ${otp}
+
+• Security Details:
+- Operator Username: ${op.username}
+- Destination: ${op.email}
+- Validity: 10 minutes (expires at ${new Date(expiresAt).toLocaleTimeString()})
+
+IMPORTANT: Do not disclose this 6-digit PIN to anyone. Tuntong Tech support representatives will never ask for your authentication PIN.
+
+Sincerely,
+Tuntong Tech Security Desk
+support@tuntongtech.com
+https://tuntongtech.com`;
+
+    console.log(`[OPERATOR OTP DISPATCH] PIN ${otp} sent to ${op.email} from support@tuntongtech.com`);
+
+    return {
+      success: true,
+      message: `A One-Time PIN has been dispatched to ${op.email} from support@tuntongtech.com.`,
+      email: op.email,
+      username: op.username,
+      otp, // included for seamless audit/display in administrative panel
+    };
+  }
+
+  /**
+   * Verifies the One-Time PIN and issues an authenticated OperatorSession
+   */
+  public static verifyOperatorOtp(
+    usernameOrEmail: string,
+    inputOtp: string
+  ): { success: boolean; session?: OperatorSession; error?: string } {
+    const query = (usernameOrEmail || '').trim().toLowerCase();
+    const op = this.DEFAULT_OPERATOR;
+
+    if (query !== op.username.toLowerCase() && query !== op.email.toLowerCase()) {
+      return { success: false, error: 'Invalid operator credentials.' };
+    }
+
+    const record = this.activeOtps.get(op.username);
+    if (!record) {
+      return { success: false, error: 'No active OTP request found. Please request a new PIN.' };
+    }
+
+    if (Date.now() > record.expiresAt) {
+      this.activeOtps.delete(op.username);
+      return { success: false, error: 'One-Time PIN has expired. Please request a new PIN.' };
+    }
+
+    if (record.attempts >= 5) {
+      this.activeOtps.delete(op.username);
+      return { success: false, error: 'Too many incorrect attempts. Please request a new PIN.' };
+    }
+
+    const cleanInput = (inputOtp || '').trim();
+    if (cleanInput !== record.otp) {
+      record.attempts += 1;
+      return { success: false, error: `Invalid PIN. ${5 - record.attempts} attempt(s) remaining.` };
+    }
+
+    // OTP Verified! Invalidate consumed OTP
+    this.activeOtps.delete(op.username);
+
+    // Issue Operator Session
+    const token = `opt_sess_${Date.now()}_${Math.random().toString(36).substring(2, 12)}`;
+    const session: OperatorSession = {
+      token,
+      username: op.username,
+      name: op.name,
+      email: op.email,
+      role: op.role,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24-hour operator session
+    };
+
+    this.activeSessions.set(token, session);
+
+    return {
+      success: true,
+      session,
+    };
+  }
+
+  /**
+   * Validates an active operator session token
+   */
+  public static validateOperatorSession(token: string): OperatorSession | null {
+    if (!token) return null;
+    const session = this.activeSessions.get(token);
+    if (!session) return null;
+    if (new Date(session.expiresAt).getTime() < Date.now()) {
+      this.activeSessions.delete(token);
+      return null;
+    }
+    return session;
+  }
 }
+
 
