@@ -948,7 +948,7 @@ export default function AdminDashboard() {
   const handleExecuteTreasurySweep = (e: React.FormEvent) => {
     e.preventDefault();
     if (sweepAmount <= 0) return;
-    const currentBal = escrowLedger[0]?.runningBalance ?? 48470;
+    const currentBal = escrowLedger[0]?.runningBalance ?? 0;
     if (sweepAmount > currentBal) {
       alert('Sweep amount cannot exceed current Platform Escrow float!');
       return;
@@ -2764,35 +2764,50 @@ export default function AdminDashboard() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Active Loan Portfolio</div>
-                <div className="text-2xl font-bold text-slate-900 mt-2">₱50,000.00</div>
-                <div className="text-xs text-emerald-600 font-medium mt-1 flex items-center">
-                  <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> 1 Active Loan (0 Defaults)
+            {(() => {
+              const activeLoansCount = members.filter((m) => (m.loanBalance || 0) > 0).length;
+              const totalActiveLoanPortfolio = members.reduce((sum, m) => sum + (m.loanBalance || 0), 0);
+              const totalPaidUpShareCapital = members.reduce((sum, m) => sum + (m.paidUpShares || 0), 0);
+              const membersCount = members.length;
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Active Loan Portfolio</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-2">
+                      ₱{totalActiveLoanPortfolio.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-emerald-600 font-medium mt-1 flex items-center">
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> {activeLoansCount} Active {activeLoansCount === 1 ? 'Loan' : 'Loans'} (0 Defaults)
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Paid-Up Share Capital</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-2">
+                      ₱{totalPaidUpShareCapital.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-slate-500 font-medium mt-1">
+                      {membersCount} {membersCount === 1 ? 'Member' : 'Members'} Registered
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                      {techFeeTreatment === 'PASS_THROUGH' ? 'Technology Fees (Pass-Through)' : 'Technology Fees (OPEX Absorbed)'}
+                    </div>
+                    <div className="text-2xl font-bold text-emerald-600 mt-2">₱0.00</div>
+                    <div className="text-xs text-slate-500 font-medium mt-1">₱0.00 Output VAT Remitted</div>
+                  </div>
+
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Portfolio At Risk (PAR)</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-2">0.00%</div>
+                    <div className="text-xs text-emerald-600 font-medium mt-1">CDA Target: &lt; 5.0%</div>
+                  </div>
                 </div>
-              </div>
-
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Paid-Up Share Capital</div>
-                <div className="text-2xl font-bold text-slate-900 mt-2">₱25,000.00</div>
-                <div className="text-xs text-slate-500 font-medium mt-1">2 Regular Members Registered</div>
-              </div>
-
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  {techFeeTreatment === 'PASS_THROUGH' ? 'Technology Fees (Pass-Through)' : 'Technology Fees (OPEX Absorbed)'}
-                </div>
-                <div className="text-2xl font-bold text-emerald-600 mt-2">₱0.00</div>
-                <div className="text-xs text-slate-500 font-medium mt-1">₱0.00 Output VAT Remitted</div>
-              </div>
-
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <div className="text-xs font-medium text-slate-500 uppercase tracking-wider">Portfolio At Risk (PAR)</div>
-                <div className="text-2xl font-bold text-slate-900 mt-2">0.00%</div>
-                <div className="text-xs text-emerald-600 font-medium mt-1">CDA Target: &lt; 5.0%</div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Architecture & Compliance Overview */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -7537,24 +7552,32 @@ export default function AdminDashboard() {
               </div>
 
               {/* Card 2: Accumulated Statutory Reserves & Undivided Savings */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  <span>Accumulated Reserves</span>
-                  <span className="text-[10px] font-mono text-slate-500 font-semibold">&le; ₱10M Limit</span>
-                </div>
-                <div className="text-2xl font-black font-mono text-emerald-600">
-                  ₱250,000.00
-                </div>
-                <div className="space-y-1">
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: '2.5%' }}></div>
+              {(() => {
+                const reserveBalance = Number(trialBalanceData?.items?.find((i: any) => i.accountCode === '3-02-01')?.balance) || 0;
+                const reservePct = Math.min(100, (reserveBalance / 10000000) * 100);
+                const bufferSafe = Math.max(0, 10000000 - reserveBalance);
+
+                return (
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      <span>Accumulated Reserves</span>
+                      <span className="text-[10px] font-mono text-slate-500 font-semibold">&le; ₱10M Limit</span>
+                    </div>
+                    <div className="text-2xl font-black font-mono text-emerald-600">
+                      ₱{reserveBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${reservePct}%` }}></div>
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex justify-between">
+                        <span>Current: {reservePct.toFixed(1)}% of Threshold</span>
+                        <span className="font-semibold text-emerald-700">₱{(bufferSafe / 1000000).toFixed(2)}M Buffer Safe</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-400 flex justify-between">
-                    <span>Current: 2.5% of Threshold</span>
-                    <span className="font-semibold text-emerald-700">₱9.75M Buffer Safe</span>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Card 3: BIR Certificate of Tax Exemption (CTE) */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
@@ -8016,19 +8039,19 @@ export default function AdminDashboard() {
                 <div className="space-y-2 text-xs text-slate-600">
                   <div className="flex justify-between p-2 bg-slate-50 rounded">
                     <span>Total Registered Membership:</span>
-                    <strong className="text-slate-900">2 Regular (100% Active)</strong>
+                    <strong className="text-slate-900">{members.length} ({members.filter((m) => m.kycStatus === 'VERIFIED').length} Verified)</strong>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded">
                     <span>Total Paid-Up Share Capital:</span>
-                    <strong className="text-slate-900">₱25,000.00 (Common)</strong>
+                    <strong className="text-slate-900">₱{members.reduce((s, m) => s + (m.paidUpShares || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Common)</strong>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded">
                     <span>Active Loan Portfolio:</span>
-                    <strong className="text-slate-900">₱50,000.00 (0 Defaults)</strong>
+                    <strong className="text-slate-900">₱{members.reduce((s, m) => s + (m.loanBalance || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({members.filter((m) => (m.loanBalance || 0) > 0).length} Active)</strong>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded">
                     <span>Collection Efficiency:</span>
-                    <strong className="text-emerald-700">98.5%</strong>
+                    <strong className="text-emerald-700">100.0%</strong>
                   </div>
                 </div>
               </div>
@@ -10204,7 +10227,7 @@ export default function AdminDashboard() {
                   </span>
                 </div>
                 <div className="text-3xl font-black font-mono tracking-tight text-white mt-2">
-                  ₱{(escrowLedger[0]?.runningBalance ?? 48470).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  ₱{(escrowLedger[0]?.runningBalance ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                 </div>
                 <div className="text-[11px] text-emerald-400 font-medium mt-1 flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -10213,29 +10236,39 @@ export default function AdminDashboard() {
               </div>
 
               {/* Card 2: Total Gross Inflows */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Gross QR Ph Inflows</div>
-                <div className="text-2xl font-black font-mono text-slate-900 mt-2">
-                  ₱50,000.00
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Share Capital (₱5k) + Repayments (₱45k)
-                </div>
-              </div>
+              {(() => {
+                const totalInflows = escrowLedger.reduce((sum, tx) => sum + (tx.grossAmount > 0 ? tx.grossAmount : 0), 0);
+                return (
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Gross QR Ph Inflows</div>
+                    <div className="text-2xl font-black font-mono text-slate-900 mt-2">
+                      ₱{totalInflows.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {escrowLedger.filter((tx) => tx.grossAmount > 0).length} QR Ph Inflow Transactions
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Card 3: Platform Fees & Onboarding Charges */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform Billed</div>
-                  <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded font-mono">12% VAT Incl.</span>
-                </div>
-                <div className="text-2xl font-black font-mono text-indigo-600 mt-2">
-                  ₱825.00
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  ₱50/member (&gt;15 free) + 1% loan tech fee
-                </div>
-              </div>
+              {(() => {
+                const totalPlatformBilled = escrowLedger.reduce((sum, tx) => sum + (tx.platformFee + tx.vatAmount), 0);
+                return (
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform Billed</div>
+                      <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded font-mono">12% VAT Incl.</span>
+                    </div>
+                    <div className="text-2xl font-black font-mono text-indigo-600 mt-2">
+                      ₱{totalPlatformBilled.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      ₱50/member (&gt;15 free) + 1% loan tech fee
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Card 4: Mother Bank Depository */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
@@ -10516,7 +10549,7 @@ export default function AdminDashboard() {
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-950">
                   <div className="text-[10px] uppercase font-bold text-emerald-700">Current Available Escrow Float</div>
                   <div className="text-xl font-black font-mono mt-0.5">
-                    ₱{(escrowLedger[0]?.runningBalance ?? 48470).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    ₱{(escrowLedger[0]?.runningBalance ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                   </div>
                 </div>
 
@@ -10525,7 +10558,7 @@ export default function AdminDashboard() {
                   <input
                     type="number"
                     min="1000"
-                    max={escrowLedger[0]?.runningBalance ?? 48470}
+                    max={escrowLedger[0]?.runningBalance ?? 0}
                     step="500"
                     required
                     value={sweepAmount}
