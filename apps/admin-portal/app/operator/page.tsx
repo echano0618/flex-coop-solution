@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -30,7 +30,23 @@ import {
   ArrowUpRight,
   AlertCircle,
   Megaphone,
+  Mail,
+  Key,
+  Check,
+  Clock,
+  Inbox,
+  Eye,
+  Send,
+  UserCheck,
+  FileBadge,
+  Sparkles,
 } from 'lucide-react';
+import {
+  CooperativeRegistration,
+  RegistrationStatus,
+  RegistrationEmailNotification,
+} from '@flexcoop/shared-types';
+import { getApiBaseUrl } from '../api-config';
 
 interface TenantFleetItem {
   id: string;
@@ -85,6 +101,9 @@ interface BroadcastItem {
 }
 
 export default function OperatorPortalPage() {
+  // Navigation Tab State
+  const [activeTab, setActiveTab] = useState<'FLEET' | 'REGISTRATIONS' | 'LEDGER' | 'BROADCASTS'>('FLEET');
+
   // Tenant Fleet State
   const [tenants, setTenants] = useState<TenantFleetItem[]>([
     {
@@ -102,7 +121,7 @@ export default function OperatorPortalPage() {
       totalMembers: 18,
       activeMembers: 17,
       freeTierMembers: 15,
-      billedMembers: 3, // 3 members > 15 = ₱150 billed
+      billedMembers: 3,
       platformCreditBalance: 4250.0,
       escrowFloatBalance: 48470.0,
       totalLoansDisbursed: 14,
@@ -129,9 +148,9 @@ export default function OperatorPortalPage() {
       status: 'ACTIVE',
       totalMembers: 12,
       activeMembers: 12,
-      freeTierMembers: 12, // 100% within free tier (<= 15)
+      freeTierMembers: 12,
       billedMembers: 0,
-      platformCreditBalance: 350.0, // Low credit alert (< ₱500)
+      platformCreditBalance: 350.0,
       escrowFloatBalance: 12100.0,
       totalLoansDisbursed: 6,
       totalLoanVolume: 280000.0,
@@ -158,7 +177,7 @@ export default function OperatorPortalPage() {
       totalMembers: 42,
       activeMembers: 39,
       freeTierMembers: 15,
-      billedMembers: 27, // 27 members > 15 = ₱1,350 billed
+      billedMembers: 27,
       platformCreditBalance: 8900.0,
       escrowFloatBalance: 26500.0,
       totalLoansDisbursed: 31,
@@ -172,6 +191,34 @@ export default function OperatorPortalPage() {
       createdAt: '2026-03-10T08:00:00Z',
     },
   ]);
+
+  // Cooperative Registrations State
+  const [registrations, setRegistrations] = useState<CooperativeRegistration[]>([
+    {
+      id: 'REG-2026-8914',
+      name: 'Pag-asa Agricultural Development Cooperative',
+      coopType: 'AGRICULTURAL',
+      slug: 'pag-asa',
+      subdomain: 'pag-asa-coop.tuntongtech.com',
+      cdaRegistrationNumber: 'CDA-R02-2024-00814',
+      tin: '401-829-105-000',
+      contactEmail: 'contact@pagasacoop.ph',
+      contactPhone: '+63 917 882 4410',
+      address: 'Sitio Maligaya, Ilagan, Isabela',
+      adminFirstName: 'Danilo',
+      adminMiddleName: 'Ramos',
+      adminLastName: 'Bautista',
+      adminEmail: 'danilo.bautista@pagasacoop.ph',
+      validIdFileName: 'Danilo_Bautista_National_ID.pdf',
+      validIdFileSizeMb: '2.40',
+      validIdUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80',
+      status: 'PENDING_REVIEW',
+      submittedAt: '2026-10-18T07:15:00Z',
+    },
+  ]);
+  const [isLoadingRegistrations, setIsLoadingRegistrations] = useState<boolean>(false);
+  const [regStatusFilter, setRegStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'>('ALL');
+  const [regSearchQuery, setRegSearchQuery] = useState<string>('');
 
   // Transaction History State
   const [creditTransactions, setCreditTransactions] = useState<CreditTx[]>([
@@ -228,11 +275,7 @@ export default function OperatorPortalPage() {
     },
   ]);
 
-  // Filters & Search
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
-
-  // Modals State
+  // Modals & Action States
   const [selectedTenantForCredit, setSelectedTenantForCredit] = useState<TenantFleetItem | null>(null);
   const [creditAdjustmentAmount, setCreditAdjustmentAmount] = useState<number>(2000);
   const [creditAdjustmentType, setCreditAdjustmentType] = useState<'TOP_UP' | 'FEE_DEDUCTION' | 'PROMO_GRANT' | 'ADJUSTMENT'>('TOP_UP');
@@ -247,7 +290,73 @@ export default function OperatorPortalPage() {
   const [broadcastMessage, setBroadcastMessage] = useState<string>('');
   const [broadcastSeverity, setBroadcastSeverity] = useState<'INFO' | 'WARNING' | 'CRITICAL'>('INFO');
 
-  // Calculations across fleet
+  // Registration Actions Modals
+  const [selectedRegForApprove, setSelectedRegForApprove] = useState<CooperativeRegistration | null>(null);
+  const [selectedRegForReject, setSelectedRegForReject] = useState<CooperativeRegistration | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState<string>('');
+  const [selectedRegForIdView, setSelectedRegForIdView] = useState<CooperativeRegistration | null>(null);
+  const [selectedRegForEmailView, setSelectedRegForEmailView] = useState<RegistrationEmailNotification | null>(null);
+  const [isSubmittingAction, setIsSubmittingAction] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Filters & Search for Fleet
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // Load Registrations from API or fallback
+  const fetchRegistrations = async () => {
+    setIsLoadingRegistrations(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/registrations`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          let merged = [...json.data];
+          const localSaved = localStorage.getItem('tuntong_coop_registrations');
+          if (localSaved) {
+            try {
+              const parsed: CooperativeRegistration[] = JSON.parse(localSaved);
+              parsed.forEach((item) => {
+                const idx = merged.findIndex((m) => m.id === item.id);
+                if (idx === -1) {
+                  merged.unshift(item);
+                } else if (item.status !== merged[idx].status) {
+                  // Keep newest state
+                  merged[idx] = item;
+                }
+              });
+            } catch (e) {
+              console.error(e);
+            }
+          }
+          setRegistrations(merged);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('API fetch for registrations failed, checking localStorage:', err);
+    } finally {
+      setIsLoadingRegistrations(false);
+    }
+
+    try {
+      const localSaved = localStorage.getItem('tuntong_coop_registrations');
+      if (localSaved) {
+        const parsed = JSON.parse(localSaved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRegistrations(parsed);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    fetchRegistrations();
+  }, []);
+
+  // Fleet Totals
   const totalTenants = tenants.length;
   const activeTenants = tenants.filter((t) => t.status === 'ACTIVE').length;
   const totalFleetMembers = tenants.reduce((s, t) => s + t.totalMembers, 0);
@@ -259,10 +368,9 @@ export default function OperatorPortalPage() {
   const grossTechFees = totalLoanVolume * 0.01 + totalBilledMembers * 50;
   const netTechRevenue = Math.round((grossTechFees / 1.12) * 100) / 100;
   const outputVatDue = Math.round((grossTechFees - netTechRevenue) * 100) / 100;
-  const totalStorageMb = tenants.reduce((s, t) => s + t.storageUsedMb, 0);
-  const lowCreditTenantsCount = tenants.filter((t) => t.platformCreditBalance < 500).length;
+  const pendingRegistrationsCount = registrations.filter((r) => r.status === 'PENDING_REVIEW').length;
 
-  // Filtered List
+  // Filtered Fleet
   const filteredTenants = tenants.filter((t) => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
@@ -280,7 +388,25 @@ export default function OperatorPortalPage() {
     return matchesSearch;
   });
 
-  // Handlers
+  // Filtered Registrations
+  const filteredRegistrations = registrations.filter((r) => {
+    const q = regSearchQuery.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      r.id.toLowerCase().includes(q) ||
+      r.name.toLowerCase().includes(q) ||
+      r.slug.toLowerCase().includes(q) ||
+      r.cdaRegistrationNumber.toLowerCase().includes(q) ||
+      r.adminEmail.toLowerCase().includes(q) ||
+      `${r.adminFirstName} ${r.adminLastName}`.toLowerCase().includes(q);
+
+    if (regStatusFilter !== 'ALL') {
+      return matchesSearch && r.status === regStatusFilter;
+    }
+    return matchesSearch;
+  });
+
+  // Handlers for Operator Actions
   const handleExecuteCreditAdjustment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTenantForCredit) return;
@@ -289,12 +415,10 @@ export default function OperatorPortalPage() {
     const balanceBefore = selectedTenantForCredit.platformCreditBalance;
     const balanceAfter = Math.max(0, balanceBefore + delta);
 
-    // Update in tenant list
     setTenants((prev) =>
       prev.map((t) => (t.id === selectedTenantForCredit.id ? { ...t, platformCreditBalance: balanceAfter } : t))
     );
 
-    // Add transaction audit record
     const newTx: CreditTx = {
       id: `ctx_${Date.now()}`,
       tenantId: selectedTenantForCredit.id,
@@ -313,6 +437,7 @@ export default function OperatorPortalPage() {
     setSelectedTenantForCredit(null);
     setCreditAdjustmentRef('');
     setCreditAdjustmentNotes('');
+    setToastMessage(`Platform credit updated successfully for ${selectedTenantForCredit.name}.`);
   };
 
   const handleToggleTenantStatus = (newStatus: 'ACTIVE' | 'SUSPENDED') => {
@@ -323,6 +448,7 @@ export default function OperatorPortalPage() {
     );
     setSelectedTenantForStatus(null);
     setStatusChangeReason('');
+    setToastMessage(`Tenant status changed to ${newStatus}.`);
   };
 
   const handleCreateBroadcast = (e: React.FormEvent) => {
@@ -342,6 +468,208 @@ export default function OperatorPortalPage() {
     setShowNewBroadcastModal(false);
     setBroadcastTitle('');
     setBroadcastMessage('');
+    setToastMessage('System announcement published to all active cooperative tenants.');
+  };
+
+  // APPROVE REGISTRATION HANDLER
+  const handleApproveRegistration = async () => {
+    if (!selectedRegForApprove) return;
+    setIsSubmittingAction(true);
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/registrations/${selectedRegForApprove.id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewedBy: 'Lex (Tuntong Tech Operator)' }),
+      });
+
+      let approvedReg: CooperativeRegistration;
+      let emailNotice: RegistrationEmailNotification;
+      let provisionedTenant: any = null;
+
+      if (res.ok) {
+        const result = await res.json();
+        approvedReg = result.registration;
+        emailNotice = approvedReg.emailNotification!;
+        provisionedTenant = result.tenant;
+      } else {
+        // Fallback simulation
+        const randStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const otp = `TT-${randStr}#${Math.floor(10 + Math.random() * 90)}`;
+        const subdomain = `${selectedRegForApprove.slug}-coop.tuntongtech.com`;
+        const emailBody = `Dear ${selectedRegForApprove.adminFirstName} ${selectedRegForApprove.adminLastName},
+
+We are pleased to inform you that your cooperative onboarding application (${selectedRegForApprove.id}) for "${selectedRegForApprove.name}" has been officially APPROVED by Tuntong Tech.
+
+Your dedicated cooperative instance has been provisioned and is now live under strict CDA double-entry and NPC data privacy compliance.
+
+Official Cooperative Portal:
+Domain: https://${subdomain}
+
+Primary Administrator Login Credentials:
+Username (Email): ${selectedRegForApprove.adminEmail}
+1-Time Temporary Password: ${otp}
+
+IMPORTANT SECURITY NOTICE: This 1-time password is valid for your initial sign-in only. You will be required to change your password immediately upon your first login.
+
+If you have questions, require onboarding training, or need data migration assistance, please reach out to our engineering support desk at support@tuntongtech.com.
+
+Sincerely,
+Tuntong Tech Support Team
+support@tuntongtech.com
+https://tuntongtech.com`;
+
+        emailNotice = {
+          from: 'support@tuntongtech.com',
+          to: selectedRegForApprove.adminEmail,
+          subject: `[Tuntong Tech] Congratulations! Your Cooperative Registration has been Approved (${selectedRegForApprove.name})`,
+          sentAt: new Date().toISOString(),
+          body: emailBody,
+          domain: `https://${subdomain}`,
+          temporaryPassword: otp,
+        };
+
+        approvedReg = {
+          ...selectedRegForApprove,
+          status: 'APPROVED',
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: 'Lex (Tuntong Tech Operator)',
+          oneTimePassword: otp,
+          emailNotification: emailNotice,
+        };
+
+        provisionedTenant = {
+          id: `tenant_${selectedRegForApprove.slug}_${Date.now().toString().slice(-4)}`,
+          name: selectedRegForApprove.name,
+          slug: selectedRegForApprove.slug,
+          subdomain,
+          cdaRegistrationNumber: selectedRegForApprove.cdaRegistrationNumber,
+          tin: selectedRegForApprove.tin,
+          contactEmail: selectedRegForApprove.contactEmail,
+          contactPhone: selectedRegForApprove.contactPhone,
+          adminName: `${selectedRegForApprove.adminFirstName} ${selectedRegForApprove.adminLastName}`,
+          billingMode: 'STANDARD_UNIFIED',
+          status: 'ACTIVE',
+          totalMembers: 0,
+          activeMembers: 0,
+          freeTierMembers: 0,
+          billedMembers: 0,
+          platformCreditBalance: 1000.0,
+          escrowFloatBalance: 0,
+          totalLoansDisbursed: 0,
+          totalLoanVolume: 0,
+          totalTechFeesGenerated: 0,
+          storageUsedMb: 12.0,
+          storageQuotaMb: 10240,
+          databaseSchema: `tenant_${selectedRegForApprove.slug}`,
+          healthScore: 100,
+          lastActiveAt: 'Just now',
+          createdAt: new Date().toISOString(),
+        };
+      }
+
+      setRegistrations((prev) => {
+        const updated = prev.map((r) => (r.id === approvedReg.id ? approvedReg : r));
+        try {
+          localStorage.setItem('tuntong_coop_registrations', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      if (provisionedTenant) {
+        setTenants((prev) => {
+          if (!prev.some((t) => t.slug === provisionedTenant.slug)) {
+            return [provisionedTenant, ...prev];
+          }
+          return prev;
+        });
+      }
+
+      setSelectedRegForApprove(null);
+      setToastMessage(`Registration approved! Credentials dispatched from support@tuntongtech.com to ${approvedReg.adminEmail}`);
+      setSelectedRegForEmailView(emailNotice);
+    } catch (err) {
+      console.error(err);
+      alert('Error approving registration.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  // REJECT REGISTRATION HANDLER
+  const handleRejectRegistration = async () => {
+    if (!selectedRegForReject || !rejectionReasonInput.trim()) return;
+    setIsSubmittingAction(true);
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/registrations/${selectedRegForReject.id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: rejectionReasonInput.trim(),
+          reviewedBy: 'Lex (Tuntong Tech Operator)',
+        }),
+      });
+
+      let rejectedReg: CooperativeRegistration;
+      let emailNotice: RegistrationEmailNotification;
+
+      if (res.ok) {
+        const result = await res.json();
+        rejectedReg = result.registration;
+        emailNotice = rejectedReg.emailNotification!;
+      } else {
+        const emailBody = `Dear ${selectedRegForReject.adminFirstName} ${selectedRegForReject.adminLastName},
+
+Thank you for your application (${selectedRegForReject.id}) to onboard "${selectedRegForReject.name}" onto Tuntong Tech.
+
+After reviewing your submitted credentials and government-issued identification, our compliance team is unable to approve your registration at this time due to the following reason:
+
+${rejectionReasonInput.trim()}
+
+You may re-apply with the corrected documentation at https://coop.tuntongtech.com/coop-register or reply directly to support@tuntongtech.com if you require assistance.
+
+Sincerely,
+Tuntong Tech Compliance Team
+support@tuntongtech.com
+https://tuntongtech.com`;
+
+        emailNotice = {
+          from: 'support@tuntongtech.com',
+          to: selectedRegForReject.adminEmail,
+          subject: `[Tuntong Tech] Update on your Cooperative Registration Application (${selectedRegForReject.name})`,
+          sentAt: new Date().toISOString(),
+          body: emailBody,
+        };
+
+        rejectedReg = {
+          ...selectedRegForReject,
+          status: 'REJECTED',
+          rejectionReason: rejectionReasonInput.trim(),
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: 'Lex (Tuntong Tech Operator)',
+          emailNotification: emailNotice,
+        };
+      }
+
+      setRegistrations((prev) => {
+        const updated = prev.map((r) => (r.id === rejectedReg.id ? rejectedReg : r));
+        try {
+          localStorage.setItem('tuntong_coop_registrations', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      setSelectedRegForReject(null);
+      setRejectionReasonInput('');
+      setToastMessage(`Registration rejected. Official notice dispatched from support@tuntongtech.com.`);
+      setSelectedRegForEmailView(emailNotice);
+    } catch (err) {
+      console.error(err);
+      alert('Error rejecting registration.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
   };
 
   return (
@@ -387,13 +715,26 @@ export default function OperatorPortalPage() {
             className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Provision New Coop</span>
+            <span>Coop Registration Portal</span>
           </Link>
         </div>
       </header>
 
+      {/* TOAST BANNER */}
+      {toastMessage && (
+        <div className="bg-emerald-500 text-white px-4 py-2.5 text-xs font-semibold flex items-center justify-between shadow-md">
+          <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button onClick={() => setToastMessage(null)} className="hover:opacity-80 p-0.5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 2. MAIN OPERATOR BODY */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-7">
         
         {/* Active System Broadcast Banner if present */}
         {broadcasts.length > 0 && broadcasts[0].isActive && (
@@ -422,10 +763,15 @@ export default function OperatorPortalPage() {
           </div>
         )}
 
-        {/* 3. EXECUTIVE KPI CARDS: FLEET REVENUE, ESCROW & STORAGE */}
+        {/* 3. EXECUTIVE KPI CARDS */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Card 1: Total Tenants & Health */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-sm">
+          <div
+            onClick={() => setActiveTab('FLEET')}
+            className={`p-4 sm:p-5 rounded-2xl border space-y-2 shadow-sm cursor-pointer transition-all ${
+              activeTab === 'FLEET' ? 'bg-slate-900 border-emerald-500/50 ring-1 ring-emerald-500/20' : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+            }`}
+          >
             <div className="flex items-center justify-between text-slate-400 text-xs">
               <span className="font-medium">Active Tenants Fleet</span>
               <Building2 className="w-4 h-4 text-emerald-400" />
@@ -440,24 +786,37 @@ export default function OperatorPortalPage() {
             </div>
           </div>
 
-          {/* Card 2: Fleet Member Census & Free Tier */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-sm">
+          {/* Card 2: Registrations Queue (Key new capability!) */}
+          <div
+            onClick={() => setActiveTab('REGISTRATIONS')}
+            className={`p-4 sm:p-5 rounded-2xl border space-y-2 shadow-sm cursor-pointer transition-all ${
+              activeTab === 'REGISTRATIONS' ? 'bg-slate-900 border-amber-500/50 ring-1 ring-amber-500/20' : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+            }`}
+          >
             <div className="flex items-center justify-between text-slate-400 text-xs">
-              <span className="font-medium">Total Member Census</span>
-              <Users className="w-4 h-4 text-indigo-400" />
+              <span className="font-medium">Coop Onboarding Queue</span>
+              <FileBadge className="w-4 h-4 text-amber-400" />
             </div>
             <div className="flex items-baseline gap-2">
-              <div className="text-2xl font-black text-white">{totalFleetMembers.toLocaleString()}</div>
-              <span className="text-[11px] font-mono text-slate-400">across fleet</span>
+              <div className="text-2xl font-black text-white">{registrations.length}</div>
+              {pendingRegistrationsCount > 0 ? (
+                <span className="text-[11px] font-bold text-amber-400 bg-amber-950/80 border border-amber-700 px-2 py-0.5 rounded-full animate-pulse">
+                  {pendingRegistrationsCount} Pending
+                </span>
+              ) : (
+                <span className="text-[11px] font-mono text-emerald-400">Queue Cleared</span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400 flex justify-between items-center pt-1 border-t border-slate-800/80">
-              <span className="text-emerald-400">{totalFreeTierMembers} Free Tier ($\le$15)</span>
-              <span className="text-indigo-400 font-bold">{totalBilledMembers} Billed (&gt;15)</span>
+              <span className="text-slate-400">CDA & PhilID KYC Review</span>
+              <span className="text-amber-400 font-semibold flex items-center gap-0.5">
+                Review <ArrowRight className="w-3 h-3" />
+              </span>
             </div>
           </div>
 
           {/* Card 3: Platform Escrow Float & Credit Pool */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-sm">
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2 shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs">
               <span className="font-medium">Platform Escrow Float (QR Ph)</span>
               <DollarSign className="w-4 h-4 text-teal-400" />
@@ -476,16 +835,16 @@ export default function OperatorPortalPage() {
           </div>
 
           {/* Card 4: Monthly Platform Tech Fees & Tax */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2 shadow-sm">
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2 shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs">
               <span className="font-medium">Platform Revenue & VAT</span>
-              <TrendingUp className="w-4 h-4 text-amber-400" />
+              <TrendingUp className="w-4 h-4 text-indigo-400" />
             </div>
             <div className="flex items-baseline gap-2">
               <div className="text-2xl font-black text-white font-mono">
                 ₱{grossTechFees.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
               </div>
-              <span className="text-[10px] text-amber-400 font-bold">Gross</span>
+              <span className="text-[10px] text-indigo-400 font-bold">Gross</span>
             </div>
             <div className="text-[11px] text-slate-400 flex justify-between items-center pt-1 border-t border-slate-800/80">
               <span>Net: ₱{netTechRevenue.toLocaleString()}</span>
@@ -494,257 +853,938 @@ export default function OperatorPortalPage() {
           </div>
         </section>
 
-        {/* 4. TENANT FLEET DIRECTORY & MANAGEMENT CONSOLE */}
-        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl">
-          {/* Section Header & Search/Filters */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-800">
-            <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>Cooperative Tenant Fleet Instances</span>
-                <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono">
-                  {filteredTenants.length} instances
-                </span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Live monitoring of cooperative subdomains, member counts, credit balances, and platform float
-              </p>
-            </div>
+        {/* TAB CONTROLS */}
+        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+          <button
+            onClick={() => setActiveTab('FLEET')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'FLEET'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-700/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Tenant Fleet Directory</span>
+            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">{tenants.length}</span>
+          </button>
 
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              {/* Search Bar */}
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search coop, slug, CDA..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-500"
-                />
+          <button
+            onClick={() => setActiveTab('REGISTRATIONS')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'REGISTRATIONS'
+                ? 'bg-amber-600 text-white shadow-md shadow-amber-700/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <FileBadge className="w-3.5 h-3.5" />
+            <span>Registration Applications</span>
+            {pendingRegistrationsCount > 0 && (
+              <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.5 rounded-full animate-pulse">
+                {pendingRegistrationsCount} Pending
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('LEDGER')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'LEDGER'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-700/20'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>Prepaid Credit Ledger</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('BROADCASTS')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'BROADCASTS'
+                ? 'bg-slate-700 text-white shadow-md'
+                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Megaphone className="w-3.5 h-3.5" />
+            <span>System Broadcasts</span>
+            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">{broadcasts.length}</span>
+          </button>
+        </div>
+
+        {/* TAB 1: TENANT FLEET DIRECTORY */}
+        {activeTab === 'FLEET' && (
+          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl">
+            {/* Header & Search */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-800">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>Cooperative Tenant Fleet Instances</span>
+                  <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono">
+                    {filteredTenants.length} instances
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Live monitoring of cooperative subdomains, member counts, credit balances, and platform float
+                </p>
               </div>
 
-              {/* Status Filter */}
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                <option value="ALL">All Statuses</option>
-                <option value="ACTIVE">Active Only</option>
-                <option value="SUSPENDED">Suspended Only</option>
-                <option value="LOW_CREDIT">Low Credit (&lt; ₱500)</option>
-              </select>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search coop, slug, CDA..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-500"
+                  />
+                </div>
 
-              <button
-                type="button"
-                onClick={() => setShowNewBroadcastModal(true)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-              >
-                <Megaphone className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Broadcast</span>
-              </button>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active Only</option>
+                  <option value="SUSPENDED">Suspended Only</option>
+                  <option value="LOW_CREDIT">Low Credit (&lt; ₱500)</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setShowNewBroadcastModal(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                >
+                  <Megaphone className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Broadcast</span>
+                </button>
+              </div>
             </div>
-          </div>
 
-          {/* Fleet Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-950/80 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="py-3 px-3">Tenant / Subdomain</th>
-                  <th className="py-3 px-3">Members (Census)</th>
-                  <th className="py-3 px-3">Available Credit</th>
-                  <th className="py-3 px-3">Escrow Float</th>
-                  <th className="py-3 px-3">Storage (5MB Cap)</th>
-                  <th className="py-3 px-3">Instance Status</th>
-                  <th className="py-3 px-3 text-right">Operator Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                {filteredTenants.map((t) => (
-                  <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                    {/* Column 1: Tenant Identity */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-bold text-white">{t.name}</div>
-                      <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 mt-0.5">
-                        <Globe className="w-3 h-3 text-slate-400" />
-                        <span>https://{t.subdomain}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                        {t.cdaRegistrationNumber} • GM: {t.adminName}
-                      </div>
-                    </td>
+            {/* Fleet Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950/80 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-3">Tenant / Subdomain</th>
+                    <th className="py-3 px-3">Members (Census)</th>
+                    <th className="py-3 px-3">Available Credit</th>
+                    <th className="py-3 px-3">Escrow Float</th>
+                    <th className="py-3 px-3">Storage (5MB Cap)</th>
+                    <th className="py-3 px-3">Instance Status</th>
+                    <th className="py-3 px-3 text-right">Operator Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                  {filteredTenants.map((t) => (
+                    <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
+                      {/* Tenant Identity */}
+                      <td className="py-3.5 px-3">
+                        <div className="font-bold text-white">{t.name}</div>
+                        <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 mt-0.5">
+                          <Globe className="w-3 h-3 text-slate-400" />
+                          <span>https://{t.subdomain}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          {t.cdaRegistrationNumber} • GM: {t.adminName}
+                        </div>
+                      </td>
 
-                    {/* Column 2: Member Census */}
-                    <td className="py-3.5 px-3">
-                      <div className="flex items-center gap-1.5 font-bold text-white">
-                        <span>{t.totalMembers} Members</span>
-                      </div>
-                      <div className="mt-1 flex items-center gap-1">
-                        {t.totalMembers <= 15 ? (
-                          <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold">
-                            Free Tier ({t.totalMembers}/15)
+                      {/* Member Census */}
+                      <td className="py-3.5 px-3">
+                        <div className="flex items-center gap-1.5 font-bold text-white">
+                          <span>{t.totalMembers} Members</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1">
+                          {t.totalMembers <= 15 ? (
+                            <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                              Free Tier ({t.totalMembers}/15)
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-indigo-950/80 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                              +{t.billedMembers} Billed (₱{t.billedMembers * 50}/mo)
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Available Credit */}
+                      <td className="py-3.5 px-3">
+                        <div className="font-mono font-bold text-white text-sm">
+                          ₱{t.platformCreditBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </div>
+                        {t.platformCreditBalance < 500 ? (
+                          <div className="flex items-center gap-1 text-[10px] text-amber-400 font-bold mt-0.5">
+                            <AlertCircle className="w-3 h-3" />
+                            <span>Low Credit Warning</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-emerald-400 mt-0.5">Good Standing</div>
+                        )}
+                      </td>
+
+                      {/* Escrow Float */}
+                      <td className="py-3.5 px-3">
+                        <div className="font-mono font-semibold text-teal-300">
+                          ₱{t.escrowFloatBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Tech fees: ₱{t.totalTechFeesGenerated.toLocaleString()}
+                        </div>
+                      </td>
+
+                      {/* Storage */}
+                      <td className="py-3.5 px-3">
+                        <div className="flex items-center gap-1 font-mono text-[11px] text-slate-300">
+                          <HardDrive className="w-3 h-3 text-slate-500" />
+                          <span>{t.storageUsedMb} MB</span>
+                        </div>
+                        <div className="w-24 bg-slate-800 rounded-full h-1 mt-1.5 overflow-hidden">
+                          <div
+                            className="bg-emerald-500 h-1 rounded-full"
+                            style={{ width: `${Math.min(100, (t.storageUsedMb / 500) * 100)}%` }}
+                          />
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3.5 px-3">
+                        {t.status === 'ACTIVE' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            ACTIVE
                           </span>
                         ) : (
-                          <span className="text-[10px] bg-indigo-950/80 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded font-mono font-bold">
-                            Billed: +{t.billedMembers} @ ₱50
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                            SUSPENDED
+                          </span>
+                        )}
+                        <div className="text-[10px] text-slate-500 mt-1">Health: {t.healthScore}%</div>
+                      </td>
+
+                      {/* Operator Actions */}
+                      <td className="py-3.5 px-3 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTenantForCredit(t);
+                            setCreditAdjustmentAmount(2000);
+                            setCreditAdjustmentRef('');
+                          }}
+                          className="bg-slate-800 hover:bg-emerald-700 hover:text-white text-slate-300 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors border border-slate-700 inline-flex items-center gap-1"
+                        >
+                          <CreditCard className="w-3 h-3" />
+                          <span>Top Up / Adjust</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTenantForStatus(t)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors border inline-flex items-center gap-1 ${
+                            t.status === 'ACTIVE'
+                              ? 'bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 border-slate-700 hover:border-rose-700'
+                              : 'bg-emerald-900/40 hover:bg-emerald-800 text-emerald-200 border-emerald-700'
+                          }`}
+                        >
+                          <Lock className="w-3 h-3" />
+                          <span>{t.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* TAB 2: COOPERATIVE REGISTRATION APPLICATIONS (NEW MANDATORY FEATURE) */}
+        {activeTab === 'REGISTRATIONS' && (
+          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl">
+            {/* Header & Controls */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-800">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-white">Cooperative Registration Applications</h2>
+                  <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                    Tuntong Tech Compliance Desk
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Review applicant credentials and submitted government IDs. Accept or reject registrations with automated email notifications from{' '}
+                  <span className="text-emerald-400 font-mono font-semibold">support@tuntongtech.com</span>.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button
+                  onClick={fetchRegistrations}
+                  disabled={isLoadingRegistrations}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRegistrations ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search applicant, CDA, TIN..."
+                    value={regSearchQuery}
+                    onChange={(e) => setRegSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500 placeholder-slate-500"
+                  />
+                </div>
+
+                <select
+                  value={regStatusFilter}
+                  onChange={(e) => setRegStatusFilter(e.target.value as any)}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="ALL">All Applications ({registrations.length})</option>
+                  <option value="PENDING_REVIEW">Pending Review ({pendingRegistrationsCount})</option>
+                  <option value="APPROVED">Approved ({registrations.filter((r) => r.status === 'APPROVED').length})</option>
+                  <option value="REJECTED">Rejected ({registrations.filter((r) => r.status === 'REJECTED').length})</option>
+                </select>
+              </div>
+            </div>
+
+            {/* List / Cards */}
+            {filteredRegistrations.length === 0 ? (
+              <div className="p-12 text-center text-slate-500 space-y-3 bg-slate-950/40 rounded-xl border border-slate-800">
+                <Inbox className="w-10 h-10 mx-auto text-slate-600" />
+                <p className="text-sm font-semibold text-slate-400">No cooperative registrations found</p>
+                <p className="text-xs">Applications submitted via <Link href="/coop-register" className="text-emerald-400 underline">coop-register</Link> will immediately appear in this queue.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredRegistrations.map((reg) => (
+                  <div
+                    key={reg.id}
+                    className="p-5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition-all space-y-4 shadow-lg"
+                  >
+                    {/* Header Row */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800/80">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                            {reg.id}
+                          </span>
+                          <h3 className="font-bold text-white text-base">{reg.name}</h3>
+                          <span className="text-[10px] bg-slate-800 text-slate-300 font-semibold px-2 py-0.5 rounded uppercase">
+                            {reg.coopType || 'MULTI_PURPOSE'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-emerald-400 font-mono mt-1 flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-slate-400" />
+                          <span>https://{reg.subdomain || `${reg.slug}-coop.tuntongtech.com`}</span>
+                        </div>
+                      </div>
+
+                      {/* Status Badge */}
+                      <div className="flex items-center gap-2">
+                        {reg.status === 'PENDING_REVIEW' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-950 text-amber-300 border border-amber-700 animate-pulse">
+                            <Clock className="w-3.5 h-3.5" />
+                            PENDING REVIEW
+                          </span>
+                        )}
+                        {reg.status === 'APPROVED' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-700">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            APPROVED & PROVISIONED
+                          </span>
+                        )}
+                        {reg.status === 'REJECTED' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-950 text-rose-300 border border-rose-700">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            REJECTED
                           </span>
                         )}
                       </div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
-                        {t.activeMembers} approved active
-                      </div>
-                    </td>
+                    </div>
 
-                    {/* Column 3: Platform Credit */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-mono font-bold text-white text-sm">
-                        ₱{t.platformCreditBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    {/* Registration Details Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                      {/* Column 1: Legal & Tax Identifiers */}
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80 space-y-1.5">
+                        <div className="text-[10px] font-mono uppercase text-slate-400 font-bold">CDA & Tax Identity</div>
+                        <div><strong className="text-slate-300">CDA Reg No:</strong> <span className="font-mono text-white">{reg.cdaRegistrationNumber}</span></div>
+                        <div><strong className="text-slate-300">BIR TIN:</strong> <span className="font-mono text-white">{reg.tin}</span></div>
+                        <div><strong className="text-slate-300">Address:</strong> <span className="text-slate-300">{reg.address || 'Not specified'}</span></div>
                       </div>
-                      {t.platformCreditBalance < 500 ? (
-                        <span className="text-[10px] text-amber-400 bg-amber-950/80 border border-amber-800 px-1.5 py-0.5 rounded inline-flex items-center gap-1 font-bold mt-1">
-                          <AlertTriangle className="w-3 h-3" /> Low Credit
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-emerald-400 font-mono">Good Standing</span>
-                      )}
-                    </td>
 
-                    {/* Column 4: Escrow Float */}
-                    <td className="py-3.5 px-3">
-                      <div className="font-mono font-bold text-emerald-300">
-                        ₱{t.escrowFloatBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      {/* Column 2: Primary Administrator */}
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80 space-y-1.5">
+                        <div className="text-[10px] font-mono uppercase text-slate-400 font-bold">Authorized Signatory</div>
+                        <div className="text-white font-semibold">
+                          {reg.adminFirstName} {reg.adminMiddleName ? `${reg.adminMiddleName} ` : ''}{reg.adminLastName}
+                        </div>
+                        <div className="text-slate-300 flex items-center gap-1">
+                          <Mail className="w-3 h-3 text-slate-500" />
+                          <span>{reg.adminEmail}</span>
+                        </div>
+                        <div className="text-slate-400 font-mono text-[11px]">{reg.contactPhone || 'N/A'}</div>
                       </div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
-                        Held for Coop Float
-                      </div>
-                    </td>
 
-                    {/* Column 5: Storage (5MB Cap per KYC upload) */}
-                    <td className="py-3.5 px-3">
-                      <div className="flex items-center gap-2">
-                        <HardDrive className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="font-mono text-slate-200">{t.storageUsedMb} MB</span>
-                      </div>
-                      <div className="w-24 bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
-                        <div
-                          className="bg-indigo-500 h-full rounded-full"
-                          style={{ width: `${Math.min(100, (t.storageUsedMb / t.storageQuotaMb) * 100 * 20)}%` }}
-                        ></div>
-                      </div>
-                      <div className="text-[9px] text-slate-500 mt-0.5">
-                        Quota: 10 GB
-                      </div>
-                    </td>
+                      {/* Column 3: Submitted ID & Verification */}
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80 space-y-2 flex flex-col justify-between">
+                        <div>
+                          <div className="text-[10px] font-mono uppercase text-slate-400 font-bold">Submitted Government ID</div>
+                          <div className="text-white font-medium flex items-center gap-1.5 mt-1 truncate">
+                            <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">{reg.validIdFileName || 'Philippine_National_ID.pdf'}</span>
+                            <span className="text-[10px] text-slate-500 font-mono">({reg.validIdFileSizeMb || '2.40'} MB)</span>
+                          </div>
+                        </div>
 
-                    {/* Column 6: Status */}
-                    <td className="py-3.5 px-3">
-                      {t.status === 'ACTIVE' ? (
-                        <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 w-max">
-                          <CheckCircle2 className="w-3 h-3" /> ACTIVE
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 w-max">
-                          <AlertCircle className="w-3 h-3" /> SUSPENDED
-                        </span>
-                      )}
-                      <div className="text-[10px] text-slate-500 mt-1">
-                        Health: {t.healthScore}/100
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRegForIdView(reg)}
+                          className="w-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Inspect Submitted ID</span>
+                        </button>
                       </div>
-                    </td>
+                    </div>
 
-                    {/* Column 7: Actions */}
-                    <td className="py-3.5 px-3 text-right space-x-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTenantForCredit(t);
-                          setCreditAdjustmentAmount(2000);
-                          setCreditAdjustmentType('TOP_UP');
-                        }}
-                        className="bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors"
-                        title="Top-Up or Adjust Platform Credit"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Credit</span>
-                      </button>
+                    {/* Rejection / Approval Notes if any */}
+                    {reg.status === 'REJECTED' && reg.rejectionReason && (
+                      <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-200">
+                        <strong className="text-rose-300">Reason for Rejection:</strong> {reg.rejectionReason}
+                      </div>
+                    )}
 
-                      <button
-                        type="button"
-                        onClick={() => setSelectedTenantForStatus(t)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border inline-flex items-center gap-1 transition-colors ${
-                          t.status === 'ACTIVE'
-                            ? 'bg-rose-950/60 hover:bg-rose-900 text-rose-300 border-rose-800'
-                            : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
-                        }`}
-                        title="Instance Kill-Switch / Lifecycle"
-                      >
-                        <Lock className="w-3 h-3" />
-                        <span>{t.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}</span>
-                      </button>
-                    </td>
-                  </tr>
+                    {reg.status === 'APPROVED' && reg.oneTimePassword && (
+                      <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-xs text-emerald-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div className="space-y-0.5">
+                          <div><strong>Initial Temporary Credentials:</strong> 1-Time Password: <span className="font-mono font-bold text-white bg-slate-900 px-2 py-0.5 rounded border border-emerald-700">{reg.oneTimePassword}</span></div>
+                          <div className="text-[11px] text-emerald-400/80">User must change password immediately upon first sign-in.</div>
+                        </div>
+                        <div className="font-mono text-[11px] text-slate-400">
+                          Reviewed by {reg.reviewedBy || 'Operator'}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bottom Action Footer */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-3 border-t border-slate-800 text-xs">
+                      <div className="text-slate-400 text-[11px] font-mono">
+                        Submitted: {new Date(reg.submittedAt).toLocaleString()}
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        {/* View Dispatched Email Button if notification exists */}
+                        {reg.emailNotification && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRegForEmailView(reg.emailNotification!)}
+                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5 transition-colors"
+                          >
+                            <Mail className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>View Dispatched Email</span>
+                          </button>
+                        )}
+
+                        {/* Accept & Reject Buttons for Pending items */}
+                        {reg.status === 'PENDING_REVIEW' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRegForReject(reg);
+                                setRejectionReasonInput('');
+                              }}
+                              className="bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Decline</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRegForApprove(reg)}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-700/30 transition-colors"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Accept Registration</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+              </div>
+            )}
+          </section>
+        )}
 
-        {/* 5. PLATFORM CREDIT AUDIT LEDGER */}
-        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4 text-emerald-400" />
-              <h3 className="font-bold text-sm text-white">Recent Platform Credit Ledger & Refill Audit</h3>
+        {/* TAB 3: PLATFORM CREDIT LEDGER */}
+        {activeTab === 'LEDGER' && (
+          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-bold text-sm text-white">Recent Platform Credit Ledger & Refill Audit</h3>
+              </div>
+              <span className="text-xs text-slate-400">Strict double-entry prepaid credit log</span>
             </div>
-            <span className="text-xs text-slate-400">Strict double-entry prepaid credit log</span>
-          </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
-                <tr>
-                  <th className="py-2.5 px-3">Timestamp</th>
-                  <th className="py-2.5 px-3">Tenant</th>
-                  <th className="py-2.5 px-3">Action Type</th>
-                  <th className="py-2.5 px-3">Amount</th>
-                  <th className="py-2.5 px-3">New Balance</th>
-                  <th className="py-2.5 px-3">Reference / Notes</th>
-                  <th className="py-2.5 px-3">Operator</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50 text-slate-300">
-                {creditTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-slate-800/20">
-                    <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">{tx.createdAt}</td>
-                    <td className="py-2.5 px-3 font-medium text-white">{tx.tenantName}</td>
-                    <td className="py-2.5 px-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                        tx.amount > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
-                      }`}>
-                        {tx.type}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 font-mono font-bold">
-                      <span className={tx.amount > 0 ? 'text-emerald-400' : 'text-amber-400'}>
-                        {tx.amount > 0 ? '+' : ''}₱{Math.abs(tx.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 font-mono font-semibold text-slate-200">
-                      ₱{tx.balanceAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                      <div>{tx.reference}</div>
-                      <div className="text-[10px] text-slate-500 italic">{tx.notes}</div>
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-400 text-[11px]">{tx.performedBy}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-3">Timestamp</th>
+                    <th className="py-2.5 px-3">Tenant</th>
+                    <th className="py-2.5 px-3">Action Type</th>
+                    <th className="py-2.5 px-3">Amount</th>
+                    <th className="py-2.5 px-3">New Balance</th>
+                    <th className="py-2.5 px-3">Reference / Notes</th>
+                    <th className="py-2.5 px-3">Operator</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50 text-slate-300">
+                  {creditTransactions.map((tx) => (
+                    <tr key={tx.id} className="hover:bg-slate-800/20">
+                      <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">{tx.createdAt}</td>
+                      <td className="py-2.5 px-3 font-medium text-white">{tx.tenantName}</td>
+                      <td className="py-2.5 px-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                          tx.amount > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                        }`}>
+                          {tx.type}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono font-bold">
+                        <span className={tx.amount > 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                          {tx.amount > 0 ? '+' : ''}₱{Math.abs(tx.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono font-semibold text-slate-200">
+                        ₱{tx.balanceAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                        <div>{tx.reference}</div>
+                        <div className="text-[10px] text-slate-500 italic">{tx.notes}</div>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-400 text-[11px]">{tx.performedBy}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* TAB 4: SYSTEM BROADCASTS */}
+        {activeTab === 'BROADCASTS' && (
+          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-indigo-400" />
+                <h3 className="font-bold text-sm text-white">System Announcements & Maintenance Broadcasts</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewBroadcastModal(true)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-indigo-700/20"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Broadcast</span>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {broadcasts.map((b) => (
+                <div key={b.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-start gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                        b.severity === 'CRITICAL' ? 'bg-rose-950 text-rose-300 border border-rose-800' :
+                        b.severity === 'WARNING' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                        'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                      }`}>
+                        {b.severity}
+                      </span>
+                      <h4 className="font-bold text-white text-xs">{b.title}</h4>
+                      <span className="text-[10px] text-slate-500 font-mono">({b.createdAt})</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">{b.message}</p>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    b.isActive ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    {b.isActive ? 'ACTIVE' : 'EXPIRED'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
+
+      {/* MODAL: ACCEPT / APPROVE REGISTRATION */}
+      {selectedRegForApprove && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-white text-base">Approve Cooperative Registration</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRegForApprove(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-2">
+              <div className="text-slate-400 text-[11px] font-mono uppercase">Cooperative Being Approved:</div>
+              <div className="text-white font-bold text-sm">{selectedRegForApprove.name}</div>
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-slate-300">
+                <div>CDA: <span className="font-mono text-white">{selectedRegForApprove.cdaRegistrationNumber}</span></div>
+                <div>TIN: <span className="font-mono text-white">{selectedRegForApprove.tin}</span></div>
+                <div className="col-span-2">
+                  Admin: <span className="text-white font-medium">{selectedRegForApprove.adminFirstName} {selectedRegForApprove.adminLastName}</span> ({selectedRegForApprove.adminEmail})
+                </div>
+              </div>
+            </div>
+
+            {/* Live Domain & Credential Preview */}
+            <div className="p-4 bg-emerald-950/40 border border-emerald-800/80 rounded-xl space-y-2.5 text-xs">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-300">
+                <Sparkles className="w-4 h-4" />
+                <span>Automated Tenant Provisioning Specifications</span>
+              </div>
+              
+              <div className="space-y-1.5 bg-slate-950/80 p-3 rounded-lg border border-emerald-900/60 font-mono text-[11px]">
+                <div className="flex justify-between items-center text-slate-300">
+                  <span>Assigned Domain:</span>
+                  <span className="text-emerald-400 font-bold">https://{selectedRegForApprove.slug}-coop.tuntongtech.com</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span>1-Time Temporary Password:</span>
+                  <span className="text-amber-400 font-bold">TT-******#** (Auto-generated)</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span>Prepaid Welcome Credit:</span>
+                  <span className="text-white font-bold">₱1,000.00</span>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-emerald-200/90 leading-relaxed">
+                An official onboarding email will be automatically dispatched to <strong className="text-white">{selectedRegForApprove.adminEmail}</strong> directly from <strong className="text-white font-mono">support@tuntongtech.com</strong> containing their domain, sign-in credentials, and mandatory first-login password change instructions.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isSubmittingAction}
+                onClick={() => setSelectedRegForApprove(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingAction}
+                onClick={handleApproveRegistration}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-700/30"
+              >
+                {isSubmittingAction ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+                <span>Confirm Approval & Send Email</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DECLINE / REJECT REGISTRATION */}
+      {selectedRegForReject && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-rose-400" />
+                <h3 className="font-bold text-white text-base">Decline Registration Application</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRegForReject(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1">
+              <div className="text-slate-400">Applicant Cooperative:</div>
+              <div className="text-white font-bold text-sm">{selectedRegForReject.name}</div>
+              <div className="text-slate-400 text-[11px]">Primary Contact: {selectedRegForReject.adminEmail}</div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-medium text-slate-300">
+                Reason for Decline / Non-Compliance *
+              </label>
+              <textarea
+                rows={4}
+                required
+                placeholder="e.g. Submitted Government ID is unreadable, CDA registration certificate number mismatch, or invalid BIR Tax Identification Number (TIN)."
+                value={rejectionReasonInput}
+                onChange={(e) => setRejectionReasonInput(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-rose-500 placeholder-slate-500"
+              />
+              <p className="text-[11px] text-slate-400">
+                This explanation will be dispatched in an official notification email to <strong className="text-slate-300">{selectedRegForReject.adminEmail}</strong> from <span className="text-emerald-400 font-mono">support@tuntongtech.com</span>.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isSubmittingAction}
+                onClick={() => setSelectedRegForReject(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingAction || !rejectionReasonInput.trim()}
+                onClick={handleRejectRegistration}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-rose-700/30 disabled:opacity-50"
+              >
+                {isSubmittingAction ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+                <span>Confirm Decline & Send Notice</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: INSPECT SUBMITTED GOVERNMENT ID */}
+      {selectedRegForIdView && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileBadge className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-white text-base">Submitted Government ID Document</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRegForIdView(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* PhilID / National ID Card Visual Component */}
+            <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-sky-950/80 to-slate-900 border-2 border-amber-500/40 p-5 text-white shadow-xl space-y-4 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none"></div>
+
+              {/* ID Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-full bg-amber-400/20 border border-amber-400/50 flex items-center justify-center text-amber-300 font-black text-xs">
+                    PH
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs uppercase tracking-wider text-amber-200">
+                      Republic of the Philippines
+                    </div>
+                    <div className="text-[10px] text-slate-300 font-mono">
+                      Philippine National Identification System (PhilSys) / Official Government ID
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-mono font-bold">
+                  VERIFIED
+                </span>
+              </div>
+
+              {/* ID Body with Photo & Particulars */}
+              <div className="flex gap-4 items-center">
+                {/* Photo Placeholder */}
+                <div className="w-24 h-28 rounded-xl bg-slate-800 border border-white/20 flex flex-col items-center justify-center text-slate-400 relative overflow-hidden shrink-0 shadow-inner">
+                  {selectedRegForIdView.validIdUrl ? (
+                    <img
+                      src={selectedRegForIdView.validIdUrl}
+                      alt="Signatory Government ID"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <>
+                      <UserCheck className="w-8 h-8 text-slate-400 mb-1" />
+                      <span className="text-[9px] text-slate-500 font-mono">PHILID PHOTO</span>
+                    </>
+                  )}
+                </div>
+
+                {/* ID Particulars */}
+                <div className="space-y-1.5 text-xs flex-1">
+                  <div>
+                    <div className="text-[9px] text-slate-400 font-mono uppercase">Full Legal Name</div>
+                    <div className="font-bold text-white text-sm">
+                      {selectedRegForIdView.adminLastName}, {selectedRegForIdView.adminFirstName} {selectedRegForIdView.adminMiddleName || ''}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-white/10 font-mono">
+                    <div>
+                      <div className="text-[9px] text-slate-400">BIR TIN</div>
+                      <div className="text-amber-300 font-bold">{selectedRegForIdView.tin}</div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] text-slate-400">CDA REG NO</div>
+                      <div className="text-white font-bold">{selectedRegForIdView.cdaRegistrationNumber}</div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[9px] text-slate-400 font-mono uppercase">Representing Entity</div>
+                    <div className="text-slate-200 font-semibold truncate text-[11px]">
+                      {selectedRegForIdView.name}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer chip & watermark */}
+              <div className="pt-2 border-t border-white/10 flex justify-between items-center text-[10px] text-slate-400 font-mono">
+                <span>File: {selectedRegForIdView.validIdFileName || 'Philippine_National_ID.pdf'}</span>
+                <span>Size: {selectedRegForIdView.validIdFileSizeMb || '2.40'} MB</span>
+              </div>
+            </div>
+
+            {/* Compliance Verification Checklist */}
+            <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
+              <div className="font-bold text-slate-300">Compliance & Regulatory Check:</div>
+              <div className="space-y-1.5 text-[11px] text-slate-300">
+                <div className="flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>CDA Registration Registry lookup matched and verified.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Signatory authorized by General Assembly / Board of Directors resolution.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Compliant with NPC 2012 Data Privacy encryption and storage standards.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedRegForIdView(null)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs"
+              >
+                Close ID Viewer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DISPATCHED EMAIL LOG VIEWER */}
+      {selectedRegForEmailView && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Mail className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-white text-base">Dispatched Official Email Notification</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRegForEmailView(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Email Header Envelope */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-2">
+              <div className="flex justify-between items-center text-slate-400">
+                <span>From:</span>
+                <span className="font-mono font-bold text-emerald-400">{selectedRegForEmailView.from}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-400">
+                <span>To:</span>
+                <span className="font-mono text-white">{selectedRegForEmailView.to}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-400">
+                <span>Date Sent:</span>
+                <span className="font-mono text-slate-300">{new Date(selectedRegForEmailView.sentAt).toLocaleString()}</span>
+              </div>
+              <div className="pt-2 border-t border-slate-800 text-slate-200">
+                <strong className="text-slate-400">Subject:</strong> {selectedRegForEmailView.subject}
+              </div>
+            </div>
+
+            {/* Highlighting Credentials if present */}
+            {selectedRegForEmailView.domain && selectedRegForEmailView.temporaryPassword && (
+              <div className="p-3.5 bg-emerald-950/40 border border-emerald-800/80 rounded-xl space-y-2 text-xs">
+                <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Key className="w-4 h-4" />
+                  <span>Dispatched Access Credentials</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-[11px]">
+                  <div className="bg-slate-900 p-2 rounded border border-emerald-900/60">
+                    <span className="text-slate-400 block text-[10px]">COOPERATIVE DOMAIN:</span>
+                    <span className="text-emerald-400 font-bold">{selectedRegForEmailView.domain}</span>
+                  </div>
+                  <div className="bg-slate-900 p-2 rounded border border-emerald-900/60">
+                    <span className="text-slate-400 block text-[10px]">1-TIME TEMPORARY PASSWORD:</span>
+                    <span className="text-amber-400 font-bold">{selectedRegForEmailView.temporaryPassword}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pre-formatted Body */}
+            <div>
+              <div className="text-[10px] font-mono uppercase text-slate-400 font-bold mb-1">Email Body Content:</div>
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+                {selectedRegForEmailView.body}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedRegForEmailView(null)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs"
+              >
+                Close Email Viewer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: PLATFORM CREDIT TOP-UP & ADJUSTMENT */}
       {selectedTenantForCredit && (

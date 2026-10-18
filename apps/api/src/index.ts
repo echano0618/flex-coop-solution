@@ -474,6 +474,102 @@ app.post('/api/v1/operator/broadcasts', (req: Request, res: Response) => {
   res.status(201).json({ success: true, data: broadcast });
 });
 
+// -------------------------------------------------------------
+// 2.1.1 COOPERATIVE REGISTRATION ONBOARDING & OPERATOR GOVERNANCE
+// -------------------------------------------------------------
+app.get('/api/v1/operator/registrations', (_req: Request, res: Response) => {
+  const registrations = OperatorService.listRegistrations();
+  res.json({ success: true, count: registrations.length, data: registrations });
+});
+
+app.post('/api/v1/coop-registrations', (req: Request, res: Response) => {
+  const {
+    name,
+    coopType,
+    slug,
+    cdaRegistrationNumber,
+    tin,
+    contactEmail,
+    contactPhone,
+    address,
+    adminFirstName,
+    adminMiddleName,
+    adminLastName,
+    adminEmail,
+    validIdUrl,
+    validIdFileName,
+    validIdFileSizeMb,
+  } = req.body;
+
+  if (!name || !slug || !cdaRegistrationNumber || !tin || !adminEmail || !adminFirstName || !adminLastName) {
+    return res.status(400).json({
+      success: false,
+      error: 'Cooperative name, slug, CDA registration number, TIN, admin name, and admin email are required.',
+    });
+  }
+
+  const record = OperatorService.submitRegistration({
+    name,
+    coopType: coopType || 'MULTI_PURPOSE',
+    slug,
+    cdaRegistrationNumber,
+    tin,
+    contactEmail: contactEmail || adminEmail,
+    contactPhone,
+    address: address || 'Philippines',
+    adminFirstName,
+    adminMiddleName,
+    adminLastName,
+    adminEmail,
+    validIdUrl,
+    validIdFileName,
+    validIdFileSizeMb,
+  });
+
+  res.status(201).json({
+    success: true,
+    message: `Cooperative registration application '${name}' (${record.id}) submitted successfully for compliance review by Tuntong Tech.`,
+    data: record,
+  });
+});
+
+app.post('/api/v1/operator/registrations/:id/approve', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { reviewedBy } = req.body;
+
+  const result = OperatorService.approveRegistration(id, reviewedBy || 'Tuntong Tech Operator');
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  res.json({
+    success: true,
+    message: `Cooperative '${result.registration?.name}' approved successfully. Subdomain '${result.registration?.subdomain}' activated and onboarding credentials dispatched via support@tuntongtech.com.`,
+    data: result.registration,
+    tenant: result.tenant,
+  });
+});
+
+app.post('/api/v1/operator/registrations/:id/reject', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { reason, reviewedBy } = req.body;
+
+  if (!reason) {
+    return res.status(400).json({ success: false, error: 'Rejection reason is required.' });
+  }
+
+  const result = OperatorService.rejectRegistration(id, reason, reviewedBy || 'Tuntong Tech Compliance Officer');
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  res.json({
+    success: true,
+    message: `Cooperative registration '${result.registration?.name}' rejected. Official notice dispatched via support@tuntongtech.com.`,
+    data: result.registration,
+  });
+});
+
 // ==========================================
 // 2.2 COOPERATIVE PLATFORM CREDIT & TOP-UP WALLET
 // ==========================================

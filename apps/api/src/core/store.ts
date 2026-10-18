@@ -14,6 +14,7 @@ import {
   SurplusDistributionResult,
   PlatformCreditTransaction,
   SystemBroadcast,
+  CooperativeRegistration,
 } from '@flexcoop/shared-types';
 import { AmortizationService } from '../modules/lending/amortization.service';
 import { MonetizationService } from '../modules/monetization/monetization.service';
@@ -37,6 +38,7 @@ export class AppDataStore {
   public platformCredits: Map<string, number> = new Map(); // tenantId -> available credit
   public creditTransactions: PlatformCreditTransaction[] = [];
   public systemBroadcasts: SystemBroadcast[] = [];
+  public coopRegistrations: CooperativeRegistration[] = [];
 
   constructor() {
     this.seedInitialTenantData();

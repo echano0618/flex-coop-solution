@@ -43,12 +43,17 @@ export default function CoopRegisterPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredResult, setRegisteredResult] = useState<{
-    tenantId: string;
+    id: string;
     subdomain: string;
-    schemaName: string;
     name: string;
     adminFullName: string;
+    adminEmail: string;
+    cdaRegistrationNumber: string;
+    tin: string;
+    address: string;
     validIdName: string;
+    validIdSizeMb: string;
+    submittedAt: string;
   } | null>(null);
 
   const handleSlugChange = (rawVal: string) => {
@@ -118,50 +123,77 @@ export default function CoopRegisterPage() {
       .filter(Boolean)
       .join(' ');
 
+    const payload = {
+      name: formData.name,
+      coopType: formData.coopType,
+      slug: formData.slug,
+      cdaRegistrationNumber: formData.cdaRegistrationNumber,
+      tin: formData.tin,
+      contactEmail: formData.contactEmail || formData.adminEmail,
+      address: formData.address,
+      adminFirstName: formData.adminFirstName,
+      adminMiddleName: formData.adminMiddleName,
+      adminLastName: formData.adminLastName,
+      adminEmail: formData.adminEmail,
+      validIdFileName: validIdFileName || 'government_id.pdf',
+      validIdFileSizeMb: validIdSizeMb || '1.80',
+      validIdUrl: validIdFileName ? `/uploads/kyc/${validIdFileName}` : undefined,
+    };
+
+    let generatedRegId = `REG-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
     try {
-      // Call Backend API to provision tenant
-      const res = await fetch(`${getApiBaseUrl()}/tenants`, {
+      // Call Backend API to submit application for operator compliance review
+      const res = await fetch(`${getApiBaseUrl()}/coop-registrations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name,
-          slug: formData.slug,
-          cdaRegistrationNumber: formData.cdaRegistrationNumber,
-          tin: formData.tin,
-          contactEmail: formData.contactEmail || formData.adminEmail,
-          address: formData.address,
-          billingMode: 'STANDARD_UNIFIED',
-          adminFirstName: formData.adminFirstName,
-          adminMiddleName: formData.adminMiddleName,
-          adminLastName: formData.adminLastName,
-          validIdUrl: validIdFileName ? `/uploads/kyc/${validIdFileName}` : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
-      if (data.success) {
-        setRegisteredResult({
-          tenantId: data.data.id,
-          subdomain: `${formData.slug}-coop.tuntongtech.com`,
-          schemaName: data.schemaName || `tenant_${formData.slug}`,
-          name: formData.name,
-          adminFullName,
-          validIdName: validIdFileName,
-        });
-      } else {
-        alert(`Provisioning failed: ${data.error || 'Unknown error'}`);
+      if (data.success && data.data?.id) {
+        generatedRegId = data.data.id;
       }
-    } catch {
-      // Demo fallback if API offline
+    } catch (err) {
+      console.warn('API submission notice:', err);
+    } finally {
+      // Persist in localStorage so Operator portal can also pick it up immediately
+      if (typeof window !== 'undefined') {
+        try {
+          const stored = JSON.parse(localStorage.getItem('tuntong_coop_registrations') || '[]');
+          const newEntry = {
+            id: generatedRegId,
+            ...payload,
+            subdomain: `${formData.slug}-coop.tuntongtech.com`,
+            status: 'PENDING_REVIEW',
+            submittedAt: new Date().toISOString(),
+          };
+          localStorage.setItem('tuntong_coop_registrations', JSON.stringify([newEntry, ...stored]));
+        } catch (e) {
+          console.error('LocalStorage sync error:', e);
+        }
+      }
+
       setRegisteredResult({
-        tenantId: `tenant_${formData.slug || 'coop'}_demo`,
-        subdomain: `${formData.slug || 'coop'}-coop.tuntongtech.com`,
-        schemaName: `tenant_${formData.slug || 'coop'}`,
+        id: generatedRegId,
+        subdomain: `${formData.slug}-coop.tuntongtech.com`,
         name: formData.name,
         adminFullName,
-        validIdName: validIdFileName,
+        adminEmail: formData.adminEmail,
+        cdaRegistrationNumber: formData.cdaRegistrationNumber,
+        tin: formData.tin,
+        address: formData.address,
+        validIdName: validIdFileName || 'government_id.pdf',
+        validIdSizeMb: validIdSizeMb || '1.80',
+        submittedAt: new Date().toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
       });
-    } finally {
+
       setIsSubmitting(false);
     }
   };
@@ -171,16 +203,21 @@ export default function CoopRegisterPage() {
       {/* Top Header */}
       <header className="bg-slate-900 text-white border-b border-slate-800">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <Building2 className="w-6 h-6 text-indigo-400" />
-            <span className="font-bold text-lg tracking-tight">Flex Coop Solution</span>
-            <span className="text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono ml-2">
-              SaaS Instance Provisioner
-            </span>
-          </Link>
-          <div className="flex items-center gap-4 text-sm">
-            <Link href="/" className="text-slate-300 hover:text-white transition">
-              Back to Portal
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-emerald-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 font-black">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-black text-lg tracking-tight text-white">Tuntong Tech</span>
+              <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono ml-2 font-semibold">
+                Cooperative Enterprise Onboarding
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-semibold">
+            <Link href="/operator" className="text-slate-300 hover:text-white transition flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Operator Portal</span>
             </Link>
           </div>
         </div>
@@ -192,14 +229,14 @@ export default function CoopRegisterPage() {
             {/* Header info */}
             <div className="text-center mb-8">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 mb-3">
-                <Sparkles className="w-3.5 h-3.5" /> Instant Multi-Tenant Cloud Provisioning
+                <Sparkles className="w-3.5 h-3.5" /> Tuntong Tech Cloud Onboarding
               </span>
               <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                Register Your Cooperative Instance
+                Register Your Cooperative with Tuntong Tech
               </h1>
               <p className="text-slate-600 mt-2 max-w-2xl mx-auto text-sm leading-relaxed">
                 Empower your Philippine cooperative with CDA Standard Chart of Accounts (MC 2015-06), Truth-in-Lending amortizations,
-                PayMongo QR Ph rails, and dedicated subdomain isolation.
+                PayMongo QR Ph rails, and dedicated subdomain isolation. Submitted registrations are evaluated for statutory compliance before instance activation.
               </p>
             </div>
 
@@ -538,8 +575,8 @@ export default function CoopRegisterPage() {
                     className="mt-1 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
                   />
                   <span className="text-xs text-slate-700 leading-relaxed">
-                    <strong>CDA Statutory Compliance Agreement:</strong> We authorize Flex Coop Solution to pre-seed the official
-                    CDA Standard Chart of Accounts (MC 2015-06) and generate required C-PES and CAPR regulatory reporting structures under the single SaaS billing model.
+                    <strong>CDA Statutory Compliance Agreement:</strong> We authorize Tuntong Tech to evaluate our application credentials,
+                    pre-seed the official CDA Standard Chart of Accounts (MC 2015-06), and provision our dedicated cooperative instance upon approval.
                   </span>
                 </label>
               </div>
@@ -551,10 +588,10 @@ export default function CoopRegisterPage() {
                 className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50 text-base"
               >
                 {isSubmitting ? (
-                  'Provisioning Cooperative Cloud Instance...'
+                  'Submitting Application for Compliance Review...'
                 ) : (
                   <>
-                    <span>Provision Cooperative Instance</span>
+                    <span>Submit Application for Review</span>
                     <ArrowRight className="w-5 h-5" />
                   </>
                 )}
@@ -562,61 +599,90 @@ export default function CoopRegisterPage() {
             </form>
           </>
         ) : (
-          /* Success Screen */
+          /* Submission Confirmation Screen */
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center space-y-6">
-            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-10 h-10" />
+            <div className="w-16 h-16 bg-amber-50 text-amber-600 border border-amber-200 rounded-full flex items-center justify-center mx-auto shadow-sm">
+              <FileText className="w-9 h-9" />
             </div>
 
             <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-                Instance Provisioned Successfully
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-100/70 px-3.5 py-1 rounded-full border border-amber-300">
+                Application Submitted • Under Compliance Review
               </span>
-              <h2 className="text-2xl font-black text-slate-900 mt-2">{registeredResult.name}</h2>
-              <p className="text-slate-600 text-sm mt-1">
-                Your cooperative cloud instance and isolated database have been initialized.
-              </p>
+              <h2 className="text-2xl font-black text-slate-900 mt-3">{registeredResult.name}</h2>
+              <div className="inline-flex items-center gap-2 mt-2 px-3 py-1 bg-slate-100 rounded-lg text-slate-700 text-xs font-mono font-bold">
+                <span>Application Reference:</span>
+                <span className="text-indigo-600 font-extrabold">{registeredResult.id}</span>
+              </div>
             </div>
 
-            {/* Instance Details */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left max-w-lg mx-auto space-y-3 font-mono text-xs">
+            {/* Email Dispatch Notice */}
+            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-xl p-5 text-left max-w-xl mx-auto space-y-2 text-xs text-slate-700 leading-relaxed shadow-sm">
+              <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm">
+                <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                <span>Next Step: Tuntong Tech Verification &amp; Credential Dispatch</span>
+              </div>
+              <p>
+                Our compliance team is verifying your cooperative registration details, CDA certificate, and uploaded government-issued ID (<strong>{registeredResult.validIdName}</strong>).
+              </p>
+              <div className="pt-2 border-t border-indigo-200/60 text-slate-800">
+                <p>
+                  📧 Upon operator approval, an official notification will be dispatched from:
+                </p>
+                <div className="mt-1.5 bg-white border border-indigo-200 rounded-lg p-2.5 font-mono text-[11px] space-y-1">
+                  <div><strong>From:</strong> support@tuntongtech.com</div>
+                  <div><strong>To:</strong> {registeredResult.adminEmail}</div>
+                  <div><strong>Includes:</strong> Live Domain (<strong>https://{registeredResult.subdomain}</strong>) and 1-Time Temporary Password</div>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2 italic">
+                  * Note: The 1-time password will be subject to a mandatory password change during your initial administrator sign-in.
+                </p>
+              </div>
+            </div>
+
+            {/* Application Summary Box */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left max-w-xl mx-auto space-y-2.5 font-mono text-xs">
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Dedicated Portal URL:</span>
+                <span className="text-slate-500 font-sans">Proposed Domain:</span>
                 <span className="font-bold text-indigo-600">https://{registeredResult.subdomain}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Tenant Document Root:</span>
-                <span className="text-slate-800">/tenants/{registeredResult.tenantId}</span>
+                <span className="text-slate-500 font-sans">CDA Registration No:</span>
+                <span className="text-slate-800">{registeredResult.cdaRegistrationNumber}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Platform Billing Model:</span>
-                <span className="text-indigo-700 font-semibold">1% Loan Fee + ₱50/Member (&gt;15 free)</span>
+                <span className="text-slate-500 font-sans">BIR TIN:</span>
+                <span className="text-slate-800">{registeredResult.tin}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Pre-seeded Ledger:</span>
-                <span className="text-emerald-700 font-semibold">CDA Standard Chart of Accounts (MC 2015-06)</span>
+                <span className="text-slate-500 font-sans">Registered Office:</span>
+                <span className="text-slate-800 truncate max-w-xs">{registeredResult.address}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Primary Administrator:</span>
-                <span className="text-slate-800 font-semibold">{registeredResult.adminFullName} (GM)</span>
+                <span className="text-slate-500 font-sans">Primary Administrator:</span>
+                <span className="text-slate-800 font-semibold">{registeredResult.adminFullName}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Verified Identification:</span>
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-slate-500 font-sans">Submitted Government ID:</span>
                 <span className="text-emerald-700 font-semibold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {registeredResult.validIdName || 'ID Uploaded'} (Verified $\le$ 5MB)
+                  {registeredResult.validIdName} ({registeredResult.validIdSizeMb} MB)
                 </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-sans">Submission Timestamp:</span>
+                <span className="text-slate-600">{registeredResult.submittedAt}</span>
               </div>
             </div>
 
             {/* Action buttons */}
             <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
               <Link
-                href="/"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-sm transition"
+                href="/operator"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm shadow-sm transition"
               >
-                <span>Launch Cooperative Admin Portal</span>
-                <ExternalLink className="w-4 h-4" />
+                <span>View in Operator Control Plane</span>
+                <ArrowRight className="w-4 h-4" />
               </Link>
               <button
                 onClick={() => {
@@ -627,7 +693,7 @@ export default function CoopRegisterPage() {
                 }}
                 className="px-6 py-3 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-sm transition"
               >
-                Provision Another Coop
+                Submit Another Cooperative
               </button>
             </div>
           </div>

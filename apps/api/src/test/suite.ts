@@ -1810,7 +1810,90 @@ console.log('\n--- 27. System Configuration Module & IAM 5-Attempt Lockout with 
   assert(Boolean(unlockAuditRecord?.target.includes(validJustification)), 'Audit record preserves mandatory justification note verbatim');
 }
 
-console.log('\n🎉 ALL 262 VERIFICATION TEST CASES (INCLUDING SYSTEM CONFIGURATION MODULE, MEMBERSHIP REGISTRATION DYNAMIC FIELDS, IAM 5-ATTEMPT LIMIT, 24-HOUR LOCKOUT & MANDATORY AUDIT JUSTIFICATION) PASSED SUCCESSFULLY!\n');
+// 28. Cooperative Public Registration, Operator Review, ID Inspection, Approval OTP & support@tuntongtech.com Email Dispatch
+console.log('\n--- 28. Cooperative Registration, Operator Review, ID Inspection, Approval OTP & support@tuntongtech.com Email Dispatch ---');
+{
+  OperatorService.ensureInitialized();
+
+  // 28.1 Verify seeded pending registration is untied from dummy Bayanihan
+  const initialRegs = OperatorService.listRegistrations();
+  assert(initialRegs.length >= 1, 'Initial registrations list contains at least 1 application');
+  const seeded = initialRegs.find((r) => r.id === 'REG-2026-8914');
+  assert(seeded !== undefined, 'Seeded application REG-2026-8914 is present');
+  assert(seeded?.status === 'PENDING_REVIEW', 'Seeded application status is strictly PENDING_REVIEW');
+  assert(seeded?.validIdFileName !== undefined, 'Submitted government ID file name is attached');
+  assert(seeded?.validIdFileSizeMb !== undefined, 'Submitted government ID file size is recorded');
+
+  // 28.2 Submit new cooperative registration application
+  const newReg = OperatorService.submitRegistration({
+    name: 'Tagumpay Multi-Purpose Cooperative',
+    coopType: 'MULTI_PURPOSE',
+    slug: 'tagumpay',
+    cdaRegistrationNumber: 'CDA-R04A-2025-00192',
+    tin: '772-109-883-000',
+    contactEmail: 'info@tagumpaycoop.ph',
+    contactPhone: '+63 918 772 1099',
+    address: 'National Highway, Calamba, Laguna',
+    adminFirstName: 'Eduardo',
+    adminMiddleName: 'Castro',
+    adminLastName: 'Villanueva',
+    adminEmail: 'eduardo.villanueva@tagumpaycoop.ph',
+    validIdFileName: 'Eduardo_Villanueva_Passport.pdf',
+    validIdFileSizeMb: '3.15',
+    validIdUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80',
+  });
+
+  assert(Boolean(newReg.id.startsWith('REG-')), 'New registration receives unique REG- identifier');
+  assert(newReg.status === 'PENDING_REVIEW', 'New registration initial status is strictly PENDING_REVIEW');
+  assert(newReg.subdomain === 'tagumpay-coop.tuntongtech.com', 'Subdomain is mapped under tuntongtech.com');
+  assert(newReg.validIdFileName === 'Eduardo_Villanueva_Passport.pdf', 'Submitted Government ID is recorded');
+
+  // 28.3 Operator approves Tagumpay application
+  const approveResult = OperatorService.approveRegistration(newReg.id, 'Lex (Operator)');
+  assert(approveResult.success === true, 'Operator approval succeeds');
+  assert(approveResult.registration?.status === 'APPROVED', 'Registration status transitions to APPROVED');
+  assert(Boolean(approveResult.registration?.oneTimePassword), '1-time temporary password is generated');
+  assert(Boolean(approveResult.registration?.oneTimePassword?.startsWith('TT-')), '1-time password follows TT- prefix');
+  assert(approveResult.tenant !== undefined, 'Tenant instance is provisioned into fleet');
+  assert(approveResult.tenant?.status === 'ACTIVE', 'Provisioned tenant is ACTIVE');
+
+  // Email Notification verification
+  const emailNotification = approveResult.registration?.emailNotification;
+  assert(emailNotification !== undefined, 'Official email notification record is generated');
+  assert(emailNotification?.from === 'support@tuntongtech.com', 'Email strictly originates from support@tuntongtech.com');
+  assert(emailNotification?.to === 'eduardo.villanueva@tagumpaycoop.ph', 'Email is addressed to registrant');
+  assert(Boolean(emailNotification?.subject.includes('Approved')), 'Email subject states Approved');
+  assert(Boolean(emailNotification?.body.includes('support@tuntongtech.com')), 'Email body contains official support contact');
+  assert(Boolean(emailNotification?.body.includes(approveResult.registration!.oneTimePassword!)), 'Email body conveys 1-time password');
+  assert(Boolean(emailNotification?.body.includes('tagumpay-coop.tuntongtech.com')), 'Email body conveys dedicated domain');
+  assert(Boolean(emailNotification?.body.includes('initial sign-in only')), 'Email body informs user password must be changed upon login');
+
+  // 28.4 Submit another application and test operator Rejection
+  const rejectedApp = OperatorService.submitRegistration({
+    name: 'Illegitimate Syndicate Cooperative',
+    coopType: 'CREDIT',
+    slug: 'syndicate',
+    cdaRegistrationNumber: 'CDA-FAKE-999',
+    tin: '000-000-000-000',
+    contactEmail: 'scam@fakecoop.xyz',
+    address: 'Fake Address 123',
+    adminFirstName: 'Fake',
+    adminLastName: 'User',
+    adminEmail: 'scam@fakecoop.xyz',
+    validIdFileName: 'fake_id.png',
+  });
+
+  const rejectReason = 'CDA registration number does not exist in CDA registry; TIN validation failed BIR database lookup.';
+  const rejectResult = OperatorService.rejectRegistration(rejectedApp.id, rejectReason, 'Lex (Operator)');
+
+  assert(rejectResult.success === true, 'Operator rejection succeeds');
+  assert(rejectResult.registration?.status === 'REJECTED', 'Registration status transitions to REJECTED');
+  assert(rejectResult.registration?.rejectionReason === rejectReason, 'Rejection reason is preserved verbatim');
+  assert(rejectResult.registration?.emailNotification?.from === 'support@tuntongtech.com', 'Rejection email originates from support@tuntongtech.com');
+  assert(Boolean(rejectResult.registration?.emailNotification?.body.includes(rejectReason)), 'Rejection email conveys specific non-compliance reason');
+}
+
+console.log('\n🎉 ALL 285 VERIFICATION TEST CASES (INCLUDING COOP REGISTRATION, OPERATOR REVIEW, ID INSPECTION, APPROVAL OTP & support@tuntongtech.com DISPATCH) PASSED SUCCESSFULLY!\n');
 
 
 

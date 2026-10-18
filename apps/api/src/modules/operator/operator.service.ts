@@ -6,6 +6,9 @@ import {
   Tenant,
   TenantFleetSummary,
   TenantStatus,
+  CooperativeRegistration,
+  RegistrationStatus,
+  RegistrationEmailNotification,
 } from '@flexcoop/shared-types';
 import { dbStore } from '../../core/store';
 
@@ -71,6 +74,31 @@ export class OperatorService {
     const tenantSilangan = 'tenant_silangan_003';
     if (!dbStore.platformCredits.has(tenantSilangan)) {
       dbStore.platformCredits.set(tenantSilangan, 8900.0);
+    }
+
+    // Initialize default submitted cooperative registration if empty
+    if (dbStore.coopRegistrations.length === 0) {
+      dbStore.coopRegistrations.push({
+        id: 'REG-2026-8914',
+        name: 'Pag-asa Agricultural Development Cooperative',
+        coopType: 'AGRICULTURAL',
+        slug: 'pag-asa',
+        subdomain: 'pag-asa-coop.tuntongtech.com',
+        cdaRegistrationNumber: 'CDA-R02-2024-00814',
+        tin: '401-829-105-000',
+        contactEmail: 'contact@pagasacoop.ph',
+        contactPhone: '+63 917 882 4410',
+        address: 'Sitio Maligaya, Ilagan, Isabela',
+        adminFirstName: 'Danilo',
+        adminMiddleName: 'Ramos',
+        adminLastName: 'Bautista',
+        adminEmail: 'danilo.bautista@pagasacoop.ph',
+        validIdFileName: 'Danilo_Bautista_National_ID.pdf',
+        validIdFileSizeMb: '2.40',
+        validIdUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80',
+        status: 'PENDING_REVIEW',
+        submittedAt: '2026-10-18T07:15:00Z',
+      });
     }
   }
 
@@ -270,4 +298,185 @@ export class OperatorService {
   public static getActiveBroadcasts(): SystemBroadcast[] {
     return dbStore.systemBroadcasts.filter((b) => b.isActive);
   }
+
+  /**
+   * Cooperative Registrations Onboarding & Governance
+   */
+  public static listRegistrations(): CooperativeRegistration[] {
+    this.ensureInitialized();
+    return dbStore.coopRegistrations;
+  }
+
+  public static getRegistrationById(id: string): CooperativeRegistration | undefined {
+    this.ensureInitialized();
+    return dbStore.coopRegistrations.find((r) => r.id === id);
+  }
+
+  public static submitRegistration(
+    data: Omit<CooperativeRegistration, 'id' | 'status' | 'submittedAt' | 'subdomain'>
+  ): CooperativeRegistration {
+    this.ensureInitialized();
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const id = `REG-2026-${randomSuffix}`;
+    const subdomain = `${data.slug}-coop.tuntongtech.com`;
+
+    const record: CooperativeRegistration = {
+      ...data,
+      id,
+      subdomain,
+      status: 'PENDING_REVIEW',
+      submittedAt: new Date().toISOString(),
+    };
+
+    dbStore.coopRegistrations.unshift(record);
+    return record;
+  }
+
+  public static approveRegistration(
+    id: string,
+    reviewedBy: string = 'Tuntong Tech Operator'
+  ): { success: boolean; registration?: CooperativeRegistration; tenant?: Tenant; error?: string } {
+    this.ensureInitialized();
+    const reg = dbStore.coopRegistrations.find((r) => r.id === id);
+    if (!reg) {
+      return { success: false, error: 'Registration application not found.' };
+    }
+    if (reg.status === 'APPROVED') {
+      return { success: false, error: 'Registration application is already approved.' };
+    }
+
+    // Generate secure 1-time password for admin initial sign-in
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let randStr = '';
+    for (let i = 0; i < 6; i++) {
+      randStr += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    const oneTimePassword = `TT-${randStr}#${Math.floor(10 + Math.random() * 90)}`;
+    const subdomain = `${reg.slug}-coop.tuntongtech.com`;
+
+    // Provision new tenant in live fleet
+    const tenantId = `tenant_${reg.slug}_${Math.random().toString(36).substring(2, 6)}`;
+    const tenant: Tenant = {
+      id: tenantId,
+      name: reg.name,
+      slug: reg.slug,
+      cdaRegistrationNumber: reg.cdaRegistrationNumber,
+      tin: reg.tin,
+      contactEmail: reg.contactEmail,
+      contactPhone: reg.contactPhone || '+63 900 000 0000',
+      adminFirstName: reg.adminFirstName,
+      adminMiddleName: reg.adminMiddleName,
+      adminLastName: reg.adminLastName,
+      validIdUrl: reg.validIdUrl,
+      address: reg.address || 'Philippines',
+      billingMode: 'STANDARD_UNIFIED',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    dbStore.tenants.set(tenantId, tenant);
+    if (!dbStore.platformCredits.has(tenantId)) {
+      dbStore.platformCredits.set(tenantId, 1000.0); // Seed initial welcome platform credit
+    }
+    dbStore.members.set(tenantId, []);
+    dbStore.loans.set(tenantId, []);
+    dbStore.journalEntries.set(tenantId, []);
+    dbStore.shareAccounts.set(tenantId, []);
+    dbStore.savingsAccounts.set(tenantId, []);
+
+    // Create Email Notification payload from support@tuntongtech.com
+    const emailSubject = `[Tuntong Tech] Congratulations! Your Cooperative Registration has been Approved (${reg.name})`;
+    const emailBody = `Dear ${reg.adminFirstName} ${reg.adminLastName},
+
+We are pleased to inform you that your cooperative onboarding application (${reg.id}) for "${reg.name}" has been officially APPROVED by Tuntong Tech.
+
+Your dedicated cooperative instance has been provisioned and is now live under strict CDA double-entry and NPC data privacy compliance.
+
+Official Cooperative Portal:
+Domain: https://${subdomain}
+
+Primary Administrator Login Credentials:
+Username (Email): ${reg.adminEmail}
+1-Time Temporary Password: ${oneTimePassword}
+
+IMPORTANT SECURITY NOTICE: This 1-time password is valid for your initial sign-in only. You will be required to change your password immediately upon your first login.
+
+If you have questions, require onboarding training, or need data migration assistance, please reach out to our engineering support desk at support@tuntongtech.com.
+
+Sincerely,
+Tuntong Tech Support Team
+support@tuntongtech.com
+https://tuntongtech.com`;
+
+    const emailNotification: RegistrationEmailNotification = {
+      from: 'support@tuntongtech.com',
+      to: reg.adminEmail,
+      subject: emailSubject,
+      sentAt: new Date().toISOString(),
+      body: emailBody,
+      domain: `https://${subdomain}`,
+      temporaryPassword: oneTimePassword,
+    };
+
+    reg.status = 'APPROVED';
+    reg.reviewedAt = new Date().toISOString();
+    reg.reviewedBy = reviewedBy;
+    reg.oneTimePassword = oneTimePassword;
+    reg.emailNotification = emailNotification;
+
+    return {
+      success: true,
+      registration: reg,
+      tenant,
+    };
+  }
+
+  public static rejectRegistration(
+    id: string,
+    reason: string,
+    reviewedBy: string = 'Tuntong Tech Operator'
+  ): { success: boolean; registration?: CooperativeRegistration; error?: string } {
+    this.ensureInitialized();
+    const reg = dbStore.coopRegistrations.find((r) => r.id === id);
+    if (!reg) {
+      return { success: false, error: 'Registration application not found.' };
+    }
+
+    const emailSubject = `[Tuntong Tech] Update on your Cooperative Registration Application (${reg.name})`;
+    const emailBody = `Dear ${reg.adminFirstName} ${reg.adminLastName},
+
+Thank you for your application (${reg.id}) to onboard "${reg.name}" onto Tuntong Tech.
+
+After reviewing your submitted credentials and government-issued identification, our compliance team is unable to approve your registration at this time due to the following reason:
+
+${reason}
+
+You may re-apply with the corrected documentation at https://coop.tuntongtech.com/coop-register or reply directly to support@tuntongtech.com if you require assistance.
+
+Sincerely,
+Tuntong Tech Compliance Team
+support@tuntongtech.com
+https://tuntongtech.com`;
+
+    const emailNotification: RegistrationEmailNotification = {
+      from: 'support@tuntongtech.com',
+      to: reg.adminEmail,
+      subject: emailSubject,
+      sentAt: new Date().toISOString(),
+      body: emailBody,
+    };
+
+    reg.status = 'REJECTED';
+    reg.rejectionReason = reason;
+    reg.reviewedAt = new Date().toISOString();
+    reg.reviewedBy = reviewedBy;
+    reg.emailNotification = emailNotification;
+
+    return {
+      success: true,
+      registration: reg,
+    };
+  }
 }
+

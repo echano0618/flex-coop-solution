@@ -83,3 +83,42 @@ export interface SystemBroadcast {
   createdAt: string;
   createdBy: string;
 }
+
+export type RegistrationStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+
+export interface RegistrationEmailNotification {
+  from: string; // 'support@tuntongtech.com'
+  to: string;
+  subject: string;
+  sentAt: string;
+  body: string;
+  domain?: string;
+  temporaryPassword?: string;
+}
+
+export interface CooperativeRegistration {
+  id: string; // e.g. "REG-2026-1049"
+  name: string;
+  coopType: string;
+  slug: string;
+  subdomain: string;
+  cdaRegistrationNumber: string;
+  tin: string;
+  contactEmail: string;
+  contactPhone?: string;
+  address: string;
+  adminFirstName: string;
+  adminMiddleName?: string;
+  adminLastName: string;
+  adminEmail: string;
+  validIdUrl?: string;
+  validIdFileName?: string;
+  validIdFileSizeMb?: string;
+  status: RegistrationStatus;
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
+  oneTimePassword?: string;
+  emailNotification?: RegistrationEmailNotification;
+}
