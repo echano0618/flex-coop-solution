@@ -90,10 +90,17 @@ export function middleware(request: NextRequest) {
       });
     }
 
-    // On tenant subdomain without an active session cookie, redirect to /login
+    // Require active staff admin session cookie to access the Admin Portal dashboard
     const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
-    if (isTenantSubdomain && !adminCookie) {
-      return NextResponse.redirect(new URL('/login', request.url));
+    if (!adminCookie) {
+      const loginUrl = new URL('/login', request.url);
+      if (hasCoopQuery) {
+        const coopVal = request.nextUrl.searchParams.get('coop') || request.nextUrl.searchParams.get('tenant');
+        if (coopVal) loginUrl.searchParams.set('coop', coopVal);
+      } else if (isTenantSubdomain && tenantSlug) {
+        loginUrl.searchParams.set('coop', tenantSlug);
+      }
+      return NextResponse.redirect(loginUrl);
     }
   }
 

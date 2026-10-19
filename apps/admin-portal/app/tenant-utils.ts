@@ -353,6 +353,11 @@ export function getTenantAdminSession(expectedSlug?: string): any | null {
       if (val) {
         try {
           const parsed = JSON.parse(val);
+          // Block and purge legacy mock/development bypass sessions
+          if (parsed && (parsed.id === 'usr_gm_session' || parsed.id === 'usr_sysadmin_01')) {
+            localStorage.removeItem(key);
+            continue;
+          }
           if (parsed && (parsed.token || parsed.role || parsed.email)) {
             if (expectedSlug && expectedSlug !== 'default') {
               if (parsed.coopSlug && !isCoopSlugMatch(parsed.coopSlug, expectedSlug)) {

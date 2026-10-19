@@ -165,32 +165,6 @@ const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
 
 const STAFF_ACCOUNTS: StaffAccount[] = [
   {
-    id: 'usr_sysadmin_01',
-    role: 'SYSTEM_ADMIN',
-    roleTitle: 'Platform System Admin',
-    name: 'Platform System Administrator',
-    initials: 'SA',
-    color: 'bg-red-600',
-    description: 'Root platform administrative access, IAM user provisioning, RBAC configuration, System Configuration, and Platform Escrow monitoring.',
-    allowedTabs: [
-      'overview',
-      'members',
-      'products',
-      'los',
-      'calculator',
-      'collateral',
-      'cashier',
-      'accounting',
-      'surplus',
-      'invoices',
-      'reports',
-      'iam',
-      'rbac',
-      'system_config',
-      'platform_usage',
-    ],
-  },
-  {
     id: 'usr_gm_01',
     role: 'GENERAL_MANAGER',
     roleTitle: 'General Manager / Superadmin',
@@ -214,6 +188,23 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
       'rbac',
       'system_config',
       'platform_usage',
+    ],
+  },
+  {
+    id: 'usr_sysadmin_01',
+    role: 'SYSTEM_ADMIN',
+    roleTitle: 'Cooperative System Admin',
+    name: 'IT System Administrator',
+    initials: 'IT',
+    color: 'bg-slate-700',
+    description: 'Cooperative internal IT user administration, access control provisioning, and system configuration management.',
+    allowedTabs: [
+      'overview',
+      'iam',
+      'rbac',
+      'system_config',
+      'platform_usage',
+      'reports',
     ],
   },
   {
@@ -442,7 +433,16 @@ export default function AdminDashboard() {
 
         if (stored) {
           const parsed = stored;
-          if (parsed && (parsed.token || parsed.role || parsed.email)) {
+          // Invalidate legacy dev bypass sessions
+          if (parsed && (parsed.id === 'usr_gm_session' || parsed.id === 'usr_sysadmin_01' || parsed.name === 'Platform System Administrator')) {
+            clearTenantAdminSession(tenantInfo.slug);
+            stored = null;
+          }
+        }
+
+        if (stored) {
+          const parsed = stored;
+          if (parsed && parsed.token && (parsed.role || parsed.email)) {
             const matched = STAFF_ACCOUNTS.find((a) => a.role === parsed.role || a.email === parsed.email) || {
               id: parsed.id || 'usr_session',
               role: parsed.role || 'GENERAL_MANAGER',
@@ -3195,38 +3195,16 @@ export default function AdminDashboard() {
                 Your session is being verified for <strong className="text-slate-200">{coopName}</strong>. If you are not redirected automatically, select an option below:
               </p>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 pt-2 justify-center">
+            <div className="pt-2 flex justify-center">
               <button
                 type="button"
                 onClick={() => {
                   window.location.href = tenantSlug && tenantSlug !== 'default' ? `/login?coop=${tenantSlug}` : '/login';
                 }}
-                className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow transition"
+                className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1.5"
               >
-                Go to Staff Login
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const session = {
-                    id: 'usr_gm_session',
-                    name: gm.name || 'Felix Echano',
-                    email: gm.email || 'admin@familycoop.ph',
-                    role: 'GENERAL_MANAGER',
-                    roleTitle: 'General Manager / Superadmin',
-                    coopName: coopName,
-                    coopSlug: tenantSlug,
-                    token: `adm_sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-                    loginAt: new Date().toISOString(),
-                  };
-                  setTenantAdminSession(session, tenantSlug, coopName);
-                  setCurrentStaff(STAFF_ACCOUNTS[0]);
-                  setIsAuthenticated(true);
-                  setIsCheckingAuth(false);
-                }}
-                className="w-full sm:w-auto px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow transition"
-              >
-                Sign In as General Manager
+                <span>Go to Staff Login</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -3291,18 +3269,6 @@ export default function AdminDashboard() {
 
         {/* Drawer Footer Utilities */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
-          {currentStaff.role === 'SYSTEM_ADMIN' && (
-            <Link
-              href="/operator"
-              className="flex items-center justify-between p-2 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/70 border border-indigo-700/60 text-indigo-300 transition text-[11px] font-bold shadow-sm"
-            >
-              <div className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                <span>SaaS Operator Fleet Portal</span>
-              </div>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          )}
 
           <Link
             href="/member"
@@ -3382,19 +3348,6 @@ export default function AdminDashboard() {
 
             {/* Mobile Drawer Footer Utilities */}
             <div className="p-3 border-t border-slate-800 bg-slate-950/40 space-y-2 text-xs">
-              {currentStaff.role === 'SYSTEM_ADMIN' && (
-                <Link
-                  href="/operator"
-                  onClick={() => setIsMobileDrawerOpen(false)}
-                  className="flex items-center justify-between p-2 rounded-lg bg-indigo-950/70 border border-indigo-700/60 text-indigo-300 transition text-[11px] font-bold"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>SaaS Operator Fleet Portal</span>
-                  </div>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
-              )}
 
               <Link
                 href="/member"
