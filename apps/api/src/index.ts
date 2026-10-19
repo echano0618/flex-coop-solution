@@ -1538,8 +1538,24 @@ app.post('/api/v1/members', async (req: Request, res: Response) => {
     try {
       const fsService = FirestoreCoopService.getInstance();
       await fsService.saveMember(tenantId, newMember);
+      await fsService.saveMemberCredential(tenantId, {
+        username: email.trim().toLowerCase(),
+        email: email.trim().toLowerCase(),
+        phone: phone || '',
+        pin: '123456',
+        password: 'password',
+        name: `${firstName} ${lastName}`.trim(),
+        memberId,
+        memberNumber,
+        role: 'MEMBER',
+        roleTitle: 'Regular Member',
+        isStaff: false,
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
     } catch (fsErr) {
-      console.warn('Firestore saveMember fallback:', fsErr);
+      console.warn('Firestore saveMember/saveMemberCredential fallback:', fsErr);
     }
 
     const members = dbStore.members.get(tenantId) || [];
