@@ -163,6 +163,16 @@ export class PayMongoService {
     const authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
     const amountInCentavos = Math.round(params.amount * 100);
 
+    // Ensure all metadata values are strings, as PayMongo rejects non-string metadata attributes
+    const sanitizedMetadata: Record<string, string> = {};
+    if (params.metadata) {
+      for (const [key, val] of Object.entries(params.metadata)) {
+        if (val !== undefined && val !== null) {
+          sanitizedMetadata[key] = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        }
+      }
+    }
+
     // 1. Create Payment Intent
     const intentRes = await fetch(`${this.getBaseUrl()}/payment_intents`, {
       method: 'POST',
@@ -177,7 +187,7 @@ export class PayMongoService {
             payment_method_allowed: ['qrph'],
             currency: 'PHP',
             description: params.description,
-            metadata: params.metadata || {},
+            metadata: sanitizedMetadata,
           },
         },
       }),
