@@ -987,22 +987,29 @@ export default function MemberPortalPage() {
   const requiresCoMaker = Boolean(selectedProduct.requiresCoMaker);
   const coMakerRuleText = selectedProduct.coMakerRuleDescription || 'Requires active co-maker endorsement with joint solidary liability.';
 
-  // Helper functions for Principal vs Monthly Amortization calculation
-  const computePrincipalFromAmortization = (amort: number, term: number, rate: number): number => {
-    const mRate = rate / 12.0;
-    if (mRate === 0) return Math.round(amort * term);
-    const f = Math.pow(1.0 + mRate, term);
-    if (f <= 1.0) return Math.round(amort * term);
-    const rawPrincipal = amort * ((f - 1.0) / (mRate * f));
+  // Term unit & payment frequency calculations
+  const isWeeks = selectedProduct.termUnit === 'WEEKS';
+  const isBiWeekly = isWeeks && selectedProduct.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
+  const periodsPerYear = isWeeks ? (isBiWeekly ? 26.0 : 52.0) : 12.0;
+  const effectiveTermPeriods = isWeeks
+    ? (isBiWeekly ? Math.max(1, Math.ceil(loanTermWeeks / 2)) : Math.max(1, loanTermWeeks))
+    : Math.max(1, loanTerm);
+  const periodicRate = annualRate / periodsPerYear;
+
+  // Helper functions for Principal vs Periodic Amortization calculation
+  const computePrincipalFromAmortization = (amort: number, periods: number, pRate: number): number => {
+    if (pRate === 0) return Math.round(amort * periods);
+    const f = Math.pow(1.0 + pRate, periods);
+    if (f <= 1.0) return Math.round(amort * periods);
+    const rawPrincipal = amort * ((f - 1.0) / (pRate * f));
     return Math.round(rawPrincipal / 100) * 100;
   };
 
-  const computeAmortizationFromPrincipal = (principal: number, term: number, rate: number): number => {
-    const mRate = rate / 12.0;
-    if (mRate === 0) return Math.round((principal / term) * 100) / 100;
-    const f = Math.pow(1.0 + mRate, term);
-    if (f <= 1.0) return Math.round((principal / term) * 100) / 100;
-    return Math.round(((principal * (mRate * f)) / (f - 1.0)) * 100) / 100;
+  const computeAmortizationFromPrincipal = (principal: number, periods: number, pRate: number): number => {
+    if (pRate === 0) return Math.round((principal / periods) * 100) / 100;
+    const f = Math.pow(1.0 + pRate, periods);
+    if (f <= 1.0) return Math.round((principal / periods) * 100) / 100;
+    return Math.round(((principal * (pRate * f)) / (f - 1.0)) * 100) / 100;
   };
 
   // Technology Fee Treatment (Online Single Database Config: Pass-Through vs OPEX)
@@ -1161,14 +1168,6 @@ export default function MemberPortalPage() {
     ? Math.round(loanAmount * (coopFilingFeeRatePercent / 100) * 100) / 100
     : 0;
 
-  // Term unit & payment frequency calculations
-  const isWeeks = selectedProduct.termUnit === 'WEEKS';
-  const isBiWeekly = isWeeks && selectedProduct.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
-  const periodsPerYear = isWeeks ? (isBiWeekly ? 26.0 : 52.0) : 12.0;
-  const effectiveTermPeriods = isWeeks
-    ? (isBiWeekly ? Math.max(1, Math.ceil(loanTermWeeks / 2)) : Math.max(1, loanTermWeeks))
-    : Math.max(1, loanTerm);
-
   // Mandatory Share Capital Purchase
   const mandatorySharePrice = 100; // Par value per share
   const mandatoryShareQty = selectedProduct.mandatoryShareQuantity || 10;
@@ -1200,14 +1199,14 @@ export default function MemberPortalPage() {
   const netProceeds = Math.max(0, loanAmount - memberTechFeeDeduction - coopServiceFee - advanceInterest - optionalFeesTotal - upfrontShareDeductionAmount);
 
   // Periodic annuity installment
-  const periodicRate = annualRate / periodsPerYear;
   const periodicFactor = Math.pow(1.0 + periodicRate, effectiveTermPeriods);
   const basePeriodicInstallment = Math.round(((loanAmount * (periodicRate * periodicFactor)) / (periodicFactor - 1.0)) * 100) / 100;
   const monthlyInstallment = basePeriodicInstallment + shareAmortizationPerPeriod;
   const totalInterest = Math.round(((basePeriodicInstallment * effectiveTermPeriods) - loanAmount) * 100) / 100;
-  const annualTermYears = isWeeks ? (loanTermWeeks / 52.0) : (loanTerm / 12.0);
   const totalDeductions = memberTechFeeDeduction + coopServiceFee + advanceInterest + optionalFeesTotal + upfrontShareDeductionAmount;
-  const eir = Math.round((((totalInterest + totalDeductions) / Math.max(1, netProceeds)) / Math.max(0.08, annualTermYears)) * 10000) / 100;
+  // Actual EIR based on the loan tenure (not annualized / not p.a.)
+  const eirTenure = Math.round(((totalInterest + totalDeductions) / Math.max(1, netProceeds)) * 10000) / 100;
+  const eir = eirTenure;
 
   // Pass-On Fee for QR Ph
   const passOnFee = repayChannel === 'PAYMONGO_QRPH' ? Math.max(15.0, Math.round(repayAmount * 0.015 * 100) / 100) : 0.0;
@@ -2645,17 +2644,41 @@ export default function MemberPortalPage() {
                                 const pRate = p.annualInterestRate || 0.12;
                                 const pMin = p.minAmount || 5000;
                                 const pMax = p.maxAmount || 100000;
-                                if (p.termUnit === 'WEEKS') {
+                                const pIsWeeks = p.termUnit === 'WEEKS';
+                                const pIsBiWeekly = pIsWeeks && p.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
+                                const pPeriodsPerYear = pIsWeeks ? (pIsBiWeekly ? 26.0 : 52.0) : 12.0;
+                                let resolvedWeeks = loanTermWeeks;
+                                let resolvedMonths = loanTerm;
+
+                                if (pIsWeeks) {
                                   const minW = p.minTermWeeks || 4;
                                   const maxW = p.maxTermWeeks || 52;
-                                  if (loanTermWeeks > maxW) setLoanTermWeeks(maxW);
-                                  if (loanTermWeeks < minW) setLoanTermWeeks(minW);
+                                  if (resolvedWeeks > maxW) resolvedWeeks = maxW;
+                                  if (resolvedWeeks < minW) resolvedWeeks = minW;
+                                  setLoanTermWeeks(resolvedWeeks);
                                 } else {
-                                  const nextTerm = loanTerm > p.maxTermMonths ? p.maxTermMonths : loanTerm;
-                                  if (loanTerm > p.maxTermMonths) setLoanTerm(p.maxTermMonths);
+                                  const minM = p.minTermMonths || 1;
+                                  const maxM = p.maxTermMonths || 36;
+                                  if (resolvedMonths > maxM) resolvedMonths = maxM;
+                                  if (resolvedMonths < minM) resolvedMonths = minM;
+                                  setLoanTerm(resolvedMonths);
                                 }
+
+                                const pTermPeriods = pIsWeeks
+                                  ? (pIsBiWeekly ? Math.max(1, Math.ceil(resolvedWeeks / 2)) : Math.max(1, resolvedWeeks))
+                                  : Math.max(1, resolvedMonths);
+                                const pPeriodicRate = pRate / pPeriodsPerYear;
+
                                 if (loanCalculationBasis === 'AMORTIZATION') {
-                                  const computed = computePrincipalFromAmortization(desiredAmortization, loanTerm, pRate);
+                                  let targetAmort = desiredAmortization;
+                                  if (pIsWeeks && targetAmort > 3500) {
+                                    targetAmort = 1200;
+                                    setDesiredAmortization(1200);
+                                  } else if (!pIsWeeks && targetAmort < 1500) {
+                                    targetAmort = 4442;
+                                    setDesiredAmortization(4442);
+                                  }
+                                  const computed = computePrincipalFromAmortization(targetAmort, pTermPeriods, pPeriodicRate);
                                   const clamped = Math.min(pMax, Math.max(pMin, computed));
                                   setLoanAmount(clamped);
                                 } else {
@@ -2701,7 +2724,9 @@ export default function MemberPortalPage() {
                     <div className="flex justify-between items-center">
                       <label className="text-xs font-bold text-slate-700">2. Loan Calculation Basis</label>
                       <span className="text-[11px] font-semibold text-emerald-800">
-                        {loanCalculationBasis === 'PRINCIPAL' ? 'Principal-Driven' : 'Budget / Amortization-Driven'}
+                        {loanCalculationBasis === 'PRINCIPAL'
+                          ? 'Principal-Driven'
+                          : (isWeeks ? 'Weekly Budget-Driven' : 'Monthly Budget-Driven')}
                       </span>
                     </div>
 
@@ -2726,9 +2751,9 @@ export default function MemberPortalPage() {
                         onClick={() => {
                           setLoanCalculationBasis('AMORTIZATION');
                           const currentAmort = Math.round(monthlyInstallment);
-                          const initialAmort = currentAmort > 0 ? currentAmort : 4442;
+                          const initialAmort = currentAmort > 0 ? currentAmort : (isWeeks ? 1200 : 4442);
                           setDesiredAmortization(initialAmort);
-                          const computed = computePrincipalFromAmortization(initialAmort, loanTerm, annualRate);
+                          const computed = computePrincipalFromAmortization(initialAmort, effectiveTermPeriods, periodicRate);
                           const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
                           setLoanAmount(clamped);
                         }}
@@ -2739,7 +2764,7 @@ export default function MemberPortalPage() {
                         }`}
                       >
                         <Calculator className="w-3.5 h-3.5" />
-                        <span>Monthly Amortization</span>
+                        <span>{isWeeks ? (isBiWeekly ? 'Bi-Weekly Amortization' : 'Weekly Amortization') : 'Monthly Amortization'}</span>
                       </button>
                     </div>
 
@@ -2766,37 +2791,41 @@ export default function MemberPortalPage() {
                           <span>Max: ₱{maxPrincipal.toLocaleString()}.00</span>
                         </div>
                         <div className="flex justify-between items-center pt-1 border-t border-slate-200 text-xs">
-                          <span className="text-slate-500">Resulting Monthly Amortization:</span>
+                          <span className="text-slate-500">
+                            Resulting {isWeeks ? (isBiWeekly ? 'Bi-Weekly' : 'Weekly') : 'Monthly'} Amortization:
+                          </span>
                           <span className="font-bold text-slate-900 font-mono">
-                            ₱{monthlyInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                            ₱{monthlyInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / {isWeeks ? (isBiWeekly ? '2 wks' : 'wk') : 'mo'}
                           </span>
                         </div>
                       </div>
                     ) : (
-                      /* Option B: Desired Monthly Amortization */
+                      /* Option B: Desired Amortization */
                       <div className="p-4 bg-emerald-50/70 border border-emerald-300 rounded-xl space-y-3.5">
                         <div>
                           <div className="flex justify-between items-center mb-1">
-                            <span className="text-xs font-bold text-emerald-950">Target Monthly Payment Budget:</span>
+                            <span className="text-xs font-bold text-emerald-950">
+                              Target {isWeeks ? (isBiWeekly ? 'Bi-Weekly' : 'Weekly') : 'Monthly'} Payment Budget:
+                            </span>
                             <span className="text-sm font-black text-emerald-800 font-mono">
-                              ₱{desiredAmortization.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                              ₱{desiredAmortization.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / {isWeeks ? (isBiWeekly ? '2 wks' : 'wk') : 'mo'}
                             </span>
                           </div>
                           <p className="text-[11px] text-emerald-800">
-                            Slide or pick your target monthly repayment capacity. We compute the maximum loan principal for you.
+                            Slide or pick your target {isWeeks ? (isBiWeekly ? 'bi-weekly' : 'weekly') : 'monthly'} repayment capacity. We compute the maximum loan principal for you.
                           </p>
                         </div>
 
                         <input
                           type="range"
-                          min={Math.max(500, Math.floor(computeAmortizationFromPrincipal(minPrincipal, loanTerm, annualRate) / 50) * 50)}
-                          max={Math.ceil(computeAmortizationFromPrincipal(maxPrincipal, loanTerm, annualRate) / 50) * 50}
-                          step={100}
+                          min={Math.max(isWeeks ? 200 : 500, Math.floor(computeAmortizationFromPrincipal(minPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50)}
+                          max={Math.ceil(computeAmortizationFromPrincipal(maxPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50}
+                          step={isWeeks ? 50 : 100}
                           value={desiredAmortization}
                           onChange={(e) => {
                             const newAmort = Number(e.target.value);
                             setDesiredAmortization(newAmort);
-                            const computed = computePrincipalFromAmortization(newAmort, loanTerm, annualRate);
+                            const computed = computePrincipalFromAmortization(newAmort, effectiveTermPeriods, periodicRate);
                             const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
                             setLoanAmount(clamped);
                           }}
@@ -2805,13 +2834,16 @@ export default function MemberPortalPage() {
 
                         {/* Quick Stepper Pills */}
                         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                          {[2000, 3000, 4500, 6000, 8000, 10000].map((amt) => (
+                          {(isWeeks
+                            ? [500, 1000, 1500, 2000, 2500, 3000]
+                            : [2000, 3000, 4500, 6000, 8000, 10000]
+                          ).map((amt) => (
                             <button
                               key={amt}
                               type="button"
                               onClick={() => {
                                 setDesiredAmortization(amt);
-                                const computed = computePrincipalFromAmortization(amt, loanTerm, annualRate);
+                                const computed = computePrincipalFromAmortization(amt, effectiveTermPeriods, periodicRate);
                                 const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
                                 setLoanAmount(clamped);
                               }}
@@ -2821,7 +2853,7 @@ export default function MemberPortalPage() {
                                   : 'bg-white text-emerald-900 border-emerald-300 hover:bg-emerald-100'
                               }`}
                             >
-                              ₱{amt.toLocaleString()}/mo
+                              ₱{amt.toLocaleString()}/{isWeeks ? (isBiWeekly ? '2 wks' : 'wk') : 'mo'}
                             </button>
                           ))}
                         </div>
@@ -2833,7 +2865,7 @@ export default function MemberPortalPage() {
                               Computed Loan Principal
                             </div>
                             <div className="text-[11px] text-slate-600 mt-0.5">
-                              Budget: <strong>₱{desiredAmortization.toLocaleString()}/mo</strong> • {loanTerm} mos @ {(annualRate * 100).toFixed(1)}% p.a.
+                              Budget: <strong>₱{desiredAmortization.toLocaleString()}/{isWeeks ? (isBiWeekly ? '2 wks' : 'wk') : 'mo'}</strong> • {isWeeks ? `${loanTermWeeks} wks` : `${loanTerm} mos`} @ {(annualRate * 100).toFixed(1)}% p.a.
                             </div>
                           </div>
                           <div className="text-right">
@@ -2866,7 +2898,15 @@ export default function MemberPortalPage() {
                           <button
                             key={w}
                             type="button"
-                            onClick={() => setLoanTermWeeks(w)}
+                            onClick={() => {
+                              setLoanTermWeeks(w);
+                              if (loanCalculationBasis === 'AMORTIZATION') {
+                                const periods = isBiWeekly ? Math.max(1, Math.ceil(w / 2)) : Math.max(1, w);
+                                const computed = computePrincipalFromAmortization(desiredAmortization, periods, periodicRate);
+                                const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
+                                setLoanAmount(clamped);
+                              }
+                            }}
                             className={`flex-1 min-w-[65px] py-2 rounded-lg border text-xs font-bold transition-colors ${
                               loanTermWeeks === w
                                 ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
@@ -2886,7 +2926,7 @@ export default function MemberPortalPage() {
                             onClick={() => {
                               setLoanTerm(t);
                               if (loanCalculationBasis === 'AMORTIZATION') {
-                                const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate);
+                                const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate / 12.0);
                                 const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
                                 setLoanAmount(clamped);
                               }
@@ -3276,7 +3316,9 @@ export default function MemberPortalPage() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-600">Effective Interest Rate (EIR):</span>
-                          <span className="font-bold text-emerald-700">{eir.toFixed(2)}% p.a.</span>
+                          <span className="font-bold text-emerald-700">
+                            {eirTenure.toFixed(2)}% ({isWeeks ? `${loanTermWeeks} Wks` : `${loanTerm} Mos`} Tenure)
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -3991,8 +4033,13 @@ export default function MemberPortalPage() {
             amount: loanAmount,
             principalAmount: loanAmount,
             annualRate: annualRate,
-            termMonths: loanTerm,
+            termMonths: isWeeks ? Math.ceil(loanTermWeeks / 4) : loanTerm,
+            termWeeks: isWeeks ? loanTermWeeks : undefined,
+            termUnit: selectedProduct.termUnit || 'MONTHS',
+            weeklyPaymentFrequency: selectedProduct.weeklyPaymentFrequency || 'EVERY_WEEK',
+            paymentFrequency: isWeeks ? (isBiWeekly ? 'BI_WEEKLY' : 'WEEKLY') : 'MONTHLY',
             monthlyAmortization: monthlyInstallment,
+            periodicInstallment: monthlyInstallment,
             techFeeDeduction: memberTechFeeDeduction,
             coopServiceFee: coopServiceFee,
             advanceInterest: advanceInterest,
@@ -4001,10 +4048,15 @@ export default function MemberPortalPage() {
             status: 'SUBMITTED',
           };
 
+          const discIsWeeks = (activeDisclosureLoan.termUnit || selectedProduct.termUnit) === 'WEEKS' || Boolean(activeDisclosureLoan.termWeeks);
+          const discIsBiWeekly = (activeDisclosureLoan.weeklyPaymentFrequency || selectedProduct.weeklyPaymentFrequency) === 'EVERY_OTHER_WEEK';
+          const discTermWeeks = Number(activeDisclosureLoan.termWeeks || (discIsWeeks ? loanTermWeeks : 0));
           const discPrincipal = Number(activeDisclosureLoan.principalAmount || activeDisclosureLoan.amount || 50000);
           const discTerm = Number(activeDisclosureLoan.termMonths || 12);
+          const discInstallmentsCount = discIsWeeks ? (discIsBiWeekly ? Math.ceil(discTermWeeks / 2) : discTermWeeks) : discTerm;
+          const discFrequencyLabel = discIsWeeks ? (discIsBiWeekly ? 'bi-weekly' : 'weekly') : 'monthly';
           const discAnnualRate = Number(activeDisclosureLoan.annualRate ?? activeDisclosureLoan.interestRateAnnual ?? 0.12);
-          const discInstallment = Number(activeDisclosureLoan.monthlyAmortization || activeDisclosureLoan.monthlyInstallment || (() => {
+          const discInstallment = Number(activeDisclosureLoan.periodicInstallment || activeDisclosureLoan.monthlyAmortization || activeDisclosureLoan.monthlyInstallment || (() => {
             const mRate = discAnnualRate / 12.0;
             const f = Math.pow(1.0 + mRate, discTerm);
             return Math.round(((discPrincipal * (mRate * f)) / (f - 1.0)) * 100) / 100;
@@ -4107,7 +4159,11 @@ export default function MemberPortalPage() {
                   </div>
                   <div>
                     <span className="text-slate-500">Repayment Term: </span>
-                    <strong>{discTerm} Monthly Installments</strong>
+                    <strong>
+                      {discIsWeeks
+                        ? `${discTermWeeks} Weeks (${discInstallmentsCount} ${discIsBiWeekly ? 'Bi-Weekly' : 'Weekly'} Installments)`
+                        : `${discTerm} Monthly Installments`}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Gross Loan Principal: </span>
@@ -4119,11 +4175,17 @@ export default function MemberPortalPage() {
                   </div>
                   <div>
                     <span className="text-slate-500">Effective Interest Rate (EIR): </span>
-                    <strong className="text-emerald-700">{discEir.toFixed(2)}% per annum</strong>
+                    <strong className="text-emerald-700">{discEir.toFixed(2)}% (Loan Tenure)</strong>
                   </div>
                   <div>
-                    <span className="text-slate-500">Monthly Installment Amortization: </span>
-                    <strong className="text-slate-900 font-mono">₱{discInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo</strong>
+                    <span className="text-slate-500">
+                      {discIsWeeks
+                        ? (discIsBiWeekly ? 'Bi-Weekly Installment Amortization: ' : 'Weekly Installment Amortization: ')
+                        : 'Monthly Installment Amortization: '}
+                    </span>
+                    <strong className="text-slate-900 font-mono">
+                      ₱{discInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / {discIsWeeks ? (discIsBiWeekly ? '2 wks' : 'wk') : 'mo'}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">SaaS Platform Processing Fee: </span>
@@ -4147,7 +4209,7 @@ export default function MemberPortalPage() {
 
                 <div className="p-4 bg-white rounded-lg border border-slate-200 text-xs font-mono text-slate-700 leading-relaxed">
                   <div className="font-bold text-slate-900 uppercase mb-1">PROMISSORY NOTE &amp; LOAN AGREEMENT SUMMARY</div>
-                  {`"FOR VALUE RECEIVED, I, ${(activeDisclosureLoan.memberName || currentMember.name).toUpperCase()}, promise to pay to the order of ${discCreditor.toUpperCase()} the sum of ${discPromissoryWords} (PHP ${discPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) in ${discTerm} equal monthly installments of PHP ${discInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. In case of default, a 3% monthly surcharge applies. Solidary liability acknowledged pursuant to the Cooperative Bylaws."`}
+                  {`"FOR VALUE RECEIVED, I, ${(activeDisclosureLoan.memberName || currentMember.name).toUpperCase()}, promise to pay to the order of ${discCreditor.toUpperCase()} the sum of ${discPromissoryWords} (PHP ${discPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) in ${discInstallmentsCount} equal ${discFrequencyLabel} installments of PHP ${discInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. In case of default, a 3% monthly surcharge applies. Solidary liability acknowledged pursuant to the Cooperative Bylaws."`}
                 </div>
               </div>
             </div>
