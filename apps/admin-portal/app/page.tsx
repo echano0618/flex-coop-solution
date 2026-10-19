@@ -74,6 +74,8 @@ import {
   Save,
   Loader2,
   PiggyBank,
+  Zap,
+  AlertCircle,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -511,7 +513,7 @@ export default function AdminDashboard() {
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
 
   // System Configuration Sub-Section State
-  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee' | 'savings_deposit'>('membership_registration');
+  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee' | 'savings_deposit' | 'paymongo'>('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -1063,6 +1065,134 @@ export default function AdminDashboard() {
 
   const handleResetSavingsDepositConfig = () => {
     handleSaveSavingsDepositConfig(true);
+  };
+
+  // Cooperative PayMongo Payment Gateway Configuration
+  const [tenantPaymongoConfig, setTenantPaymongoConfig] = useState<{
+    secretKey: string;
+    publicKey: string;
+    webhookSecret: string;
+    environment: 'test' | 'live';
+    isEnabled: boolean;
+    updatedAt?: string;
+    updatedBy?: string;
+  }>({
+    secretKey: '',
+    publicKey: '',
+    webhookSecret: '',
+    environment: 'test',
+    isEnabled: true,
+  });
+  const [showPaymongoSecretKey, setShowPaymongoSecretKey] = useState<boolean>(false);
+  const [tenantPaymongoTesting, setTenantPaymongoTesting] = useState<boolean>(false);
+  const [tenantPaymongoTestResult, setTenantPaymongoTestResult] = useState<{
+    success: boolean;
+    message: string;
+    responseTimeMs?: number;
+    livemode?: boolean;
+  } | null>(null);
+  const [tenantPaymongoSaving, setTenantPaymongoSaving] = useState<boolean>(false);
+  const [tenantPaymongoNotification, setTenantPaymongoNotification] = useState<string | null>(null);
+
+  const fetchTenantPaymongoConfig = async () => {
+    try {
+      const tenant = resolveTenantCoop();
+      const res = await fetch(`${getApiBaseUrl()}/tenant/paymongo-config`, {
+        headers: {
+          'x-tenant-slug': tenant.slug || 'family-coop',
+          'x-tenant-id': `tenant_${(tenant.slug || 'family').replace(/[-_]coop$/, '')}`,
+        },
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.data) {
+        setTenantPaymongoConfig({
+          secretKey: data.data.secretKey || '',
+          publicKey: data.data.publicKey || '',
+          webhookSecret: data.data.webhookSecret || '',
+          environment: data.data.environment || 'test',
+          isEnabled: data.data.isEnabled !== undefined ? Boolean(data.data.isEnabled) : true,
+          updatedAt: data.data.updatedAt,
+          updatedBy: data.data.updatedBy,
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load tenant PayMongo config:', err);
+    }
+  };
+
+  const handleSaveTenantPaymongoConfig = async () => {
+    if (!tenantPaymongoConfig.secretKey.trim() || !tenantPaymongoConfig.publicKey.trim()) {
+      alert('Secret Key and Public Key are required to save PayMongo configuration.');
+      return;
+    }
+    setTenantPaymongoSaving(true);
+    setTenantPaymongoNotification(null);
+    try {
+      const tenant = resolveTenantCoop();
+      const res = await fetch(`${getApiBaseUrl()}/tenant/paymongo-config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenant.slug || 'family-coop',
+          'x-tenant-id': `tenant_${(tenant.slug || 'family').replace(/[-_]coop$/, '')}`,
+        },
+        body: JSON.stringify({
+          ...tenantPaymongoConfig,
+          updatedBy: currentStaff.name || 'Cooperative Admin',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTenantPaymongoNotification('PayMongo gateway credentials updated successfully! Members will now pay directly to this cooperative account.');
+        setTimeout(() => setTenantPaymongoNotification(null), 5000);
+      } else {
+        alert(data.error || 'Failed to save PayMongo configuration.');
+      }
+    } catch (err: any) {
+      alert(`Network error saving PayMongo configuration: ${err.message}`);
+    } finally {
+      setTenantPaymongoSaving(false);
+    }
+  };
+
+  const handleTestTenantPaymongoConnection = async () => {
+    if (!tenantPaymongoConfig.secretKey.trim()) {
+      alert('Please enter a PayMongo Secret Key to test connection.');
+      return;
+    }
+    setTenantPaymongoTesting(true);
+    setTenantPaymongoTestResult(null);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/tenant/paymongo-test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ secretKey: tenantPaymongoConfig.secretKey.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTenantPaymongoTestResult({
+          success: true,
+          message: `PayMongo API connection verified! (Mode: ${data.livemode ? 'Live Production' : 'Sandbox Test Mode'}, Latency: ${data.responseTimeMs}ms)`,
+          responseTimeMs: data.responseTimeMs,
+          livemode: data.livemode,
+        });
+      } else {
+        setTenantPaymongoTestResult({
+          success: false,
+          message: data.error || 'Connection failed. Please verify your secret key.',
+          responseTimeMs: data.responseTimeMs,
+        });
+      }
+    } catch (err: any) {
+      setTenantPaymongoTestResult({
+        success: false,
+        message: `Network error: ${err.message}`,
+      });
+    } finally {
+      setTenantPaymongoTesting(false);
+    }
   };
 
   // Platform Escrow & Usage State
@@ -2173,9 +2303,19 @@ export default function AdminDashboard() {
       } catch (err) {
         console.warn('Error loading online system config:', err);
       }
+      try {
+        await fetchTenantPaymongoConfig();
+      } catch {}
     }
     loadOnlineSystemConfig();
   }, []);
+
+  // Sync PayMongo config when navigating to system_config tab or paymongo section
+  useEffect(() => {
+    if (activeTab === 'system_config' || systemConfigSection === 'paymongo') {
+      fetchTenantPaymongoConfig();
+    }
+  }, [activeTab, systemConfigSection]);
 
   // Re-sync whenever the admin navigates to the Membership tab
   useEffect(() => {
@@ -10245,6 +10385,24 @@ export default function AdminDashboard() {
 
               <button
                 type="button"
+                onClick={() => setSystemConfigSection('paymongo')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'paymongo'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
+                <span>PayMongo Payment Gateway</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'paymongo' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {tenantPaymongoConfig.isEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setSystemConfigSection('security_policies')}
                 className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
                   systemConfigSection === 'security_policies'
@@ -11484,6 +11642,270 @@ export default function AdminDashboard() {
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Save Savings Deposit Policy</span>
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-SECTION 7: COOPERATIVE PAYMONGO PAYMENT GATEWAY */}
+            {systemConfigSection === 'paymongo' && (
+              <div className="space-y-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+                  {/* Card Header */}
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                          <CreditCard className="w-3 h-3 text-emerald-600" />
+                          <span>Cooperative Payment Gateway</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">Cloud Firestore: /tenants/tenant_{tenantSlug.replace(/[-_]coop$/, '')}/system_config/paymongo</span>
+                      </div>
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">Cooperative PayMongo API Configuration</h3>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-3xl leading-relaxed">
+                        Configure your cooperative&apos;s own PayMongo API credentials for QR Ph generation, GCash, Maya, and online payments. All member share capital purchases, savings deposits, and loan repayments will settle directly into your cooperative&apos;s PayMongo merchant account.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border ${
+                        tenantPaymongoConfig.isEnabled
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                      }`}>
+                        <span className={`w-2 h-2 rounded-full ${tenantPaymongoConfig.isEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                        <span>{tenantPaymongoConfig.isEnabled ? 'GATEWAY ACTIVE' : 'GATEWAY DISABLED'}</span>
+                      </span>
+
+                      <span className={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold uppercase border ${
+                        tenantPaymongoConfig.environment === 'live'
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-blue-50 text-blue-700 border-blue-200'
+                      }`}>
+                        {tenantPaymongoConfig.environment === 'live' ? 'Live Production' : 'Sandbox Test Mode'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Notification Banner */}
+                  {tenantPaymongoNotification && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{tenantPaymongoNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setTenantPaymongoNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {/* API Credentials Configuration Form */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {/* Secret Key Input */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Key className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>PayMongo Secret Key (sk_live_ / sk_test_)</span>
+                        </span>
+                        <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPaymongoSecretKey ? 'text' : 'password'}
+                          value={tenantPaymongoConfig.secretKey}
+                          onChange={(e) =>
+                            setTenantPaymongoConfig((prev) => ({ ...prev, secretKey: e.target.value.trim() }))
+                          }
+                          placeholder="sk_live_... or sk_test_..."
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPaymongoSecretKey(!showPaymongoSecretKey)}
+                          className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
+                        >
+                          {showPaymongoSecretKey ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Confidential API key used to securely create payment intents and verify QR Ph settlement.
+                      </p>
+                    </div>
+
+                    {/* Public Key Input */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>PayMongo Public Key (pk_live_ / pk_test_)</span>
+                        </span>
+                        <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={tenantPaymongoConfig.publicKey}
+                          onChange={(e) =>
+                            setTenantPaymongoConfig((prev) => ({ ...prev, publicKey: e.target.value.trim() }))
+                          }
+                          placeholder="pk_live_... or pk_test_..."
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-16 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(tenantPaymongoConfig.publicKey);
+                            alert('Public key copied to clipboard!');
+                          }}
+                          className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Safe public identifier used by the Member Portal payment interface.
+                      </p>
+                    </div>
+
+                    {/* Webhook Secret Input */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                        <span>PayMongo Webhook Signing Secret (whsec_...)</span>
+                        <span className="text-[10px] text-slate-400 font-semibold">Optional</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={tenantPaymongoConfig.webhookSecret}
+                        onChange={(e) =>
+                          setTenantPaymongoConfig((prev) => ({ ...prev, webhookSecret: e.target.value.trim() }))
+                        }
+                        placeholder="whsec_..."
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        Webhook endpoint: <code className="text-slate-700 font-bold bg-slate-100 px-1 py-0.5 rounded">/api/v1/payments/paymongo/webhook</code>
+                      </p>
+                    </div>
+
+                    {/* Environment & Gateway Status Toggle */}
+                    <div className="grid grid-cols-2 gap-3 items-start">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700 block">Gateway Environment</label>
+                        <select
+                          value={tenantPaymongoConfig.environment}
+                          onChange={(e) =>
+                            setTenantPaymongoConfig((prev) => ({
+                              ...prev,
+                              environment: e.target.value as 'test' | 'live',
+                            }))
+                          }
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+                        >
+                          <option value="test">Sandbox Test Mode</option>
+                          <option value="live">Live Production</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700 block">Integration Switch</label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTenantPaymongoConfig((prev) => ({
+                              ...prev,
+                              isEnabled: !prev.isEnabled,
+                            }))
+                          }
+                          className={`w-full py-2.5 rounded-xl font-bold text-xs border transition ${
+                            tenantPaymongoConfig.isEnabled
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                              : 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100'
+                          }`}
+                        >
+                          {tenantPaymongoConfig.isEnabled ? 'Enabled (Active)' : 'Disabled'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Test Connection Results Card */}
+                  {tenantPaymongoTestResult && (
+                    <div
+                      className={`p-4 rounded-xl border text-xs space-y-1 ${
+                        tenantPaymongoTestResult.success
+                          ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
+                          : 'bg-rose-50/70 border-rose-300 text-rose-950'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold">
+                        {tenantPaymongoTestResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-600" />
+                        )}
+                        <span>
+                          {tenantPaymongoTestResult.success ? 'PayMongo API Connection Successful' : 'Connection Failure'}
+                        </span>
+                      </div>
+                      <p className="opacity-90">{tenantPaymongoTestResult.message}</p>
+                    </div>
+                  )}
+
+                  {/* Informational Guidance Box */}
+                  <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span className="uppercase tracking-wider">Independent Merchant Account Direct Settlement</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      By configuring your cooperative&apos;s own PayMongo API keys, all QR Ph payments generated by members in the Member Self-Service portal will be directly remitted into your cooperative&apos;s verified bank account via PayMongo settlement.
+                    </p>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100">
+                    <div className="text-xs text-slate-500 font-mono">
+                      {tenantPaymongoConfig.updatedAt
+                        ? `Last updated: ${new Date(tenantPaymongoConfig.updatedAt).toLocaleString()} by ${tenantPaymongoConfig.updatedBy || 'Admin'}`
+                        : 'No custom credentials configured yet (using platform defaults)'}
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={handleTestTenantPaymongoConnection}
+                        disabled={tenantPaymongoTesting}
+                        className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs border border-slate-200 flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+                      >
+                        {tenantPaymongoTesting ? (
+                          <span className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Zap className="w-3.5 h-3.5 text-amber-600" />
+                        )}
+                        <span>{tenantPaymongoTesting ? 'Testing...' : 'Test Connection'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveTenantPaymongoConfig}
+                        disabled={tenantPaymongoSaving}
+                        className="flex-1 sm:flex-none px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm disabled:opacity-50"
+                      >
+                        {tenantPaymongoSaving ? (
+                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>{tenantPaymongoSaving ? 'Saving...' : 'Save PayMongo Configuration'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

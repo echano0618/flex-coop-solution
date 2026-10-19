@@ -61,6 +61,16 @@ export function resolveTenantFromHost(hostHeader?: string): string | null {
     return cleanHost.slice(0, -'.localhost'.length);
   }
 
+  // Custom Domain Mapping lookup from registered cooperatives
+  const matchReg = dbStore.coopRegistrations.find((r: any) =>
+    r.customDomain?.toLowerCase() === cleanHost ||
+    r.domain?.toLowerCase() === cleanHost ||
+    r.subdomain?.toLowerCase() === cleanHost
+  );
+  if (matchReg && matchReg.slug) {
+    return matchReg.slug;
+  }
+
   return null;
 }
 
@@ -1178,9 +1188,70 @@ app.post('/api/v1/operator/paymongo-test', async (req: Request, res: Response) =
 
 app.get('/api/v1/payments/paymongo/public-config', async (_req: Request, res: Response) => {
   try {
-    const config = await PayMongoService.getConfig();
+    const config = await PayMongoService.getPlatformConfig();
     res.json({
       success: true,
+      data: {
+        publicKey: config.publicKey,
+        isEnabled: config.isEnabled,
+        environment: config.environment,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Tenant-Scoped PayMongo Gateway Configuration (Admin Portal)
+app.get('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const config = await PayMongoService.getTenantConfig(tenantId);
+    res.json({ success: true, tenantId, data: config });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const { secretKey, publicKey, webhookSecret, environment, isEnabled, updatedBy } = req.body;
+    if (!secretKey || !publicKey) {
+      return res.status(400).json({ success: false, error: 'Secret Key and Public Key are required.' });
+    }
+    const saved = await PayMongoService.saveTenantConfig(
+      tenantId,
+      { secretKey, publicKey, webhookSecret, environment, isEnabled },
+      updatedBy || 'Cooperative Admin'
+    );
+    res.json({
+      success: true,
+      message: 'Cooperative PayMongo gateway credentials updated and saved to Cloud Firestore.',
+      data: saved,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/tenant/paymongo-test', async (req: Request, res: Response) => {
+  try {
+    const { secretKey } = req.body;
+    const result = await PayMongoService.testConnection(secretKey);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/v1/tenant/paymongo-public-config', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const config = await PayMongoService.getTenantConfig(tenantId);
+    res.json({
+      success: true,
+      tenantId,
       data: {
         publicKey: config.publicKey,
         isEnabled: config.isEnabled,
@@ -2196,7 +2267,7 @@ app.post('/api/v1/shares/paymongo/create-intent', async (req: Request, res: Resp
         convenienceFee,
         type: 'SHARE_CAPITAL',
       },
-    });
+    }, tenantId);
 
     let checkoutLinkUrl: string | undefined;
     let checkoutLinkId: string | undefined;
@@ -2205,7 +2276,7 @@ app.post('/api/v1/shares/paymongo/create-intent', async (req: Request, res: Resp
         amount: totalAmount,
         description: `Purchase of ${count} Cooperative Shares (@ ₱${parValue}/share)`,
         remarks: `Tenant: ${tenantId} | Member: ${memberId}`,
-      });
+      }, tenantId);
       checkoutLinkUrl = linkResult.checkoutUrl;
       checkoutLinkId = linkResult.linkId;
     } catch (linkErr) {
@@ -2235,6 +2306,7 @@ app.post('/api/v1/shares/paymongo/create-intent', async (req: Request, res: Resp
 });
 
 app.get('/api/v1/shares/paymongo/status/:intentId', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
   const { intentId } = req.params;
   const linkId = req.query.linkId as string | undefined;
 
@@ -2245,7 +2317,7 @@ app.get('/api/v1/shares/paymongo/status/:intentId', async (req: Request, res: Re
 
     if (intentId) {
       try {
-        const intentStatus = await PayMongoService.checkPaymentIntentStatus(intentId);
+        const intentStatus = await PayMongoService.checkPaymentIntentStatus(intentId, tenantId);
         paymentStatus = intentStatus.status;
         if (intentStatus.isPaid) {
           isPaid = true;
@@ -2258,7 +2330,7 @@ app.get('/api/v1/shares/paymongo/status/:intentId', async (req: Request, res: Re
 
     if (!isPaid && linkId) {
       try {
-        const linkStatus = await PayMongoService.checkCheckoutLinkStatus(linkId);
+        const linkStatus = await PayMongoService.checkCheckoutLinkStatus(linkId, tenantId);
         if (linkStatus.isPaid) {
           isPaid = true;
           paymentStatus = 'paid';
@@ -2301,7 +2373,7 @@ app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res
 
   if (paymentIntentId) {
     try {
-      const statusRes = await PayMongoService.checkPaymentIntentStatus(paymentIntentId);
+      const statusRes = await PayMongoService.checkPaymentIntentStatus(paymentIntentId, tenantId);
       paymentStatus = statusRes.status;
       if (statusRes.isPaid) {
         isPaid = true;
@@ -2313,7 +2385,7 @@ app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res
 
   if (!isPaid && checkoutLinkId) {
     try {
-      const linkRes = await PayMongoService.checkCheckoutLinkStatus(checkoutLinkId);
+      const linkRes = await PayMongoService.checkCheckoutLinkStatus(checkoutLinkId, tenantId);
       if (linkRes.isPaid) {
         isPaid = true;
         paymentStatus = 'paid';

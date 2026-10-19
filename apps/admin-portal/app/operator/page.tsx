@@ -2144,13 +2144,13 @@ https://tuntongtech.com`;
                     <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                       <CreditCard className="w-4 h-4" />
                     </span>
-                    <h3 className="font-bold text-base text-white">PayMongo Payment Gateway Integration</h3>
+                    <h3 className="font-bold text-base text-white">Platform PayMongo Gateway (Platform Credit Top-Up)</h3>
                     <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded font-mono">
                       Cloud Firestore: platform_config/paymongo
                     </span>
                   </div>
                   <p className="text-xs text-slate-400">
-                    Configure official PayMongo API keys for QR Ph generation, GCash, Maya, and credit/debit card processing across all cooperative tenant portals.
+                    Configure platform PayMongo credentials used by cooperative administrators to top-up platform operating credit. Each cooperative tenant configures their own PayMongo API keys for member payments in their Admin Portal.
                   </p>
                 </div>
 

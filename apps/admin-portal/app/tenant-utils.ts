@@ -177,7 +177,19 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
     slug = (params.get('coop') || params.get('tenant') || '').trim().toLowerCase();
   }
 
-  // 3. Fallback to active admin session if visiting root path
+  // 3. Fallback to active member session or admin session if visiting custom domain or root path
+  if (!slug) {
+    try {
+      const memberSess = localStorage.getItem('flexcoop_auth_member');
+      if (memberSess) {
+        const parsed = JSON.parse(memberSess);
+        if (parsed.coopSlug || parsed.tenantSlug) {
+          slug = parsed.coopSlug || parsed.tenantSlug;
+        }
+      }
+    } catch {}
+  }
+
   if (!slug) {
     try {
       const sess = localStorage.getItem('flexcoop_admin_session');
@@ -190,7 +202,7 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
     } catch {}
   }
 
-  // 4. Resolve Details from Onboarding Registrations
+  // 4. Resolve Details from Onboarding Registrations (match by custom domain or slug)
   let resolvedName = '';
   let resolvedRegNo = '';
   let resolvedType = '';
@@ -201,9 +213,19 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
     if (regStr) {
       const regs = JSON.parse(regStr);
       if (Array.isArray(regs)) {
+        // First match against custom domain if hostname is a custom domain
+        const domainMatch = regs.find((r: any) =>
+          (r.customDomain && r.customDomain.toLowerCase() === hostname) ||
+          (r.domain && r.domain.toLowerCase() === hostname) ||
+          (r.subdomain && r.subdomain.toLowerCase() === hostname)
+        );
+        if (domainMatch && !slug) {
+          slug = domainMatch.slug;
+        }
+
         const match = slug
           ? regs.find((r: any) => r.slug?.toLowerCase() === slug.toLowerCase())
-          : regs.find((r: any) => r.status === 'APPROVED') || regs[0];
+          : domainMatch || regs.find((r: any) => r.status === 'APPROVED') || regs[0];
 
         if (match) {
           if (!slug && match.slug) slug = match.slug.toLowerCase();

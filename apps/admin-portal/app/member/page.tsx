@@ -560,11 +560,14 @@ export default function MemberPortalPage() {
   const handleInitiatePaymongoShares = async () => {
     setIsGeneratingPaymongo(true);
     try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
       const res = await fetch(`${getApiBaseUrl()}/shares/paymongo/create-intent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
         },
         body: JSON.stringify({
           memberId: currentMember.id,
@@ -588,11 +591,14 @@ export default function MemberPortalPage() {
     if (!paymongoActivePayment) return;
     setIsVerifyingPaymongo(true);
     try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
       const res = await fetch(`${getApiBaseUrl()}/shares/paymongo/verify-and-complete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
         },
         body: JSON.stringify({
           memberId: currentMember.id,
@@ -642,12 +648,15 @@ export default function MemberPortalPage() {
     let isDisposed = false;
     const interval = setInterval(async () => {
       try {
+        const targetTenantSlug = tenantInfo.slug || 'family-coop';
+        const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
         const linkQuery = paymongoActivePayment.checkoutLinkId ? `?linkId=${paymongoActivePayment.checkoutLinkId}` : '';
         const res = await fetch(
           `${getApiBaseUrl()}/shares/paymongo/status/${paymongoActivePayment.paymentIntentId}${linkQuery}`,
           {
             headers: {
-              'x-tenant-slug': tenantInfo.slug,
+              'x-tenant-slug': targetTenantSlug,
+              'x-tenant-id': targetTenantId,
             },
           }
         );

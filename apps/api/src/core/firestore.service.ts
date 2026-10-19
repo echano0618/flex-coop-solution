@@ -821,5 +821,25 @@ export class FirestoreCoopService {
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   }
+
+  public tenantPaymongoDoc(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('system_config').doc('paymongo');
+  }
+
+  public async getTenantPaymongoConfig(tenantId: string): Promise<any | null> {
+    try {
+      const doc = await this.tenantPaymongoDoc(tenantId).get();
+      return doc.exists ? doc.data() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async saveTenantPaymongoConfig(tenantId: string, data: any): Promise<void> {
+    await this.tenantPaymongoDoc(tenantId).set({
+      ...data,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
 }
 

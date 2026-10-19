@@ -12,8 +12,9 @@ const DEFAULT_PAYMONGO_CONFIG: PayMongoConfig = {
 };
 
 export class PayMongoService {
-  private static cachedConfig: PayMongoConfig | null = null;
-  private static lastFetchTime = 0;
+  private static cachedPlatformConfig: PayMongoConfig | null = null;
+  private static lastPlatformFetchTime = 0;
+  private static cachedTenantConfigs = new Map<string, { config: PayMongoConfig; lastFetchTime: number }>();
   private static CACHE_TTL_MS = 30000; // 30 seconds cache
 
   private static getBaseUrl(): string {
@@ -21,19 +22,19 @@ export class PayMongoService {
   }
 
   /**
-   * Retrieves the current PayMongo configuration (from Firestore with in-memory caching)
+   * Retrieves the platform-level PayMongo configuration (used by Operator Portal for Platform Credit Top-Up)
    */
-  public static async getConfig(): Promise<PayMongoConfig> {
+  public static async getPlatformConfig(): Promise<PayMongoConfig> {
     const now = Date.now();
-    if (this.cachedConfig && now - this.lastFetchTime < this.CACHE_TTL_MS) {
-      return this.cachedConfig;
+    if (this.cachedPlatformConfig && now - this.lastPlatformFetchTime < this.CACHE_TTL_MS) {
+      return this.cachedPlatformConfig;
     }
 
     try {
       const fs = FirestoreCoopService.getInstance();
       const doc = await fs.getPlatformConfig('paymongo');
       if (doc && doc.secretKey) {
-        this.cachedConfig = {
+        this.cachedPlatformConfig = {
           secretKey: doc.secretKey,
           publicKey: doc.publicKey || DEFAULT_PAYMONGO_CONFIG.publicKey,
           webhookSecret: doc.webhookSecret || DEFAULT_PAYMONGO_CONFIG.webhookSecret,
@@ -42,26 +43,72 @@ export class PayMongoService {
           updatedAt: doc.updatedAt || new Date().toISOString(),
           updatedBy: doc.updatedBy || 'Platform Operator',
         };
-        this.lastFetchTime = now;
-        return this.cachedConfig;
+        this.lastPlatformFetchTime = now;
+        return this.cachedPlatformConfig;
       }
     } catch (err) {
-      console.warn('[PAYMONGO] Failed to load config from Firestore, using defaults:', err);
+      console.warn('[PAYMONGO] Failed to load platform config from Firestore, using defaults:', err);
     }
 
-    this.cachedConfig = { ...DEFAULT_PAYMONGO_CONFIG };
-    this.lastFetchTime = now;
-    return this.cachedConfig;
+    this.cachedPlatformConfig = { ...DEFAULT_PAYMONGO_CONFIG };
+    this.lastPlatformFetchTime = now;
+    return this.cachedPlatformConfig;
   }
 
   /**
-   * Saves updated PayMongo configuration to Cloud Firestore
+   * Retrieves tenant-specific PayMongo configuration (used for Member Portal share purchases, deposits, and loan payments)
    */
-  public static async saveConfig(
+  public static async getTenantConfig(tenantId: string): Promise<PayMongoConfig> {
+    const now = Date.now();
+    const cached = this.cachedTenantConfigs.get(tenantId);
+    if (cached && now - cached.lastFetchTime < this.CACHE_TTL_MS) {
+      return cached.config;
+    }
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const doc = await fs.getTenantPaymongoConfig(tenantId);
+      if (doc && doc.secretKey) {
+        const tenantCfg: PayMongoConfig = {
+          secretKey: doc.secretKey,
+          publicKey: doc.publicKey || '',
+          webhookSecret: doc.webhookSecret || '',
+          environment: doc.environment || 'test',
+          isEnabled: doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : true,
+          updatedAt: doc.updatedAt || new Date().toISOString(),
+          updatedBy: doc.updatedBy || 'Cooperative Admin',
+        };
+        this.cachedTenantConfigs.set(tenantId, { config: tenantCfg, lastFetchTime: now });
+        return tenantCfg;
+      }
+    } catch (err) {
+      console.warn(`[PAYMONGO] Failed to load tenant config for ${tenantId}, falling back to platform config:`, err);
+    }
+
+    // Fall back to platform config if tenant hasn't configured custom keys
+    const platformConfig = await this.getPlatformConfig();
+    this.cachedTenantConfigs.set(tenantId, { config: platformConfig, lastFetchTime: now });
+    return platformConfig;
+  }
+
+  /**
+   * Resolves PayMongo configuration: tenant-specific if tenantId supplied, otherwise platform-level
+   */
+  public static async getConfig(tenantId?: string): Promise<PayMongoConfig> {
+    if (tenantId) {
+      return this.getTenantConfig(tenantId);
+    }
+    return this.getPlatformConfig();
+  }
+
+  /**
+   * Saves updated Platform PayMongo configuration (Operator Portal)
+   */
+  public static async savePlatformConfig(
     updated: Partial<PayMongoConfig>,
     updatedBy: string
   ): Promise<PayMongoConfig> {
-    const current = await this.getConfig();
+    const current = await this.getPlatformConfig();
     const newConfig: PayMongoConfig = {
       secretKey: updated.secretKey ? updated.secretKey.trim() : current.secretKey,
       publicKey: updated.publicKey ? updated.publicKey.trim() : current.publicKey,
@@ -76,11 +123,51 @@ export class PayMongoService {
       const fs = FirestoreCoopService.getInstance();
       await fs.savePlatformConfig('paymongo', newConfig);
     } catch (err) {
-      console.warn('[PAYMONGO] Warning saving to Firestore:', err);
+      console.warn('[PAYMONGO] Warning saving platform config to Firestore:', err);
     }
 
-    this.cachedConfig = newConfig;
-    this.lastFetchTime = Date.now();
+    this.cachedPlatformConfig = newConfig;
+    this.lastPlatformFetchTime = Date.now();
+    return newConfig;
+  }
+
+  /**
+   * Backward compatibility alias for savePlatformConfig
+   */
+  public static async saveConfig(
+    updated: Partial<PayMongoConfig>,
+    updatedBy: string
+  ): Promise<PayMongoConfig> {
+    return this.savePlatformConfig(updated, updatedBy);
+  }
+
+  /**
+   * Saves updated Tenant PayMongo configuration (Admin Portal)
+   */
+  public static async saveTenantConfig(
+    tenantId: string,
+    updated: Partial<PayMongoConfig>,
+    updatedBy: string
+  ): Promise<PayMongoConfig> {
+    const current = await this.getTenantConfig(tenantId);
+    const newConfig: PayMongoConfig = {
+      secretKey: updated.secretKey ? updated.secretKey.trim() : current.secretKey,
+      publicKey: updated.publicKey ? updated.publicKey.trim() : current.publicKey,
+      webhookSecret: updated.webhookSecret ? updated.webhookSecret.trim() : current.webhookSecret,
+      environment: updated.environment || current.environment,
+      isEnabled: updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled,
+      updatedAt: new Date().toISOString(),
+      updatedBy: updatedBy || 'Cooperative Admin',
+    };
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveTenantPaymongoConfig(tenantId, newConfig);
+    } catch (err) {
+      console.warn(`[PAYMONGO] Warning saving tenant config for ${tenantId}:`, err);
+    }
+
+    this.cachedTenantConfigs.set(tenantId, { config: newConfig, lastFetchTime: Date.now() });
     return newConfig;
   }
 
@@ -96,7 +183,7 @@ export class PayMongoService {
     accountDescriptor?: string;
   }> {
     const startTime = Date.now();
-    const config = await this.getConfig();
+    const config = await this.getPlatformConfig();
     const secretKey = (secretKeyOverride || config.secretKey).trim();
 
     try {
@@ -142,11 +229,14 @@ export class PayMongoService {
    * Creates an end-to-end QR Ph Payment Intent and attaches a QR Ph payment method,
    * returning the actual dynamic QR Ph image and checkout payload.
    */
-  public static async createQRPhPayment(params: {
-    amount: number; // in PHP
-    description: string;
-    metadata?: Record<string, any>;
-  }): Promise<{
+  public static async createQRPhPayment(
+    params: {
+      amount: number; // in PHP
+      description: string;
+      metadata?: Record<string, any>;
+    },
+    tenantId?: string
+  ): Promise<{
     paymentIntentId: string;
     clientKey: string;
     qrImageUrl: string;
@@ -154,9 +244,9 @@ export class PayMongoService {
     status: string;
     totalAmount: number;
   }> {
-    const config = await this.getConfig();
+    const config = await this.getConfig(tenantId);
     if (!config.isEnabled) {
-      throw new Error('PayMongo integration is currently disabled by Platform Administration.');
+      throw new Error('PayMongo integration is currently disabled by Cooperative Administration.');
     }
 
     const secretKey = config.secretKey;
@@ -267,20 +357,23 @@ export class PayMongoService {
   /**
    * Creates a PayMongo Checkout Link for multi-channel checkout (QR Ph, GCash, Maya, Cards)
    */
-  public static async createCheckoutLink(params: {
-    amount: number; // in PHP
-    description: string;
-    remarks?: string;
-  }): Promise<{
+  public static async createCheckoutLink(
+    params: {
+      amount: number; // in PHP
+      description: string;
+      remarks?: string;
+    },
+    tenantId?: string
+  ): Promise<{
     linkId: string;
     checkoutUrl: string;
     referenceNumber: string;
     status: string;
     amount: number;
   }> {
-    const config = await this.getConfig();
+    const config = await this.getConfig(tenantId);
     if (!config.isEnabled) {
-      throw new Error('PayMongo integration is currently disabled by Platform Administration.');
+      throw new Error('PayMongo integration is currently disabled by Cooperative Administration.');
     }
 
     const secretKey = config.secretKey;
@@ -320,19 +413,22 @@ export class PayMongoService {
   }
 
   /**
-   * Checks the status of a Payment Intent
+   * Checks the status of a Payment Intent with intelligent fallback to platform key if needed
    */
-  public static async checkPaymentIntentStatus(intentId: string): Promise<{
+  public static async checkPaymentIntentStatus(
+    intentId: string,
+    tenantId?: string
+  ): Promise<{
     status: string;
     isPaid: boolean;
     paymentId?: string;
     amount?: number;
   }> {
-    const config = await this.getConfig();
-    const secretKey = config.secretKey;
-    const authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
+    const config = await this.getConfig(tenantId);
+    let secretKey = config.secretKey;
+    let authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
 
-    const res = await fetch(`${this.getBaseUrl()}/payment_intents/${intentId}`, {
+    let res = await fetch(`${this.getBaseUrl()}/payment_intents/${intentId}`, {
       method: 'GET',
       headers: {
         Authorization: authHeader,
@@ -340,14 +436,38 @@ export class PayMongoService {
       },
     });
 
-    const data: any = await res.json();
+    let data: any = await res.json();
+
+    // Fallback to platform credentials if not found with tenant credentials
+    if ((!res.ok || !data?.data) && tenantId) {
+      const platformConfig = await this.getPlatformConfig();
+      if (platformConfig.secretKey && platformConfig.secretKey !== secretKey) {
+        const platAuth = `Basic ${Buffer.from(`${platformConfig.secretKey}:`).toString('base64')}`;
+        const fallbackRes = await fetch(`${this.getBaseUrl()}/payment_intents/${intentId}`, {
+          method: 'GET',
+          headers: {
+            Authorization: platAuth,
+            'Content-Type': 'application/json',
+          },
+        });
+        const fallbackData = await fallbackRes.json();
+        if (fallbackRes.ok && fallbackData?.data) {
+          res = fallbackRes;
+          data = fallbackData;
+        }
+      }
+    }
+
     if (!res.ok || !data?.data) {
       throw new Error('Payment Intent not found on PayMongo.');
     }
 
     const status = data.data.attributes.status;
     const payments = data.data.attributes.payments || [];
-    const isPaid = status === 'succeeded' || payments.some((p: any) => p.attributes?.status === 'paid');
+    const isPaid =
+      status === 'succeeded' ||
+      status === 'paid' ||
+      payments.some((p: any) => p.attributes?.status === 'paid' || p.attributes?.status === 'succeeded');
     const paymentId = payments[0]?.id;
     const amount = data.data.attributes.amount ? data.data.attributes.amount / 100 : undefined;
 
@@ -360,18 +480,21 @@ export class PayMongoService {
   }
 
   /**
-   * Checks the status of a PayMongo Checkout Link
+   * Checks the status of a PayMongo Checkout Link with intelligent fallback to platform key if needed
    */
-  public static async checkCheckoutLinkStatus(linkId: string): Promise<{
+  public static async checkCheckoutLinkStatus(
+    linkId: string,
+    tenantId?: string
+  ): Promise<{
     status: string;
     isPaid: boolean;
     paymentId?: string;
   }> {
-    const config = await this.getConfig();
-    const secretKey = config.secretKey;
-    const authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
+    const config = await this.getConfig(tenantId);
+    let secretKey = config.secretKey;
+    let authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
 
-    const res = await fetch(`${this.getBaseUrl()}/links/${linkId}`, {
+    let res = await fetch(`${this.getBaseUrl()}/links/${linkId}`, {
       method: 'GET',
       headers: {
         Authorization: authHeader,
@@ -379,14 +502,38 @@ export class PayMongoService {
       },
     });
 
-    const data: any = await res.json();
+    let data: any = await res.json();
+
+    // Fallback to platform credentials if not found with tenant credentials
+    if ((!res.ok || !data?.data) && tenantId) {
+      const platformConfig = await this.getPlatformConfig();
+      if (platformConfig.secretKey && platformConfig.secretKey !== secretKey) {
+        const platAuth = `Basic ${Buffer.from(`${platformConfig.secretKey}:`).toString('base64')}`;
+        const fallbackRes = await fetch(`${this.getBaseUrl()}/links/${linkId}`, {
+          method: 'GET',
+          headers: {
+            Authorization: platAuth,
+            'Content-Type': 'application/json',
+          },
+        });
+        const fallbackData = await fallbackRes.json();
+        if (fallbackRes.ok && fallbackData?.data) {
+          res = fallbackRes;
+          data = fallbackData;
+        }
+      }
+    }
+
     if (!res.ok || !data?.data) {
       throw new Error('Checkout Link not found on PayMongo.');
     }
 
     const status = data.data.attributes.status;
-    const isPaid = status === 'paid';
     const payments = data.data.attributes.payments || [];
+    const isPaid =
+      status === 'paid' ||
+      status === 'succeeded' ||
+      payments.some((p: any) => p.attributes?.status === 'paid' || p.attributes?.status === 'succeeded');
 
     return {
       status,
