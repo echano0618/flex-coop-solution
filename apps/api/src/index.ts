@@ -173,11 +173,13 @@ async function performUnifiedLogin(
   // 1. Locate member record across all possible identifiers
   let member = members.find(
     (m: any) =>
-      m.username?.toLowerCase() === cleanId ||
-      m.phone === identifier.trim() ||
       m.email?.toLowerCase() === cleanId ||
+      m.username?.toLowerCase() === cleanId ||
       m.memberNumber?.toLowerCase() === cleanId ||
-      m.id?.toLowerCase() === cleanId
+      m.id?.toLowerCase() === cleanId ||
+      m.phone === identifier.trim() ||
+      ((cleanId === 'admin' || cleanId === 'gm' || cleanId === 'echano0618') &&
+        (m.memberNumber === 'MEM-2026-0001' || m.position?.toLowerCase().includes('general manager')))
   );
 
   // 2. Check if this is the General Manager
@@ -190,7 +192,8 @@ async function performUnifiedLogin(
     (tenant?.adminLastName && cleanId.includes(tenant.adminLastName.toLowerCase())) ||
     cleanId === 'mem-2026-0001' ||
     cleanId === 'mem_gm_0001' ||
-    cleanId === 'echano0618';
+    cleanId === 'echano0618' ||
+    cleanId === 'echano0618@gmail.com';
 
   if (!member && isGmIdentifier) {
     const gmLastName = tenant?.adminLastName || 'Echano';
@@ -367,23 +370,26 @@ async function performUnifiedLogin(
     savingsBalance: (member as any)?.savingsBalance || 15000,
   };
 
-  // Keep single credential synced in Firestore
+  // Keep strictly 1 single credential synced in Firestore by registered email address
   try {
-    const credPayload = {
-      ...(storedCred || {}),
-      username: (memberData as any).username || cleanId,
-      email: memberData.email,
-      phone: memberData.phone,
-      pin: secretStr,
-      password: secretStr,
-      role,
-      roleTitle,
-      isStaff,
-      name: memberFullName,
-      memberId: memberData.id,
-      updatedAt: new Date().toISOString(),
-    };
-    await fsService.saveMemberCredential(tenantId, credPayload);
+    const regEmail = (memberData.email || storedCred?.email || '').toLowerCase().trim();
+    if (regEmail) {
+      const credPayload = {
+        ...(storedCred || {}),
+        username: regEmail,
+        email: regEmail,
+        phone: memberData.phone,
+        pin: secretStr,
+        password: secretStr,
+        role,
+        roleTitle,
+        isStaff,
+        name: memberFullName,
+        memberId: memberData.id,
+        updatedAt: new Date().toISOString(),
+      };
+      await fsService.saveMemberCredential(tenantId, credPayload);
+    }
   } catch {}
 
   // 6. Generate single signed JWT token
@@ -575,7 +581,7 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
     }
 
     const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim();
-    const cleanUser = (username || email.split('@')[0]).trim().toLowerCase();
+    const cleanUser = email.trim().toLowerCase();
     const cleanPin = (password || pin || '123456').trim();
     const appId = `APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const memberId = `mem_app_${appId}`;
@@ -684,12 +690,14 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
 
     const cred = {
       username: cleanUser,
-      email: email.trim().toLowerCase(),
+      email: cleanUser,
       phone: phone || '',
       pin: cleanPin,
+      password: cleanPin,
       name: fullName,
       applicantId: appId,
       memberId,
+      memberNumber,
       coopSlug: coopSlug || tenantId.replace('tenant_', ''),
       status: 'UNDER_REVIEW',
       createdAt: new Date().toISOString(),

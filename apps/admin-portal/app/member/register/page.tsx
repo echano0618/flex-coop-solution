@@ -134,8 +134,7 @@ export default function MemberRegisterPage() {
   const [psgcPostalCode, setPsgcPostalCode] = useState<string>('');
   const [psgcAddressError, setPsgcAddressError] = useState<string | null>(null);
 
-  // Step 2: Member Portal Login Credentials
-  const [username, setUsername] = useState<string>('');
+  // Step 2: Member Portal Login Credentials (Standardized to Registered Email)
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [credentialError, setCredentialError] = useState<string | null>(null);
@@ -447,7 +446,7 @@ export default function MemberRegisterPage() {
       firstName,
       middleName,
       lastName,
-      username: (username || '').trim().toLowerCase() || email.split('@')[0].toLowerCase(),
+      username: email.trim().toLowerCase(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
       landline: landline.trim(),
@@ -875,12 +874,8 @@ export default function MemberRegisterPage() {
                 return;
               }
 
-              if (!username.trim()) {
-                setCredentialError('Please choose a preferred Username for your member portal login.');
-                return;
-              }
-              if (username.trim().length < 3) {
-                setCredentialError('Username must be at least 3 characters long.');
+              if (!email.trim() || !email.includes('@')) {
+                setCredentialError('Please provide a valid registered email address in Step 1 to be used as your login username.');
                 return;
               }
               if (!password.trim()) {
@@ -1371,7 +1366,7 @@ export default function MemberRegisterPage() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Choose your username and 6-digit MPIN / password. You will use these credentials to securely log in to the Member Portal once registered.
+                Your registered email address is your official login username across both the Member and Admin portals. Set your confidential 6-digit MPIN or password below.
               </p>
 
               {credentialError && (
@@ -1384,20 +1379,13 @@ export default function MemberRegisterPage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Preferred Username *
+                    Official Login Username
                   </label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => {
-                      setUsername(e.target.value.toLowerCase().replace(/\s+/g, ''));
-                      setCredentialError(null);
-                    }}
-                    required
-                    placeholder="e.g. jdelacruz"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
-                  />
-                  <span className="text-[10px] text-slate-500 mt-1 block">Letters, numbers, dots, or dashes</span>
+                  <div className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-emerald-300 font-mono flex items-center justify-between">
+                    <span className="truncate">{email.trim().toLowerCase() || 'Enter in Step 1'}</span>
+                    <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800/80 px-1.5 py-0.5 rounded">Email</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 block">Standardized to your registered email</span>
                 </div>
 
                 <div>
@@ -2114,20 +2102,20 @@ export default function MemberRegisterPage() {
               </div>
               <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800 space-y-1.5 text-xs text-slate-300">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Username / Account ID:</span>
-                  <span className="font-mono font-bold text-emerald-400">{username || email.split('@')[0]}</span>
+                  <span className="text-slate-400">Login Username:</span>
+                  <span className="font-mono font-bold text-emerald-400">{email.trim().toLowerCase()}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">6-Digit MPIN:</span>
+                  <span className="text-slate-400">6-Digit MPIN / Password:</span>
                   <span className="font-mono text-slate-400">•••••• (Configured)</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Registered Email:</span>
-                  <span className="font-mono text-slate-300">{email}</span>
+                  <span className="font-mono text-slate-300">{email.trim().toLowerCase()}</span>
                 </div>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                You can now log in using your <strong>Username</strong> and <strong>6-digit MPIN</strong> to track your application status and access self-service cooperative features.
+                You can now log in using your registered <strong>Email Address</strong> and <strong>6-digit MPIN</strong> to track your application status and access self-service cooperative features.
               </p>
             </div>
 
@@ -2136,8 +2124,8 @@ export default function MemberRegisterPage() {
               <Link
                 href={
                   tenantInfo.slug && tenantInfo.slug !== 'default'
-                    ? `/member/login?coop=${tenantInfo.slug}&username=${encodeURIComponent(username || email.split('@')[0])}`
-                    : `/member/login?username=${encodeURIComponent(username || email.split('@')[0])}`
+                    ? `/member/login?coop=${tenantInfo.slug}&username=${encodeURIComponent(email.trim().toLowerCase())}`
+                    : `/member/login?username=${encodeURIComponent(email.trim().toLowerCase())}`
                 }
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/30"
               >

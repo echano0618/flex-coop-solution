@@ -462,18 +462,22 @@ export class FirestoreCoopService {
   }
 
   // --------------------------------------------------------------------------
-  // Member Credentials Management (Strict Authentication)
+  // Member Credentials Management (Strict Authentication: Single Entry by Registered Email)
   // --------------------------------------------------------------------------
 
   public async saveMemberCredential(tenantId: string, cred: any): Promise<void> {
-    const username = (cred.username || '').toLowerCase().trim();
-    const email = (cred.email || '').toLowerCase().trim();
-    const id = username || email || cred.phone;
+    const rawEmail = cred.email || (cred.username && cred.username.includes('@') ? cred.username : '');
+    const email = (rawEmail || '').toLowerCase().trim();
+    if (!email) {
+      console.warn('saveMemberCredential skipped: missing registered email address for', cred);
+      return;
+    }
 
-    await this.credentialsCol(tenantId).doc(id).set(
+    // Single entry in credentials table strictly keyed by registered email address
+    await this.credentialsCol(tenantId).doc(email).set(
       {
         ...cred,
-        username,
+        username: email,
         email,
         updatedAt: new Date().toISOString(),
       },
@@ -484,15 +488,19 @@ export class FirestoreCoopService {
   public async getMemberCredential(tenantId: string, identifier: string): Promise<any | null> {
     const idLower = identifier.toLowerCase().trim();
 
-    // 1. Check direct doc by username
+    // 1. Check direct doc by registered email (Standard single entry)
     const doc = await this.credentialsCol(tenantId).doc(idLower).get();
     if (doc.exists) return doc.data();
 
-    // 2. Query by email
+    // 2. Query by email field
     const byEmail = await this.credentialsCol(tenantId).where('email', '==', idLower).limit(1).get();
     if (!byEmail.empty) return byEmail.docs[0].data();
 
-    // 3. Query by phone
+    // 3. Query by memberId
+    const byMemberId = await this.credentialsCol(tenantId).where('memberId', '==', identifier.trim()).limit(1).get();
+    if (!byMemberId.empty) return byMemberId.docs[0].data();
+
+    // 4. Query by phone
     const byPhone = await this.credentialsCol(tenantId).where('phone', '==', identifier.trim()).limit(1).get();
     if (!byPhone.empty) return byPhone.docs[0].data();
 
