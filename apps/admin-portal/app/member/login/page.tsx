@@ -19,6 +19,7 @@ import {
   setTenantMemberSession,
   getTenantMemberSession,
   setTenantAdminSession,
+  clearTenantAdminSession,
   TenantInfo,
   base64UrlToUint8Array,
 } from '../../tenant-utils';
@@ -159,6 +160,8 @@ export default function MemberLoginPage() {
         setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
         if (data.isStaff || data.user?.isStaff) {
           setTenantAdminSession(data.user || data.member, tenantInfo.slug, tenantInfo.name);
+        } else {
+          clearTenantAdminSession(tenantInfo.slug);
         }
         router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
         return;
@@ -205,6 +208,8 @@ export default function MemberLoginPage() {
         // Single Sign-On: If this account has staff/admin privileges, simultaneously set admin session
         if (data.isStaff || data.user?.isStaff) {
           setTenantAdminSession(data.user || data.member, tenantInfo.slug, tenantInfo.name);
+        } else {
+          clearTenantAdminSession(tenantInfo.slug);
         }
         router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
         return;

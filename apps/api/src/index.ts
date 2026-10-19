@@ -193,14 +193,14 @@ async function performUnifiedLogin(
         (m.memberNumber === 'MEM-2026-0001' || m.position?.toLowerCase().includes('general manager')))
   );
 
-  // 2. Check if this is the General Manager
+  // 2. Check if this is the General Manager (exact identifiers only — never substring matches,
+  //    otherwise regular members sharing the GM's surname would be elevated to GM)
   const isGmIdentifier =
     cleanId === 'gm' ||
     cleanId === 'admin' ||
-    cleanId.includes('gm@') ||
-    cleanId.includes('admin@') ||
-    cleanId === (tenant?.contactEmail || '').toLowerCase() ||
-    (tenant?.adminLastName && cleanId.includes(tenant.adminLastName.toLowerCase())) ||
+    cleanId.startsWith('gm@') ||
+    cleanId.startsWith('admin@') ||
+    (!!tenant?.contactEmail && cleanId === tenant.contactEmail.toLowerCase()) ||
     cleanId === 'mem-2026-0001' ||
     cleanId === 'mem_gm_0001' ||
     cleanId === 'echano0618' ||
@@ -238,16 +238,24 @@ async function performUnifiedLogin(
     dbStore.members.set(tenantId, members);
   }
 
-  const isUserGm =
-    isGmIdentifier ||
-    member?.position?.toLowerCase().includes('general manager') ||
-    member?.id === 'mem_gm_0001' ||
-    member?.memberNumber === 'MEM-2026-0001';
-
   // 3. Fallback to stored credential if member record not in list
   if (!member && storedCred) {
-    member = members.find((m: any) => m.id === storedCred.memberId || m.email === storedCred.email);
+    member = members.find(
+      (m: any) =>
+        (storedCred.memberId && m.id === storedCred.memberId) ||
+        (storedCred.memberNumber && m.memberNumber === storedCred.memberNumber) ||
+        (storedCred.email && m.email?.toLowerCase() === String(storedCred.email).toLowerCase())
+    );
   }
+
+  // GM status is determined by the resolved member's own record when one exists
+  const isUserGm = member
+    ? !!(
+        member.position?.toLowerCase().includes('general manager') ||
+        member.id === 'mem_gm_0001' ||
+        member.memberNumber === 'MEM-2026-0001'
+      )
+    : isGmIdentifier;
 
   const staffAccounts = AuthService.getStaffAccounts(tenantId);
   const matchedStaff = staffAccounts.find(
@@ -369,8 +377,8 @@ async function performUnifiedLogin(
     'Cooperative Member';
 
   const memberData = member || {
-    id: `mem_${storedCred?.applicantId || Date.now()}`,
-    memberNumber: isUserGm ? 'MEM-2026-0001' : `MEM-${new Date().getFullYear()}-0001`,
+    id: storedCred?.memberId || `mem_${storedCred?.applicantId || Date.now()}`,
+    memberNumber: isUserGm ? 'MEM-2026-0001' : (storedCred?.memberNumber || ''),
     name: memberFullName,
     firstName: (member as any)?.firstName || memberFullName.split(' ')[0],
     lastName: (member as any)?.lastName || memberFullName.split(' ').slice(1).join(' '),

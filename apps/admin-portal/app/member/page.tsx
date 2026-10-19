@@ -378,8 +378,8 @@ export default function MemberPortalPage() {
         if (auth) {
           try {
             const parsed = auth;
-            if (parsed && (parsed.firstName || parsed.name)) {
-              let fullName = parsed.name || `${parsed.firstName} ${parsed.lastName || ''}`.trim();
+            if (parsed) {
+              let fullName = parsed.name || `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim() || parsed.email || 'Cooperative Member';
               if (fullName.toUpperCase() === 'ECHANO0618') {
                 fullName = 'Felix II Echano';
               }
@@ -388,8 +388,9 @@ export default function MemberPortalPage() {
               const classification = parsed.classification || 'ASSOCIATE';
               const isDividendEligible = parsed.isDividendEligible !== undefined ? Boolean(parsed.isDividendEligible) : (classification === 'REGULAR');
               setCustomMember({
-                id: parsed.id || 'mem_0001',
-                memberNumber: parsed.memberNumber || parsed.memberNo || 'MEM-2026-0001',
+                id: parsed.id || parsed.email || '',
+                memberNumber: parsed.memberNumber || parsed.memberNo || '',
+                email: parsed.email || '',
                 name: fullName,
                 initials: initials || 'MB',
                 classification: classification,
@@ -463,33 +464,38 @@ export default function MemberPortalPage() {
           .then((r) => r.json())
           .then((res) => {
             if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-              const userEmail = (auth?.email || admin?.email || '').toLowerCase().trim();
-              const userMemberNo = (auth?.memberNumber || auth?.memberNo || admin?.memberNumber || '').toUpperCase().trim();
-              const userName = (auth?.name || `${auth?.firstName || ''} ${auth?.lastName || ''}`.trim() || admin?.name || '').toLowerCase().trim();
+              // Identity is resolved strictly from the authenticated session.
+              // A member session always takes precedence over a (possibly stale) admin session.
+              const identitySource: any = auth || admin || {};
+              const userId = String(identitySource.id || '').toLowerCase().trim();
+              const userEmail = String(identitySource.email || '').toLowerCase().trim();
+              const userMemberNo = String(identitySource.memberNumber || identitySource.memberNo || '').toUpperCase().trim();
+              const normalizeNo = (v: string) => v.replace(/[-_ ]/g, '').toUpperCase();
 
-              const matched =
-                res.data.find((m: any) => {
-                  if (userEmail && m.email?.toLowerCase().trim() === userEmail) return true;
-                  if (userMemberNo) {
-                    const mNo = (m.memberNumber || m.memberNo || m.id || '').toUpperCase().trim();
-                    if (mNo === userMemberNo) return true;
-                    const normM = mNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-                    const normUser = userMemberNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-                    if (normM === normUser) return true;
-                  }
-                  if (userName) {
-                    const mName = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).toLowerCase().trim();
-                    if (mName === userName || mName.includes(userName) || userName.includes(mName)) return true;
-                    const nameParts = userName.split(' ');
-                    const last = nameParts[nameParts.length - 1];
-                    if (last && last.length > 2 && mName.includes(last)) return true;
-                  }
-                  return (
-                    m.id === 'MEM-2026-0001' ||
-                    m.memberNumber === 'MEM-2026-0001' ||
-                    m.position === 'General Manager'
-                  );
-                }) || res.data[0];
+              const byId = userId
+                ? res.data.find((m: any) => String(m.id || '').toLowerCase().trim() === userId)
+                : undefined;
+              const byEmail = userEmail
+                ? res.data.find((m: any) => String(m.email || '').toLowerCase().trim() === userEmail)
+                : undefined;
+              const byMemberNo = userMemberNo
+                ? res.data.find((m: any) => {
+                    const mNo = String(m.memberNumber || m.memberNo || '').toUpperCase().trim();
+                    return !!mNo && normalizeNo(mNo) === normalizeNo(userMemberNo);
+                  })
+                : undefined;
+
+              let matched = byId || byEmail || byMemberNo;
+
+              // Only an admin-only session (no member session) may fall back to the General Manager record.
+              if (!matched && !auth && admin) {
+                matched = res.data.find(
+                  (m: any) =>
+                    m.position === 'General Manager' ||
+                    m.id === 'mem_gm_0001' ||
+                    String(m.memberNumber || '').endsWith('-0001')
+                );
+              }
 
               if (matched) {
                 const fullName = matched.name || `${matched.firstName || ''} ${matched.lastName || ''}`.trim();
