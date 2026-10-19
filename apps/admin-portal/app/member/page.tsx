@@ -26,6 +26,7 @@ import {
   BookOpen,
   Users,
   Clock,
+  Calendar,
   UserCheck,
   AlertTriangle,
   PieChart,
@@ -332,6 +333,7 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
   const firstDueGiven = Boolean(loan?.firstDueDate);
 
   let remaining = principal;
+  let dueNowAssigned = false;
   const rows = [];
   for (let i = 1; i <= periods; i++) {
     const interest = isStraightLine ? principal * periodRate : remaining * periodRate;
@@ -347,6 +349,19 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
       due.setMonth(due.getMonth() + offset);
     }
 
+    const existingItem = Array.isArray(loan?.schedule) ? loan.schedule[i - 1] : null;
+    const isPaid = Boolean(
+      existingItem?.isPaid === true ||
+      existingItem?.status === 'PAID' ||
+      (Array.isArray(loan?.repayments) &&
+        loan.repayments.some((rep: any) => Number(rep.installmentNumber || rep.seq) === i))
+    );
+    let status = isPaid ? 'PAID' : 'UPCOMING';
+    if (!isPaid && !dueNowAssigned) {
+      status = 'DUE_NOW';
+      dueNowAssigned = true;
+    }
+
     rows.push({
       seq: i,
       due: formatScheduleDate(due),
@@ -354,7 +369,7 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
       in: r2(interest),
       tot: r2(pr + interest),
       bal: r2(remaining),
-      status: i === 1 ? 'DUE_NOW' : 'UPCOMING',
+      status,
     });
   }
   return rows;
@@ -370,16 +385,41 @@ function getLoanLedgerTransactions(loan: any, currentBalance: number = 50000, ex
     : 'Oct 19, 2026';
   const disbRef = loan?.disbursementReference || loan?.loanNumber || `DISB-TX-${loan?.id?.slice(0, 6) || '001'}`;
 
-  return [
-    {
-      date: disbDate,
-      ref: disbRef,
-      particulars: `Initial Loan Proceeds Disbursed (${loan?.productName || 'Regular Member Loan'})`,
-      debit: principal,
-      credit: 0,
-      balance: principal,
-    },
-  ];
+  const baseEntry = {
+    date: disbDate,
+    ref: disbRef,
+    particulars: `Initial Loan Proceeds Disbursed (${loan?.productName || 'Regular Member Loan'})`,
+    debit: principal,
+    credit: 0,
+    balance: principal,
+  };
+
+  if (Array.isArray(loan?.repayments) && loan.repayments.length > 0) {
+    return [baseEntry, ...loan.repayments];
+  }
+
+  // Synthesize repayment entries from any PAID schedule rows if repayments array wasn't populated yet
+  const scheduleRows = getLoanScheduleRows(loan, currentBalance);
+  const paidRows = scheduleRows.filter((r: any) => r.status === 'PAID');
+  if (paidRows.length > 0) {
+    let runningBal = principal;
+    const synthesized = paidRows.map((r: any) => {
+      runningBal = Math.max(0, Math.round((runningBal - Number(r.pr || 0)) * 100) / 100);
+      return {
+        date: r.due,
+        ref: `OR-PAID-${r.seq}`,
+        particulars: `Installment #${r.seq} Repayment via PayMongo QR Ph (Principal ₱${Number(r.pr || 0).toFixed(2)} + Interest ₱${Number(r.in || 0).toFixed(2)})`,
+        principal: Number(r.pr || 0),
+        interest: Number(r.in || 0),
+        debit: 0,
+        credit: Number(r.pr || 0),
+        balance: runningBal,
+      };
+    });
+    return [baseEntry, ...synthesized];
+  }
+
+  return [baseEntry];
 }
 
 export default function MemberPortalPage() {
@@ -1119,6 +1159,19 @@ export default function MemberPortalPage() {
 
   // Technology Fee Treatment (Online Single Database Config: Pass-Through vs OPEX)
   const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
+  // PayMongo Gateway Fee Treatment (PASS_THROUGH vs OPEX, no ₱15 minimum floor)
+  const [paymongoFeeTreatment, setPaymongoFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`);
+        if (cached === 'OPEX' || cached === 'PASS_THROUGH') {
+          return cached;
+        }
+      } catch {}
+    }
+    return 'PASS_THROUGH';
+  });
   const [coopFilingFeeEnabled, setCoopFilingFeeEnabled] = useState<boolean>(true);
   const [coopFilingFeeRatePercent, setCoopFilingFeeRatePercent] = useState<number>(1.5);
   const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(() => {
@@ -1153,11 +1206,34 @@ export default function MemberPortalPage() {
       })
       .catch(() => {});
 
-    // React in real time when admin toggles savings deposit configuration in another tab
+    const targetTenantId = `tenant_${(tenantInfo.slug || 'family-coop').replace(/[-_]coop$/, '')}`;
+    fetch(`${getApiBaseUrl()}/tenant/paymongo-public-config?coop=${tenantInfo.slug}`, {
+      headers: {
+        'x-tenant-slug': tenantInfo.slug,
+        'x-tenant-id': targetTenantId,
+      },
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res && res.success && res.data && (res.data.feeTreatment === 'OPEX' || res.data.feeTreatment === 'PASS_THROUGH')) {
+          setPaymongoFeeTreatment(res.data.feeTreatment);
+          try {
+            localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenantInfo.slug}`, res.data.feeTreatment);
+          } catch {}
+        }
+      })
+      .catch(() => {});
+
+    // React in real time when admin toggles savings deposit or PayMongo fee configuration in another tab
     const handleStorageUpdate = (e: StorageEvent) => {
       if (e.key && e.key.includes('flexcoop_savings_deposit_enabled')) {
         const val = e.newValue === 'true';
         setSavingsDepositEnabled(val);
+      }
+      if (e.key && e.key.includes('flexcoop_paymongo_fee_treatment')) {
+        if (e.newValue === 'OPEX' || e.newValue === 'PASS_THROUGH') {
+          setPaymongoFeeTreatment(e.newValue);
+        }
       }
     };
     window.addEventListener('storage', handleStorageUpdate);
@@ -1327,8 +1403,11 @@ export default function MemberPortalPage() {
   const eirTenure = Math.round(((totalInterest + totalDeductions) / Math.max(1, netProceeds)) * 10000) / 100;
   const eir = eirTenure;
 
-  // Pass-On Fee for QR Ph
-  const passOnFee = repayChannel === 'PAYMONGO_QRPH' ? Math.max(15.0, Math.round(repayAmount * 0.015 * 100) / 100) : 0.0;
+  // Pass-On Fee for QR Ph (1.5%, no ₱15 minimum floor, respects PASS_THROUGH vs OPEX)
+  const passOnFee =
+    repayChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment === 'PASS_THROUGH'
+      ? Math.round(repayAmount * 0.015 * 100) / 100
+      : 0.0;
   const totalCharge = Math.round((repayAmount + passOnFee) * 100) / 100;
 
   const handleSimulatePayment = () => {
@@ -1349,6 +1428,16 @@ export default function MemberPortalPage() {
     type: 'LOAN' | 'SAVINGS' | 'SHARES';
     amount: number;
     description: string;
+    lockedAmount?: boolean;
+    loanId?: string;
+    loanNumber?: string;
+    installmentNumber?: number;
+    dueDate?: string;
+    principalPortion?: number;
+    interestPortion?: number;
+    qrImageUrl?: string;
+    paymentIntentId?: string;
+    isGeneratingQr?: boolean;
   }>({
     open: false,
     type: 'LOAN',
@@ -1531,12 +1620,74 @@ export default function MemberPortalPage() {
         },
       ] : []);
 
-  // Convenience Fee Calculator for PayMongo QR Ph (1.5%, minimum ₱15.00)
+  // Convenience Fee Calculator for PayMongo QR Ph (1.5%, NO minimum ₱15 floor; 0 when OPEX)
   const calculateConvenienceFee = (amount: number) => {
-    return Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
+    if (paymongoFeeTreatment === 'OPEX') return 0.0;
+    return Math.round(amount * 0.015 * 100) / 100;
   };
 
-  const handleExecutePassbookPayment = (type: 'LOAN' | 'SAVINGS' | 'SHARES', amount: number) => {
+  const handleOpenLoanPayNow = async (loan: any, dueRow: any) => {
+    const dueAmt = Math.round(Number(dueRow?.tot || 4442.44) * 100) / 100;
+    const prAmt = Math.round(Number(dueRow?.pr || Math.max(0, dueAmt - 460.58)) * 100) / 100;
+    const inAmt = Math.round(Number(dueRow?.in || Math.max(0, dueAmt - prAmt)) * 100) / 100;
+    const instNum = Number(dueRow?.seq || 1);
+    const dueStr = String(dueRow?.due || new Date().toISOString().slice(0, 10));
+    const targetLoanId = loan?.id || loan?.loanNumber || 'LN-2026-00001';
+    const targetLoanNumber = loan?.loanNumber || loan?.id || 'LN-2026-00001';
+    const desc = `Installment #${instNum} Due ${dueStr} (${loan?.productName || 'Member Loan'})`;
+
+    setPassbookPayModal({
+      open: true,
+      type: 'LOAN',
+      amount: dueAmt,
+      description: desc,
+      lockedAmount: true,
+      loanId: targetLoanId,
+      loanNumber: targetLoanNumber,
+      installmentNumber: instNum,
+      dueDate: dueStr,
+      principalPortion: prAmt,
+      interestPortion: inAmt,
+      isGeneratingQr: true,
+    });
+
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const res = await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(targetLoanId)}/paymongo/create-intent?coop=${targetTenantSlug}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          memberId: currentMember.id,
+          installmentNumber: instNum,
+          dueDate: dueStr,
+          dueAmount: dueAmt,
+          principalAmount: prAmt,
+          interestAmount: inAmt,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        if (json.data.feeTreatment === 'OPEX' || json.data.feeTreatment === 'PASS_THROUGH') {
+          setPaymongoFeeTreatment(json.data.feeTreatment);
+        }
+        setPassbookPayModal((prev) => ({
+          ...prev,
+          qrImageUrl: json.data.qrImageUrl || '',
+          paymentIntentId: json.data.paymentIntentId || '',
+          isGeneratingQr: false,
+        }));
+        return;
+      }
+    } catch {}
+    setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: false }));
+  };
+
+  const handleExecutePassbookPayment = async (type: 'LOAN' | 'SAVINGS' | 'SHARES', amount: number) => {
     const fee = calculateConvenienceFee(amount);
     const total = Math.round((amount + fee) * 100) / 100;
     const now = new Date();
@@ -1545,24 +1696,133 @@ export default function MemberPortalPage() {
     const orNum = `OR-${now.getFullYear()}-QR${Math.floor(10000 + Math.random() * 90000)}`;
 
     if (type === 'LOAN') {
-      const interestPart = 460.58;
-      const principalPart = Math.max(0, Math.round((amount - interestPart) * 100) / 100);
-      const newBal = Math.max(0, Math.round((loanBalance - principalPart) * 100) / 100);
-      setLoanBalance(newBal);
+      const ACTIVE_LOAN_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
+      const targetLoan =
+        memberLoanApplications.find(
+          (app: any) =>
+            (passbookPayModal.loanId && (app.id === passbookPayModal.loanId || app.loanNumber === passbookPayModal.loanId)) ||
+            (passbookPayModal.loanNumber && (app.loanNumber === passbookPayModal.loanNumber || app.id === passbookPayModal.loanNumber))
+        ) ||
+        memberLoanApplications.find((app: any) => app.status === 'DISBURSED') ||
+        memberLoanApplications.find((app: any) => ACTIVE_LOAN_STATUSES.includes(String(app.status || '').toUpperCase()));
 
-      setMariaLoanLedger((prev) => [
-        ...prev,
-        {
-          date: dateStr,
-          ref: orNum,
-          particulars: `Installment #2 Repayment via PayMongo QR Ph (Principal ₱${principalPart.toFixed(2)} + Interest ₱${interestPart.toFixed(2)})`,
-          principal: principalPart,
-          interest: interestPart,
-          debit: 0,
-          credit: principalPart,
-          balance: newBal,
-        },
-      ]);
+      const effectiveBal =
+        pickNumber(targetLoan?.balanceRemaining, targetLoan?.principalAmount, targetLoan?.amount, loanBalance) || loanBalance;
+      const computedRows = targetLoan ? getLoanScheduleRows(targetLoan, effectiveBal) : [];
+      const nextDueRow = computedRows.find((r: any) => r.status !== 'PAID');
+
+      const instNum = passbookPayModal.installmentNumber || nextDueRow?.seq || 2;
+      const interestPart =
+        passbookPayModal.interestPortion !== undefined
+          ? passbookPayModal.interestPortion
+          : nextDueRow?.in !== undefined
+          ? Number(nextDueRow.in)
+          : 460.58;
+      const principalPart =
+        passbookPayModal.principalPortion !== undefined
+          ? passbookPayModal.principalPortion
+          : nextDueRow?.pr !== undefined
+          ? Number(nextDueRow.pr)
+          : Math.max(0, Math.round((amount - interestPart) * 100) / 100);
+
+      const newBal = Math.max(0, Math.round((effectiveBal - principalPart) * 100) / 100);
+      const loanRef = targetLoan?.loanNumber || targetLoan?.id || passbookPayModal.loanNumber || 'LN-2026-00001';
+      const newRepaymentEntry = {
+        date: dateStr,
+        ref: orNum,
+        installmentNumber: instNum,
+        particulars: `Installment #${instNum} Repayment via PayMongo QR Ph (Principal ₱${principalPart.toFixed(2)} + Interest ₱${interestPart.toFixed(2)})`,
+        principal: principalPart,
+        interest: interestPart,
+        convenienceFee: fee,
+        totalPaid: total,
+        debit: 0,
+        credit: principalPart,
+        balance: newBal,
+      };
+
+      setLoanBalance(newBal);
+      setMariaLoanLedger((prev) => [...prev, newRepaymentEntry]);
+
+      // Update memberLoanApplications and localStorage so Passbook Amortization Schedule & Admin Portal reflect PAID immediately
+      const applyLoanUpdate = (loanItem: any) => {
+        const rows = getLoanScheduleRows(loanItem, effectiveBal);
+        const updatedSchedule = rows.map((r: any) => {
+          const isTarget = Number(r.seq) === Number(instNum);
+          const alreadyPaid = r.status === 'PAID' || isTarget;
+          return {
+            installmentNumber: r.seq,
+            dueDate: r.due,
+            principalAmount: r.pr,
+            interestAmount: r.in,
+            totalInstallment: r.tot,
+            endingBalance: r.bal,
+            isPaid: alreadyPaid,
+            status: alreadyPaid ? 'PAID' : 'UPCOMING',
+            ...(isTarget ? { paidAt: now.toISOString(), paymentReference: orNum } : {}),
+          };
+        });
+        const existingRepayments = Array.isArray(loanItem.repayments) ? loanItem.repayments : [];
+        return {
+          ...loanItem,
+          balanceRemaining: newBal,
+          schedule: updatedSchedule,
+          repayments: [...existingRepayments, newRepaymentEntry],
+          status: newBal <= 0 ? 'PAID' : loanItem.status,
+          updatedAt: now.toISOString(),
+        };
+      };
+
+      setMemberLoanApplications((prev) =>
+        prev.map((app: any) => {
+          if (targetLoan && (app.id === targetLoan.id || app.loanNumber === targetLoan.loanNumber)) {
+            return applyLoanUpdate(app);
+          }
+          return app;
+        })
+      );
+
+      try {
+        const storageKey = `flexcoop_loan_applications_${tenantInfo.slug}`;
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const updatedAll = parsed.map((app: any) => {
+              if (targetLoan && (app.id === targetLoan.id || app.loanNumber === targetLoan.loanNumber)) {
+                return applyLoanUpdate(app);
+              }
+              return app;
+            });
+            localStorage.setItem(storageKey, JSON.stringify(updatedAll));
+          }
+        }
+      } catch {}
+
+      // Persist repayment to Backend API (updates Firestore loan schedule, balanceRemaining, borrower loanBalance, and CDA GL)
+      try {
+        const targetTenantSlug = tenantInfo.slug || 'family-coop';
+        const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+        fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(targetLoan?.id || loanRef)}/repay?coop=${targetTenantSlug}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-slug': targetTenantSlug,
+            'x-tenant-id': targetTenantId,
+          },
+          body: JSON.stringify({
+            memberId: currentMember.id,
+            installmentNumber: instNum,
+            dueAmount: amount,
+            principalAmount: principalPart,
+            interestAmount: interestPart,
+            convenienceFee: fee,
+            feeTreatment: paymongoFeeTreatment,
+            paymentIntentId: passbookPayModal.paymentIntentId || `pi_qrph_${Date.now()}`,
+            orNumber: orNum,
+          }),
+        }).catch(() => {});
+      } catch {}
 
       setPassbookReceipt({
         orNumber: orNum,
@@ -1574,8 +1834,8 @@ export default function MemberPortalPage() {
         convenienceFee: fee,
         totalAmount: total,
         newBalance: newBal,
-        reference: 'LN-2026-00001',
-        description: 'Monthly Loan Amortization Payment',
+        reference: loanRef,
+        description: `Installment #${instNum} Loan Amortization Payment`,
       });
     } else if (type === 'SAVINGS') {
       const newBal = Math.round((savingsBalance + amount) * 100) / 100;
@@ -1953,6 +2213,96 @@ export default function MemberPortalPage() {
                 </div>
               </div>
             </div>
+
+            {/* Active Loan Next Payment Due Date & Due Amount Reminder with PayMongo QR Ph "Pay Now" */}
+            {(() => {
+              const ACTIVE_LOAN_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
+              const activeDisbursedLoan =
+                memberLoanApplications.find((app: any) => app.status === 'DISBURSED' && Number(app.balanceRemaining ?? app.amount ?? 1) > 0) ||
+                memberLoanApplications.find(
+                  (app: any) =>
+                    ACTIVE_LOAN_STATUSES.includes(String(app.status || '').toUpperCase()) &&
+                    Number(app.balanceRemaining ?? app.amount ?? 1) > 0
+                );
+              const hasActiveLoan = Boolean(activeDisbursedLoan || loanBalance > 0);
+              if (!hasActiveLoan) return null;
+
+              const effectiveBal =
+                pickNumber(
+                  activeDisbursedLoan?.balanceRemaining,
+                  activeDisbursedLoan?.principalAmount,
+                  activeDisbursedLoan?.amount,
+                  loanBalance
+                ) || loanBalance;
+              if (effectiveBal <= 0) return null;
+
+              const scheduleRows = getLoanScheduleRows(activeDisbursedLoan, effectiveBal);
+              const nextDueRow = scheduleRows.find((r: any) => r.status !== 'PAID');
+              if (!nextDueRow) return null;
+
+              const loanRef = activeDisbursedLoan?.loanNumber || activeDisbursedLoan?.id || 'LN-2026-00001';
+              const productName = activeDisbursedLoan?.productName || 'Regular Member Loan';
+              const dueAmount = Number(nextDueRow.tot || 0);
+              const prAmount = Number(nextDueRow.pr || 0);
+              const inAmount = Number(nextDueRow.in || 0);
+              const paidCount = scheduleRows.filter((r: any) => r.status === 'PAID').length;
+
+              return (
+                <div className="bg-gradient-to-r from-amber-50 via-white to-emerald-50/70 border-2 border-amber-300 rounded-2xl p-5 shadow-sm space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 shadow-xs">
+                        <Calendar className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="bg-amber-200/90 text-amber-950 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-400">
+                            Upcoming Loan Payment Reminder
+                          </span>
+                          <span className="font-mono text-xs font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                            {loanRef}
+                          </span>
+                          <span className="text-xs font-semibold text-emerald-800">
+                            • {productName}
+                          </span>
+                        </div>
+                        <div className="text-sm sm:text-base font-extrabold text-slate-900">
+                          Next Payment Due Date:{' '}
+                          <span className="text-amber-800 underline decoration-amber-400 underline-offset-4">
+                            {nextDueRow.due}
+                          </span>{' '}
+                          <span className="text-xs font-semibold text-slate-500">
+                            (Installment #{nextDueRow.seq} of {scheduleRows.length} • {paidCount} Paid)
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">
+                          Principal: <strong className="font-mono text-slate-800">₱{prAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> + Interest: <strong className="font-mono text-amber-800">₱{inAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> • Remaining Principal Balance: <strong className="font-mono text-slate-900">₱{effectiveBal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex sm:flex-col items-center sm:items-end justify-between gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-amber-200/80 shrink-0">
+                      <div className=" sm:text-right">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          Exact Amount Due
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black font-mono text-emerald-800">
+                          ₱{dueAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLoanPayNow(activeDisbursedLoan, nextDueRow)}
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md shadow-emerald-700/20 transition flex items-center gap-2 cursor-pointer"
+                      >
+                        <QrCode className="w-4 h-4" />
+                        <span>Pay Now (QR Ph)</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Quick Action Buttons Section */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -5409,7 +5759,10 @@ export default function MemberPortalPage() {
                       {/* Summary & Execution */}
                       {(() => {
                         const principal = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
-                        const passOn = depositChannel === 'PAYMONGO_QRPH' ? Math.round(principal * 0.015 * 100) / 100 : 0;
+                        const passOn =
+                          depositChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment === 'PASS_THROUGH'
+                            ? Math.round(principal * 0.015 * 100) / 100
+                            : 0;
                         const total = principal + passOn;
 
                         return (
@@ -5420,7 +5773,9 @@ export default function MemberPortalPage() {
                             </div>
                             {depositChannel === 'PAYMONGO_QRPH' && (
                               <div className="flex justify-between text-amber-700">
-                                <span>Gateway Convenience Fee (1.5%):</span>
+                                <span>
+                                  Gateway Convenience Fee ({paymongoFeeTreatment === 'OPEX' ? 'OPEX Absorbed' : '1.5% Pass-Through'}):
+                                </span>
                                 <span className="font-mono font-semibold">+ ₱{passOn.toFixed(2)}</span>
                               </div>
                             )}
@@ -5571,7 +5926,9 @@ export default function MemberPortalPage() {
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
-                      PayMongo QR Ph Repayment &amp; Deposit
+                      {passbookPayModal.type === 'LOAN'
+                        ? 'PayMongo QR Ph Loan Installment Payment'
+                        : 'PayMongo QR Ph Repayment & Deposit'}
                     </h3>
                     <div className="text-[10px] sm:text-[11px] text-slate-300 truncate">
                       Cooperative Payment Terminal • <strong>{currentMember.name}</strong>
@@ -5589,93 +5946,115 @@ export default function MemberPortalPage() {
               </div>
 
               <div className="p-4 sm:p-6 space-y-5 text-xs overflow-y-auto flex-1">
-                {/* Account Selection */}
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
-                    Payment Destination:
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPassbookPayModal((prev) => ({
-                          ...prev,
-                          type: 'LOAN',
-                          amount: 4442.44,
-                          description: 'Monthly Loan Amortization Installment #2',
-                        }))
-                      }
-                      className={`p-3 rounded-xl border text-center transition ${
-                        passbookPayModal.type === 'LOAN'
-                          ? 'border-indigo-600 bg-indigo-50/80 font-bold text-indigo-950 ring-2 ring-indigo-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <CreditCard className="w-4 h-4 mx-auto mb-1 text-indigo-600" />
-                      <span>Loan Repayment</span>
-                    </button>
+                {/* Account Selection (Hidden when locked to Loan Due Amount) */}
+                {!passbookPayModal.lockedAmount && passbookPayModal.type !== 'LOAN' && (
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                      Payment Destination:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPassbookPayModal((prev) => ({
+                            ...prev,
+                            type: 'SAVINGS',
+                            amount: 1000,
+                            description: 'Voluntary Member Savings Deposit',
+                          }))
+                        }
+                        className={`p-3 rounded-xl border text-center transition ${
+                          passbookPayModal.type === 'SAVINGS'
+                            ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <PiggyBank className="w-4 h-4 mx-auto mb-1 text-emerald-600" />
+                        <span>Savings Deposit</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPassbookPayModal((prev) => ({
-                          ...prev,
-                          type: 'SAVINGS',
-                          amount: 1000,
-                          description: 'Voluntary Member Savings Deposit',
-                        }))
-                      }
-                      className={`p-3 rounded-xl border text-center transition ${
-                        passbookPayModal.type === 'SAVINGS'
-                          ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <PiggyBank className="w-4 h-4 mx-auto mb-1 text-emerald-600" />
-                      <span>Savings Deposit</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPassbookPayModal((prev) => ({
-                          ...prev,
-                          type: 'SHARES',
-                          amount: 1000,
-                          description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
-                        }))
-                      }
-                      className={`p-3 rounded-xl border text-center transition ${
-                        passbookPayModal.type === 'SHARES'
-                          ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <BookOpen className="w-4 h-4 mx-auto mb-1 text-amber-600" />
-                      <span>Share Capital</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPassbookPayModal((prev) => ({
+                            ...prev,
+                            type: 'SHARES',
+                            amount: 1000,
+                            description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
+                          }))
+                        }
+                        className={`p-3 rounded-xl border text-center transition ${
+                          passbookPayModal.type === 'SHARES'
+                            ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <BookOpen className="w-4 h-4 mx-auto mb-1 text-amber-600" />
+                        <span>Share Capital</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Amount Input */}
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Amount to Credit (₱):
-                  </label>
-                  <input
-                    type="number"
-                    min="100"
-                    step="100"
-                    value={passbookPayModal.amount}
-                    onChange={(e) =>
-                      setPassbookPayModal((prev) => ({
-                        ...prev,
-                        amount: Math.max(100, Number(e.target.value)),
-                      }))
-                    }
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 font-bold font-mono text-base text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
-                  />
-                </div>
+                {/* Amount Input — Strictly Non-Editable for Loan Due Amount */}
+                {passbookPayModal.type === 'LOAN' || passbookPayModal.lockedAmount ? (
+                  <div className="p-4 bg-indigo-50/70 border-2 border-indigo-200 rounded-2xl space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-900">
+                        Scheduled Installment Due Amount
+                      </span>
+                      <span className="bg-indigo-200 text-indigo-950 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        Non-Editable • Locked to Due Amount
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between pt-1">
+                      <div className="text-xs text-slate-600 space-y-0.5">
+                        <div className="font-bold text-slate-900">{passbookPayModal.description}</div>
+                        {passbookPayModal.dueDate && (
+                          <div>
+                            Due Date: <strong className="text-amber-800">{passbookPayModal.dueDate}</strong>
+                          </div>
+                        )}
+                        {passbookPayModal.principalPortion !== undefined && passbookPayModal.interestPortion !== undefined && (
+                          <div className="text-[11px] text-slate-500">
+                            Principal: <strong>₱{passbookPayModal.principalPortion.toFixed(2)}</strong> + Interest: <strong>₱{passbookPayModal.interestPortion.toFixed(2)}</strong>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xl font-black font-mono text-indigo-950">
+                          ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={`₱${passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                      className="w-full border border-indigo-200 bg-white/80 rounded-xl px-3.5 py-2 font-bold font-mono text-sm text-slate-700 cursor-not-allowed select-none"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Amount to Credit (₱):
+                    </label>
+                    <input
+                      type="number"
+                      min="100"
+                      step="100"
+                      value={passbookPayModal.amount}
+                      onChange={(e) =>
+                        setPassbookPayModal((prev) => ({
+                          ...prev,
+                          amount: Math.max(100, Number(e.target.value)),
+                        }))
+                      }
+                      className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 font-bold font-mono text-base text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+                )}
 
                 {/* Dynamic Fee Calculation Breakdown */}
                 {(() => {
@@ -5685,36 +6064,54 @@ export default function MemberPortalPage() {
                   return (
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
                       <div className="flex justify-between text-slate-600">
-                        <span>Net Account Credit:</span>
+                        <span>{passbookPayModal.type === 'LOAN' ? 'Loan Installment Due Amount:' : 'Net Account Credit:'}</span>
                         <span className="font-mono font-bold text-slate-900">
-                          ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                       <div className="flex justify-between text-amber-800">
-                        <span className="flex items-center gap-1">
-                          <span>Pass-On QR Ph Convenience Fee (1.5%):</span>
-                          <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-bold">Min ₱15</span>
+                        <span className="flex items-center gap-1 flex-wrap">
+                          <span>PayMongo QR Ph Gateway Fee (1.5%):</span>
+                          <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-bold">
+                            {paymongoFeeTreatment === 'OPEX' ? 'Coop OPEX (₱0 Fee)' : 'Pass-Through'}
+                          </span>
                         </span>
                         <span className="font-mono font-bold">+ ₱{fee.toFixed(2)}</span>
                       </div>
                       <div className="border-t border-slate-200 pt-2 flex justify-between items-center text-sm font-black text-slate-900">
-                        <span>Total to Scan & Pay:</span>
-                        <span className="font-mono text-emerald-700 text-base">₱{total.toFixed(2)}</span>
+                        <span>Total to Scan &amp; Pay:</span>
+                        <span className="font-mono text-emerald-700 text-base">
+                          ₱{total.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
                       </div>
                     </div>
                   );
                 })()}
 
-                {/* QR Graphic and Payload Simulation */}
+                {/* QR Graphic and Payload */}
                 <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50/50 flex flex-col items-center justify-center text-center">
-                  <div className="w-40 h-40 bg-white border-2 border-emerald-600 rounded-2xl p-3 shadow-md flex flex-col items-center justify-center">
-                    <div className="w-32 h-32 bg-slate-950 rounded-xl flex items-center justify-center text-white text-[10px] font-mono p-2 text-center">
-                      [PayMongo QR Ph]
-                      <br />
-                      ₱{(passbookPayModal.amount + calculateConvenienceFee(passbookPayModal.amount)).toFixed(2)}
-                      <br />
-                      InstaPay / GCash
-                    </div>
+                  <div className="w-44 h-44 bg-white border-2 border-emerald-600 rounded-2xl p-3 shadow-md flex flex-col items-center justify-center">
+                    {passbookPayModal.isGeneratingQr ? (
+                      <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
+                        <RefreshCw className="w-6 h-6 animate-spin text-emerald-600" />
+                        <span className="text-[10px] font-bold">Generating PayMongo QR Ph...</span>
+                      </div>
+                    ) : passbookPayModal.qrImageUrl && passbookPayModal.qrImageUrl.startsWith('data:image') ? (
+                      <img
+                        src={passbookPayModal.qrImageUrl}
+                        alt="PayMongo QR Ph Code"
+                        className="w-36 h-36 object-contain"
+                      />
+                    ) : (
+                      <div className="w-36 h-36 bg-slate-950 rounded-xl flex flex-col items-center justify-center text-white text-[10px] font-mono p-2 text-center gap-1">
+                        <QrCode className="w-10 h-10 text-emerald-400" />
+                        <span className="font-bold text-emerald-300">[PayMongo QR Ph]</span>
+                        <span className="font-bold text-xs">
+                          ₱{(passbookPayModal.amount + calculateConvenienceFee(passbookPayModal.amount)).toFixed(2)}
+                        </span>
+                        <span className="text-[9px] text-slate-300">InstaPay / GCash / Maya</span>
+                      </div>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-2">
                     Scan with GCash, Maya, BDO, BPI, UnionBank, or any InstaPay-enabled mobile banking app.
@@ -5724,11 +6121,16 @@ export default function MemberPortalPage() {
                 <div className="pt-1">
                   <button
                     type="button"
-                    onClick={() => handleExecutePassbookPayment(passbookPayModal.type, passbookPayModal.amount)}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2"
+                    onClick={() => {
+                      const payType = passbookPayModal.type;
+                      const payAmt = passbookPayModal.amount;
+                      setPassbookPayModal((prev) => ({ ...prev, open: false }));
+                      handleExecutePassbookPayment(payType, payAmt);
+                    }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Execute Instant PayMongo QR Ph Payment</span>
+                    <span>Complete &amp; Record PayMongo QR Ph Payment</span>
                   </button>
                 </div>
               </div>

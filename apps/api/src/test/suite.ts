@@ -1395,17 +1395,18 @@ console.log('\n--- 24. Automated Platform Credit Billing & Option 4 Member Digit
   assert(mariaSL.totalSavingsBalance === 5000.0, 'Maria Savings Passbook balance (2-01-01) reflects ₱5,000.00');
   assert(mariaSL.totalLoanOutstandingBalance === 46057.56, 'Maria Loan Subsidiary Ledger (1-02-01) reflects ₱46,057.56');
 
-  // 24.6 PayMongo QR Ph Pass-On Convenience Fee (1.5%, minimum ₱15.00)
-  const calcConvenienceFee = (amount: number) => Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
+  // 24.6 PayMongo QR Ph Gateway Fee (1.5%, no ₱15.00 minimum floor; supports PASS_THROUGH vs OPEX)
+  const calcConvenienceFee = (amount: number, feeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH') =>
+    feeTreatment === 'OPEX' ? 0.0 : Math.round(amount * 0.015 * 100) / 100;
   const loanInstallment = 4442.44;
-  const qrFee = calcConvenienceFee(loanInstallment);
+  const qrFee = calcConvenienceFee(loanInstallment, 'PASS_THROUGH');
   assert(qrFee === 66.64, '1.5% pass-on convenience fee on ₱4,442.44 repayment is exactly ₱66.64');
   assert(Math.round((loanInstallment + qrFee) * 100) / 100 === 4509.08, 'Total amount to pay via QR Ph is ₱4,509.08');
 
-  // Minimum fee threshold (₱500 payment -> 1.5% is ₱7.50, capped at minimum ₱15.00)
+  // No ₱15.00 minimum fee floor on small transactions (₱500 payment -> 1.5% is ₱7.50, or ₱0.00 when OPEX)
   const smallPayment = 500.0;
-  const minQrFee = calcConvenienceFee(smallPayment);
-  assert(minQrFee === 15.0, 'Convenience fee enforces minimum ₱15.00 floor on small transactions');
+  const minQrFee = calcConvenienceFee(smallPayment, 'PASS_THROUGH');
+  assert(minQrFee === 7.5, 'Convenience fee has no ₱15.00 floor on small transactions (1.5% of ₱500 = ₱7.50)');
 }
 
 // 25. Co-Maker Capacity Engine, Early Settlement Rebate & Low-Balance (No Grace Period) Verification

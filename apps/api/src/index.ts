@@ -1239,18 +1239,22 @@ app.get('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) =>
 app.post('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
-    const { secretKey, publicKey, webhookSecret, environment, isEnabled, updatedBy } = req.body;
-    if (!secretKey || !publicKey) {
-      return res.status(400).json({ success: false, error: 'Secret Key and Public Key are required.' });
-    }
+    const { secretKey, publicKey, webhookSecret, environment, isEnabled, feeTreatment, updatedBy } = req.body;
     const saved = await PayMongoService.saveTenantConfig(
       tenantId,
-      { secretKey, publicKey, webhookSecret, environment, isEnabled },
+      {
+        secretKey,
+        publicKey,
+        webhookSecret,
+        environment,
+        isEnabled,
+        feeTreatment: feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
+      },
       updatedBy || 'Cooperative Admin'
     );
     res.json({
       success: true,
-      message: 'Cooperative PayMongo gateway credentials updated and saved to Cloud Firestore.',
+      message: 'Cooperative PayMongo gateway configuration updated and saved to Cloud Firestore.',
       data: saved,
     });
   } catch (err: any) {
@@ -1279,6 +1283,7 @@ app.get('/api/v1/tenant/paymongo-public-config', async (req: Request, res: Respo
         publicKey: config.publicKey,
         isEnabled: config.isEnabled,
         environment: config.environment,
+        feeTreatment: config.feeTreatment || 'PASS_THROUGH',
       },
     });
   } catch (err: any) {
@@ -3834,16 +3839,20 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       const loan = rawLoan as any;
       const principal = Number(loan.principalAmount || loan.amount || 0);
       if (principal <= 0) continue;
+      const effectiveLoanBalance =
+        loan.balanceRemaining !== undefined && loan.balanceRemaining !== null
+          ? Number(loan.balanceRemaining)
+          : principal;
 
       const borrower: any = resolveBorrower(loan);
 
-      if (borrower && (Number(borrower.loanBalance || 0) !== principal)) {
-        borrower.loanBalance = principal;
+      if (borrower && (Number(borrower.loanBalance || 0) !== effectiveLoanBalance)) {
+        borrower.loanBalance = effectiveLoanBalance;
         borrower.activeLoanId = loan.id;
         borrower.activeLoanNumber = loan.loanNumber;
         try {
           await fsService.updateMember(tenantId, borrower.id, {
-            loanBalance: principal,
+            loanBalance: effectiveLoanBalance,
             activeLoanId: loan.id,
             activeLoanNumber: loan.loanNumber,
             updatedAt: new Date().toISOString(),
@@ -4128,11 +4137,20 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
 // ==========================================
 // 6. PAYMENTS & REPAYMENTS (PAYMONGO QR PH & CASHIER)
 // ==========================================
-app.post('/api/v1/payments/qrph/generate', (req: Request, res: Response) => {
-  const { loanId, memberId, amount, description } = req.body;
+app.post('/api/v1/payments/qrph/generate', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { loanId, memberId, amount, description, feeTreatment } = req.body;
 
   if (!loanId || !amount || amount <= 0) {
     return res.status(400).json({ success: false, error: 'Valid loanId and payment amount required.' });
+  }
+
+  let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+  if (!feeTreatment) {
+    try {
+      const cfg = await PayMongoService.getTenantConfig(tenantId);
+      if (cfg.feeTreatment === 'OPEX') effectiveFeeTreatment = 'OPEX';
+    } catch {}
   }
 
   const qrIntent = PaymentService.generateQRPhIntent({
@@ -4140,14 +4158,339 @@ app.post('/api/v1/payments/qrph/generate', (req: Request, res: Response) => {
     memberId: memberId || 'mem_default',
     installmentAmount: Number(amount),
     description: description || 'Loan Installment Repayment',
+    feeTreatment: effectiveFeeTreatment,
   });
 
   res.json({ success: true, data: qrIntent });
 });
 
+app.post('/api/v1/loans/:id/paymongo/create-intent', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const loanId = req.params.id;
+  const { memberId, installmentNumber, amount, feeTreatment } = req.body;
+
+  if (!amount || Number(amount) <= 0) {
+    return res.status(400).json({ success: false, error: 'Valid due amount is required.' });
+  }
+
+  let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+  if (!feeTreatment) {
+    try {
+      const cfg = await PayMongoService.getTenantConfig(tenantId);
+      if (cfg.feeTreatment === 'OPEX') effectiveFeeTreatment = 'OPEX';
+    } catch {}
+  }
+
+  const baseAmount = Math.round(Number(amount) * 100) / 100;
+  const convenienceFee = PaymentService.calculatePassOnFee(baseAmount, 'PAYMONGO_QRPH', effectiveFeeTreatment);
+  const totalAmount = Math.round((baseAmount + convenienceFee) * 100) / 100;
+
+  try {
+    const qrResult = await PayMongoService.createQRPhPayment(
+      {
+        amount: totalAmount,
+        description: `Loan Installment #${installmentNumber || 1} (${loanId})`,
+        metadata: {
+          tenantId,
+          loanId,
+          memberId: memberId || 'mem_default',
+          installmentNumber: installmentNumber || 1,
+          baseAmount,
+          convenienceFee,
+          feeTreatment: effectiveFeeTreatment,
+          type: 'LOAN_REPAYMENT',
+        },
+      },
+      tenantId
+    );
+
+    let checkoutLinkUrl: string | undefined;
+    let checkoutLinkId: string | undefined;
+    try {
+      const linkResult = await PayMongoService.createCheckoutLink(
+        {
+          amount: totalAmount,
+          description: `Loan Installment #${installmentNumber || 1} (${loanId})`,
+          remarks: `Tenant: ${tenantId} | Loan: ${loanId} | Member: ${memberId || ''}`,
+        },
+        tenantId
+      );
+      checkoutLinkUrl = linkResult.checkoutUrl;
+      checkoutLinkId = linkResult.linkId;
+    } catch {}
+
+    return res.json({
+      success: true,
+      data: {
+        paymentIntentId: qrResult.paymentIntentId,
+        clientKey: qrResult.clientKey,
+        qrImageUrl: qrResult.qrImageUrl,
+        expiresAt: qrResult.expiresAt,
+        status: qrResult.status,
+        checkoutUrl: checkoutLinkUrl,
+        checkoutLinkId,
+        baseAmount,
+        convenienceFee,
+        totalAmount,
+        feeTreatment: effectiveFeeTreatment,
+      },
+    });
+  } catch (err: any) {
+    // Fallback to deterministic EMVCo QR Ph intent if external PayMongo sandbox call is unavailable
+    const fallback = PaymentService.generateQRPhIntent({
+      loanId,
+      memberId: memberId || 'mem_default',
+      installmentAmount: baseAmount,
+      description: `Loan Installment #${installmentNumber || 1} (${loanId})`,
+      feeTreatment: effectiveFeeTreatment,
+    });
+    return res.json({
+      success: true,
+      data: {
+        paymentIntentId: fallback.intentId,
+        clientKey: fallback.intentId,
+        qrImageUrl: '',
+        qrCodePayload: fallback.qrCodePayload,
+        expiresAt: fallback.expiresAt,
+        status: 'awaiting_payment_method',
+        baseAmount: fallback.loanInstallmentAmount,
+        convenienceFee: fallback.passOnFee,
+        totalAmount: fallback.totalAmountToPay,
+        feeTreatment: effectiveFeeTreatment,
+      },
+    });
+  }
+});
+
+app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const loanId = req.params.id;
+    const {
+      memberId,
+      memberName: reqMemberName,
+      memberNo: reqMemberNo,
+      installmentNumber,
+      amountPaid,
+      principalPortion: reqPrincipalPortion,
+      interestPortion: reqInterestPortion,
+      channel,
+      feeTreatment,
+      receiptNumber: reqReceiptNumber,
+    } = req.body;
+
+    const fsService = FirestoreCoopService.getInstance();
+    let loans = dbStore.loans.get(tenantId) || [];
+    let loan: any = loans.find((l: any) => l.id === loanId || l.loanNumber === loanId);
+    if (!loan) {
+      try {
+        const fsLoans = await fsService.listLoans(tenantId);
+        if (fsLoans && fsLoans.length > 0) {
+          loans = fsLoans;
+          dbStore.loans.set(tenantId, loans);
+          loan = loans.find((l: any) => l.id === loanId || l.loanNumber === loanId);
+        }
+      } catch {}
+    }
+
+    if (!loan) {
+      return res.status(404).json({ success: false, error: 'Loan not found.' });
+    }
+
+    // Ensure schedule exists on the loan
+    const principalAmount = Number(loan.principalAmount || loan.amount || 50000);
+    if (!Array.isArray(loan.schedule) || loan.schedule.length === 0 || !loan.schedule[0]?.totalInstallment) {
+      const scheduleData = AmortizationService.generateSchedule({
+        principalAmount,
+        annualInterestRate: Number(loan.annualRate ?? loan.interestRateAnnual ?? 0.12),
+        termMonths: Number(loan.termMonths || loan.term || 12),
+        termWeeks: loan.termWeeks ? Number(loan.termWeeks) : undefined,
+        termUnit: loan.termUnit || 'MONTHS',
+        weeklyPaymentFrequency: loan.weeklyPaymentFrequency || 'EVERY_WEEK',
+        paymentFrequency: loan.paymentFrequency || (loan.termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
+        method: loan.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+        firstDueDate: loan.firstDueDate,
+        mandatorySharePaymentTreatment: loan.mandatorySharePurchaseEnabled ? loan.mandatorySharePaymentTreatment : undefined,
+        mandatoryShareAmount: Number(loan.mandatoryShareAmount || 0),
+      });
+      loan.schedule = scheduleData.schedule;
+      loan.totalInterestExpected = scheduleData.totalInterest;
+      loan.totalPayable = scheduleData.totalPayable;
+    }
+
+    // Find target installment
+    const targetItem =
+      (installmentNumber
+        ? loan.schedule.find((s: any) => Number(s.installmentNumber || s.seq) === Number(installmentNumber))
+        : null) ||
+      loan.schedule.find((s: any) => !s.isPaid && s.status !== 'PAID') ||
+      loan.schedule[0];
+
+    const dueAmount = Math.round(Number(amountPaid || targetItem?.totalInstallment || 0) * 100) / 100;
+    const interestPortion =
+      reqInterestPortion !== undefined
+        ? Math.round(Number(reqInterestPortion) * 100) / 100
+        : Math.round(Number(targetItem?.interestAmount || 0) * 100) / 100;
+    const principalPortion =
+      reqPrincipalPortion !== undefined
+        ? Math.round(Number(reqPrincipalPortion) * 100) / 100
+        : Math.round(Number(targetItem?.principalAmount || Math.max(0, dueAmount - interestPortion)) * 100) / 100;
+
+    let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+    if (!feeTreatment) {
+      try {
+        const cfg = await PayMongoService.getTenantConfig(tenantId);
+        if (cfg.feeTreatment === 'OPEX') effectiveFeeTreatment = 'OPEX';
+      } catch {}
+    }
+
+    const paymentChannel: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' = channel === 'IN_PERSON_CASHIER' ? 'IN_PERSON_CASHIER' : 'PAYMONGO_QRPH';
+    const passOnFee =
+      paymentChannel === 'PAYMONGO_QRPH'
+        ? PaymentService.calculatePassOnFee(dueAmount, 'PAYMONGO_QRPH', effectiveFeeTreatment)
+        : 0;
+
+    const nowIso = new Date().toISOString();
+    if (targetItem) {
+      targetItem.isPaid = true;
+      targetItem.status = 'PAID';
+      targetItem.paidAt = nowIso;
+      targetItem.paidPrincipal = targetItem.principalAmount || principalPortion;
+      targetItem.paidInterest = targetItem.interestAmount || interestPortion;
+    }
+
+    const prevRemaining =
+      loan.balanceRemaining !== undefined && loan.balanceRemaining !== null
+        ? Number(loan.balanceRemaining)
+        : principalAmount;
+    const newRemaining =
+      targetItem?.endingBalance !== undefined && targetItem?.endingBalance !== null
+        ? Math.max(0, Math.round(Number(targetItem.endingBalance) * 100) / 100)
+        : Math.max(0, Math.round((prevRemaining - principalPortion) * 100) / 100);
+
+    loan.balanceRemaining = newRemaining;
+    loan.updatedAt = nowIso;
+
+    const receiptNo = reqReceiptNumber || `OR-${new Date().getFullYear()}-QR${Math.floor(10000 + Math.random() * 90000)}`;
+    const dateFormatted = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+    const instNum = targetItem?.installmentNumber || installmentNumber || 1;
+
+    const repaymentEntry = {
+      id: `rep_${Date.now()}`,
+      date: dateFormatted,
+      ref: receiptNo,
+      particulars: `Installment #${instNum} Repayment via PayMongo QR Ph (Principal ₱${principalPortion.toFixed(2)} + Interest ₱${interestPortion.toFixed(2)})`,
+      principal: principalPortion,
+      interest: interestPortion,
+      debit: 0,
+      credit: principalPortion,
+      balance: newRemaining,
+      paidAt: nowIso,
+    };
+
+    loan.repayments = Array.isArray(loan.repayments) ? [...loan.repayments, repaymentEntry] : [repaymentEntry];
+
+    // Persist updated loan in memory & Firestore
+    const loanIdx = loans.findIndex((l: any) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+    if (loanIdx >= 0) loans[loanIdx] = loan;
+    else loans.unshift(loan);
+    dbStore.loans.set(tenantId, loans);
+
+    try {
+      await fsService.saveLoan(tenantId, loan);
+    } catch (fsErr) {
+      console.warn('Firestore saveLoan on repay warning:', fsErr);
+    }
+
+    // Update borrower member's loanBalance in memory & Firestore
+    let members = dbStore.members.get(tenantId) || [];
+    try {
+      const fsMembers = await fsService.listMembers(tenantId);
+      if (fsMembers && fsMembers.length > 0) members = fsMembers;
+    } catch {}
+
+    const payMemberId = memberId || loan.memberId;
+    const payMemberNo = reqMemberNo || loan.memberNo || loan.memberNumber;
+    const borrower: any = members.find(
+      (m: any) =>
+        (payMemberId && (m.id === payMemberId || m.memberNumber === payMemberId)) ||
+        (payMemberNo && (m.memberNumber === payMemberNo || m.memberNo === payMemberNo))
+    );
+
+    if (borrower) {
+      borrower.loanBalance = newRemaining;
+      try {
+        await fsService.updateMember(tenantId, borrower.id, {
+          loanBalance: newRemaining,
+          updatedAt: nowIso,
+        });
+      } catch {}
+      const mIdx = members.findIndex((m: any) => m.id === borrower.id);
+      if (mIdx >= 0) members[mIdx] = borrower;
+      dbStore.members.set(tenantId, members);
+    }
+
+    const memberName =
+      reqMemberName || loan.memberName || (borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Cooperative Member');
+    const memberNumber = payMemberNo || borrower?.memberNumber || 'MEM-2026-0001';
+
+    // Post Balanced CDA Journal Entry
+    const jeData = GeneralLedgerService.buildRepaymentEntry({
+      loanId: loan.id,
+      loanNumber: loan.loanNumber,
+      grossReceived: Math.round((dueAmount + passOnFee) * 100) / 100,
+      principalPortion,
+      interestPortion,
+      penaltyPortion: 0,
+      passOnFee,
+      channel: paymentChannel,
+      userId: 'usr_paymongo_qrph',
+      memberId: borrower?.id || payMemberId || 'mem_0001',
+      memberNumber,
+      memberName,
+    });
+
+    const entries = dbStore.journalEntries.get(tenantId) || [];
+    const journalEntry = { id: `je_${Date.now()}`, ...jeData };
+    entries.push(journalEntry);
+    dbStore.journalEntries.set(tenantId, entries);
+    try {
+      await fsService.postJournalEntry(tenantId, journalEntry);
+    } catch {}
+
+    const paymentRecord: PaymentTransaction = {
+      id: `pay_${Date.now()}`,
+      receiptNumber: receiptNo,
+      loanId: loan.id,
+      memberId: borrower?.id || payMemberId,
+      channel: paymentChannel,
+      grossAmountPaid: Math.round((dueAmount + passOnFee) * 100) / 100,
+      passOnConvenienceFee: passOnFee,
+      netLoanPayment: dueAmount,
+      principalPortion,
+      interestPortion,
+      penaltyPortion: 0,
+      paidAt: nowIso,
+      createdAt: nowIso,
+    };
+
+    return res.json({
+      success: true,
+      receiptNumber: receiptNo,
+      loan,
+      payment: paymentRecord,
+      repaymentEntry,
+      loanBalanceRemaining: newRemaining,
+      journalEntry,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/v1/payments/cashier', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const { loanId, memberId, amountPaid, channel } = req.body;
+  const { loanId, memberId, amountPaid, channel, feeTreatment } = req.body;
 
   if (!loanId || !amountPaid || amountPaid <= 0) {
     return res.status(400).json({ success: false, error: 'loanId and amountPaid are required.' });
@@ -4161,7 +4504,14 @@ app.post('/api/v1/payments/cashier', (req: Request, res: Response) => {
   }
 
   const paymentChannel = channel === 'PAYMONGO_QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER';
-  const passOnFee = paymentChannel === 'PAYMONGO_QRPH' ? PaymentService.calculatePassOnFee(Number(amountPaid), 'PAYMONGO_QRPH') : 0;
+  const passOnFee =
+    paymentChannel === 'PAYMONGO_QRPH'
+      ? PaymentService.calculatePassOnFee(
+          Number(amountPaid),
+          'PAYMONGO_QRPH',
+          feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH'
+        )
+      : 0;
   const netLoanPayment = Number(amountPaid);
 
   // Allocate payment: Penalties -> Interest -> Principal

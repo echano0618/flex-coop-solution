@@ -114,6 +114,7 @@ type TabType =
   | 'products'
   | 'los'
   | 'calculator'
+  | 'amortization_schedules'
   | 'collateral'
   | 'cashier'
   | 'accounting'
@@ -145,6 +146,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
     'products',
     'los',
     'calculator',
+    'amortization_schedules',
     'collateral',
     'cashier',
     'accounting',
@@ -156,12 +158,12 @@ const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
     'system_config',
     'platform_usage',
   ],
-  LOAN_OFFICER: ['overview', 'members', 'products', 'los', 'calculator', 'collateral'],
-  CREDIT_COMMITTEE: ['overview', 'products', 'los', 'calculator', 'collateral'],
-  BOD: ['overview', 'products', 'los', 'calculator', 'collateral', 'surplus', 'reports'],
-  CASHIER: ['overview', 'los', 'cashier'],
-  ACCOUNTANT: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator'],
-  COMPLIANCE_OFFICER: ['overview', 'members', 'collateral', 'surplus', 'reports'],
+  LOAN_OFFICER: ['overview', 'members', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
+  CREDIT_COMMITTEE: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
+  BOD: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
+  CASHIER: ['overview', 'los', 'amortization_schedules', 'cashier'],
+  ACCOUNTANT: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator', 'amortization_schedules'],
+  COMPLIANCE_OFFICER: ['overview', 'members', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
 };
 
 const STAFF_ACCOUNTS: StaffAccount[] = [
@@ -179,6 +181,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
       'products',
       'los',
       'calculator',
+      'amortization_schedules',
       'collateral',
       'cashier',
       'accounting',
@@ -216,7 +219,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'LO',
     color: 'bg-blue-600',
     description: 'Underwrites member applications, verifies credit & co-makers, calculates amortizations.',
-    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral'],
+    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
   },
   {
     id: 'usr_crecom_01',
@@ -226,7 +229,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CC',
     color: 'bg-amber-600',
     description: 'Reviews loan appraisals, verifies collateral, endorses to Board.',
-    allowedTabs: ['overview', 'products', 'los', 'calculator', 'collateral'],
+    allowedTabs: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
   },
   {
     id: 'usr_bod_01',
@@ -236,7 +239,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'BD',
     color: 'bg-purple-600',
     description: 'Authorizes credit facilities requiring Board policy resolutions.',
-    allowedTabs: ['overview', 'products', 'los', 'calculator', 'collateral', 'surplus', 'reports'],
+    allowedTabs: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
   },
   {
     id: 'usr_cashier_01',
@@ -246,7 +249,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CS',
     color: 'bg-emerald-600',
     description: 'Executes approved cash disbursements, processes over-the-counter payments & receipts.',
-    allowedTabs: ['overview', 'los', 'cashier'],
+    allowedTabs: ['overview', 'los', 'amortization_schedules', 'cashier'],
   },
   {
     id: 'usr_acct_01',
@@ -256,7 +259,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'AC',
     color: 'bg-teal-600',
     description: 'Manages CDA Standard Chart of Accounts, General Ledger, and BIR Tax Invoices.',
-    allowedTabs: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator'],
+    allowedTabs: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator', 'amortization_schedules'],
   },
   {
     id: 'usr_dpo_01',
@@ -266,9 +269,126 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CO',
     color: 'bg-rose-600',
     description: 'Audits NPC Data Privacy, AMLA covered transactions, and CDA/CIC statutory reports.',
-    allowedTabs: ['overview', 'members', 'collateral', 'surplus', 'reports'],
+    allowedTabs: ['overview', 'members', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
   },
 ];
+
+function computeLoanScheduleForAdmin(loan: any) {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const pickNum = (...vals: any[]): number => {
+    for (const v of vals) {
+      if (v === undefined || v === null || v === '') continue;
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return 0;
+  };
+  const fmtDate = (val: any): string => {
+    if (!val) return '';
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) return String(val);
+    return d.toISOString().slice(0, 10);
+  };
+
+  if (Array.isArray(loan?.schedule) && loan.schedule.length > 0) {
+    let dueNowAssigned = false;
+    const mapped = loan.schedule.map((item: any, idx: number) => {
+      const pr = pickNum(item.principalAmount, item.principalPayment, item.principal, item.pr);
+      const inn = pickNum(item.interestAmount, item.interestPayment, item.interest, item.in);
+      const share = pickNum(item.mandatoryShareAmount);
+      const tot = pickNum(item.totalInstallment, item.totalPayment, item.monthlyInstallment, item.tot) || pr + inn + share;
+      const bal = pickNum(item.endingBalance, item.remainingBalance, item.bal);
+      const isPaid = item.isPaid === true || item.status === 'PAID';
+      let status = isPaid ? 'PAID' : 'UPCOMING';
+      if (!isPaid && !dueNowAssigned) {
+        status = 'DUE_NOW';
+        dueNowAssigned = true;
+      }
+      return {
+        seq: item.installmentNumber || item.period || item.seq || idx + 1,
+        due: fmtDate(item.dueDate || item.due || item.paymentDate),
+        pr: r2(pr),
+        in: r2(inn),
+        tot: r2(tot),
+        bal: r2(bal),
+        status,
+      };
+    });
+    if (mapped.some((r: any) => r.pr > 0 || r.in > 0 || r.tot > 0)) {
+      return mapped;
+    }
+  }
+
+  const principal = pickNum(loan?.principalAmount, loan?.amount, loan?.requestedAmount, loan?.balanceRemaining) || 50000;
+  const annualRate = pickNum(loan?.annualRate, loan?.interestRateAnnual, loan?.annualInterestRate) || 0.12;
+  const isWeekly = loan?.termUnit === 'WEEKS' || loan?.paymentFrequency === 'WEEKLY' || loan?.paymentFrequency === 'BI_WEEKLY';
+  const everyOtherWeek = loan?.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' || loan?.paymentFrequency === 'BI_WEEKLY';
+
+  let periods: number;
+  let periodRate: number;
+  let periodDays = 0;
+  if (isWeekly) {
+    const weeks = pickNum(loan?.termWeeks, loan?.term) || 12;
+    const step = everyOtherWeek ? 2 : 1;
+    periods = Math.max(1, Math.ceil(weeks / step));
+    periodRate = (annualRate / 52) * step;
+    periodDays = 7 * step;
+  } else {
+    periods = Math.max(1, pickNum(loan?.termMonths, loan?.term) || 12);
+    periodRate = annualRate / 12;
+  }
+
+  const isStraightLine = String(loan?.amortizationMethod || '').startsWith('STRAIGHT');
+  const levelPayment =
+    periodRate > 0
+      ? (principal * periodRate * Math.pow(1 + periodRate, periods)) / (Math.pow(1 + periodRate, periods) - 1)
+      : principal / periods;
+
+  const start = new Date(loan?.firstDueDate || loan?.disbursedAt || loan?.approvedAt || loan?.createdAt || Date.now());
+  const firstDueGiven = Boolean(loan?.firstDueDate);
+
+  let remaining = principal;
+  let dueNowAssigned = false;
+  const rows = [];
+  for (let i = 1; i <= periods; i++) {
+    const interest = isStraightLine ? principal * periodRate : remaining * periodRate;
+    let pr = isStraightLine ? principal / periods : levelPayment - interest;
+    if (i === periods) pr = remaining;
+    remaining = Math.max(0, remaining - pr);
+
+    const due = new Date(start);
+    const offset = firstDueGiven ? i - 1 : i;
+    if (isWeekly) {
+      due.setDate(due.getDate() + periodDays * offset);
+    } else {
+      due.setMonth(due.getMonth() + offset);
+    }
+
+    const existingItem = Array.isArray(loan?.schedule) ? loan.schedule[i - 1] : null;
+    const isPaid = Boolean(
+      existingItem?.isPaid === true ||
+      existingItem?.status === 'PAID' ||
+      (Array.isArray(loan?.repayments) &&
+        loan.repayments.some((rep: any) => Number(rep.installmentNumber || rep.seq) === i))
+    );
+    let status = isPaid ? 'PAID' : 'UPCOMING';
+    if (!isPaid && !dueNowAssigned) {
+      status = 'DUE_NOW';
+      dueNowAssigned = true;
+    }
+
+    rows.push({
+      seq: i,
+      due: fmtDate(due),
+      pr: r2(pr),
+      in: r2(interest),
+      tot: r2(pr + interest),
+      bal: r2(remaining),
+      status,
+    });
+  }
+  return rows;
+}
 
 const DEFAULT_LOAN_PRODUCTS = [
   {
@@ -452,7 +572,7 @@ export default function AdminDashboard() {
               initials: (parsed.name || 'AD').split(' ').map((n: string) => n[0]).join('').slice(0, 2),
               color: 'bg-indigo-600',
               description: 'Authenticated Staff Session',
-              allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'iam', 'rbac', 'system_config', 'platform_usage'],
+              allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral', 'cashier', 'accounting', 'surplus', 'invoices', 'reports', 'iam', 'rbac', 'system_config', 'platform_usage'],
             };
             setCurrentStaff(matched as any);
             setIsAuthenticated(true);
@@ -496,6 +616,7 @@ export default function AdminDashboard() {
     { id: 'products', label: 'Loan Products & Offers', icon: Sliders, category: 'Lending' },
     { id: 'los', label: 'LOS Approval Matrix', icon: CreditCard, category: 'Lending' },
     { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator, category: 'Lending' },
+    { id: 'amortization_schedules', label: 'Amortization Schedules', icon: Calendar, category: 'Lending' },
     { id: 'collateral', label: 'Collateral & Chattel Registry', icon: Scale, category: 'Lending' },
     { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode, category: 'Treasury' },
     { id: 'accounting', label: 'CDA General Ledger', icon: BookOpen, category: 'Finance' },
@@ -507,6 +628,9 @@ export default function AdminDashboard() {
     { id: 'system_config', label: 'System Configuration', icon: Settings, category: 'Administration' },
     { id: 'platform_usage', label: 'Platform Escrow & Usage', icon: Activity, category: 'Administration' },
   ];
+
+  const [amortScheduleSearchQuery, setAmortScheduleSearchQuery] = useState<string>('');
+  const [selectedAmortLoanId, setSelectedAmortLoanId] = useState<string>('ALL');
 
   // Dynamic RBAC State & Permission Matrix
   const [rolePermissions, setRolePermissions] = useState<Record<StaffRole, TabType[]>>(DEFAULT_ROLE_PERMISSIONS);
@@ -1093,14 +1217,28 @@ export default function AdminDashboard() {
     webhookSecret: string;
     environment: 'test' | 'live';
     isEnabled: boolean;
+    feeTreatment: 'PASS_THROUGH' | 'OPEX';
     updatedAt?: string;
     updatedBy?: string;
-  }>({
-    secretKey: '',
-    publicKey: '',
-    webhookSecret: '',
-    environment: 'test',
-    isEnabled: true,
+  }>(() => {
+    let initialFeeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH';
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`);
+        if (cached === 'OPEX' || cached === 'PASS_THROUGH') {
+          initialFeeTreatment = cached;
+        }
+      } catch {}
+    }
+    return {
+      secretKey: '',
+      publicKey: '',
+      webhookSecret: '',
+      environment: 'test',
+      isEnabled: true,
+      feeTreatment: initialFeeTreatment,
+    };
   });
   const [showPaymongoSecretKey, setShowPaymongoSecretKey] = useState<boolean>(false);
   const [tenantPaymongoTesting, setTenantPaymongoTesting] = useState<boolean>(false);
@@ -1124,30 +1262,35 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success && data.data) {
+        const resolvedFeeTreatment = data.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
         setTenantPaymongoConfig({
           secretKey: data.data.secretKey || '',
           publicKey: data.data.publicKey || '',
           webhookSecret: data.data.webhookSecret || '',
           environment: data.data.environment || 'test',
           isEnabled: data.data.isEnabled !== undefined ? Boolean(data.data.isEnabled) : true,
+          feeTreatment: resolvedFeeTreatment,
           updatedAt: data.data.updatedAt,
           updatedBy: data.data.updatedBy,
         });
+        try {
+          localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`, resolvedFeeTreatment);
+        } catch {}
       }
     } catch (err) {
       console.warn('Failed to load tenant PayMongo config:', err);
     }
   };
 
-  const handleSaveTenantPaymongoConfig = async () => {
-    if (!tenantPaymongoConfig.secretKey.trim() || !tenantPaymongoConfig.publicKey.trim()) {
-      alert('Secret Key and Public Key are required to save PayMongo configuration.');
-      return;
-    }
+  const handleSaveTenantPaymongoConfig = async (overrideFeeTreatment?: 'PASS_THROUGH' | 'OPEX') => {
+    const effectiveFeeTreatment = overrideFeeTreatment || tenantPaymongoConfig.feeTreatment || 'PASS_THROUGH';
     setTenantPaymongoSaving(true);
     setTenantPaymongoNotification(null);
     try {
       const tenant = resolveTenantCoop();
+      try {
+        localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`, effectiveFeeTreatment);
+      } catch {}
       const res = await fetch(`${getApiBaseUrl()}/tenant/paymongo-config`, {
         method: 'POST',
         headers: {
@@ -1157,12 +1300,15 @@ export default function AdminDashboard() {
         },
         body: JSON.stringify({
           ...tenantPaymongoConfig,
+          feeTreatment: effectiveFeeTreatment,
           updatedBy: currentStaff.name || 'Cooperative Admin',
         }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setTenantPaymongoNotification('PayMongo gateway credentials updated successfully! Members will now pay directly to this cooperative account.');
+        setTenantPaymongoNotification(
+          `PayMongo gateway configuration & fee policy (${effectiveFeeTreatment === 'OPEX' ? 'Coop OPEX — ₱0.00 Member Fee' : '1.5% Pass-Through — No Minimum Floor'}) saved successfully!`
+        );
         setTimeout(() => setTenantPaymongoNotification(null), 5000);
       } else {
         alert(data.error || 'Failed to save PayMongo configuration.');
@@ -3469,7 +3615,10 @@ export default function AdminDashboard() {
       ? savingsDepositAmount
       : paymentAmount;
 
-  const passOnFee = paymentChannel === 'PAYMONGO_QRPH' ? Math.max(15, Math.round(activeTxAmount * 0.015 * 100) / 100) : 0;
+  const passOnFee =
+    paymentChannel === 'PAYMONGO_QRPH' && tenantPaymongoConfig.feeTreatment !== 'OPEX'
+      ? Math.round(activeTxAmount * 0.015 * 100) / 100
+      : 0;
   const totalCharge = activeTxAmount + passOnFee;
 
   // Official Receipt Modal State
@@ -3994,37 +4143,119 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mb-4">
-                  <Percent className="w-5 h-5 text-emerald-600" />
-                  Dual Monetization & Pass-Through Engine
-                </h3>
-                <div className="space-y-4 text-sm">
-                  <div className="p-4 border border-emerald-200 bg-emerald-50/50 rounded-lg">
-                    <div className="flex justify-between font-semibold text-emerald-950">
-                      <span>Platform Technology Fee (Active Policy)</span>
-                      <span className="text-emerald-700">1.0% Flat Rate ({techFeeTreatment === 'PASS_THROUGH' ? 'Pass-Through' : 'OPEX'})</span>
-                    </div>
-                    <p className="text-xs text-emerald-800 mt-1">
-                      {techFeeTreatment === 'PASS_THROUGH'
-                        ? 'Technology fee is deducted upfront from loan disbursement proceeds.'
-                        : 'Technology fee is absorbed directly by the cooperative under operating expense account 5-02-14.'}
-                    </p>
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-4">
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-emerald-600" />
+                      <span>Members with Upcoming Loan Payment Due Dates</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('amortization_schedules')}
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer"
+                    >
+                      View All Schedules →
+                    </button>
                   </div>
 
-                  <div className="p-4 border border-slate-200 bg-slate-50 rounded-lg">
-                    <div className="flex justify-between font-semibold text-slate-800">
-                      <span>Coop-Owned Merchant Mode</span>
-                      <span className="text-slate-600">0.5% (No Floor)</span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Cooperative connects their own PayMongo/banking merchant account. Platform takes 0.5% fee.
-                    </p>
-                  </div>
+                  {(() => {
+                    const ACTIVE_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
+                    const activeLoans = loanApplications.filter(
+                      (app: any) =>
+                        ACTIVE_STATUSES.includes(String(app.status || '').toUpperCase()) &&
+                        Number(app.balanceRemaining ?? app.amount ?? app.principalAmount ?? 0) > 0
+                    );
 
-                  <div className="text-xs text-slate-500 bg-slate-100 p-3 rounded">
-                    <strong>Tax Rule:</strong> All platform processing fees are inclusive of <strong>12% Output VAT</strong> and generate an electronic Sales Invoice with BIR compliance metadata.
-                  </div>
+                    const upcomingItems = activeLoans
+                      .map((loan: any) => {
+                        const rows = computeLoanScheduleForAdmin(loan);
+                        const nextDue = rows.find((r: any) => r.status !== 'PAID');
+                        if (!nextDue) return null;
+                        return {
+                          loanId: loan.id || loan.loanNumber,
+                          loanNumber: loan.loanNumber || loan.id,
+                          memberName: loan.memberName || 'Cooperative Member',
+                          memberNo: loan.memberNo || loan.memberNumber || loan.memberId || 'MEM-0001',
+                          productName: loan.productName || 'Regular Member Loan',
+                          dueDate: nextDue.due,
+                          installmentSeq: nextDue.seq,
+                          totalInstallments: rows.length,
+                          dueAmount: Number(nextDue.tot || 0),
+                          principalPortion: Number(nextDue.pr || 0),
+                          interestPortion: Number(nextDue.in || 0),
+                          balanceRemaining: Number(loan.balanceRemaining ?? loan.amount ?? loan.principalAmount ?? 0),
+                        };
+                      })
+                      .filter(Boolean) as any[];
+
+                    upcomingItems.sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+
+                    if (upcomingItems.length === 0) {
+                      return (
+                        <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <Calendar className="w-8 h-8 text-slate-400 mx-auto" />
+                          <div className="text-xs font-bold text-slate-700">No Upcoming Loan Payment Due Dates</div>
+                          <p className="text-[11px] text-slate-500">
+                            Members with active or disbursed loans will automatically appear here ordered by their next scheduled installment due date.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-72 overflow-y-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                            <tr>
+                              <th className="p-2.5">Member</th>
+                              <th className="p-2.5">Loan Ref</th>
+                              <th className="p-2.5">Next Due Date</th>
+                              <th className="p-2.5 text-right">Due Amount</th>
+                              <th className="p-2.5 text-center">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {upcomingItems.map((item) => (
+                              <tr key={item.loanId} className="hover:bg-slate-50/80 transition">
+                                <td className="p-2.5">
+                                  <div className="font-bold text-slate-900">{item.memberName}</div>
+                                  <div className="text-[10px] font-mono text-slate-500">{item.memberNo}</div>
+                                </td>
+                                <td className="p-2.5">
+                                  <div className="font-mono font-bold text-indigo-800">{item.loanNumber}</div>
+                                  <div className="text-[10px] text-slate-500 truncate max-w-[130px]">{item.productName}</div>
+                                </td>
+                                <td className="p-2.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-mono font-bold text-[11px]">
+                                    {item.dueDate}
+                                  </span>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    Inst #{item.installmentSeq} of {item.totalInstallments}
+                                  </div>
+                                </td>
+                                <td className="p-2.5 text-right font-mono font-bold text-emerald-800">
+                                  ₱{item.dueAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedAmortLoanId(item.loanId);
+                                      setActiveTab('amortization_schedules');
+                                    }}
+                                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-bold transition cursor-pointer"
+                                  >
+                                    Schedule
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -8277,6 +8508,296 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TAB: MEMBER AMORTIZATION SCHEDULES (ALL ACTIVE LOANS) */}
+        {activeTab === 'amortization_schedules' && (
+          <div className="space-y-6">
+            {(() => {
+              const ACTIVE_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
+              const activeLoans = loanApplications.filter(
+                (app: any) =>
+                  ACTIVE_STATUSES.includes(String(app.status || '').toUpperCase()) &&
+                  Number(app.balanceRemaining ?? app.amount ?? app.principalAmount ?? 0) > 0
+              );
+
+              const q = amortScheduleSearchQuery.trim().toLowerCase();
+              const filteredLoans = activeLoans.filter((loan: any) => {
+                const loanKey = String(loan.id || loan.loanNumber || '');
+                if (selectedAmortLoanId !== 'ALL' && loanKey !== selectedAmortLoanId && loan.loanNumber !== selectedAmortLoanId) {
+                  return false;
+                }
+                if (!q) return true;
+                const memName = String(loan.memberName || '').toLowerCase();
+                const memNo = String(loan.memberNo || loan.memberNumber || loan.memberId || '').toLowerCase();
+                const lnNo = String(loan.loanNumber || loan.id || '').toLowerCase();
+                const prod = String(loan.productName || '').toLowerCase();
+                return memName.includes(q) || memNo.includes(q) || lnNo.includes(q) || prod.includes(q);
+              });
+
+              const totalPrincipalOutstanding = activeLoans.reduce(
+                (sum: number, l: any) => sum + Number(l.balanceRemaining ?? l.amount ?? l.principalAmount ?? 0),
+                0
+              );
+              const totalNextInstallmentsDue = activeLoans.reduce((sum: number, l: any) => {
+                const rows = computeLoanScheduleForAdmin(l);
+                const nextDue = rows.find((r: any) => r.status !== 'PAID');
+                return sum + Number(nextDue?.tot || 0);
+              }, 0);
+
+              return (
+                <>
+                  {/* Header & Search Controls */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-5">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <Calendar className="w-5 h-5 text-emerald-600" />
+                          <span>Member Loan Amortization Schedules</span>
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Comprehensive view of computed amortization schedules, installment due dates, principal/interest breakdowns, and payment statuses for all members with active loans.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            value={amortScheduleSearchQuery}
+                            onChange={(e) => setAmortScheduleSearchQuery(e.target.value)}
+                            placeholder="Search member, ID, or loan #..."
+                            className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none w-56"
+                          />
+                        </div>
+
+                        <select
+                          value={selectedAmortLoanId}
+                          onChange={(e) => setSelectedAmortLoanId(e.target.value)}
+                          className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          <option value="ALL">All Active Member Loans ({activeLoans.length})</option>
+                          {activeLoans.map((l: any) => {
+                            const key = l.id || l.loanNumber;
+                            return (
+                              <option key={key} value={key}>
+                                {l.memberName || 'Member'} — {l.loanNumber || l.id}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* KPI Summary Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          Active Member Loans
+                        </div>
+                        <div className="text-2xl font-black text-slate-900 font-mono mt-1">
+                          {activeLoans.length}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Approved &amp; Disbursed Member Accounts
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-emerald-50/70 rounded-xl border border-emerald-200">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                          Total Principal Outstanding
+                        </div>
+                        <div className="text-2xl font-black text-emerald-950 font-mono mt-1">
+                          ₱{totalPrincipalOutstanding.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-[11px] text-emerald-700 mt-0.5">
+                          Aggregate Remaining Loan Principal
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-amber-50/70 rounded-xl border border-amber-200">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
+                          Next Installments Due Total
+                        </div>
+                        <div className="text-2xl font-black text-amber-950 font-mono mt-1">
+                          ₱{totalNextInstallmentsDue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-[11px] text-amber-800 mt-0.5">
+                          Scheduled Upcoming Cycle Billings
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Active Member Amortization Schedule Cards */}
+                  {filteredLoans.length === 0 ? (
+                    <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-2 shadow-sm">
+                      <Calendar className="w-10 h-10 text-slate-400 mx-auto" />
+                      <h3 className="text-sm font-bold text-slate-800">No Active Member Loan Schedules Found</h3>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        {activeLoans.length === 0
+                          ? 'There are currently no active or disbursed loans in this cooperative tenant.'
+                          : 'No active loans matched your search filter. Try clearing the search box or selecting "All Active Member Loans".'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {filteredLoans.map((loan: any) => {
+                        const rows = computeLoanScheduleForAdmin(loan);
+                        const nextDue = rows.find((r: any) => r.status !== 'PAID');
+                        const paidCount = rows.filter((r: any) => r.status === 'PAID').length;
+                        const principal = Number(loan.principalAmount || loan.amount || 50000);
+                        const balanceRemaining = Number(loan.balanceRemaining ?? principal);
+                        const annualRate = Number(loan.annualRate ?? loan.interestRateAnnual ?? loan.annualInterestRate ?? 0.12);
+                        const isWeekly =
+                          loan.termUnit === 'WEEKS' ||
+                          loan.paymentFrequency === 'WEEKLY' ||
+                          loan.paymentFrequency === 'BI_WEEKLY';
+                        const isBiWeekly =
+                          isWeekly &&
+                          (loan.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' || loan.paymentFrequency === 'BI_WEEKLY');
+                        const termLabel = isWeekly
+                          ? `${Number(loan.termWeeks || loan.term || 12)} Weeks (${isBiWeekly ? 'Bi-Weekly' : 'Weekly'})`
+                          : `${Number(loan.termMonths || loan.term || 12)} Months (Monthly)`;
+
+                        return (
+                          <div
+                            key={loan.id || loan.loanNumber}
+                            className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"
+                          >
+                            {/* Borrower & Loan Header */}
+                            <div className="p-5 bg-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-mono text-xs font-bold px-2.5 py-0.5 rounded">
+                                    {loan.loanNumber || loan.id}
+                                  </span>
+                                  <span className="text-base font-extrabold text-white">
+                                    {loan.memberName || 'Cooperative Member'}
+                                  </span>
+                                  <span className="text-xs font-mono text-slate-300">
+                                    ({loan.memberNo || loan.memberNumber || loan.memberId || 'MEM-0001'})
+                                  </span>
+                                  <span className="bg-indigo-500/30 border border-indigo-400/40 text-indigo-100 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
+                                    {loan.status || 'DISBURSED'}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-300">
+                                  Product: <strong className="text-white">{loan.productName || 'Regular Member Loan'}</strong> • Term:{' '}
+                                  <strong className="text-white">{termLabel}</strong> • Interest Rate:{' '}
+                                  <strong className="text-emerald-300">{(annualRate * 100).toFixed(2)}% p.a.</strong>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-800/90 p-3 rounded-xl border border-slate-700">
+                                <div>
+                                  <div className="text-[10px] uppercase text-slate-400 font-semibold">Principal</div>
+                                  <div className="font-mono font-bold text-white">
+                                    ₱{principal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase text-slate-400 font-semibold">Remaining Bal</div>
+                                  <div className="font-mono font-bold text-emerald-400">
+                                    ₱{balanceRemaining.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase text-slate-400 font-semibold">Next Due Date</div>
+                                  <div className="font-mono font-bold text-amber-300">
+                                    {nextDue ? nextDue.due : 'Fully Paid'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase text-slate-400 font-semibold">Next Due Amt</div>
+                                  <div className="font-mono font-bold text-white">
+                                    {nextDue
+                                      ? `₱${Number(nextDue.tot).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                      : '₱0.00'}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Amortization Schedule Table */}
+                            <div className="p-5 space-y-3">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-slate-800 uppercase tracking-wider">
+                                  Computed Amortization Schedule ({rows.length} Installments • {paidCount} Paid, {rows.length - paidCount} Remaining)
+                                </span>
+                                <span className="text-slate-500 font-mono">
+                                  Account Code: 1-02-01 (Loans Receivable)
+                                </span>
+                              </div>
+
+                              <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-96 overflow-y-auto">
+                                <table className="w-full text-left text-xs">
+                                  <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                                    <tr>
+                                      <th className="p-3">#</th>
+                                      <th className="p-3">Due Date</th>
+                                      <th className="p-3 text-right">Principal</th>
+                                      <th className="p-3 text-right">Interest</th>
+                                      <th className="p-3 text-right">Total Installment</th>
+                                      <th className="p-3 text-right">Ending Principal</th>
+                                      <th className="p-3 text-center">Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                                    {rows.map((row: any) => (
+                                      <tr
+                                        key={row.seq}
+                                        className={
+                                          row.status === 'PAID'
+                                            ? 'bg-emerald-50/30 text-slate-500'
+                                            : row.status === 'DUE_NOW'
+                                            ? 'bg-amber-50/70 font-bold'
+                                            : 'hover:bg-slate-50/60'
+                                        }
+                                      >
+                                        <td className="p-3 font-sans text-slate-500">{row.seq}</td>
+                                        <td className="p-3 font-sans font-semibold text-slate-900">{row.due}</td>
+                                        <td className="p-3 text-right">
+                                          ₱{Number(row.pr).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="p-3 text-right text-amber-700">
+                                          ₱{Number(row.in).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="p-3 text-right font-black text-slate-900">
+                                          ₱{Number(row.tot).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="p-3 text-right text-slate-600">
+                                          ₱{Number(row.bal).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="p-3 text-center font-sans">
+                                          <span
+                                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                              row.status === 'PAID'
+                                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                                : row.status === 'DUE_NOW'
+                                                ? 'bg-amber-200 text-amber-950 border border-amber-400'
+                                                : 'bg-slate-100 text-slate-600'
+                                            }`}
+                                          >
+                                            {row.status === 'DUE_NOW' ? 'NEXT DUE' : row.status}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -12844,6 +13365,86 @@ export default function AdminDashboard() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Gateway Fee Treatment Policy: Pass-Through vs OPEX (No ₱15 Minimum Floor) */}
+                    <div className="md:col-span-2 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <label className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                            <Percent className="w-4 h-4 text-emerald-600" />
+                            <span>PayMongo Gateway Fee Treatment Policy (1.5% QR Ph Fee — No Minimum ₱15 Floor)</span>
+                          </label>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Choose whether the 1.5% PayMongo QR Ph gateway fee is passed through to the paying member or absorbed by the cooperative as an operating expense (OPEX). There is no ₱15.00 minimum fee floor.
+                          </p>
+                        </div>
+                        <span
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 border ${
+                            tenantPaymongoConfig.feeTreatment === 'OPEX'
+                              ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                              : 'bg-amber-100 text-amber-900 border-amber-300'
+                          }`}
+                        >
+                          {tenantPaymongoConfig.feeTreatment === 'OPEX'
+                            ? 'Active: Cooperative OPEX (₱0 Member Fee)'
+                            : 'Active: Member Pass-Through (1.5% Exact)'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTenantPaymongoConfig((prev) => ({
+                              ...prev,
+                              feeTreatment: 'PASS_THROUGH',
+                            }));
+                            handleSaveTenantPaymongoConfig('PASS_THROUGH');
+                          }}
+                          className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+                            tenantPaymongoConfig.feeTreatment !== 'OPEX'
+                              ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
+                              : 'border-slate-200 bg-white/70 hover:bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-900">Pass-Through to Member (1.5%)</span>
+                            {tenantPaymongoConfig.feeTreatment !== 'OPEX' && (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                            Exact 1.5% gateway fee (no ₱15 minimum floor) is added on top of the member&apos;s due amount so the cooperative receives 100% net settlement.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTenantPaymongoConfig((prev) => ({
+                              ...prev,
+                              feeTreatment: 'OPEX',
+                            }));
+                            handleSaveTenantPaymongoConfig('OPEX');
+                          }}
+                          className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+                            tenantPaymongoConfig.feeTreatment === 'OPEX'
+                              ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
+                              : 'border-slate-200 bg-white/70 hover:bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-900">Cooperative OPEX (Absorbed)</span>
+                            {tenantPaymongoConfig.feeTreatment === 'OPEX' && (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                            Member pays the exact base due amount with <strong>₱0.00 gateway fee</strong>. The 1.5% fee is recorded under Cooperative Operating Expense (5-02-14).
+                          </p>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Test Connection Results Card */}
@@ -12905,7 +13506,7 @@ export default function AdminDashboard() {
 
                       <button
                         type="button"
-                        onClick={handleSaveTenantPaymongoConfig}
+                        onClick={() => handleSaveTenantPaymongoConfig()}
                         disabled={tenantPaymongoSaving}
                         className="flex-1 sm:flex-none px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm disabled:opacity-50"
                       >

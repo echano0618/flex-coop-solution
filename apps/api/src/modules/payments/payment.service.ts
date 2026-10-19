@@ -2,15 +2,18 @@ import { PaymentChannel, PaymentTransaction } from '@flexcoop/shared-types';
 
 export class PaymentService {
   /**
-   * Calculates pass-on convenience fee for PayMongo QR Ph
-   * Fixed ₱15 or 1.5% whichever is configured
+   * Calculates convenience fee for PayMongo QR Ph (1.5% with no minimum floor, or ₱0 when OPEX)
    */
-  static calculatePassOnFee(amount: number, channel: PaymentChannel): number {
-    if (channel !== 'PAYMONGO_QRPH') {
-      return 0.0; // In-person and bank transfer have NO pass-on fee
+  static calculatePassOnFee(
+    amount: number,
+    channel: PaymentChannel,
+    feeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH'
+  ): number {
+    if (channel !== 'PAYMONGO_QRPH' || feeTreatment === 'OPEX') {
+      return 0.0; // In-person, bank transfer, or OPEX gateway fee policy have NO pass-on fee to member
     }
-    // PayMongo standard QR Ph fee: 1.5% or min ₱15
-    return Math.max(15.0, Math.round(amount * 0.015 * 100) / 100);
+    // PayMongo QR Ph fee: 1.5% with no minimum ₱15 floor
+    return Math.round(amount * 0.015 * 100) / 100;
   }
 
   /**
@@ -21,6 +24,7 @@ export class PaymentService {
     memberId: string;
     installmentAmount: number;
     description: string;
+    feeTreatment?: 'PASS_THROUGH' | 'OPEX';
   }): {
     intentId: string;
     loanInstallmentAmount: number;
@@ -29,7 +33,11 @@ export class PaymentService {
     qrCodePayload: string;
     expiresAt: string;
   } {
-    const passOnFee = this.calculatePassOnFee(params.installmentAmount, 'PAYMONGO_QRPH');
+    const passOnFee = this.calculatePassOnFee(
+      params.installmentAmount,
+      'PAYMONGO_QRPH',
+      params.feeTreatment || 'PASS_THROUGH'
+    );
     const totalAmountToPay = Math.round((params.installmentAmount + passOnFee) * 100) / 100;
     const intentId = `pi_qrph_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 

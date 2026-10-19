@@ -7,6 +7,7 @@ const DEFAULT_PAYMONGO_CONFIG: PayMongoConfig = {
   webhookSecret: process.env.PAYMONGO_WEBHOOK_SECRET || 'whsec_test_secret_key_12345',
   environment: 'test',
   isEnabled: true,
+  feeTreatment: 'PASS_THROUGH',
   updatedAt: new Date().toISOString(),
   updatedBy: 'System Initializer',
 };
@@ -40,6 +41,7 @@ export class PayMongoService {
           webhookSecret: doc.webhookSecret || DEFAULT_PAYMONGO_CONFIG.webhookSecret,
           environment: doc.environment || 'test',
           isEnabled: doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : true,
+          feeTreatment: doc.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
           updatedAt: doc.updatedAt || new Date().toISOString(),
           updatedBy: doc.updatedBy || 'Platform Operator',
         };
@@ -65,16 +67,19 @@ export class PayMongoService {
       return cached.config;
     }
 
+    const platformConfig = await this.getPlatformConfig();
+
     try {
       const fs = FirestoreCoopService.getInstance();
       const doc = await fs.getTenantPaymongoConfig(tenantId);
-      if (doc && doc.secretKey) {
+      if (doc) {
         const tenantCfg: PayMongoConfig = {
-          secretKey: doc.secretKey,
-          publicKey: doc.publicKey || '',
-          webhookSecret: doc.webhookSecret || '',
-          environment: doc.environment || 'test',
+          secretKey: doc.secretKey || platformConfig.secretKey,
+          publicKey: doc.publicKey || platformConfig.publicKey,
+          webhookSecret: doc.webhookSecret || platformConfig.webhookSecret,
+          environment: doc.environment || platformConfig.environment || 'test',
           isEnabled: doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : true,
+          feeTreatment: doc.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
           updatedAt: doc.updatedAt || new Date().toISOString(),
           updatedBy: doc.updatedBy || 'Cooperative Admin',
         };
@@ -85,8 +90,7 @@ export class PayMongoService {
       console.warn(`[PAYMONGO] Failed to load tenant config for ${tenantId}, falling back to platform config:`, err);
     }
 
-    // Fall back to platform config if tenant hasn't configured custom keys
-    const platformConfig = await this.getPlatformConfig();
+    // Fall back to platform config if tenant hasn't configured custom settings
     this.cachedTenantConfigs.set(tenantId, { config: platformConfig, lastFetchTime: now });
     return platformConfig;
   }
@@ -115,6 +119,7 @@ export class PayMongoService {
       webhookSecret: updated.webhookSecret ? updated.webhookSecret.trim() : current.webhookSecret,
       environment: updated.environment || current.environment,
       isEnabled: updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled,
+      feeTreatment: updated.feeTreatment || current.feeTreatment || 'PASS_THROUGH',
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy || 'Platform Operator',
     };
@@ -151,11 +156,12 @@ export class PayMongoService {
   ): Promise<PayMongoConfig> {
     const current = await this.getTenantConfig(tenantId);
     const newConfig: PayMongoConfig = {
-      secretKey: updated.secretKey ? updated.secretKey.trim() : current.secretKey,
-      publicKey: updated.publicKey ? updated.publicKey.trim() : current.publicKey,
-      webhookSecret: updated.webhookSecret ? updated.webhookSecret.trim() : current.webhookSecret,
+      secretKey: updated.secretKey && updated.secretKey.trim() ? updated.secretKey.trim() : current.secretKey,
+      publicKey: updated.publicKey && updated.publicKey.trim() ? updated.publicKey.trim() : current.publicKey,
+      webhookSecret: updated.webhookSecret && updated.webhookSecret.trim() ? updated.webhookSecret.trim() : current.webhookSecret,
       environment: updated.environment || current.environment,
       isEnabled: updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled,
+      feeTreatment: updated.feeTreatment === 'OPEX' ? 'OPEX' : (updated.feeTreatment === 'PASS_THROUGH' ? 'PASS_THROUGH' : (current.feeTreatment || 'PASS_THROUGH')),
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy || 'Cooperative Admin',
     };
