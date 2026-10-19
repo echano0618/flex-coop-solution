@@ -664,9 +664,29 @@ export default function MemberPortalPage() {
       .catch(() => {});
   }, []);
 
-  // Show only ACTIVE products to members for new loan applications, deduplicated by code/name
+  // Show only ACTIVE and eligible products to members for new loan applications, deduplicated by code/name
   const activeLoanProducts = (() => {
-    const rawActive = loanProducts.filter((p) => p.isActive !== false && p.status !== 'INACTIVE');
+    const rawActive = loanProducts.filter((p) => {
+      if (p.isActive === false || p.status === 'INACTIVE') return false;
+      if (p.availability === 'SPECIFIC_MEMBERS') {
+        if (p.eligibleMemberScope === 'REGULAR_ONLY') {
+          return currentMember.classification === 'REGULAR';
+        }
+        if (p.eligibleMemberScope === 'ASSOCIATE_ONLY') {
+          return currentMember.classification === 'ASSOCIATE';
+        }
+        if (p.eligibleMemberScope === 'SPECIFIC_LIST' || Array.isArray(p.eligibleMemberIds)) {
+          const memberIds = p.eligibleMemberIds || [];
+          const curId = (currentMember.id || '').trim().toLowerCase();
+          const curNo = (currentMember.memberNumber || '').trim().toLowerCase();
+          return memberIds.some((id: string) => {
+            const normalized = (id || '').trim().toLowerCase();
+            return normalized === curId || normalized === curNo;
+          });
+        }
+      }
+      return true;
+    });
     const seen = new Set<string>();
     const deduplicated: any[] = [];
     for (const p of rawActive) {

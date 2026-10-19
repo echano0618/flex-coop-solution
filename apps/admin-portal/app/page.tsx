@@ -1510,6 +1510,13 @@ export default function AdminDashboard() {
   const [newProductServiceFeeRate, setNewProductServiceFeeRate] = useState<number>(1.5);
   const [newProductFinesRate, setNewProductFinesRate] = useState<number>(3.0);
   const [newProductStatus, setNewProductStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  // Member availability & eligibility configuration (All members vs specific members)
+  const [newProductAvailability, setNewProductAvailability] = useState<'ALL_MEMBERS' | 'SPECIFIC_MEMBERS'>('ALL_MEMBERS');
+  const [newProductEligibleScope, setNewProductEligibleScope] = useState<'SPECIFIC_LIST' | 'REGULAR_ONLY' | 'ASSOCIATE_ONLY'>('SPECIFIC_LIST');
+  const [newProductEligibleMemberIds, setNewProductEligibleMemberIds] = useState<string[]>([]);
+  const [newProductMemberSearch, setNewProductMemberSearch] = useState<string>('');
+  // Loan product catalog active/inactive display filter (default: ACTIVE)
+  const [productFilterStatus, setProductFilterStatus] = useState<'ACTIVE' | 'INACTIVE' | 'ALL'>('ACTIVE');
 
   // Walk-In Loan Application State for Staff / Loan Officer
   const [showWalkInLoanModal, setShowWalkInLoanModal] = useState<boolean>(false);
@@ -1714,6 +1721,9 @@ export default function AdminDashboard() {
       minCoMakers: newProductRequiresCoMaker ? Number(newProductMinCoMakers) : 0,
       coMakerRuleDescription: newProductCoMakerRule,
       requiresCollateral: newProductRequiresCollateral,
+      availability: newProductAvailability,
+      eligibleMemberScope: newProductAvailability === 'SPECIFIC_MEMBERS' ? newProductEligibleScope : 'ALL',
+      eligibleMemberIds: newProductAvailability === 'SPECIFIC_MEMBERS' && newProductEligibleScope === 'SPECIFIC_LIST' ? newProductEligibleMemberIds : [],
       isActive: newProductStatus === 'ACTIVE',
       status: newProductStatus,
     };
@@ -3747,38 +3757,8 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Right: Quick Links, Role Switcher */}
-            <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-              {/* Member Portal Quick Links */}
-              <div className="hidden xl:flex items-center space-x-1 border-r border-slate-200 pr-3">
-                <Link
-                  href="/member/login"
-                  className="text-xs font-semibold text-slate-700 hover:text-emerald-700 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                >
-                  Member Login
-                </Link>
-                <Link
-                  href="/member/register"
-                  className="text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors"
-                >
-                  + Member Onboarding
-                </Link>
-                <Link
-                  href="/coop-register"
-                  className="text-xs font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg transition-colors ml-1"
-                >
-                  + Register New Coop
-                </Link>
-              </div>
-
-              <Link
-                href="/member"
-                className="hidden sm:flex text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-lg items-center gap-1.5 transition-colors shadow-xs"
-              >
-                <span>Member Portal</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-
+            {/* Right: Authenticated User Profile */}
+            <div className="flex items-center shrink-0">
               {/* Authenticated Staff Profile Card (Strict RBAC - Impersonation Disabled) */}
               <div className="relative">
                 <button
@@ -5258,197 +5238,311 @@ export default function AdminDashboard() {
         {/* TAB: LOAN PRODUCTS & OFFERS */}
         {activeTab === 'products' && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Cooperative Loan Products & Credit Facilities</h2>
-                <p className="text-xs text-slate-500">
-                  Configure custom interest rates, repayment tenure terms, amortization formulas, and co-maker solidary underwriting rules.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowProductModal(true)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-              >
-                <Plus className="w-4 h-4" /> Configure New Loan Product
-              </button>
-            </div>
-
-            {productSaveNotification && (
-              <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span><strong>Saved to Database:</strong> {productSaveNotification}</span>
-                </div>
-                <span className="font-mono text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold">
-                  200 OK (Persisted)
-                </span>
-              </div>
-            )}
-
-            {/* Product Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {loanProducts.map((p) => {
+            {/* Active / Inactive / All Loan Products Catalog */}
+            {(() => {
+              const activeCount = loanProducts.filter((p) => p.isActive !== false && p.status !== 'INACTIVE').length;
+              const inactiveCount = loanProducts.filter((p) => p.isActive === false || p.status === 'INACTIVE').length;
+              const filteredLoanProducts = loanProducts.filter((p) => {
                 const isActive = p.isActive !== false && p.status !== 'INACTIVE';
-                return (
-                  <div
-                    key={p.id}
-                    className={`border rounded-xl p-5 transition-all flex flex-col justify-between space-y-4 ${
-                      isActive
-                        ? 'border-slate-200 bg-slate-50/60 hover:bg-slate-50'
-                        : 'border-slate-300 bg-slate-100/70 opacity-90'
-                    }`}
-                  >
+                if (productFilterStatus === 'ACTIVE') return isActive;
+                if (productFilterStatus === 'INACTIVE') return !isActive;
+                return true;
+              });
+
+              return (
+                <>
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                            {p.type}
-                          </span>
-                          {isActive ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> ACTIVE
-                            </span>
-                          ) : (
-                            <span className="bg-slate-200 text-slate-700 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> INACTIVE
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                          {p.code}
-                        </span>
-                      </div>
-
-                      <h3 className="font-bold text-base text-slate-900">{p.name}</h3>
-                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">
-                        {p.coMakerRuleDescription}
+                      <h2 className="text-lg font-bold text-slate-900">Cooperative Loan Products & Credit Facilities</h2>
+                      <p className="text-xs text-slate-500">
+                        Configure custom interest rates, repayment tenure terms, amortization formulas, and member eligibility rules.
                       </p>
-
-                      <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Principal Range:</span>
-                          <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Annual Interest:</span>
-                          <span className="font-semibold text-emerald-700">{(p.annualInterestRate * 100).toFixed(1)}% p.a.</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Repayment Term:</span>
-                          <span className="font-semibold text-slate-900">
-                            {(p as any).termUnit === 'WEEKS'
-                              ? `${(p as any).minTermWeeks || 1} - ${(p as any).maxTermWeeks || 52} Weeks (${(p as any).weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ? 'Bi-weekly' : 'Weekly'})`
-                              : `${p.minTermMonths} - ${p.maxTermMonths} Months`}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Amortization Engine:</span>
-                          <span className="font-medium text-slate-700 text-[11px] text-right">
-                            {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
-                          </span>
-                        </div>
-                        {(p as any).mandatorySharePurchaseEnabled && (
-                          <div className="flex justify-between items-center text-[11px] bg-emerald-50 text-emerald-800 p-1.5 rounded border border-emerald-200">
-                            <span className="font-semibold">Mandatory Share Capital:</span>
-                            <span className="font-mono font-bold">
-                              {(p as any).mandatoryShareQuantity || 0} Shares ({(p as any).mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' ? 'Amortized' : 'Upfront'})
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-500">Advance Interest:</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            p.advanceInterestOption === 'FIRST_YEAR'
-                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                              : p.advanceInterestOption === 'ENTIRE_LOAN'
-                              ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}>
-                            {p.advanceInterestOption === 'FIRST_YEAR'
-                              ? '1st Year Deducted Upfront'
-                              : p.advanceInterestOption === 'ENTIRE_LOAN'
-                              ? 'Entire Loan Upfront'
-                              : 'None (Standard)'}
-                          </span>
-                        </div>
-                        {p.advanceInterestOption === 'FIRST_YEAR' && (
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-slate-500">Succeeding Period:</span>
-                            <span className="text-slate-700 font-medium">
-                              {p.succeedingMethod === 'STRAIGHT_LINE' ? 'Straight-Line' : 'Diminishing Balance'}
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-500">Installment Type:</span>
-                          <span className="text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
-                            {p.fixedMonthlyInstallment !== false ? 'Fixed Level Monthly' : 'Variable Installment'}
-                          </span>
-                        </div>
-                        {Array.isArray(p.optionalFees) && p.optionalFees.length > 0 && (
-                          <div className="pt-1 border-t border-slate-100">
-                            <span className="text-[10px] text-slate-500 block mb-1">Optional Pass-Through Fees ({p.optionalFees.length}/5):</span>
-                            <div className="flex flex-wrap gap-1">
-                              {p.optionalFees.map((fee: any) => (
-                                <span key={fee.id} className="text-[9px] bg-slate-200/80 text-slate-700 font-mono px-1.5 py-0.5 rounded">
-                                  {fee.name} ({fee.type === 'PERCENTAGE' ? `${fee.value}%` : `₱${fee.value}`})
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center pt-1">
-                          <span className="text-slate-500">Co-Maker Rule:</span>
-                          {p.requiresCoMaker ? (
-                            <span className="bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                              ✓ {p.minCoMakers} Co-Maker Req.
-                            </span>
-                          ) : (
-                            <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[11px]">
-                              Optional
-                            </span>
-                          )}
-                        </div>
-                      </div>
                     </div>
-
-                    <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
-                      <span>Fee: {(p.serviceFeeRate * 100).toFixed(1)}% • Pen: {(p.finesRateMonthly * 100).toFixed(1)}%/mo</span>
-                      <div className="flex items-center gap-1.5">
-                        {isActive ? (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleProductStatus(p.id)}
-                            className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded border border-rose-200 transition flex items-center gap-1"
-                            title="Deactivate this product so it is hidden from member applications"
-                          >
-                            <Ban className="w-3 h-3" /> Deactivate
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleProductStatus(p.id)}
-                            className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2 py-1 rounded border border-emerald-300 transition flex items-center gap-1"
-                            title="Activate this product for member applications"
-                          >
-                            <Check className="w-3 h-3" /> Activate
-                          </button>
-                        )}
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {/* Active / Inactive Display Filter Toggle (Default: ACTIVE) */}
+                      <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
                         <button
                           type="button"
-                          onClick={() => handleDeleteProduct(p.id)}
-                          className="text-[10px] font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded border border-slate-200 hover:border-rose-200 transition flex items-center gap-1"
-                          title="Permanently delete this loan product from catalog"
+                          onClick={() => setProductFilterStatus('ACTIVE')}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                            productFilterStatus === 'ACTIVE'
+                              ? 'bg-white text-emerald-800 shadow-xs border border-slate-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
                         >
-                          <Trash2 className="w-3 h-3" /> Delete
+                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                          <span>Active ({activeCount})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProductFilterStatus('INACTIVE')}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                            productFilterStatus === 'INACTIVE'
+                              ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                          <span>Inactive ({inactiveCount})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProductFilterStatus('ALL')}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                            productFilterStatus === 'ALL'
+                              ? 'bg-white text-emerald-800 shadow-xs border border-slate-200'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <span>All ({loanProducts.length})</span>
                         </button>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowProductModal(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                      >
+                        <Plus className="w-4 h-4" /> Configure New Loan Product
+                      </button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+
+                  {productSaveNotification && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span><strong>Saved to Database:</strong> {productSaveNotification}</span>
+                      </div>
+                      <span className="font-mono text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold">
+                        200 OK (Persisted)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Filtered Product Cards Grid */}
+                  {filteredLoanProducts.length === 0 ? (
+                    <div className="p-12 text-center bg-slate-50 border border-dashed border-slate-300 rounded-2xl space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
+                        <Sliders className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 text-sm">
+                          {productFilterStatus === 'ACTIVE'
+                            ? 'No Active Loan Products'
+                            : productFilterStatus === 'INACTIVE'
+                            ? 'No Inactive Loan Products'
+                            : 'No Loan Products Found'}
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                          {productFilterStatus === 'ACTIVE'
+                            ? 'All loan products are currently marked as Inactive. Toggle to "All" or "Inactive" to view and activate existing products.'
+                            : 'There are no inactive or archived loan products in this cooperative catalog.'}
+                        </p>
+                      </div>
+                      {productFilterStatus !== 'ALL' && (
+                        <button
+                          type="button"
+                          onClick={() => setProductFilterStatus('ALL')}
+                          className="text-xs font-bold text-emerald-700 hover:underline"
+                        >
+                          View All Loan Products ({loanProducts.length})
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                      {filteredLoanProducts.map((p) => {
+                        const isActive = p.isActive !== false && p.status !== 'INACTIVE';
+                        return (
+                          <div
+                            key={p.id}
+                            className={`border rounded-xl p-5 transition-all flex flex-col justify-between space-y-4 ${
+                              isActive
+                                ? 'border-slate-200 bg-slate-50/60 hover:bg-slate-50'
+                                : 'border-slate-300 bg-slate-100/70 opacity-90'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                    {p.type}
+                                  </span>
+                                  {isActive ? (
+                                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> ACTIVE
+                                    </span>
+                                  ) : (
+                                    <span className="bg-slate-200 text-slate-700 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> INACTIVE
+                                    </span>
+                                  )}
+                                  {p.availability === 'SPECIFIC_MEMBERS' ? (
+                                    <span className="bg-indigo-100 text-indigo-800 border border-indigo-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <Users className="w-3 h-3" />
+                                      {p.eligibleMemberScope === 'REGULAR_ONLY'
+                                        ? 'Regular Only'
+                                        : p.eligibleMemberScope === 'ASSOCIATE_ONLY'
+                                        ? 'Associate Only'
+                                        : `Specific (${p.eligibleMemberIds?.length || 0})`}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                                      All Members
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                  {p.code}
+                                </span>
+                              </div>
+
+                              <h3 className="font-bold text-base text-slate-900">{p.name}</h3>
+                              <p className="text-xs text-slate-600 mt-1 line-clamp-2">
+                                {p.coMakerRuleDescription}
+                              </p>
+
+                              <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Principal Range:</span>
+                                  <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Annual Interest:</span>
+                                  <span className="font-semibold text-emerald-700">{(p.annualInterestRate * 100).toFixed(1)}% p.a.</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Repayment Term:</span>
+                                  <span className="font-semibold text-slate-900">
+                                    {(p as any).termUnit === 'WEEKS'
+                                      ? `${(p as any).minTermWeeks || 1} - ${(p as any).maxTermWeeks || 52} Weeks (${(p as any).weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ? 'Bi-weekly' : 'Weekly'})`
+                                      : `${p.minTermMonths} - ${p.maxTermMonths} Months`}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Amortization Engine:</span>
+                                  <span className="font-medium text-slate-700 text-[11px] text-right">
+                                    {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
+                                  </span>
+                                </div>
+                                {(p as any).mandatorySharePurchaseEnabled && (
+                                  <div className="flex justify-between items-center text-[11px] bg-emerald-50 text-emerald-800 p-1.5 rounded border border-emerald-200">
+                                    <span className="font-semibold">Mandatory Share Capital:</span>
+                                    <span className="font-mono font-bold">
+                                      {(p as any).mandatoryShareQuantity || 0} Shares ({(p as any).mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' ? 'Amortized' : 'Upfront'})
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-500">Advance Interest:</span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                    p.advanceInterestOption === 'FIRST_YEAR'
+                                      ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                      : p.advanceInterestOption === 'ENTIRE_LOAN'
+                                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    {p.advanceInterestOption === 'FIRST_YEAR'
+                                      ? '1st Year Deducted Upfront'
+                                      : p.advanceInterestOption === 'ENTIRE_LOAN'
+                                      ? 'Entire Loan Upfront'
+                                      : 'None (Standard)'}
+                                  </span>
+                                </div>
+                                {p.advanceInterestOption === 'FIRST_YEAR' && (
+                                  <div className="flex justify-between items-center text-[11px]">
+                                    <span className="text-slate-500">Succeeding Period:</span>
+                                    <span className="text-slate-700 font-medium">
+                                      {p.succeedingMethod === 'STRAIGHT_LINE' ? 'Straight-Line' : 'Diminishing Balance'}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-500">Installment Type:</span>
+                                  <span className="text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                                    {p.fixedMonthlyInstallment !== false ? 'Fixed Level Monthly' : 'Variable Installment'}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center text-[11px] pt-1">
+                                  <span className="text-slate-500">Member Availability:</span>
+                                  <span className="font-semibold text-slate-800">
+                                    {p.availability === 'SPECIFIC_MEMBERS'
+                                      ? (p.eligibleMemberScope === 'REGULAR_ONLY'
+                                          ? 'Regular Members Only'
+                                          : p.eligibleMemberScope === 'ASSOCIATE_ONLY'
+                                          ? 'Associate Members Only'
+                                          : `Specific (${p.eligibleMemberIds?.length || 0} Members)`)
+                                      : 'All Members'}
+                                  </span>
+                                </div>
+                                {Array.isArray(p.optionalFees) && p.optionalFees.length > 0 && (
+                                  <div className="pt-1 border-t border-slate-100">
+                                    <span className="text-[10px] text-slate-500 block mb-1">Optional Pass-Through Fees ({p.optionalFees.length}/5):</span>
+                                    <div className="flex flex-wrap gap-1">
+                                      {p.optionalFees.map((fee: any) => (
+                                        <span key={fee.id} className="text-[9px] bg-slate-200/80 text-slate-700 font-mono px-1.5 py-0.5 rounded">
+                                          {fee.name} ({fee.type === 'PERCENTAGE' ? `${fee.value}%` : `₱${fee.value}`})
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="flex justify-between items-center pt-1">
+                                  <span className="text-slate-500">Co-Maker Rule:</span>
+                                  {p.requiresCoMaker ? (
+                                    <span className="bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                                      ✓ {p.minCoMakers} Co-Maker Req.
+                                    </span>
+                                  ) : (
+                                    <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[11px]">
+                                      Optional
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
+                              <span>Fee: {(p.serviceFeeRate * 100).toFixed(1)}% • Pen: {(p.finesRateMonthly * 100).toFixed(1)}%/mo</span>
+                              <div className="flex items-center gap-1.5">
+                                {isActive ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleProductStatus(p.id)}
+                                    className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded border border-rose-200 transition flex items-center gap-1"
+                                    title="Deactivate this product so it is hidden from member applications"
+                                  >
+                                    <Ban className="w-3 h-3" /> Deactivate
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleProductStatus(p.id)}
+                                    className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2 py-1 rounded border border-emerald-300 transition flex items-center gap-1"
+                                    title="Activate this product for member applications"
+                                  >
+                                    <Check className="w-3 h-3" /> Activate
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteProduct(p.id)}
+                                  className="text-[10px] font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded border border-slate-200 hover:border-rose-200 transition flex items-center gap-1"
+                                  title="Permanently delete this loan product from catalog"
+                                >
+                                  <Trash2 className="w-3 h-3" /> Delete
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Product Configuration Modal */}
             {showProductModal && (
@@ -5881,6 +5975,213 @@ export default function AdminDashboard() {
                           className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
                         />
                       </div>
+                    </div>
+
+                    {/* Member Availability & Eligibility Card */}
+                    <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-3">
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-blue-950 flex items-center gap-1.5">
+                            <Users className="w-4 h-4 text-blue-600" /> Member Availability & Eligibility
+                          </span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                            {newProductAvailability === 'ALL_MEMBERS' ? 'Open to All' : 'Targeted Access'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-blue-800 mt-0.5">
+                          Configure whether this loan product is accessible to all cooperative members or restricted to specific members.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <label
+                          className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs cursor-pointer transition ${
+                            newProductAvailability === 'ALL_MEMBERS'
+                              ? 'bg-white border-blue-500 shadow-xs font-semibold text-blue-900 ring-1 ring-blue-500'
+                              : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="productAvailability"
+                            value="ALL_MEMBERS"
+                            checked={newProductAvailability === 'ALL_MEMBERS'}
+                            onChange={() => setNewProductAvailability('ALL_MEMBERS')}
+                            className="w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div>
+                            <p className="font-semibold">All Members</p>
+                            <p className="text-[10px] text-slate-500">Available to all active members</p>
+                          </div>
+                        </label>
+
+                        <label
+                          className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs cursor-pointer transition ${
+                            newProductAvailability === 'SPECIFIC_MEMBERS'
+                              ? 'bg-white border-blue-500 shadow-xs font-semibold text-blue-900 ring-1 ring-blue-500'
+                              : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="productAvailability"
+                            value="SPECIFIC_MEMBERS"
+                            checked={newProductAvailability === 'SPECIFIC_MEMBERS'}
+                            onChange={() => setNewProductAvailability('SPECIFIC_MEMBERS')}
+                            className="w-3.5 h-3.5 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div>
+                            <p className="font-semibold">Specific Members Only</p>
+                            <p className="text-[10px] text-slate-500">Restricted by list or tier</p>
+                          </div>
+                        </label>
+                      </div>
+
+                      {newProductAvailability === 'SPECIFIC_MEMBERS' && (
+                        <div className="space-y-2.5 pt-2 border-t border-blue-200">
+                          <div>
+                            <label className="block text-xs font-semibold text-blue-950 mb-1">Eligibility Restriction Type</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setNewProductEligibleScope('SPECIFIC_LIST')}
+                                className={`px-2 py-1.5 rounded-lg text-xs font-medium border text-center transition ${
+                                  newProductEligibleScope === 'SPECIFIC_LIST'
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
+                              >
+                                Selected Members
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setNewProductEligibleScope('REGULAR_ONLY')}
+                                className={`px-2 py-1.5 rounded-lg text-xs font-medium border text-center transition ${
+                                  newProductEligibleScope === 'REGULAR_ONLY'
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
+                              >
+                                Regular Members Only
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setNewProductEligibleScope('ASSOCIATE_ONLY')}
+                                className={`px-2 py-1.5 rounded-lg text-xs font-medium border text-center transition ${
+                                  newProductEligibleScope === 'ASSOCIATE_ONLY'
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
+                              >
+                                Associate Only
+                              </button>
+                            </div>
+                          </div>
+
+                          {newProductEligibleScope === 'SPECIFIC_LIST' && (
+                            <div className="space-y-2 bg-white p-3 rounded-lg border border-blue-200">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-slate-800">
+                                  Select Eligible Members ({newProductEligibleMemberIds.length} selected)
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewProductEligibleMemberIds(members.map((m) => m.id || m.memberNo))}
+                                    className="text-[11px] text-blue-600 hover:underline font-medium"
+                                  >
+                                    Select All
+                                  </button>
+                                  <span className="text-slate-300">|</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewProductEligibleMemberIds([])}
+                                    className="text-[11px] text-slate-500 hover:underline font-medium"
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                                <input
+                                  type="text"
+                                  placeholder="Search by member name, ID, or email..."
+                                  value={newProductMemberSearch}
+                                  onChange={(e) => setNewProductMemberSearch(e.target.value)}
+                                  className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              </div>
+
+                              <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-lg">
+                                {members
+                                  .filter((m) => {
+                                    if (!newProductMemberSearch) return true;
+                                    const query = newProductMemberSearch.toLowerCase();
+                                    return (
+                                      m.name?.toLowerCase().includes(query) ||
+                                      m.memberNo?.toLowerCase().includes(query) ||
+                                      m.id?.toLowerCase().includes(query) ||
+                                      m.email?.toLowerCase().includes(query)
+                                    );
+                                  })
+                                  .map((m) => {
+                                    const memberIdentifier = m.id || m.memberNo;
+                                    const isSelected = newProductEligibleMemberIds.includes(memberIdentifier);
+                                    return (
+                                      <label
+                                        key={memberIdentifier}
+                                        className="flex items-center justify-between p-2 hover:bg-slate-50 cursor-pointer text-xs"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setNewProductEligibleMemberIds([...newProductEligibleMemberIds, memberIdentifier]);
+                                              } else {
+                                                setNewProductEligibleMemberIds(
+                                                  newProductEligibleMemberIds.filter((id) => id !== memberIdentifier)
+                                                );
+                                              }
+                                            }}
+                                            className="w-3.5 h-3.5 text-blue-600 rounded"
+                                          />
+                                          <div>
+                                            <span className="font-medium text-slate-800">{m.name}</span>
+                                            <span className="text-[10px] text-slate-400 ml-1.5 font-mono">({m.memberNo})</span>
+                                          </div>
+                                        </div>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-100 text-slate-600">
+                                          {m.classification || 'MEMBER'}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                {members.length === 0 && (
+                                  <p className="p-3 text-center text-xs text-slate-400">No members loaded in directory.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {newProductEligibleScope === 'REGULAR_ONLY' && (
+                            <div className="p-2.5 bg-white border border-blue-200 rounded-lg text-xs text-slate-600 flex items-center gap-2">
+                              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span>Only members with <strong>REGULAR</strong> classification (subscribed & paid minimum shares) can apply for this loan product.</span>
+                            </div>
+                          )}
+
+                          {newProductEligibleScope === 'ASSOCIATE_ONLY' && (
+                            <div className="p-2.5 bg-white border border-blue-200 rounded-lg text-xs text-slate-600 flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                              <span>Only members with <strong>ASSOCIATE</strong> classification can apply for this loan product.</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
@@ -14372,24 +14673,13 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-2 pt-1">
-              <div className="flex items-center gap-3">
-                <span className="font-semibold text-slate-300">Flex Coop Solution Cloud ERP</span>
-                <span>•</span>
-                <span>CDA MC 2015-06 & RA 9520 Standard</span>
-                <span>•</span>
-                <span>BIR CTE Compliant</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${coopPlatformCredit < 1000 ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
-                  <span className="font-mono text-slate-300">
-                    Platform Credit: ₱{coopPlatformCredit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                  </span>
+            <div className="flex items-center justify-end text-[11px] text-slate-400 gap-2 pt-1">
+              <span className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${coopPlatformCredit < 1000 ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
+                <span className="font-mono text-slate-300">
+                  Platform Credit: ₱{coopPlatformCredit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                 </span>
-                <span>•</span>
-                <span>Domain: coop.tuntongtech.com</span>
-              </div>
+              </span>
             </div>
           </div>
         </footer>
