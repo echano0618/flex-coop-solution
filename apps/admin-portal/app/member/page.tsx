@@ -60,6 +60,7 @@ import {
   isTestCoopTenant,
   purgeTenantDummyRecords,
   TenantInfo,
+  uint8ArrayToBase64Url,
 } from '../tenant-utils';
 
 const DEFAULT_LOAN_PRODUCTS = [
@@ -1456,35 +1457,47 @@ export default function MemberPortalPage() {
 
     setBiometricsLoading(true);
     try {
+      let credentialId: string | null = null;
       if (typeof window !== 'undefined' && window.PublicKeyCredential) {
-        try {
-          const challenge = new Uint8Array(32);
-          window.crypto.getRandomValues(challenge);
-          const userIdBytes = new TextEncoder().encode(currentMember.id || 'mem_default');
+        const isPlatformAvailable = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => false);
+        if (!isPlatformAvailable) {
+          setBiometricsNotice('Touch ID / Face ID / Windows Hello is not available or configured on this device/browser.');
+          setBiometricsLoading(false);
+          return;
+        }
 
-          await navigator.credentials.create({
-            publicKey: {
-              challenge,
-              rp: { name: tenantInfo.name || 'Cooperative Enterprise' },
-              user: {
-                id: userIdBytes,
-                name: currentMember.email || currentMember.memberNumber || 'member',
-                displayName: currentMember.name || 'Coop Member',
-              },
-              pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
-              authenticatorSelection: {
-                authenticatorAttachment: 'platform',
-                userVerification: 'preferred',
-              },
-              timeout: 60000,
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+        const userIdBytes = new TextEncoder().encode(currentMember.id || currentMember.memberNumber || 'mem_default');
+
+        const cred = (await navigator.credentials.create({
+          publicKey: {
+            challenge,
+            rp: {
+              name: tenantInfo.name || 'Cooperative Enterprise',
+              id: window.location.hostname,
             },
-          });
-        } catch (webAuthnErr: any) {
-          if (webAuthnErr.name === 'NotAllowedError') {
-            setBiometricsNotice('Biometric setup was cancelled or timed out.');
-            setBiometricsLoading(false);
-            return;
-          }
+            user: {
+              id: userIdBytes,
+              name: currentMember.email || currentMember.memberNumber || 'member',
+              displayName: currentMember.name || 'Coop Member',
+            },
+            pubKeyCredParams: [
+              { alg: -7, type: 'public-key' },
+              { alg: -257, type: 'public-key' },
+            ],
+            authenticatorSelection: {
+              authenticatorAttachment: 'platform',
+              residentKey: 'required',
+              requireResidentKey: true,
+              userVerification: 'preferred',
+            },
+            timeout: 60000,
+          },
+        })) as any;
+
+        if (cred && cred.rawId) {
+          credentialId = uint8ArrayToBase64Url(cred.rawId);
         }
       }
 
@@ -1493,6 +1506,8 @@ export default function MemberPortalPage() {
         memberNumber: currentMember.memberNumber,
         name: currentMember.name,
         identifier: currentMember.email || currentMember.mobile || currentMember.memberNumber || 'mem_0001',
+        credentialId: credentialId,
+        rpId: typeof window !== 'undefined' ? window.location.hostname : undefined,
         enabledAt: new Date().toISOString(),
       };
 
@@ -1502,7 +1517,11 @@ export default function MemberPortalPage() {
       setBiometricsNotice('Device biometrics (Touch ID / Face ID) successfully enabled on this device!');
       setTimeout(() => setBiometricsNotice(null), 5000);
     } catch (err: any) {
-      setBiometricsNotice('Could not enable biometrics: ' + (err.message || 'Unknown error'));
+      if (err?.name === 'NotAllowedError') {
+        setBiometricsNotice('Biometric setup was cancelled or timed out.');
+      } else {
+        setBiometricsNotice('Could not enable biometrics: ' + (err.message || 'Device authentication error'));
+      }
     } finally {
       setBiometricsLoading(false);
     }

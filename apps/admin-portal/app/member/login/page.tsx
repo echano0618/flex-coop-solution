@@ -20,6 +20,7 @@ import {
   getTenantMemberSession,
   setTenantAdminSession,
   TenantInfo,
+  base64UrlToUint8Array,
 } from '../../tenant-utils';
 
 export default function MemberLoginPage() {
@@ -30,7 +31,14 @@ export default function MemberLoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [hasBiometrics, setHasBiometrics] = useState<boolean>(false);
-  const [biometricsMember, setBiometricsMember] = useState<{ id?: string; memberNumber?: string; name?: string; identifier?: string } | null>(null);
+  const [biometricsMember, setBiometricsMember] = useState<{
+    id?: string;
+    memberNumber?: string;
+    name?: string;
+    identifier?: string;
+    credentialId?: string;
+    rpId?: string;
+  } | null>(null);
   const [isBioAuthenticating, setIsBioAuthenticating] = useState<boolean>(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
     slug: 'default',
@@ -87,19 +95,46 @@ export default function MemberLoginPage() {
         try {
           const challenge = new Uint8Array(32);
           window.crypto.getRandomValues(challenge);
+          const getPublicKey: any = {
+            challenge,
+            timeout: 60000,
+            userVerification: 'preferred',
+            rpId: window.location.hostname,
+          };
+
+          if (biometricsMember.credentialId) {
+            try {
+              getPublicKey.allowCredentials = [
+                {
+                  type: 'public-key',
+                  id: base64UrlToUint8Array(biometricsMember.credentialId),
+                  transports: ['internal'],
+                },
+              ];
+            } catch (convErr) {
+              console.warn('Error converting credentialId:', convErr);
+            }
+          }
+
           await navigator.credentials.get({
-            publicKey: {
-              challenge,
-              timeout: 60000,
-              userVerification: 'preferred',
-            },
+            publicKey: getPublicKey,
           });
         } catch (credErr: any) {
-          if (credErr?.name === 'NotAllowedError') {
-            setIsBioAuthenticating(false);
-            setErrorMessage('Biometric authentication cancelled.');
-            return;
+          console.warn('WebAuthn get error:', credErr);
+          setIsBioAuthenticating(false);
+          if (biometricsMember.identifier) {
+            setIdentifier(biometricsMember.identifier);
           }
+          const errName = credErr?.name || '';
+          const errMsg = String(credErr?.message || '').toLowerCase();
+          if (errName === 'NotAllowedError' && (errMsg.includes('cancel') || errMsg.includes('abort'))) {
+            setErrorMessage('Biometric verification cancelled.');
+          } else {
+            setErrorMessage(
+              'No biometric passkey found on this device. Please sign in with your password below, then re-enable Touch ID / Face ID under More.'
+            );
+          }
+          return;
         }
       }
 
@@ -240,6 +275,25 @@ export default function MemberLoginPage() {
                   </>
                 )}
               </button>
+
+              <div className="flex justify-between items-center px-1 text-[11px] text-slate-400">
+                <span>Touch ID / Face ID saved</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem(`flexcoop_biometrics_enabled_${tenantInfo.slug}`);
+                      localStorage.removeItem(`flexcoop_biometrics_member_${tenantInfo.slug}`);
+                      setHasBiometrics(false);
+                      setBiometricsMember(null);
+                      setErrorMessage('');
+                    } catch {}
+                  }}
+                  className="text-slate-500 hover:text-rose-600 underline transition"
+                >
+                  Reset biometrics on this device
+                </button>
+              </div>
 
               <div className="relative flex py-1 items-center">
                 <div className="flex-grow border-t border-slate-200"></div>
