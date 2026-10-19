@@ -1987,99 +1987,274 @@ app.post('/api/v1/savings/deposit', (req: Request, res: Response) => {
 // ==========================================
 // 5. LOAN PRODUCTS & ORIGINATION
 // ==========================================
-app.get('/api/v1/loan-products', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const products = dbStore.loanProducts.get(tenantId) || [];
-  res.json({ success: true, count: products.length, data: products });
+function getDefaultLoanProductsForTenant(tenantId: string): any[] {
+  return [
+    {
+      id: 'prod_reg_001',
+      tenantId,
+      name: 'Regular Member Loan',
+      code: 'REG-2026',
+      type: 'REGULAR',
+      minAmount: 10000,
+      maxAmount: 500000,
+      annualInterestRate: 12,
+      minTermMonths: 6,
+      maxTermMonths: 36,
+      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      advanceInterestOption: 'NONE',
+      succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      fixedMonthlyInstallment: false,
+      serviceFeeRate: 0.015,
+      finesRateMonthly: 0.03,
+      requiresCoMaker: true,
+      minCoMakers: 1,
+      coMakerRuleDescription: 'Requires at least 1 co-maker who is an active member with updated share capital.',
+      requiresCollateral: false,
+      isActive: true,
+      status: 'ACTIVE',
+      optionalFees: [
+        { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+        { id: 'opt_fee_2', name: 'Loan Protection Insurance', type: 'FIXED', value: 500 },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      id: 'prod_emerg_002',
+      tenantId,
+      name: 'Emergency Relief Loan Plus',
+      code: 'EMERG-2026',
+      type: 'EMERGENCY',
+      minAmount: 5000,
+      maxAmount: 30000,
+      annualInterestRate: 6,
+      minTermMonths: 3,
+      maxTermMonths: 12,
+      amortizationMethod: 'STRAIGHT_LINE_EQUAL_PRINCIPAL',
+      advanceInterestOption: 'NONE',
+      succeedingMethod: 'STRAIGHT_LINE_EQUAL_PRINCIPAL',
+      fixedMonthlyInstallment: false,
+      serviceFeeRate: 0.01,
+      finesRateMonthly: 0.02,
+      requiresCoMaker: false,
+      minCoMakers: 0,
+      coMakerRuleDescription: 'Fast-tracked calamity/hospitalization release; co-maker waived for members with > 1 year tenure.',
+      requiresCollateral: false,
+      isActive: true,
+      status: 'ACTIVE',
+      optionalFees: [
+        { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      id: 'prod_edu_003',
+      tenantId,
+      name: 'Educational Assistance Loan',
+      code: 'EDU-2026',
+      type: 'EDUCATIONAL',
+      minAmount: 5000,
+      maxAmount: 50000,
+      annualInterestRate: 8,
+      minTermMonths: 3,
+      maxTermMonths: 12,
+      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      advanceInterestOption: 'NONE',
+      succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      fixedMonthlyInstallment: false,
+      serviceFeeRate: 0.01,
+      finesRateMonthly: 0.02,
+      requiresCoMaker: true,
+      minCoMakers: 1,
+      coMakerRuleDescription: 'Tuition and school fee support. Requires student registration form / assessment slip.',
+      requiresCollateral: false,
+      isActive: true,
+      status: 'ACTIVE',
+      optionalFees: [
+        { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+        { id: 'opt_fee_2', name: 'Student Assistance Insurance', type: 'FIXED', value: 350 },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ];
+}
+
+app.get('/api/v1/loan-products', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const fsService = FirestoreCoopService.getInstance();
+    let products: any[] = [];
+    try {
+      products = await fsService.listLoanProducts(tenantId);
+    } catch (fsErr) {
+      console.warn('Firestore listLoanProducts fallback:', fsErr);
+    }
+
+    // Seed defaults in Firestore if empty
+    if (!products || products.length === 0) {
+      const defaults = getDefaultLoanProductsForTenant(tenantId);
+      for (const p of defaults) {
+        try {
+          await fsService.saveLoanProduct(tenantId, p);
+        } catch {}
+      }
+      products = defaults;
+    }
+
+    dbStore.loanProducts.set(tenantId, products);
+    res.json({ success: true, count: products.length, data: products });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.post('/api/v1/loan-products', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const {
-    name,
-    code,
-    type,
-    minAmount,
-    maxAmount,
-    annualInterestRate,
-    minTermMonths,
-    maxTermMonths,
-    amortizationMethod,
-    serviceFeeRate,
-    finesRateMonthly,
-    requiresCoMaker,
-    minCoMakers,
-    coMakerRuleDescription,
-    requiresCollateral,
-    isActive,
-  } = req.body;
+app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const {
+      id,
+      name,
+      code,
+      type,
+      minAmount,
+      maxAmount,
+      annualInterestRate,
+      minTermMonths,
+      maxTermMonths,
+      amortizationMethod,
+      advanceInterestOption,
+      succeedingMethod,
+      fixedMonthlyInstallment,
+      optionalFees,
+      serviceFeeRate,
+      finesRateMonthly,
+      requiresCoMaker,
+      minCoMakers,
+      coMakerRuleDescription,
+      requiresCollateral,
+      isActive,
+      status,
+    } = req.body;
 
-  if (!name || !code || !minAmount || !maxAmount || annualInterestRate === undefined) {
-    return res.status(400).json({ success: false, error: 'name, code, minAmount, maxAmount, and annualInterestRate are required.' });
+    if (!name || !code || !minAmount || !maxAmount || annualInterestRate === undefined) {
+      return res.status(400).json({ success: false, error: 'name, code, minAmount, maxAmount, and annualInterestRate are required.' });
+    }
+
+    const prodId = id || `prod_${code.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+    const newProduct: any = {
+      id: prodId,
+      tenantId,
+      name,
+      code: code.toUpperCase(),
+      type: type || 'REGULAR',
+      minAmount: Number(minAmount),
+      maxAmount: Number(maxAmount),
+      annualInterestRate: Number(annualInterestRate),
+      minTermMonths: minTermMonths ? Number(minTermMonths) : 1,
+      maxTermMonths: Number(maxTermMonths || 12),
+      amortizationMethod: amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      advanceInterestOption: advanceInterestOption || 'NONE',
+      succeedingMethod: succeedingMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      fixedMonthlyInstallment: Boolean(fixedMonthlyInstallment),
+      optionalFees: Array.isArray(optionalFees) ? optionalFees : [],
+      serviceFeeRate: serviceFeeRate !== undefined ? Number(serviceFeeRate) : 0.015,
+      finesRateMonthly: finesRateMonthly !== undefined ? Number(finesRateMonthly) : 0.03,
+      requiresCoMaker: requiresCoMaker !== undefined ? Boolean(requiresCoMaker) : true,
+      minCoMakers: minCoMakers ? Number(minCoMakers) : (requiresCoMaker ? 1 : 0),
+      coMakerRuleDescription: coMakerRuleDescription || (requiresCoMaker ? 'Must be an active member in good standing with updated share capital' : undefined),
+      requiresCollateral: Boolean(requiresCollateral),
+      isActive: isActive !== undefined ? Boolean(isActive) : (status !== 'INACTIVE'),
+      status: status || (isActive !== false ? 'ACTIVE' : 'INACTIVE'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Save to Cloud Firestore
+    const fsService = FirestoreCoopService.getInstance();
+    await fsService.saveLoanProduct(tenantId, newProduct);
+
+    // Update in-memory cache
+    const products = dbStore.loanProducts.get(tenantId) || [];
+    const existingIdx = products.findIndex((p: any) => p.id === newProduct.id || p.code === newProduct.code);
+    if (existingIdx >= 0) {
+      products[existingIdx] = newProduct;
+    } else {
+      products.unshift(newProduct);
+    }
+    dbStore.loanProducts.set(tenantId, products);
+
+    res.status(201).json({
+      success: true,
+      message: `Loan product '${name}' (${code}) configured and saved to Cloud Firestore database.`,
+      data: newProduct,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
-
-  const products = dbStore.loanProducts.get(tenantId) || [];
-  const newProduct: LoanProduct = {
-    id: `prod_${code.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`,
-    name,
-    code: code.toUpperCase(),
-    type: type || 'REGULAR',
-    minAmount: Number(minAmount),
-    maxAmount: Number(maxAmount),
-    annualInterestRate: Number(annualInterestRate),
-    minTermMonths: minTermMonths ? Number(minTermMonths) : 1,
-    maxTermMonths: Number(maxTermMonths || 12),
-    amortizationMethod: amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
-    serviceFeeRate: serviceFeeRate !== undefined ? Number(serviceFeeRate) : 0.015,
-    finesRateMonthly: finesRateMonthly !== undefined ? Number(finesRateMonthly) : 0.03,
-    requiresCoMaker: requiresCoMaker !== undefined ? Boolean(requiresCoMaker) : true,
-    minCoMakers: minCoMakers ? Number(minCoMakers) : (requiresCoMaker ? 1 : 0),
-    coMakerRuleDescription: coMakerRuleDescription || (requiresCoMaker ? 'Must be an active member in good standing with updated share capital' : undefined),
-    requiresCollateral: Boolean(requiresCollateral),
-    isActive: isActive !== undefined ? Boolean(isActive) : true,
-  };
-
-  products.push(newProduct);
-  dbStore.loanProducts.set(tenantId, products);
-
-  res.status(201).json({
-    success: true,
-    message: `Loan product '${name}' (${code}) configured successfully.`,
-    data: newProduct,
-  });
 });
 
-app.put('/api/v1/loan-products/:id', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const productId = req.params.id;
-  const products = dbStore.loanProducts.get(tenantId) || [];
-  const product = products.find((p) => p.id === productId);
+app.put('/api/v1/loan-products/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const productId = req.params.id;
+    const fsService = FirestoreCoopService.getInstance();
 
-  if (!product) {
-    return res.status(404).json({ success: false, error: 'Loan product not found' });
+    let existing = await fsService.getLoanProduct(tenantId, productId);
+    if (!existing) {
+      const memProducts = dbStore.loanProducts.get(tenantId) || [];
+      existing = memProducts.find((p: any) => p.id === productId);
+    }
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Loan product not found' });
+    }
+
+    const updates = {
+      ...req.body,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await fsService.updateLoanProduct(tenantId, productId, updates);
+
+    // Update in-memory cache
+    const memProducts = dbStore.loanProducts.get(tenantId) || [];
+    const idx = memProducts.findIndex((p: any) => p.id === productId);
+    if (idx >= 0) {
+      memProducts[idx] = { ...memProducts[idx], ...updates };
+      dbStore.loanProducts.set(tenantId, memProducts);
+    }
+
+    res.json({
+      success: true,
+      message: `Loan product '${existing.name}' updated successfully in Cloud Firestore database.`,
+      data: { ...existing, ...updates },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
+});
 
-  const updates = req.body;
-  if (updates.name !== undefined) product.name = updates.name;
-  if (updates.minAmount !== undefined) product.minAmount = Number(updates.minAmount);
-  if (updates.maxAmount !== undefined) product.maxAmount = Number(updates.maxAmount);
-  if (updates.annualInterestRate !== undefined) product.annualInterestRate = Number(updates.annualInterestRate);
-  if (updates.minTermMonths !== undefined) product.minTermMonths = Number(updates.minTermMonths);
-  if (updates.maxTermMonths !== undefined) product.maxTermMonths = Number(updates.maxTermMonths);
-  if (updates.amortizationMethod !== undefined) product.amortizationMethod = updates.amortizationMethod;
-  if (updates.serviceFeeRate !== undefined) product.serviceFeeRate = Number(updates.serviceFeeRate);
-  if (updates.finesRateMonthly !== undefined) product.finesRateMonthly = Number(updates.finesRateMonthly);
-  if (updates.requiresCoMaker !== undefined) product.requiresCoMaker = Boolean(updates.requiresCoMaker);
-  if (updates.minCoMakers !== undefined) product.minCoMakers = Number(updates.minCoMakers);
-  if (updates.coMakerRuleDescription !== undefined) product.coMakerRuleDescription = updates.coMakerRuleDescription;
-  if (updates.requiresCollateral !== undefined) product.requiresCollateral = Boolean(updates.requiresCollateral);
-  if (updates.isActive !== undefined) product.isActive = Boolean(updates.isActive);
+app.delete('/api/v1/loan-products/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const productId = req.params.id;
+    const fsService = FirestoreCoopService.getInstance();
 
-  res.json({
-    success: true,
-    message: `Loan product '${product.name}' parameters updated successfully.`,
-    data: product,
-  });
+    await fsService.deleteLoanProduct(tenantId, productId);
+
+    const memProducts = dbStore.loanProducts.get(tenantId) || [];
+    const filtered = memProducts.filter((p: any) => p.id !== productId);
+    dbStore.loanProducts.set(tenantId, filtered);
+
+    res.json({
+      success: true,
+      message: 'Loan product removed from database.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post('/api/v1/loans/apply', (req: Request, res: Response) => {

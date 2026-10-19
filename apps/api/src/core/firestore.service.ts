@@ -262,6 +262,51 @@ export class FirestoreCoopService {
   }
 
   // --------------------------------------------------------------------------
+  // Loan Products & Credit Facilities (Persisted in /tenants/{tenantId}/loan_products)
+  // --------------------------------------------------------------------------
+
+  public async saveLoanProduct(tenantId: string, product: LoanProduct | any): Promise<void> {
+    const prodId = product.id || `prod_${(product.code || 'loan').toLowerCase()}_${Date.now()}`;
+    await this.loanProductsCol(tenantId).doc(prodId).set(
+      {
+        ...product,
+        id: prodId,
+        tenantId,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  public async getLoanProduct(tenantId: string, productId: string): Promise<any | null> {
+    const doc = await this.loanProductsCol(tenantId).doc(productId).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  public async listLoanProducts(tenantId: string): Promise<any[]> {
+    const snapshot = await this.loanProductsCol(tenantId).get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
+  }
+
+  public async updateLoanProduct(
+    tenantId: string,
+    productId: string,
+    updates: Partial<LoanProduct> | any
+  ): Promise<void> {
+    await this.loanProductsCol(tenantId).doc(productId).set(
+      {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  public async deleteLoanProduct(tenantId: string, productId: string): Promise<void> {
+    await this.loanProductsCol(tenantId).doc(productId).delete();
+  }
+
+  // --------------------------------------------------------------------------
   // Atomic Double-Entry General Ledger (CDA Compliant)
   // --------------------------------------------------------------------------
 

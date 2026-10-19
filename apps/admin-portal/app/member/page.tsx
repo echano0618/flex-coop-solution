@@ -390,24 +390,37 @@ export default function MemberPortalPage() {
   const [selectedProductId, setSelectedProductId] = useState<string>('prod_regular');
 
   useEffect(() => {
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_products_${tenantInfo.slug}`;
 
-    fetch(`${getApiBaseUrl()}/loan-products`)
+    try {
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLoanProducts(parsed);
+          const activeOnes = parsed.filter((p: any) => p.isActive !== false && p.status !== 'INACTIVE');
+          if (activeOnes.length > 0 && !activeOnes.some((p: any) => p.id === selectedProductId)) {
+            setSelectedProductId(activeOnes[0].id);
+          }
+        }
+      }
+    } catch {}
+
+    fetch(`${getApiBaseUrl()}/loan-products?coop=${tenantInfo.slug}`, {
+      headers: { 'x-tenant-slug': tenantInfo.slug },
+    })
       .then((r) => r.json())
       .then((res) => {
         if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
-          setLoanProducts((prev) => {
-            const map = new Map();
-            res.data.forEach((p: any) => map.set(p.code || p.id, p));
-            prev.forEach((p: any) => {
-              if (!map.has(p.code || p.id)) map.set(p.code || p.id, p);
-            });
-            const merged = Array.from(map.values());
-            const activeOnes = merged.filter((p: any) => p.isActive !== false && p.status !== 'INACTIVE');
-            if (activeOnes.length > 0 && !activeOnes.some((p: any) => p.id === selectedProductId)) {
-              setSelectedProductId(activeOnes[0].id);
-            }
-            return merged;
-          });
+          setLoanProducts(res.data);
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(res.data));
+          } catch {}
+          const activeOnes = res.data.filter((p: any) => p.isActive !== false && p.status !== 'INACTIVE');
+          if (activeOnes.length > 0 && !activeOnes.some((p: any) => p.id === selectedProductId)) {
+            setSelectedProductId(activeOnes[0].id);
+          }
         }
       })
       .catch(() => {});

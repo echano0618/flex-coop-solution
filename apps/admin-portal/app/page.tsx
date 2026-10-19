@@ -1157,21 +1157,33 @@ export default function AdminDashboard() {
   const [loanProducts, setLoanProducts] = useState<any[]>(DEFAULT_LOAN_PRODUCTS);
   const [productSaveNotification, setProductSaveNotification] = useState<string | null>(null);
 
-  // Load persisted products from backend API
+  // Load persisted products from backend API with offline cache
   useEffect(() => {
-    fetch(`${getApiBaseUrl()}/loan-products`)
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_products_${tenantInfo.slug}`;
+
+    // 1. Initial cached products from localStorage if available
+    try {
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLoanProducts(parsed);
+        }
+      }
+    } catch {}
+
+    // 2. Fetch from online API
+    fetch(`${getApiBaseUrl()}/loan-products?coop=${tenantInfo.slug}`, {
+      headers: { 'x-tenant-slug': tenantInfo.slug },
+    })
       .then((res) => res.json())
       .then((resData) => {
         if (resData && resData.success && Array.isArray(resData.data) && resData.data.length > 0) {
-          setLoanProducts((prev) => {
-            const map = new Map();
-            resData.data.forEach((p: any) => map.set(p.code || p.id, p));
-            prev.forEach((p: any) => {
-              if (!map.has(p.code || p.id)) map.set(p.code || p.id, p);
-            });
-            const merged = Array.from(map.values());
-            return merged;
-          });
+          setLoanProducts(resData.data);
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(resData.data));
+          } catch {}
         }
       })
       .catch(() => {});
@@ -1301,14 +1313,23 @@ export default function AdminDashboard() {
       status: newProductStatus,
     };
 
-    const updated = [createdProduct, ...loanProducts];
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_products_${tenantInfo.slug}`;
+
+    const updated = [createdProduct, ...loanProducts.filter((p) => p.id !== createdProduct.id && p.code !== createdProduct.code)];
     setLoanProducts(updated);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+    } catch {}
 
     try {
-      await fetch(`${getApiBaseUrl()}/loan-products`, {
+      await fetch(`${getApiBaseUrl()}/loan-products?coop=${tenantInfo.slug}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(createdProduct),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({ ...createdProduct, coopSlug: tenantInfo.slug }),
       });
     } catch (err) {
       console.warn('API sync warning:', err);
@@ -1325,16 +1346,25 @@ export default function AdminDashboard() {
     const newIsActive = targetProduct.isActive === false ? true : false;
     const newStatus = newIsActive ? 'ACTIVE' : 'INACTIVE';
 
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_products_${tenantInfo.slug}`;
+
     const updated = loanProducts.map((p) =>
       p.id === productId ? { ...p, isActive: newIsActive, status: newStatus } : p
     );
     setLoanProducts(updated);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+    } catch {}
 
     try {
-      await fetch(`${getApiBaseUrl()}/loan-products/${productId}`, {
+      await fetch(`${getApiBaseUrl()}/loan-products/${productId}?coop=${tenantInfo.slug}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isActive: newIsActive }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({ isActive: newIsActive, status: newStatus, coopSlug: tenantInfo.slug }),
       });
     } catch (err) {
       console.warn('API sync warning:', err);
