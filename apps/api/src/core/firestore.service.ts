@@ -801,4 +801,25 @@ export class FirestoreCoopService {
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   }
+
+  // --------------------------------------------------------------------------
+  // Platform Configuration (PayMongo, Gateway Credentials)
+  // --------------------------------------------------------------------------
+
+  public platformConfigCol() {
+    return this.db.collection('platform_config');
+  }
+
+  public async getPlatformConfig(configId: string): Promise<any | null> {
+    const doc = await this.platformConfigCol().doc(configId).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  public async savePlatformConfig(configId: string, data: any): Promise<void> {
+    await this.platformConfigCol().doc(configId).set({
+      ...data,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
 }
+

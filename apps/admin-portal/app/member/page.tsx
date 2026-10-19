@@ -36,6 +36,8 @@ import {
   Smartphone,
   Sparkles,
   LogOut,
+  RefreshCw,
+  Check,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -538,6 +540,89 @@ export default function MemberPortalPage() {
     channel: string;
     sharesAdded?: number;
   } | null>(null);
+
+  // Real PayMongo Payment Intent & Live QR Ph State
+  const [paymongoActivePayment, setPaymongoActivePayment] = useState<{
+    paymentIntentId: string;
+    clientKey: string;
+    qrImageUrl: string;
+    checkoutUrl?: string;
+    checkoutLinkId?: string;
+    expiresAt: string;
+    totalAmount: number;
+    principalAmount: number;
+    convenienceFee: number;
+    sharesCount: number;
+  } | null>(null);
+  const [isGeneratingPaymongo, setIsGeneratingPaymongo] = useState<boolean>(false);
+  const [isVerifyingPaymongo, setIsVerifyingPaymongo] = useState<boolean>(false);
+
+  const handleInitiatePaymongoShares = async () => {
+    setIsGeneratingPaymongo(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/shares/paymongo/create-intent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          memberId: currentMember.id,
+          sharesCount: depositSharesCount,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        setPaymongoActivePayment(json.data);
+      } else {
+        alert(json.error || 'Failed to initialize PayMongo payment. Please try again.');
+      }
+    } catch (err: any) {
+      alert(`Network error connecting to PayMongo gateway: ${err.message}`);
+    } finally {
+      setIsGeneratingPaymongo(false);
+    }
+  };
+
+  const handleVerifyAndCompletePaymongoShares = async () => {
+    if (!paymongoActivePayment) return;
+    setIsVerifyingPaymongo(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/shares/paymongo/verify-and-complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          memberId: currentMember.id,
+          sharesCount: paymongoActivePayment.sharesCount,
+          amount: paymongoActivePayment.principalAmount,
+          paymentIntentId: paymongoActivePayment.paymentIntentId,
+          checkoutLinkId: paymongoActivePayment.checkoutLinkId,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setPaidUpCapital((prev) => prev + paymongoActivePayment.principalAmount);
+        setSharesCount((prev) => prev + paymongoActivePayment.sharesCount);
+        setDepositSuccessResult({
+          type: 'Share Capital Purchase',
+          amount: paymongoActivePayment.principalAmount,
+          reference: json.receiptNumber || `OR-SHR-${Date.now().toString(36).toUpperCase()}`,
+          channel: 'PayMongo QR Ph / Online Gateway',
+          sharesAdded: paymongoActivePayment.sharesCount,
+        });
+        setPaymongoActivePayment(null);
+      } else {
+        alert(json.error || 'Payment verification could not be completed.');
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setIsVerifyingPaymongo(false);
+    }
+  };
 
   // Dynamic Calculations for Loan Application
   const annualRate = selectedProduct.annualInterestRate || 0.12;
@@ -1203,6 +1288,8 @@ export default function MemberPortalPage() {
                   type="button"
                   onClick={() => {
                     setDepositModalType('SHARES');
+                    setDepositChannel('PAYMONGO_QRPH');
+                    setPaymongoActivePayment(null);
                     setDepositSuccessResult(null);
                   }}
                   className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 bg-slate-50/70 transition-all text-center group"
@@ -3340,6 +3427,7 @@ export default function MemberPortalPage() {
                   type="button"
                   onClick={() => {
                     setDepositModalType(null);
+                    setPaymongoActivePayment(null);
                     setDepositSuccessResult(null);
                   }}
                   className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
@@ -3474,124 +3562,233 @@ export default function MemberPortalPage() {
                     </div>
                   )}
 
-                  {/* Payment Channel Choice */}
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
-                      Fulfillment Method:
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setDepositChannel('PAYMONGO_QRPH')}
-                        className={`p-3 border rounded-xl text-left transition ${
-                          depositChannel === 'PAYMONGO_QRPH'
-                            ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <QrCode className="w-4 h-4 text-emerald-600" />
-                          <span>Self-Service QR Ph</span>
+                  {paymongoActivePayment ? (
+                    <div className="space-y-4 animate-in fade-in">
+                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col items-center justify-center text-center space-y-3">
+                        <div className="flex items-center gap-2 text-emerald-800 text-xs font-bold">
+                          <QrCode className="w-4 h-4" />
+                          <span>Official PayMongo QR Ph Terminal</span>
                         </div>
-                        <div className="text-[11px] text-slate-500 font-normal">
-                          Instant credit via GCash, Maya, or any InstaPay bank app.
-                        </div>
-                      </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setDepositChannel('IN_PERSON_SLIP')}
-                        className={`p-3 border rounded-xl text-left transition ${
-                          depositChannel === 'IN_PERSON_SLIP'
-                            ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Landmark className="w-4 h-4 text-emerald-600" />
-                          <span>In-Person Teller</span>
+                        {/* Real PayMongo QR Image */}
+                        <div className="w-52 h-52 bg-white border-4 border-emerald-600 rounded-2xl p-2 shadow-lg flex items-center justify-center">
+                          {paymongoActivePayment.qrImageUrl ? (
+                            <img
+                              src={paymongoActivePayment.qrImageUrl}
+                              alt="PayMongo QR Ph"
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-slate-900 rounded-xl flex items-center justify-center text-white text-xs p-3 text-center">
+                              Generating dynamic QR Ph...
+                            </div>
+                          )}
                         </div>
-                        <div className="text-[11px] text-slate-500 font-normal">
-                          Generate deposit slip for cashier counter (₱0 fee).
-                        </div>
-                      </button>
-                    </div>
-                  </div>
 
-                  {/* Summary & Execution */}
-                  {(() => {
-                    const principal = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
-                    const passOn = depositChannel === 'PAYMONGO_QRPH' ? Math.round(principal * 0.015 * 100) / 100 : 0;
-                    const total = principal + passOn;
-
-                    return (
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-slate-600">Net Deposit / Capital Credit:</span>
-                          <strong className="text-slate-900 font-mono">₱{principal.toFixed(2)}</strong>
+                        <div className="space-y-1">
+                          <div className="text-sm font-black text-slate-900">
+                            Scan to Pay: <span className="text-emerald-700 font-mono text-base">₱{paymongoActivePayment.totalAmount.toFixed(2)}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 max-w-xs">
+                            Open <strong>GCash</strong>, <strong>Maya</strong>, <strong>BDO</strong>, <strong>BPI</strong>, <strong>UnionBank</strong>, or any InstaPay app and scan this QR Ph code.
+                          </p>
                         </div>
-                        {depositChannel === 'PAYMONGO_QRPH' && (
+
+                        <div className="w-full bg-white/80 border border-emerald-200/80 rounded-xl p-3 text-left font-mono text-[11px] space-y-1 text-slate-700">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 font-sans">Common Shares:</span>
+                            <strong>+{paymongoActivePayment.sharesCount} Shares (@ ₱100)</strong>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 font-sans">Capital Credit:</span>
+                            <strong>₱{paymongoActivePayment.principalAmount.toFixed(2)}</strong>
+                          </div>
                           <div className="flex justify-between text-amber-700">
-                            <span>Gateway Convenience Fee (1.5%):</span>
-                            <span className="font-mono font-semibold">+ ₱{passOn.toFixed(2)}</span>
+                            <span className="font-sans">Gateway Fee (1.5%):</span>
+                            <span>+ ₱{paymongoActivePayment.convenienceFee.toFixed(2)}</span>
                           </div>
-                        )}
-                        <div className="border-t border-slate-200 pt-2 flex justify-between text-slate-900 font-bold">
-                          <span>Total Amount to Pay:</span>
-                          <span className="text-emerald-700 font-mono text-base">₱{total.toFixed(2)}</span>
+                          <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-slate-900">
+                            <span className="font-sans">Total Amount:</span>
+                            <span className="text-emerald-700">₱{paymongoActivePayment.totalAmount.toFixed(2)}</span>
+                          </div>
                         </div>
-                        {depositChannel === 'PAYMONGO_QRPH' && depositModalType === 'SHARES' && (
-                          <div className="text-[10px] text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-200">
-                            Share Capital paid via QR Ph is credited directly to the Cooperative&apos;s Platform Escrow account (`1-01-05`).
-                          </div>
-                        )}
 
-                        {depositChannel === 'PAYMONGO_QRPH' ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const refNo = `QR-TX-${Date.now().toString(36).toUpperCase()}`;
-                              if (depositModalType === 'SHARES') {
-                                setPaidUpCapital((prev) => prev + principal);
-                                setSharesCount((prev) => prev + depositSharesCount);
-                              } else {
-                                setSavingsBalance((prev) => prev + principal);
-                              }
-                              setDepositSuccessResult({
-                                type: depositModalType === 'SHARES' ? 'Share Capital Purchase' : 'Savings Deposit',
-                                amount: principal,
-                                reference: refNo,
-                                channel: 'PayMongo QR Ph (Instant Self-Service)',
-                                sharesAdded: depositModalType === 'SHARES' ? depositSharesCount : undefined,
-                              });
-                            }}
-                            className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
-                          >
-                            <QrCode className="w-4 h-4" />
-                            <span>Simulate Instant QR Ph Settlement</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const refNo = `DEP-${depositModalType === 'SHARES' ? 'SHR' : 'SAV'}-${Math.floor(10000 + Math.random() * 90000)}`;
-                              setDepositSuccessResult({
-                                type: depositModalType === 'SHARES' ? 'Share Capital Purchase Slip' : 'Savings Deposit Slip',
-                                amount: principal,
-                                reference: refNo,
-                                channel: 'In-Person Branch Teller Counter',
-                                sharesAdded: depositModalType === 'SHARES' ? depositSharesCount : undefined,
-                              });
-                            }}
-                            className="w-full mt-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
-                          >
-                            <FileText className="w-4 h-4" />
-                            <span>Generate In-Person Counter Deposit Slip</span>
-                          </button>
+                        {paymongoActivePayment.checkoutUrl && (
+                          <div className="w-full pt-1">
+                            <a
+                              href={paymongoActivePayment.checkoutUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-sm"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>Open PayMongo Hosted Checkout (Card / Maya / GCash)</span>
+                            </a>
+                          </div>
                         )}
                       </div>
-                    );
-                  })()}
+
+                      <div className="flex gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setPaymongoActivePayment(null)}
+                          className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                        >
+                          Back / Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isVerifyingPaymongo}
+                          onClick={handleVerifyAndCompletePaymongoShares}
+                          className="w-2/3 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                        >
+                          {isVerifyingPaymongo ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" />
+                          )}
+                          <span>{isVerifyingPaymongo ? 'Confirming Payment...' : 'Verify & Confirm Payment'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Payment Channel Choice */}
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                          Fulfillment Method:
+                        </label>
+                        <div className={`grid ${depositModalType === 'SHARES' ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
+                          <button
+                            type="button"
+                            onClick={() => setDepositChannel('PAYMONGO_QRPH')}
+                            className={`p-3 border rounded-xl text-left transition ${
+                              depositChannel === 'PAYMONGO_QRPH'
+                                ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <QrCode className="w-4 h-4 text-emerald-600" />
+                              <span>PayMongo QR Ph &amp; Online Checkout</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              Instant credit via GCash, Maya, QR Ph, or any InstaPay bank app.
+                            </div>
+                          </button>
+
+                          {/* In-Person Teller is completely removed for Cooperative Shares */}
+                          {depositModalType !== 'SHARES' && (
+                            <button
+                              type="button"
+                              onClick={() => setDepositChannel('IN_PERSON_SLIP')}
+                              className={`p-3 border rounded-xl text-left transition ${
+                                depositChannel === 'IN_PERSON_SLIP'
+                                  ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <Landmark className="w-4 h-4 text-emerald-600" />
+                                <span>In-Person Teller</span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-normal">
+                                Generate deposit slip for cashier counter (₱0 fee).
+                              </div>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Summary & Execution */}
+                      {(() => {
+                        const principal = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
+                        const passOn = depositChannel === 'PAYMONGO_QRPH' ? Math.round(principal * 0.015 * 100) / 100 : 0;
+                        const total = principal + passOn;
+
+                        return (
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">Net Deposit / Capital Credit:</span>
+                              <strong className="text-slate-900 font-mono">₱{principal.toFixed(2)}</strong>
+                            </div>
+                            {depositChannel === 'PAYMONGO_QRPH' && (
+                              <div className="flex justify-between text-amber-700">
+                                <span>Gateway Convenience Fee (1.5%):</span>
+                                <span className="font-mono font-semibold">+ ₱{passOn.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="border-t border-slate-200 pt-2 flex justify-between text-slate-900 font-bold">
+                              <span>Total Amount to Pay:</span>
+                              <span className="text-emerald-700 font-mono text-base">₱{total.toFixed(2)}</span>
+                            </div>
+                            {depositChannel === 'PAYMONGO_QRPH' && depositModalType === 'SHARES' && (
+                              <div className="text-[10px] text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-200">
+                                Share Capital paid via PayMongo is credited directly to the Cooperative&apos;s Platform Escrow account (`1-01-05`).
+                              </div>
+                            )}
+
+                            {depositChannel === 'PAYMONGO_QRPH' ? (
+                              depositModalType === 'SHARES' ? (
+                                <button
+                                  type="button"
+                                  disabled={isGeneratingPaymongo}
+                                  onClick={handleInitiatePaymongoShares}
+                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                                >
+                                  {isGeneratingPaymongo ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <QrCode className="w-4 h-4" />
+                                  )}
+                                  <span>
+                                    {isGeneratingPaymongo
+                                      ? 'Generating PayMongo QR Ph...'
+                                      : 'Pay with PayMongo (QR Ph / GCash / Maya)'}
+                                  </span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const refNo = `QR-TX-${Date.now().toString(36).toUpperCase()}`;
+                                    setSavingsBalance((prev) => prev + principal);
+                                    setDepositSuccessResult({
+                                      type: 'Savings Deposit',
+                                      amount: principal,
+                                      reference: refNo,
+                                      channel: 'PayMongo QR Ph (Instant Self-Service)',
+                                    });
+                                  }}
+                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                                >
+                                  <QrCode className="w-4 h-4" />
+                                  <span>Simulate Instant QR Ph Settlement</span>
+                                </button>
+                              )
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const refNo = `DEP-SAV-${Math.floor(10000 + Math.random() * 90000)}`;
+                                  setDepositSuccessResult({
+                                    type: 'Savings Deposit Slip',
+                                    amount: principal,
+                                    reference: refNo,
+                                    channel: 'In-Person Branch Teller Counter',
+                                  });
+                                }}
+                                className="w-full mt-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                              >
+                                <FileText className="w-4 h-4" />
+                                <span>Generate In-Person Counter Deposit Slip</span>
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                 </div>
               )) : (
                 /* Success / Receipt Screen */

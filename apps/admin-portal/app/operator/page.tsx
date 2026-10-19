@@ -47,6 +47,10 @@ import {
   Trash2,
   Landmark,
   Edit,
+  Copy,
+  EyeOff,
+  QrCode,
+  Save,
 } from 'lucide-react';
 import {
   CooperativeRegistration,
@@ -138,6 +142,33 @@ export default function OperatorPortalPage() {
   const [methodInstructions, setMethodInstructions] = useState<string>('');
   const [methodIsActive, setMethodIsActive] = useState<boolean>(true);
   const [methodIsDefault, setMethodIsDefault] = useState<boolean>(false);
+
+  // PayMongo Payment Gateway Configuration State (Stored in Firebase Firestore)
+  const [paymongoConfig, setPaymongoConfig] = useState<{
+    secretKey: string;
+    publicKey: string;
+    webhookSecret: string;
+    environment: 'test' | 'live';
+    isEnabled: boolean;
+    updatedAt?: string;
+    updatedBy?: string;
+  }>({
+    secretKey: '',
+    publicKey: '',
+    webhookSecret: '',
+    environment: 'test',
+    isEnabled: true,
+  });
+  const [showSecretKey, setShowSecretKey] = useState<boolean>(false);
+  const [paymongoTesting, setPaymongoTesting] = useState<boolean>(false);
+  const [paymongoTestResult, setPaymongoTestResult] = useState<{
+    success: boolean;
+    message: string;
+    responseTimeMs?: number;
+    livemode?: boolean;
+  } | null>(null);
+  const [paymongoSaving, setPaymongoSaving] = useState<boolean>(false);
+  const [paymongoNotification, setPaymongoNotification] = useState<string | null>(null);
 
   // Credit Top-Up Verification Queue State (Stored in Firebase Firestore)
   const [topupRequests, setTopupRequests] = useState<any[]>([]);
@@ -521,6 +552,82 @@ export default function OperatorPortalPage() {
     }
   };
 
+  // Fetch PayMongo Gateway Configuration from Firebase Firestore API
+  const fetchPaymongoConfig = async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/paymongo-config`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          setPaymongoConfig(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('PayMongo config API load warning:', err);
+    }
+  };
+
+  const handleSavePaymongoConfig = async () => {
+    setPaymongoSaving(true);
+    setPaymongoNotification(null);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/paymongo-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...paymongoConfig,
+          updatedBy: operatorSession?.name || operatorSession?.username || 'Platform Operator',
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setPaymongoConfig(json.data);
+        setPaymongoNotification('PayMongo API configuration successfully updated and saved to Cloud Firestore!');
+        setTimeout(() => setPaymongoNotification(null), 5000);
+      } else {
+        alert(json.error || 'Failed to save PayMongo configuration');
+      }
+    } catch (err: any) {
+      alert(`Network error saving PayMongo config: ${err.message}`);
+    } finally {
+      setPaymongoSaving(false);
+    }
+  };
+
+  const handleTestPaymongoConnection = async () => {
+    setPaymongoTesting(true);
+    setPaymongoTestResult(null);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/operator/paymongo-test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secretKey: paymongoConfig.secretKey }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setPaymongoTestResult({
+          success: true,
+          message: `Connected successfully to PayMongo! (${json.accountDescriptor || 'Verified'}, ${json.responseTimeMs}ms response time, mode: ${json.livemode ? 'LIVE' : 'TEST'})`,
+          responseTimeMs: json.responseTimeMs,
+          livemode: json.livemode,
+        });
+      } else {
+        setPaymongoTestResult({
+          success: false,
+          message: `Authentication Failed: ${json.error || 'Invalid API key or network error'} (${json.responseTimeMs}ms)`,
+          responseTimeMs: json.responseTimeMs,
+        });
+      }
+    } catch (err: any) {
+      setPaymongoTestResult({
+        success: false,
+        message: `Connection Error: ${err.message}`,
+      });
+    } finally {
+      setPaymongoTesting(false);
+    }
+  };
+
   // Fetch Credit Top-Up Verification Requests from Firebase Firestore API
   const fetchTopupRequests = async () => {
     setIsLoadingTopupRequests(true);
@@ -709,6 +816,7 @@ export default function OperatorPortalPage() {
     fetchOperators();
     fetchPaymentMethods();
     fetchTopupRequests();
+    fetchPaymongoConfig();
   }, [operatorSession]);
 
   // Fleet Totals
@@ -2024,9 +2132,276 @@ https://tuntongtech.com`;
           </div>
         )}
 
-        {/* TAB: PLATFORM PAYMENT METHODS (Bank Accounts) */}
+        {/* TAB: PLATFORM PAYMENT METHODS & PAYMONGO GATEWAY */}
         {activeTab === 'PAYMENT_METHODS' && (
-          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+          <div className="space-y-6">
+            {/* 1. PAYMONGO PAYMENT GATEWAY INTEGRATION PANEL */}
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl relative overflow-hidden">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-800">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                      <CreditCard className="w-4 h-4" />
+                    </span>
+                    <h3 className="font-bold text-base text-white">PayMongo Payment Gateway Integration</h3>
+                    <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded font-mono">
+                      Cloud Firestore: platform_config/paymongo
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Configure official PayMongo API keys for QR Ph generation, GCash, Maya, and credit/debit card processing across all cooperative tenant portals.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border ${
+                    paymongoConfig.isEnabled
+                      ? 'bg-emerald-950/70 text-emerald-400 border-emerald-800'
+                      : 'bg-rose-950/70 text-rose-400 border-rose-800'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full ${paymongoConfig.isEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                    <span>{paymongoConfig.isEnabled ? 'GATEWAY ACTIVE' : 'GATEWAY DISABLED'}</span>
+                  </span>
+
+                  <span className={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold uppercase border ${
+                    paymongoConfig.environment === 'live'
+                      ? 'bg-amber-950/70 text-amber-300 border-amber-800'
+                      : 'bg-blue-950/70 text-blue-300 border-blue-800'
+                  }`}>
+                    {paymongoConfig.environment === 'live' ? 'Live Production' : 'Sandbox Test Mode'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Notification Banner */}
+              {paymongoNotification && (
+                <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-600/50 text-emerald-200 text-xs flex items-center justify-between animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="font-medium">{paymongoNotification}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymongoNotification(null)}
+                    className="text-emerald-400 hover:text-emerald-200 font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* API Keys Configuration Form */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Secret Key Input */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>PayMongo Secret Key (sk_test / sk_live)</span>
+                    </span>
+                    <span className="text-[10px] text-amber-400 font-normal">Backend Server-Side Auth</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showSecretKey ? 'text' : 'password'}
+                      value={paymongoConfig.secretKey}
+                      onChange={(e) => setPaymongoConfig((prev) => ({ ...prev, secretKey: e.target.value }))}
+                      placeholder="sk_test_... or sk_live_..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecretKey(!showSecretKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                      title={showSecretKey ? 'Hide Secret Key' : 'Reveal Secret Key'}
+                    >
+                      {showSecretKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Used to securely create Payment Intents, attach QR Ph payment methods, and generate checkout links.
+                  </p>
+                </div>
+
+                {/* Public Key Input */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-blue-400" />
+                      <span>PayMongo Public Key (pk_test / pk_live)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">Client-Side Checkout</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={paymongoConfig.publicKey}
+                      onChange={(e) => setPaymongoConfig((prev) => ({ ...prev, publicKey: e.target.value }))}
+                      placeholder="pk_test_... or pk_live_..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-blue-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(paymongoConfig.publicKey);
+                        alert('Public key copied to clipboard!');
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                      title="Copy Public Key"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Exposed to tenant web portals for initializing PayMongo client SDKs and rendering checkout components.
+                  </p>
+                </div>
+
+                {/* Webhook Secret */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Webhook Signing Secret (whsec_...)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">HMAC Signature Check</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={paymongoConfig.webhookSecret}
+                    onChange={(e) => setPaymongoConfig((prev) => ({ ...prev, webhookSecret: e.target.value }))}
+                    placeholder="whsec_..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Webhook listener endpoint: <code className="text-slate-300">/api/v1/payments/paymongo/webhook</code>
+                  </p>
+                </div>
+
+                {/* Environment & Switch Options */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 block">
+                    Gateway Operating Mode &amp; Access:
+                  </label>
+                  <div className="grid grid-cols-2 gap-3 pt-0.5">
+                    {/* Environment Select */}
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-white">Environment</div>
+                        <div className="text-[10px] text-slate-400">Sandbox or Production</div>
+                      </div>
+                      <select
+                        value={paymongoConfig.environment}
+                        onChange={(e) =>
+                          setPaymongoConfig((prev) => ({
+                            ...prev,
+                            environment: e.target.value as 'test' | 'live',
+                          }))
+                        }
+                        className="bg-slate-900 border border-slate-700 text-xs font-bold text-white rounded-lg px-2.5 py-1.5 focus:outline-none"
+                      >
+                        <option value="test">Test / Sandbox</option>
+                        <option value="live">Live / Production</option>
+                      </select>
+                    </div>
+
+                    {/* Enable / Disable Switch */}
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-white">Gateway Status</div>
+                        <div className="text-[10px] text-slate-400">Online payments switch</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPaymongoConfig((prev) => ({ ...prev, isEnabled: !prev.isEnabled }))
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                          paymongoConfig.isEnabled
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-rose-900/60 text-rose-300 border border-rose-700'
+                        }`}
+                      >
+                        {paymongoConfig.isEnabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Test Result Display */}
+              {paymongoTestResult && (
+                <div className={`p-4 rounded-xl border text-xs flex items-center justify-between animate-in fade-in ${
+                  paymongoTestResult.success
+                    ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-200'
+                    : 'bg-rose-950/40 border-rose-600/50 text-rose-200'
+                }`}>
+                  <div className="flex items-center gap-2.5">
+                    {paymongoTestResult.success ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                    )}
+                    <div>
+                      <strong className="block text-white">
+                        {paymongoTestResult.success ? 'PayMongo API Connection Successful' : 'Connection Failure'}
+                      </strong>
+                      <span className="opacity-90">{paymongoTestResult.message}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymongoTestResult(null)}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] text-slate-500 font-mono">
+                  {paymongoConfig.updatedAt
+                    ? `Last updated: ${new Date(paymongoConfig.updatedAt).toLocaleString()} by ${paymongoConfig.updatedBy || 'Operator'}`
+                    : 'Default platform keys loaded'}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleTestPaymongoConnection}
+                    disabled={paymongoTesting}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-bold transition border border-slate-700 flex items-center gap-2"
+                  >
+                    {paymongoTesting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-400" />
+                    ) : (
+                      <Activity className="w-3.5 h-3.5 text-teal-400" />
+                    )}
+                    <span>{paymongoTesting ? 'Testing Connection...' : 'Test PayMongo Connection'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSavePaymongoConfig}
+                    disabled={paymongoSaving}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-700/20 flex items-center gap-2"
+                  >
+                    {paymongoSaving ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Save className="w-3.5 h-3.5" />
+                    )}
+                    <span>{paymongoSaving ? 'Saving to Firestore...' : 'Save PayMongo Configuration'}</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* 2. PLATFORM PAYMENT METHODS (Bank Accounts) */}
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Landmark className="w-4 h-4 text-teal-400" />
@@ -2134,6 +2509,7 @@ https://tuntongtech.com`;
               </div>
             )}
           </section>
+          </div>
         )}
 
         {/* TAB 4: SYSTEM BROADCASTS */}

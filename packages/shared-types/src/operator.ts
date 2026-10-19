@@ -149,3 +149,14 @@ export interface OperatorOtpResponse {
   error?: string;
 }
 
+export interface PayMongoConfig {
+  secretKey: string;
+  publicKey: string;
+  webhookSecret?: string;
+  environment: 'test' | 'live';
+  isEnabled: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+

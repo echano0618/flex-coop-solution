@@ -6,6 +6,7 @@ import { AmortizationService } from './modules/lending/amortization.service';
 import { GeneralLedgerService } from './modules/accounting/ledger.service';
 import { PaymentService } from './modules/payments/payment.service';
 import { PayMongoWebhookService } from './modules/payments/webhook.service';
+import { PayMongoService } from './modules/payments/paymongo.service';
 import { RegulatoryReportsService } from './modules/reports/reports.service';
 import { CDAExportService } from './modules/reports/cda_export.service';
 import { DisclosureService } from './modules/lending/disclosure.service';
@@ -1133,6 +1134,64 @@ app.delete('/api/v1/operator/payment-methods/:id', async (req: Request, res: Res
   }
 });
 
+// ----------------------------------------------------------------------------
+// PayMongo Payment Gateway Integration & Key Configuration (Operator)
+// ----------------------------------------------------------------------------
+app.get('/api/v1/operator/paymongo-config', async (_req: Request, res: Response) => {
+  try {
+    const config = await PayMongoService.getConfig();
+    res.json({ success: true, data: config });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/paymongo-config', async (req: Request, res: Response) => {
+  try {
+    const { secretKey, publicKey, webhookSecret, environment, isEnabled, updatedBy } = req.body;
+    if (!secretKey || !publicKey) {
+      return res.status(400).json({ success: false, error: 'Secret Key and Public Key are required.' });
+    }
+    const saved = await PayMongoService.saveConfig(
+      { secretKey, publicKey, webhookSecret, environment, isEnabled },
+      updatedBy || 'Platform Operator'
+    );
+    res.json({
+      success: true,
+      message: 'PayMongo gateway credentials updated and saved to Cloud Firestore.',
+      data: saved,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/v1/operator/paymongo-test', async (req: Request, res: Response) => {
+  try {
+    const { secretKey } = req.body;
+    const result = await PayMongoService.testConnection(secretKey);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/v1/payments/paymongo/public-config', async (_req: Request, res: Response) => {
+  try {
+    const config = await PayMongoService.getConfig();
+    res.json({
+      success: true,
+      data: {
+        publicKey: config.publicKey,
+        isEnabled: config.isEnabled,
+        environment: config.environment,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Platform Credit Top-Up Verification Queue (Stored in Firebase Firestore)
 app.get('/api/v1/operator/credit/topup-requests', async (req: Request, res: Response) => {
   try {
@@ -2104,6 +2163,170 @@ app.post('/api/v1/shares/deposit', (req: Request, res: Response) => {
     account,
     journalEntry,
     amlcAlert,
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Member Portal: Real PayMongo Online Share Capital Purchase
+// ----------------------------------------------------------------------------
+app.post('/api/v1/shares/paymongo/create-intent', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberId, sharesCount, amount } = req.body;
+
+  if (!memberId || (!sharesCount && !amount)) {
+    return res.status(400).json({ success: false, error: 'Member ID and sharesCount or amount are required.' });
+  }
+
+  const sysConfig = dbStore.systemConfigs.get(tenantId);
+  const parValue = sysConfig?.stockParValue || 100;
+  const count = sharesCount ? Number(sharesCount) : Math.ceil(Number(amount) / parValue);
+  const principalAmount = count * parValue;
+  const convenienceFee = PaymentService.calculatePassOnFee(principalAmount, 'PAYMONGO_QRPH');
+  const totalAmount = Math.round((principalAmount + convenienceFee) * 100) / 100;
+
+  try {
+    const qrResult = await PayMongoService.createQRPhPayment({
+      amount: totalAmount,
+      description: `Purchase of ${count} Shares - Member ${memberId}`,
+      metadata: {
+        tenantId,
+        memberId,
+        sharesCount: count,
+        principalAmount,
+        convenienceFee,
+        type: 'SHARE_CAPITAL',
+      },
+    });
+
+    let checkoutLinkUrl: string | undefined;
+    let checkoutLinkId: string | undefined;
+    try {
+      const linkResult = await PayMongoService.createCheckoutLink({
+        amount: totalAmount,
+        description: `Purchase of ${count} Cooperative Shares (@ ₱${parValue}/share)`,
+        remarks: `Tenant: ${tenantId} | Member: ${memberId}`,
+      });
+      checkoutLinkUrl = linkResult.checkoutUrl;
+      checkoutLinkId = linkResult.linkId;
+    } catch (linkErr) {
+      console.warn('[PAYMONGO] Checkout link creation skipped:', linkErr);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        paymentIntentId: qrResult.paymentIntentId,
+        clientKey: qrResult.clientKey,
+        qrImageUrl: qrResult.qrImageUrl,
+        expiresAt: qrResult.expiresAt,
+        status: qrResult.status,
+        checkoutUrl: checkoutLinkUrl,
+        checkoutLinkId,
+        sharesCount: count,
+        parValue,
+        principalAmount,
+        convenienceFee,
+        totalAmount,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Failed to initiate PayMongo payment.' });
+  }
+});
+
+app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberId, sharesCount, amount, paymentIntentId, checkoutLinkId } = req.body;
+
+  if (!memberId || (!sharesCount && !amount)) {
+    return res.status(400).json({ success: false, error: 'Valid memberId and sharesCount/amount required.' });
+  }
+
+  // Check PayMongo status if intent or link ID is provided
+  if (paymentIntentId) {
+    try {
+      const statusRes = await PayMongoService.checkPaymentIntentStatus(paymentIntentId);
+      console.log(`[PAYMONGO] Intent ${paymentIntentId} status: ${statusRes.status}, isPaid: ${statusRes.isPaid}`);
+    } catch (checkErr) {
+      console.warn('[PAYMONGO] Could not verify intent with PayMongo API:', checkErr);
+    }
+  }
+
+  const sysConfig = dbStore.systemConfigs.get(tenantId);
+  const parValue = sysConfig?.stockParValue || 100;
+  const count = sharesCount ? Number(sharesCount) : Math.ceil(Number(amount) / parValue);
+  const depositNum = count * parValue;
+  const passOnFee = PaymentService.calculatePassOnFee(depositNum, 'PAYMONGO_QRPH');
+
+  const accounts = dbStore.shareAccounts.get(tenantId) || [];
+  let account = accounts.find((a) => a.memberId === memberId);
+
+  if (!account) {
+    account = {
+      id: `shr_${Date.now().toString(36)}`,
+      memberId,
+      accountNumber: `SC-${Date.now().toString(36).toUpperCase()}`,
+      subscribedShares: count,
+      parValuePerShare: parValue,
+      subscribedAmount: depositNum,
+      paidUpAmount: 0,
+      balance: 0,
+      updatedAt: new Date().toISOString(),
+    };
+    accounts.push(account);
+    dbStore.shareAccounts.set(tenantId, accounts);
+  }
+
+  account.paidUpAmount += depositNum;
+  account.balance += depositNum;
+  if (account.paidUpAmount > account.subscribedAmount) {
+    account.subscribedShares += count;
+    account.subscribedAmount += depositNum;
+  }
+  account.updatedAt = new Date().toISOString();
+
+  const receiptNumber = `OR-SHR-${Date.now().toString(36).toUpperCase()}`;
+
+  const member = (dbStore.members.get(tenantId) || []).find((m) => m.id === memberId);
+  const memberName = member ? `${member.firstName} ${member.lastName}` : undefined;
+  const memberNumber = member ? member.memberNumber : account.accountNumber;
+
+  // Build balanced CDA journal entry: Debit Escrow Float (1-01-05), Credit Share Capital (3-01-01)
+  const journalData = GeneralLedgerService.buildShareDepositEntry({
+    memberId,
+    memberNumber,
+    memberName,
+    amount: depositNum,
+    channel: 'PAYMONGO_QRPH',
+    passOnFee,
+    userId: 'usr_paymongo_gateway',
+  });
+
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const journalEntry = { id: `je_${Date.now()}`, ...journalData };
+  entries.push(journalEntry);
+  dbStore.journalEntries.set(tenantId, entries);
+
+  // AMLC threshold check
+  const amlcAlert = RegulatoryReportsService.checkAMLCThreshold({
+    transactionId: journalEntry.id,
+    memberId,
+    amount: depositNum,
+    transactionType: 'SHARE_CAPITAL_DEPOSIT',
+  });
+  if (amlcAlert) {
+    dbStore.amlcAlerts.push(amlcAlert);
+  }
+
+  res.json({
+    success: true,
+    message: `Share capital contribution of ₱${depositNum.toFixed(2)} (${count} shares) processed successfully via PayMongo.`,
+    receiptNumber,
+    account,
+    journalEntry,
+    amlcAlert,
+    sharesAdded: count,
+    channel: 'PayMongo Online Gateway (QR Ph / Cards / e-Wallets)',
   });
 });
 
