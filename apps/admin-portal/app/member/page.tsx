@@ -40,6 +40,8 @@ import {
   LogOut,
   RefreshCw,
   Check,
+  ClipboardList,
+  FileCheck,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -136,6 +138,91 @@ const DEFAULT_LOAN_PRODUCTS = [
     ],
   },
 ];
+
+function numberToWordsPesos(amount: number): string {
+  const rounded = Math.floor(amount);
+  if (rounded <= 0) return 'PESOS ZERO';
+  const units = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
+  const tens = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
+
+  function convertGroup(n: number): string {
+    let str = '';
+    if (n >= 100) {
+      str += units[Math.floor(n / 100)] + ' HUNDRED ';
+      n %= 100;
+    }
+    if (n >= 20) {
+      str += tens[Math.floor(n / 10)] + (n % 10 !== 0 ? '-' + units[n % 10] : '') + ' ';
+    } else if (n > 0) {
+      str += units[n] + ' ';
+    }
+    return str.trim();
+  }
+
+  let words = '';
+  if (rounded >= 1000000) {
+    const millions = Math.floor(rounded / 1000000);
+    words += convertGroup(millions) + ' MILLION ';
+  }
+  const thousands = Math.floor((rounded % 1000000) / 1000);
+  if (thousands > 0) {
+    words += convertGroup(thousands) + ' THOUSAND ';
+  }
+  const remainder = rounded % 1000;
+  if (remainder > 0) {
+    words += convertGroup(remainder) + ' ';
+  }
+
+  return `PESOS ${words.trim()}`;
+}
+
+function formatLoanStatus(status: string): string {
+  switch (status) {
+    case 'PENDING_CO_MAKER_ACCEPTANCE':
+      return 'Awaiting Co-Maker Endorsement';
+    case 'CO_MAKER_DECLINED':
+      return 'Co-Maker Declined';
+    case 'SUBMITTED':
+      return 'Submitted to LOS';
+    case 'UNDER_CREDIT_REVIEW':
+      return 'Under Credit Review';
+    case 'BOD_APPROVAL':
+      return 'BOD Policy Review';
+    case 'APPROVED':
+      return 'Approved (Ready for Disbursal)';
+    case 'DISBURSED':
+      return 'Proceeds Disbursed';
+    case 'REJECTED':
+      return 'Application Declined';
+    case 'CANCELLED':
+      return 'Application Cancelled';
+    default:
+      return status ? status.replace(/_/g, ' ') : 'Under Review';
+  }
+}
+
+function getStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'PENDING_CO_MAKER_ACCEPTANCE':
+      return 'bg-amber-100 text-amber-900 border border-amber-300';
+    case 'CO_MAKER_DECLINED':
+    case 'REJECTED':
+    case 'CANCELLED':
+      return 'bg-rose-100 text-rose-900 border border-rose-300';
+    case 'SUBMITTED':
+      return 'bg-blue-100 text-blue-900 border border-blue-300';
+    case 'UNDER_CREDIT_REVIEW':
+      return 'bg-indigo-100 text-indigo-900 border border-indigo-300';
+    case 'BOD_APPROVAL':
+      return 'bg-purple-100 text-purple-900 border border-purple-300';
+    case 'APPROVED':
+      return 'bg-emerald-100 text-emerald-900 border border-emerald-300';
+    case 'DISBURSED':
+      return 'bg-teal-100 text-teal-900 border border-teal-300';
+    default:
+      return 'bg-slate-100 text-slate-800 border border-slate-300';
+  }
+}
 
 export default function MemberPortalPage() {
   const router = useRouter();
@@ -326,7 +413,10 @@ export default function MemberPortalPage() {
     idType: 'CDA General Manager Verified PhilSys ID',
   };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+  const [memberLoanApplications, setMemberLoanApplications] = useState<any[]>([]);
+  const [selectedLoanForDisclosure, setSelectedLoanForDisclosure] = useState<any | null>(null);
+  const [disclosureBackTab, setDisclosureBackTab] = useState<'home' | 'apply' | 'applications' | 'more'>('home');
 
   // PWA Installation Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -739,6 +829,59 @@ export default function MemberPortalPage() {
       })
       .catch(() => {});
   }, [tenantInfo.slug]);
+
+  // Fetch member's submitted loans from localStorage & backend API
+  const fetchMemberLoanApplications = React.useCallback(async () => {
+    const tenant = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_applications_${tenant.slug}`;
+    let apps: any[] = [];
+
+    // 1. Initial cached applications from localStorage
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          apps = parsed;
+        }
+      }
+    } catch {}
+
+    // 2. Fetch from Backend API
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/loans?coop=${tenant.slug}`);
+      if (res.ok) {
+        const apiLoans = await res.json();
+        if (Array.isArray(apiLoans)) {
+          const map = new Map<string, any>();
+          apps.forEach((a) => map.set(a.id, a));
+          apiLoans.forEach((a) => map.set(a.id, { ...map.get(a.id), ...a }));
+          apps = Array.from(map.values());
+        }
+      }
+    } catch {}
+
+    // Filter for current member
+    const filtered = apps.filter((app: any) => {
+      const matchId = app.memberId && app.memberId === currentMember.id;
+      const matchNo = app.memberNo && app.memberNo === currentMember.memberNumber;
+      const matchName = app.memberName && app.memberName.toLowerCase().trim() === currentMember.name.toLowerCase().trim();
+      return matchId || matchNo || matchName;
+    });
+
+    // Sort newest first
+    filtered.sort((a, b) => {
+      const timeA = new Date(a.submittedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.submittedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    setMemberLoanApplications(filtered);
+  }, [currentMember.id, currentMember.memberNumber, currentMember.name]);
+
+  useEffect(() => {
+    fetchMemberLoanApplications();
+  }, [fetchMemberLoanApplications]);
 
   const isTechFeePassThrough = techFeeTreatment === 'PASS_THROUGH';
   const techFeeAmount = Math.round(loanAmount * 0.01 * 100) / 100;
@@ -1364,6 +1507,116 @@ export default function MemberPortalPage() {
                 </button>
               </div>
             </div>
+
+            {/* Active Loan Applications & Underwriting Pipeline (Dashboard Section) */}
+            {memberLoanApplications.length > 0 && (
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                      <ClipboardList className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        My Submitted Loan Applications
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Real-time underwriting evaluation &amp; approval status
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('applications')}
+                    className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 transition-colors"
+                  >
+                    <span>View All ({memberLoanApplications.length})</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {memberLoanApplications.slice(0, 3).map((app) => (
+                    <div
+                      key={app.id}
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-slate-900 text-xs">
+                              {app.loanNumber || app.id}
+                            </span>
+                            <span className="text-slate-400">•</span>
+                            <span className="font-semibold text-slate-800 text-xs">
+                              {app.productName || 'Loan Product'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            Filed on {app.submittedAt || 'Recent'}
+                          </div>
+                        </div>
+                        <div>
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${getStatusBadgeClass(app.status)}`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                            {formatLoanStatus(app.status)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Key metrics */}
+                      <div className="grid grid-cols-3 gap-2 py-2.5 px-3 bg-white rounded-lg border border-slate-200/80 text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Principal</span>
+                          <span className="font-bold text-slate-900 font-mono text-xs">
+                            ₱{(Number(app.amount || app.principalAmount || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Term</span>
+                          <span className="font-bold text-slate-900 text-xs">
+                            {app.termMonths || 12} Mos
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Monthly</span>
+                          <span className="font-bold text-emerald-800 font-mono text-xs">
+                            ₱{(Number(app.monthlyAmortization || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedLoanForDisclosure(app);
+                            setDisclosureBackTab('home');
+                            setActiveTab('documents');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-slate-500" />
+                          <span>RA 3765 Disclosure</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedLoanForDisclosure(app);
+                            setActiveTab('applications');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-xs"
+                        >
+                          <span>Track Status</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1913,17 +2166,33 @@ export default function MemberPortalPage() {
                 )}
                 <div className="pt-2 flex flex-col sm:flex-row justify-center gap-3">
                   <button
-                    onClick={() => setActiveTab('documents')}
-                    className="bg-white text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-slate-50"
+                    type="button"
+                    onClick={() => {
+                      setDisclosureBackTab('apply');
+                      setActiveTab('documents');
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5"
                   >
-                    View RA 3765 Disclosure Statement
+                    <FileText className="w-4 h-4" />
+                    <span>View RA 3765 Disclosure Statement</span>
                   </button>
                   <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('applications');
+                    }}
+                    className="bg-white text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <ClipboardList className="w-4 h-4" />
+                    <span>Track Loan Status</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setApplicationSubmitted(false);
                       setActiveTab('home');
                     }}
-                    className="bg-white text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-slate-50"
+                    className="bg-white text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-slate-50 transition-colors"
                   >
                     Back to Portfolio
                   </button>
@@ -2380,6 +2649,13 @@ export default function MemberPortalPage() {
                         purpose: selectedProduct.name,
                         calculationBasis: loanCalculationBasis,
                         monthlyAmortization: monthlyInstallment,
+                        techFeeDeduction: memberTechFeeDeduction,
+                        coopServiceFee: coopServiceFee,
+                        advanceInterest: advanceInterest,
+                        optionalFeesTotal: optionalFeesTotal,
+                        netProceeds: netProceeds,
+                        effectiveInterestRate: eir,
+                        totalInterest: totalInterest,
                         coMakerId: requiresCoMaker ? coMakerMemberIdInput.trim() : undefined,
                         coMakerName: requiresCoMaker ? (coMaker || `Member (${coMakerMemberIdInput.trim()})`) : undefined,
                         coMakerNo: requiresCoMaker ? coMakerMemberIdInput.trim() : undefined,
@@ -2395,6 +2671,8 @@ export default function MemberPortalPage() {
                       };
 
                       setSubmittedLoanId(newLoanId);
+                      setSelectedLoanForDisclosure(newLoanApp);
+                      setMemberLoanApplications((prev) => [newLoanApp, ...prev.filter((a) => a.id !== newLoanId)]);
 
                       // 1. Immediately persist to localStorage for cross-portal sharing
                       try {
@@ -2858,80 +3136,474 @@ export default function MemberPortalPage() {
           </div>
         )}
 
-        {/* TAB 4: TRUTH IN LENDING & PROMISSORY NOTE */}
-        {activeTab === 'documents' && (
-          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+        {/* TAB: MY SUBMITTED LOAN APPLICATIONS & STATUS TRACKER */}
+        {activeTab === 'applications' && (
+          <div className="space-y-6">
             <button
               type="button"
-              onClick={() => setActiveTab('more')}
+              onClick={() => setActiveTab('home')}
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
             >
               <ArrowLeft className="w-4 h-4" />
-              Back to More Services
+              Back to Portfolio
             </button>
-            <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">Republic Act No. 3765 • Truth in Lending Disclosure</h2>
-                <p className="text-xs text-slate-500">Statutory loan disclosure statement & legally binding promissory note.</p>
+                <h2 className="text-xl font-bold text-slate-900">My Loan Applications &amp; Status</h2>
+                <p className="text-xs text-slate-500">Track real-time underwriting progress, co-maker solidary verification, and disbursement schedules.</p>
               </div>
               <button
                 type="button"
-                onClick={() => alert('Downloaded RA3765_Disclosure_LN-2026-00001.pdf to your device.')}
-                className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
+                onClick={() => setActiveTab('apply')}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 shrink-0"
               >
-                <Download className="w-4 h-4" /> Download PDF Copy
+                <Plus className="w-4 h-4" /> Apply for New Loan
               </button>
             </div>
 
-            <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 space-y-4">
-              <div className="border-b border-slate-200 pb-3 flex justify-between items-center text-xs">
-                <div>
-                  <span className="text-slate-500">Document No: </span>
-                  <span className="font-mono font-bold text-slate-900">DISC-LN-2026-00001</span>
+            {memberLoanApplications.length === 0 ? (
+              <div className="bg-white p-8 sm:p-12 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                  <ClipboardList className="w-8 h-8" />
                 </div>
-                <span className="bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full">
-                  VERIFIED & SIGNED
-                </span>
+                <h3 className="text-lg font-bold text-slate-800">No Submitted Loan Applications Found</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                  You currently have no active or historical loan applications on record. Apply online in minutes with our transparent amortization calculator.
+                </p>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('apply')}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm transition"
+                  >
+                    Apply for a Loan Now
+                  </button>
+                </div>
               </div>
+            ) : (
+              <div className="space-y-5">
+                {memberLoanApplications.map((app) => {
+                  const principal = Number(app.amount || app.principalAmount || 0);
+                  const term = Number(app.termMonths || 12);
+                  const rate = Number(app.annualRate ?? app.interestRateAnnual ?? 0.12);
+                  const installment = Number(app.monthlyAmortization || app.monthlyInstallment || 0);
+                  const net = Number(app.netProceeds || (principal - (app.techFeeDeduction || 0) - (app.coopServiceFee || 0)));
 
-              <div className="grid grid-cols-2 gap-4 text-xs text-slate-700">
-                <div>
-                  <span className="text-slate-500">Creditor: </span>
-                  <strong>{tenantInfo.name || 'Cooperative Enterprise'}</strong> (CDA Regulated)
-                </div>
-                <div>
-                  <span className="text-slate-500">Borrower: </span>
-                  <strong>{currentMember.name}</strong> ({currentMember.memberNumber})
-                </div>
-                <div>
-                  <span className="text-slate-500">Gross Loan Principal: </span>
-                  <strong>₱50,000.00</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500">Effective Interest Rate (EIR): </span>
-                  <strong className="text-emerald-700">15.50% per annum</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500">SaaS Platform Processing Fee: </span>
-                  <strong>₱1,000.00 (2.0%)</strong>
-                </div>
-                <div>
-                  <span className="text-slate-500">Coop Service & Filing Fee: </span>
-                  <strong>₱750.00 (1.5%)</strong>
-                </div>
-                <div className="col-span-2 p-3 bg-emerald-100/70 border border-emerald-300 rounded-lg text-emerald-950 font-bold flex justify-between items-center">
-                  <span>Net Disbursed Proceeds to Borrower:</span>
-                  <span className="text-base font-black">₱48,250.00</span>
-                </div>
-              </div>
+                  const isCoMakerReq = Boolean(app.requiresCoMaker || app.coMakerName || app.coMakerId);
+                  const creditReviewDone = ['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(app.status);
+                  const bodApprovalDone = ['APPROVED', 'DISBURSED'].includes(app.status);
+                  const disbursedDone = app.status === 'DISBURSED';
 
-              <div className="p-4 bg-white rounded-lg border border-slate-200 text-xs font-mono text-slate-700 leading-relaxed">
-                <div className="font-bold text-slate-900 uppercase mb-1">PROMISSORY NOTE & LOAN AGREEMENT SUMMARY</div>
-                {`"FOR VALUE RECEIVED, I, ${currentMember.name.toUpperCase()}, promise to pay to the order of ${(tenantInfo.name || 'THE COOPERATIVE').toUpperCase()} the sum of PESOS FIFTY THOUSAND (PHP 50,000.00) in 12 equal monthly installments of PHP 4,442.44. In case of default, a 3% monthly surcharge applies. Solidary liability acknowledged pursuant to the Cooperative Bylaws."`}
+                  return (
+                    <div
+                      key={app.id}
+                      className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-5"
+                    >
+                      {/* Card Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-slate-900 text-sm">
+                              {app.loanNumber || app.id}
+                            </span>
+                            <span className="text-slate-400">•</span>
+                            <span className="font-bold text-emerald-800 text-sm">
+                              {app.productName || 'Loan Product'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            Applied on: <strong>{app.submittedAt || 'Recent'}</strong> • Borrower: <strong>{app.memberName || currentMember.name}</strong>
+                          </div>
+                        </div>
+                        <div>
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${getStatusBadgeClass(app.status)}`}>
+                            <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
+                            {formatLoanStatus(app.status)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 5-Stage Visual Workflow Pipeline */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+                        <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                          Underwriting Evaluation Pipeline
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                          {/* Step 1: Application Filed */}
+                          <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 font-semibold">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase text-emerald-700">Step 1</div>
+                              <div className="truncate">Filed</div>
+                            </div>
+                          </div>
+
+                          {/* Step 2: Co-Maker Endorsement */}
+                          <div className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold ${
+                            !isCoMakerReq
+                              ? 'bg-slate-100 border-slate-200 text-slate-600'
+                              : app.status === 'PENDING_CO_MAKER_ACCEPTANCE'
+                              ? 'bg-amber-50 border-amber-300 text-amber-900'
+                              : app.status === 'CO_MAKER_DECLINED'
+                              ? 'bg-rose-50 border-rose-300 text-rose-900'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          }`}>
+                            {!isCoMakerReq ? (
+                              <Check className="w-4 h-4 text-slate-500 shrink-0" />
+                            ) : app.status === 'PENDING_CO_MAKER_ACCEPTANCE' ? (
+                              <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                            ) : app.status === 'CO_MAKER_DECLINED' ? (
+                              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                            ) : (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase text-slate-500">Step 2</div>
+                              <div className="truncate">{!isCoMakerReq ? 'Self-Secured' : 'Co-Maker'}</div>
+                            </div>
+                          </div>
+
+                          {/* Step 3: Credit Evaluation */}
+                          <div className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold ${
+                            creditReviewDone
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : app.status === 'UNDER_CREDIT_REVIEW'
+                              ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
+                              : 'bg-white border-slate-200 text-slate-400'
+                          }`}>
+                            {creditReviewDone ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            ) : app.status === 'UNDER_CREDIT_REVIEW' ? (
+                              <Clock className="w-4 h-4 text-indigo-600 shrink-0 animate-spin" />
+                            ) : (
+                              <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase text-slate-500">Step 3</div>
+                              <div className="truncate">Credit Triage</div>
+                            </div>
+                          </div>
+
+                          {/* Step 4: Board Approval */}
+                          <div className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold ${
+                            bodApprovalDone
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : app.status === 'BOD_APPROVAL'
+                              ? 'bg-purple-50 border-purple-300 text-purple-900'
+                              : 'bg-white border-slate-200 text-slate-400'
+                          }`}>
+                            {bodApprovalDone ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            ) : app.status === 'BOD_APPROVAL' ? (
+                              <Clock className="w-4 h-4 text-purple-600 shrink-0 animate-spin" />
+                            ) : (
+                              <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase text-slate-500">Step 4</div>
+                              <div className="truncate">Approval</div>
+                            </div>
+                          </div>
+
+                          {/* Step 5: Proceeds Disbursal */}
+                          <div className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold col-span-2 sm:col-span-1 ${
+                            disbursedDone
+                              ? 'bg-teal-50 border-teal-300 text-teal-900'
+                              : 'bg-white border-slate-200 text-slate-400'
+                          }`}>
+                            {disbursedDone ? (
+                              <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+                            ) : (
+                              <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase text-slate-500">Step 5</div>
+                              <div className="truncate">Disbursal</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Financial Detail Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                          <span className="text-[10px] text-slate-500 uppercase font-semibold block">Gross Principal</span>
+                          <span className="font-bold font-mono text-slate-900 text-sm">
+                            ₱{principal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                          <span className="text-[10px] text-slate-500 uppercase font-semibold block">Monthly Amortization</span>
+                          <span className="font-bold font-mono text-emerald-800 text-sm">
+                            ₱{installment.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / mo
+                          </span>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                          <span className="text-[10px] text-slate-500 uppercase font-semibold block">Repayment Term</span>
+                          <span className="font-bold text-slate-900 text-sm">
+                            {term} Months
+                          </span>
+                        </div>
+                        <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+                          <span className="text-[10px] text-emerald-800 uppercase font-semibold block">Net Disbursed Proceeds</span>
+                          <span className="font-bold font-mono text-emerald-950 text-sm">
+                            ₱{net.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Co-Maker and Settlement Info */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        {/* Co-Maker Card */}
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5 text-slate-500" /> Co-Maker Solidary Signer
+                          </div>
+                          {isCoMakerReq ? (
+                            <div className="text-slate-600">
+                              <div>Name: <strong>{app.coMakerName || 'Designated Co-Maker'}</strong></div>
+                              {app.coMakerNo && <div>Member ID: <span className="font-mono">{app.coMakerNo}</span></div>}
+                              <div className="mt-1">
+                                Status:{' '}
+                                <span className={`font-semibold ${
+                                  app.status === 'PENDING_CO_MAKER_ACCEPTANCE'
+                                    ? 'text-amber-700'
+                                    : app.status === 'CO_MAKER_DECLINED'
+                                    ? 'text-rose-700'
+                                    : 'text-emerald-700'
+                                }`}>
+                                  {app.status === 'PENDING_CO_MAKER_ACCEPTANCE'
+                                    ? 'Awaiting Co-Maker Portal Sign-off'
+                                    : app.status === 'CO_MAKER_DECLINED'
+                                    ? 'Declined by Co-Maker'
+                                    : 'Joint Solidary Liability Undertaking Signed'}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-slate-500">
+                              No co-maker required. Application qualified under self-secured borrowing policy.
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Settlement Destination Card */}
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <Banknote className="w-3.5 h-3.5 text-slate-500" /> Disbursement Settlement
+                          </div>
+                          {app.settlement ? (
+                            <div className="text-slate-600">
+                              <div>Channel: <strong>{app.settlement.channel || 'BANK_TRANSFER'}</strong></div>
+                              <div>Institution: <strong>{app.settlement.institutionName || 'Land Bank'}</strong></div>
+                              <div>Account No: <span className="font-mono font-bold text-emerald-800">{app.settlement.accountNumber || '—'}</span></div>
+                              <div>Account Name: <strong>{app.settlement.accountName || app.memberName}</strong></div>
+                            </div>
+                          ) : (
+                            <div className="text-slate-500">
+                              Disbursement via cooperative cash counter / over-the-counter teller.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card Footer Actions */}
+                      <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedLoanForDisclosure(app);
+                            setDisclosureBackTab('applications');
+                            setActiveTab('documents');
+                          }}
+                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <FileText className="w-4 h-4" />
+                          <span>View RA 3765 Disclosure Statement</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            )}
           </div>
         )}
+
+        {/* TAB 4: TRUTH IN LENDING & PROMISSORY NOTE */}
+        {activeTab === 'documents' && (() => {
+          const activeDisclosureLoan = selectedLoanForDisclosure || (memberLoanApplications.length > 0 ? memberLoanApplications[0] : null) || {
+            id: submittedLoanId || 'LN-2026-DRAFT',
+            loanNumber: submittedLoanId || 'LN-2026-DRAFT',
+            memberName: currentMember.name,
+            memberNo: currentMember.memberNumber,
+            productName: selectedProduct.name,
+            amount: loanAmount,
+            principalAmount: loanAmount,
+            annualRate: annualRate,
+            termMonths: loanTerm,
+            monthlyAmortization: monthlyInstallment,
+            techFeeDeduction: memberTechFeeDeduction,
+            coopServiceFee: coopServiceFee,
+            advanceInterest: advanceInterest,
+            netProceeds: netProceeds,
+            effectiveInterestRate: eir,
+            status: 'SUBMITTED',
+          };
+
+          const discPrincipal = Number(activeDisclosureLoan.principalAmount || activeDisclosureLoan.amount || 50000);
+          const discTerm = Number(activeDisclosureLoan.termMonths || 12);
+          const discAnnualRate = Number(activeDisclosureLoan.annualRate ?? activeDisclosureLoan.interestRateAnnual ?? 0.12);
+          const discInstallment = Number(activeDisclosureLoan.monthlyAmortization || activeDisclosureLoan.monthlyInstallment || (() => {
+            const mRate = discAnnualRate / 12.0;
+            const f = Math.pow(1.0 + mRate, discTerm);
+            return Math.round(((discPrincipal * (mRate * f)) / (f - 1.0)) * 100) / 100;
+          })());
+          const discTechFee = Number(activeDisclosureLoan.techFeeDeduction ?? Math.round(discPrincipal * 0.01 * 100) / 100);
+          const discCoopFee = Number(activeDisclosureLoan.coopServiceFee ?? (coopFilingFeeEnabled ? Math.round(discPrincipal * (coopFilingFeeRatePercent / 100) * 100) / 100 : 0));
+          const discAdvanceInterest = Number(activeDisclosureLoan.advanceInterest ?? 0);
+          const discNetProceeds = Number(activeDisclosureLoan.netProceeds ?? Math.max(0, discPrincipal - discTechFee - discCoopFee - discAdvanceInterest));
+          const discEir = Number(activeDisclosureLoan.effectiveInterestRate ?? 15.5);
+          const discDocNo = `DISC-${activeDisclosureLoan.loanNumber || activeDisclosureLoan.id || 'LN-2026-00001'}`;
+          const discBorrower = `${activeDisclosureLoan.memberName || currentMember.name} (${activeDisclosureLoan.memberNo || currentMember.memberNumber})`;
+          const discCreditor = tenantInfo.name || 'Cooperative Enterprise';
+          const discPromissoryWords = numberToWordsPesos(discPrincipal);
+
+          return (
+            <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+              <button
+                type="button"
+                onClick={() => setActiveTab(disclosureBackTab)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                {disclosureBackTab === 'applications'
+                  ? 'Back to My Applications'
+                  : disclosureBackTab === 'apply'
+                  ? 'Back to Application Form'
+                  : disclosureBackTab === 'more'
+                  ? 'Back to More Services'
+                  : 'Back to Portfolio'}
+              </button>
+
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Republic Act No. 3765 • Truth in Lending Disclosure</h2>
+                  <p className="text-xs text-slate-500">Statutory loan disclosure statement &amp; legally binding promissory note.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.print();
+                  }}
+                  className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Download className="w-4 h-4" /> Print / Save PDF
+                </button>
+              </div>
+
+              {/* Application Selector if member has multiple applications */}
+              {memberLoanApplications.length > 1 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+                  <span className="text-slate-600 font-medium">Viewing Disclosure for Application:</span>
+                  <select
+                    value={activeDisclosureLoan.id}
+                    onChange={(e) => {
+                      const found = memberLoanApplications.find((a) => a.id === e.target.value);
+                      if (found) setSelectedLoanForDisclosure(found);
+                    }}
+                    className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    {memberLoanApplications.map((app) => (
+                      <option key={app.id} value={app.id}>
+                        {app.loanNumber || app.id} — ₱{(Number(app.amount || app.principalAmount || 0)).toLocaleString()} ({app.productName || 'Loan'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 space-y-4">
+                <div className="border-b border-slate-200 pb-3 flex justify-between items-center text-xs">
+                  <div>
+                    <span className="text-slate-500">Document No: </span>
+                    <span className="font-mono font-bold text-slate-900">{discDocNo}</span>
+                  </div>
+                  <span className={`font-bold px-2.5 py-0.5 rounded-full text-[10px] ${
+                    activeDisclosureLoan.status === 'DISBURSED' || activeDisclosureLoan.status === 'APPROVED'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-blue-100 text-blue-900'
+                  }`}>
+                    {activeDisclosureLoan.status === 'DISBURSED'
+                      ? 'DISBURSED & VERIFIED'
+                      : activeDisclosureLoan.status === 'APPROVED'
+                      ? 'APPROVED & VERIFIED'
+                      : 'DIGITALLY EXECUTED'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-700">
+                  <div>
+                    <span className="text-slate-500">Creditor: </span>
+                    <strong>{discCreditor}</strong> (CDA Regulated)
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Borrower: </span>
+                    <strong>{discBorrower}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Loan Product: </span>
+                    <strong>{activeDisclosureLoan.productName || 'Cooperative Loan'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Repayment Term: </span>
+                    <strong>{discTerm} Monthly Installments</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Gross Loan Principal: </span>
+                    <strong className="text-slate-900 font-mono text-sm">₱{discPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Nominal Annual Interest Rate: </span>
+                    <strong className="text-slate-900">{(discAnnualRate * 100).toFixed(2)}% per annum</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Effective Interest Rate (EIR): </span>
+                    <strong className="text-emerald-700">{discEir.toFixed(2)}% per annum</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Monthly Installment Amortization: </span>
+                    <strong className="text-slate-900 font-mono">₱{discInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">SaaS Platform Processing Fee: </span>
+                    <strong>₱{discTechFee.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (1.0%)</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Coop Service &amp; Filing Fee: </span>
+                    <strong>₱{discCoopFee.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({coopFilingFeeRatePercent.toFixed(1)}%)</strong>
+                  </div>
+                  {discAdvanceInterest > 0 && (
+                    <div className="col-span-1 sm:col-span-2">
+                      <span className="text-slate-500">Advance Interest Deducted: </span>
+                      <strong className="text-slate-900 font-mono">₱{discAdvanceInterest.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    </div>
+                  )}
+                  <div className="col-span-1 sm:col-span-2 p-3 bg-emerald-100/70 border border-emerald-300 rounded-lg text-emerald-950 font-bold flex justify-between items-center">
+                    <span>Net Disbursed Proceeds to Borrower:</span>
+                    <span className="text-base font-black font-mono">₱{discNetProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white rounded-lg border border-slate-200 text-xs font-mono text-slate-700 leading-relaxed">
+                  <div className="font-bold text-slate-900 uppercase mb-1">PROMISSORY NOTE &amp; LOAN AGREEMENT SUMMARY</div>
+                  {`"FOR VALUE RECEIVED, I, ${(activeDisclosureLoan.memberName || currentMember.name).toUpperCase()}, promise to pay to the order of ${discCreditor.toUpperCase()} the sum of ${discPromissoryWords} (PHP ${discPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) in ${discTerm} equal monthly installments of PHP ${discInstallment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. In case of default, a 3% monthly surcharge applies. Solidary liability acknowledged pursuant to the Cooperative Bylaws."`}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* TAB 5: PROFILE & PRIVACY */}
         {activeTab === 'profile' && (
@@ -3369,6 +4041,38 @@ export default function MemberPortalPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* My Loan Applications & Status */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('applications')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <ClipboardList className="w-5 h-5" />
+                      {memberLoanApplications.length > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-emerald-600 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
+                          {memberLoanApplications.length}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                          My Loan Applications
+                        </h4>
+                        {memberLoanApplications.length > 0 && (
+                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-1.5 py-0.2 rounded-full">
+                            {memberLoanApplications.length} Filed
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Track review pipeline, approvals &amp; status</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
                 {/* Apply for Loan */}
                 <button
                   type="button"
