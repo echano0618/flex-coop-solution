@@ -675,7 +675,8 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
             formattedAddress: resolvedAddress,
           }
         : undefined,
-      classification: 'REGULAR',
+      classification: req.body.classification || 'ASSOCIATE',
+      isDividendEligible: req.body.isDividendEligible !== undefined ? req.body.isDividendEligible : (req.body.classification === 'REGULAR'),
       status: req.body.initialStatus === 'ACTIVE' ? 'ACTIVE' : 'PENDING_APPROVAL',
       kycStatus: req.body.initialStatus === 'ACTIVE' ? 'VERIFIED' : 'SUBMITTED',
       joinedAt: new Date().toISOString(),
@@ -690,6 +691,8 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
       username: cleanUser,
       idNumber: tin || employeeIdNumber || idNumber || 'N/A',
       idType: idType || 'PhilSys National ID',
+      classification: req.body.classification || 'ASSOCIATE',
+      isDividendEligible: req.body.isDividendEligible !== undefined ? req.body.isDividendEligible : (req.body.classification === 'REGULAR'),
       paidUpShares: actualDeposit,
       sharesCount: actualSubShares,
       subscribedShares: actualSubShares,
@@ -717,6 +720,7 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
       pin: cleanPin,
       password: cleanPin,
       name: fullName,
+      roleTitle: req.body.roleTitle || (req.body.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
       applicantId: appId,
       memberId,
       memberNumber,
@@ -1679,7 +1683,8 @@ app.post('/api/v1/members', async (req: Request, res: Response) => {
       gender: gender || 'OTHER',
       civilStatus: civilStatus || 'SINGLE',
       address: address || '',
-      classification: 'REGULAR',
+      classification: req.body.classification || 'ASSOCIATE',
+      isDividendEligible: req.body.isDividendEligible !== undefined ? req.body.isDividendEligible : (req.body.classification === 'REGULAR'),
       status: 'ACTIVE',
       kycStatus: 'SUBMITTED',
       joinedAt: new Date().toISOString(),
@@ -1700,7 +1705,7 @@ app.post('/api/v1/members', async (req: Request, res: Response) => {
         memberId,
         memberNumber,
         role: 'MEMBER',
-        roleTitle: 'Regular Member',
+        roleTitle: req.body.roleTitle || (req.body.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
         isStaff: false,
         status: 'ACTIVE',
         createdAt: new Date().toISOString(),
@@ -2782,6 +2787,13 @@ app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
       annualInterestRate: Number(annualInterestRate),
       minTermMonths: minTermMonths ? Number(minTermMonths) : 1,
       maxTermMonths: Number(maxTermMonths || 12),
+      termUnit: req.body.termUnit || 'MONTHS',
+      minTermWeeks: req.body.minTermWeeks ? Number(req.body.minTermWeeks) : 1,
+      maxTermWeeks: req.body.maxTermWeeks ? Number(req.body.maxTermWeeks) : 52,
+      weeklyPaymentFrequency: req.body.weeklyPaymentFrequency || 'EVERY_WEEK',
+      mandatorySharePurchaseEnabled: Boolean(req.body.mandatorySharePurchaseEnabled),
+      mandatoryShareQuantity: req.body.mandatoryShareQuantity ? Number(req.body.mandatoryShareQuantity) : 0,
+      mandatorySharePaymentTreatment: req.body.mandatorySharePaymentTreatment || 'UPFRONT_DEDUCTION',
       amortizationMethod: amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
       advanceInterestOption: advanceInterestOption || 'NONE',
       succeedingMethod: succeedingMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
@@ -2993,20 +3005,39 @@ app.post('/api/v1/loans/apply', async (req: Request, res: Response) => {
       };
     }
 
+    const termUnit = req.body.termUnit || product.termUnit || 'MONTHS';
     const term = Number(termMonths || 12);
+    const termWeeks = termUnit === 'WEEKS' ? Number(req.body.termWeeks || req.body.term || term || 12) : undefined;
+    const weeklyPaymentFrequency = req.body.weeklyPaymentFrequency || product.weeklyPaymentFrequency || 'EVERY_WEEK';
+    const firstDueDate = req.body.firstDueDate;
+
+    const mandatorySharePurchaseEnabled = req.body.mandatorySharePurchaseEnabled !== undefined
+      ? Boolean(req.body.mandatorySharePurchaseEnabled)
+      : Boolean(product.mandatorySharePurchaseEnabled);
+    const mandatoryShareQuantity = Number(req.body.mandatoryShareQuantity || product.mandatoryShareQuantity || 0);
+    const mandatorySharePaymentTreatment = req.body.mandatorySharePaymentTreatment || product.mandatorySharePaymentTreatment || 'UPFRONT_DEDUCTION';
+    const mandatoryShareAmount = mandatorySharePurchaseEnabled && mandatoryShareQuantity > 0 ? mandatoryShareQuantity * 100 : 0;
+
     const annualRate = product.annualInterestRate !== undefined ? product.annualInterestRate : 0.12;
     const scheduleData = AmortizationService.generateSchedule({
       principalAmount: finalPrincipal,
       annualInterestRate: annualRate,
       termMonths: term,
-      paymentFrequency: paymentFrequency || 'MONTHLY',
+      termWeeks,
+      termUnit,
+      weeklyPaymentFrequency,
+      paymentFrequency: paymentFrequency || (termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
       method: product.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      firstDueDate,
+      mandatorySharePaymentTreatment: mandatorySharePurchaseEnabled ? mandatorySharePaymentTreatment : undefined,
+      mandatoryShareAmount,
     });
 
     const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
     const feeCalc = MonetizationService.calculatePlatformFee(finalPrincipal, billingMode);
     const coopServiceFee = Math.round(finalPrincipal * (product.serviceFeeRate || 0.015) * 100) / 100;
-    const netProceeds = finalPrincipal - feeCalc.grossFee - coopServiceFee;
+    const upfrontShareDeduction = (mandatorySharePurchaseEnabled && mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION') ? mandatoryShareAmount : 0;
+    const netProceeds = finalPrincipal - feeCalc.grossFee - coopServiceFee - upfrontShareDeduction;
 
     const loanId = req.body.id || `loan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const loanNumber = req.body.loanNumber || `LN-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -3028,7 +3059,15 @@ app.post('/api/v1/loans/apply', async (req: Request, res: Response) => {
       interestRateAnnual: annualRate,
       annualRate,
       termMonths: term,
-      paymentFrequency: paymentFrequency || 'MONTHLY',
+      termWeeks,
+      termUnit,
+      weeklyPaymentFrequency,
+      firstDueDate,
+      mandatorySharePurchaseEnabled,
+      mandatoryShareQuantity,
+      mandatorySharePaymentTreatment,
+      mandatoryShareAmount,
+      paymentFrequency: paymentFrequency || (termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
       amortizationMethod: product.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
       status: initialStatus,
       platformFee: feeCalc.grossFee,
@@ -3202,10 +3241,69 @@ app.post('/api/v1/co-maker/endorse', (req: Request, res: Response) => {
   }
 });
 
+async function postLoanApprovalLedgerEntry(tenantId: string, loan: any, approverRole: string = 'usr_credit_committee') {
+  try {
+    const fsService = FirestoreCoopService.getInstance();
+    const principal = Number(loan.principalAmount || loan.amount || 0);
+    if (principal <= 0) return;
+
+    const entries = await getTenantJournalEntries(tenantId);
+    const hasApprovalJe = entries.some((e: any) =>
+      e.referenceId === loan.id ||
+      (e.description && e.description.includes(loan.loanNumber) && (e.description.includes('Commitment') || e.description.includes('Approved')))
+    );
+    if (hasApprovalJe) return;
+
+    let members = dbStore.members.get(tenantId) || [];
+    if (members.length === 0) {
+      try {
+        const fsMembers = await fsService.listMembers(tenantId);
+        if (fsMembers && fsMembers.length > 0) members = fsMembers;
+      } catch {}
+    }
+
+    const borrower: any = members.find((m: any) => {
+      if (loan.memberId && (m.id === loan.memberId || m.memberNumber === loan.memberId || m.memberNo === loan.memberId)) return true;
+      const lNum = (loan.memberNo || loan.memberNumber || '').toString().trim().toUpperCase();
+      const mNum = (m.memberNumber || m.memberNo || m.id || '').toString().trim().toUpperCase();
+      if (lNum && mNum && lNum === mNum) return true;
+      return false;
+    });
+
+    const borrowerName = loan.memberName || (borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Borrower');
+    const borrowerNumber = loan.memberNo || loan.memberNumber || borrower?.memberNumber || 'MEM-2026-0001';
+    const borrowerMemId = loan.memberId || borrower?.id || 'mem_0001';
+
+    const jeData = GeneralLedgerService.buildLoanApprovalEntry({
+      loanId: loan.id,
+      loanNumber: loan.loanNumber,
+      grossPrincipal: principal,
+      userId: approverRole,
+      memberId: borrowerMemId,
+      memberNumber: borrowerNumber,
+      memberName: borrowerName,
+    });
+
+    const newJe = { id: `je_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...jeData };
+    entries.push(newJe);
+    const memEntries = dbStore.journalEntries.get(tenantId) || [];
+    memEntries.push(newJe);
+    dbStore.journalEntries.set(tenantId, memEntries);
+
+    try {
+      await fsService.postJournalEntry(tenantId, newJe);
+    } catch (jeErr) {
+      console.warn('Failed to post loan approval journal entry to Firestore:', jeErr);
+    }
+  } catch (err) {
+    console.warn('postLoanApprovalLedgerEntry error:', err);
+  }
+}
+
 app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { remarks, approved } = req.body;
+  const { remarks, approved, firstDueDate } = req.body;
   const fsService = FirestoreCoopService.getInstance();
 
   let loans = dbStore.loans.get(tenantId) || [];
@@ -3227,9 +3325,44 @@ app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
     return res.json({ success: true, message: 'Loan rejected by Loan Officer.', loan });
   }
 
+  if (firstDueDate) {
+    loan.firstDueDate = firstDueDate;
+    const anyLoan = loan as any;
+    const termMonths = Number(anyLoan.termMonths || anyLoan.term || 12);
+    const termWeeks = anyLoan.termWeeks ? Number(anyLoan.termWeeks) : undefined;
+    const termUnit = anyLoan.termUnit || 'MONTHS';
+    const weeklyPaymentFrequency = anyLoan.weeklyPaymentFrequency || 'EVERY_WEEK';
+    const annualRate = anyLoan.annualRate !== undefined ? anyLoan.annualRate : (anyLoan.interestRateAnnual || 0.12);
+    const scheduleData = AmortizationService.generateSchedule({
+      principalAmount: Number(anyLoan.principalAmount || anyLoan.amount),
+      annualInterestRate: annualRate,
+      termMonths,
+      termWeeks,
+      termUnit,
+      weeklyPaymentFrequency,
+      paymentFrequency: anyLoan.paymentFrequency || (termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
+      method: anyLoan.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      firstDueDate: anyLoan.firstDueDate,
+      mandatorySharePaymentTreatment: anyLoan.mandatorySharePaymentTreatment,
+      mandatoryShareAmount: anyLoan.mandatoryShareAmount,
+    });
+    loan.schedule = scheduleData.schedule;
+    loan.totalInterestExpected = scheduleData.totalInterest;
+    loan.totalPayable = scheduleData.totalPayable;
+  }
+
   loan.status = 'UNDER_CREDIT_REVIEW';
   loan.updatedAt = new Date().toISOString();
-  try { await fsService.updateLoanStatus(tenantId, loan.id, 'UNDER_CREDIT_REVIEW', { updatedAt: loan.updatedAt }); } catch {}
+  try {
+    await fsService.updateLoanStatus(tenantId, loan.id, 'UNDER_CREDIT_REVIEW', {
+      firstDueDate: loan.firstDueDate,
+      schedule: loan.schedule,
+      totalInterestExpected: loan.totalInterestExpected,
+      totalPayable: loan.totalPayable,
+      updatedAt: loan.updatedAt,
+    });
+    await fsService.saveLoan(tenantId, loan);
+  } catch {}
   const idxReview = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
   if (idxReview >= 0) loans[idxReview] = loan; else loans.unshift(loan);
   dbStore.loans.set(tenantId, loans);
@@ -3279,6 +3412,10 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
   if (idxCom >= 0) loans[idxCom] = loan; else loans.unshift(loan);
   dbStore.loans.set(tenantId, loans);
 
+  if (loan.status === 'APPROVED') {
+    await postLoanApprovalLedgerEntry(tenantId, loan, 'usr_credit_committee');
+  }
+
   res.json({
     success: true,
     message: loan.status === 'BOD_APPROVAL' ? 'Endorsed to Board of Directors for final approval.' : 'Approved by Credit Committee. Ready for disbursement.',
@@ -3317,6 +3454,8 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
   const idxBod = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
   if (idxBod >= 0) loans[idxBod] = loan; else loans.unshift(loan);
   dbStore.loans.set(tenantId, loans);
+
+  await postLoanApprovalLedgerEntry(tenantId, loan, 'usr_bod');
 
   res.json({
     success: true,
@@ -3430,27 +3569,56 @@ app.get('/api/v1/loans/:id/disclosure-statement', (req: Request, res: Response) 
 app.post('/api/v1/loans/calculate', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const tenant = dbStore.tenants.get(tenantId);
-  const { principalAmount, annualInterestRate, termMonths, amortizationMethod, billingModeOverride } = req.body;
+  const {
+    principalAmount,
+    annualInterestRate,
+    termMonths,
+    termWeeks,
+    termUnit,
+    weeklyPaymentFrequency,
+    amortizationMethod,
+    billingModeOverride,
+    firstDueDate,
+    mandatorySharePurchaseEnabled,
+    mandatoryShareQuantity,
+    mandatorySharePaymentTreatment,
+    shareParValue,
+  } = req.body;
 
   const billingMode = billingModeOverride || tenant?.billingMode || 'PLATFORM_ESCROW';
+  const par = Number(shareParValue || 100);
+  const mandatoryShareQty = Number(mandatoryShareQuantity || 0);
+  const isShareEnabled = Boolean(mandatorySharePurchaseEnabled);
+  const mandatoryShareAmount = isShareEnabled && mandatoryShareQty > 0 ? mandatoryShareQty * par : 0;
+  const shareTreatment = mandatorySharePaymentTreatment || 'UPFRONT_DEDUCTION';
 
   const feeCalc = MonetizationService.calculatePlatformFee(Number(principalAmount), billingMode);
   const scheduleData = AmortizationService.generateSchedule({
     principalAmount: Number(principalAmount),
     annualInterestRate: Number(annualInterestRate || 0.12),
     termMonths: Number(termMonths || 12),
-    paymentFrequency: 'MONTHLY',
+    termWeeks: termWeeks ? Number(termWeeks) : undefined,
+    termUnit: termUnit || 'MONTHS',
+    weeklyPaymentFrequency: weeklyPaymentFrequency || 'EVERY_WEEK',
+    paymentFrequency: termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY',
     method: amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    firstDueDate: firstDueDate || undefined,
+    mandatorySharePaymentTreatment: isShareEnabled ? shareTreatment : undefined,
+    mandatoryShareAmount,
   });
+
+  const upfrontShareDeduction = (isShareEnabled && shareTreatment === 'UPFRONT_DEDUCTION') ? mandatoryShareAmount : 0;
 
   res.json({
     success: true,
     platformFee: feeCalc,
     amortization: scheduleData,
+    mandatoryShareAmount,
     netDisbursement: {
       grossPrincipal: Number(principalAmount),
       platformFeeDeducted: feeCalc.grossFee,
-      estimatedNetProceeds: Number(principalAmount) - feeCalc.grossFee,
+      mandatoryShareDeducted: upfrontShareDeduction,
+      estimatedNetProceeds: Number(principalAmount) - feeCalc.grossFee - upfrontShareDeduction,
     },
   });
 });
@@ -3502,9 +3670,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       } catch {}
       if (!loans || loans.length === 0) loans = dbStore.loans.get(tenantId) || [];
     }
-
-    const disbursed = loans.filter((l: any) => l.status === 'DISBURSED');
-    if (disbursed.length === 0) return;
+    if (!loans || loans.length === 0) return;
 
     let members: any[] = [];
     try {
@@ -3512,7 +3678,11 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
     } catch {}
     if (!members || members.length === 0) members = dbStore.members.get(tenantId) || [];
 
-    const entries = await getTenantJournalEntries(tenantId);
+    let entries: any[] = [];
+    try {
+      entries = await fsService.listJournalEntries(tenantId);
+    } catch {}
+    if (!entries || entries.length === 0) entries = dbStore.journalEntries.get(tenantId) || [];
     let tenant = dbStore.tenants.get(tenantId);
     if (!tenant) {
       try {
@@ -3520,32 +3690,86 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       } catch {}
     }
 
+    const resolveBorrower = (loan: any) => members.find((m: any) => {
+      if (loan.memberId && (m.id === loan.memberId || m.memberNumber === loan.memberId || m.memberNo === loan.memberId)) return true;
+      const lNum = (loan.memberNo || loan.memberNumber || '').toString().trim().toUpperCase();
+      const mNum = (m.memberNumber || m.memberNo || m.id || '').toString().trim().toUpperCase();
+      if (lNum && mNum) {
+        if (lNum === mNum) return true;
+        const normL = lNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+        const normM = mNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+        if (normL === normM) return true;
+      }
+      const lName = (loan.memberName || '').toString().toLowerCase().trim();
+      const mName = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).toString().toLowerCase().trim();
+      if (lName && mName) {
+        if (lName === mName || lName.includes(mName) || mName.includes(lName)) return true;
+        const parts = mName.split(' ');
+        const last = parts[parts.length - 1];
+        if (last && last.length > 2 && lName.includes(last)) return true;
+      }
+      return false;
+    });
+
+    // 1. Synchronize APPROVED loans (Book Commitment Entry)
+    const approvedLoans = loans.filter((l: any) => l.status === 'APPROVED');
+    for (const rawLoan of approvedLoans) {
+      const loan = rawLoan as any;
+      const principal = Number(loan.principalAmount || loan.amount || 0);
+      if (principal <= 0) continue;
+
+      const borrower: any = resolveBorrower(loan);
+      if (borrower && borrower.activeLoanId !== loan.id) {
+        borrower.activeLoanId = loan.id;
+        borrower.activeLoanNumber = loan.loanNumber;
+        try {
+          await fsService.updateMember(tenantId, borrower.id, {
+            activeLoanId: loan.id,
+            activeLoanNumber: loan.loanNumber,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {}
+      }
+
+      const hasApprovalJe = entries.some((e: any) =>
+        e.referenceId === loan.id ||
+        (e.description && e.description.includes(loan.loanNumber) && (e.description.includes('Commitment') || e.description.includes('Approved')))
+      );
+
+      if (!hasApprovalJe) {
+        const borrowerName = loan.memberName || (borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Borrower');
+        const borrowerNumber = loan.memberNo || loan.memberNumber || borrower?.memberNumber || 'MEM-2026-0001';
+        const borrowerId = loan.memberId || borrower?.id || 'mem_0001';
+
+        const jeData = GeneralLedgerService.buildLoanApprovalEntry({
+          loanId: loan.id,
+          loanNumber: loan.loanNumber,
+          grossPrincipal: principal,
+          userId: 'usr_approver',
+          memberId: borrowerId,
+          memberNumber: borrowerNumber,
+          memberName: borrowerName,
+        });
+
+        const newJe = { id: `je_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...jeData };
+        entries.push(newJe);
+        const memEntries = dbStore.journalEntries.get(tenantId) || [];
+        memEntries.push(newJe);
+        dbStore.journalEntries.set(tenantId, memEntries);
+        try {
+          await fsService.postJournalEntry(tenantId, newJe);
+        } catch {}
+      }
+    }
+
+    // 2. Synchronize DISBURSED loans (Book Cash Release Entry)
+    const disbursed = loans.filter((l: any) => l.status === 'DISBURSED');
     for (const rawLoan of disbursed) {
       const loan = rawLoan as any;
       const principal = Number(loan.principalAmount || loan.amount || 0);
       if (principal <= 0) continue;
 
-      // 1. Ensure borrower member has loanBalance updated
-      const borrower: any = members.find((m: any) => {
-        if (loan.memberId && (m.id === loan.memberId || m.memberNumber === loan.memberId || m.memberNo === loan.memberId)) return true;
-        const lNum = (loan.memberNo || loan.memberNumber || '').toString().trim().toUpperCase();
-        const mNum = (m.memberNumber || m.memberNo || m.id || '').toString().trim().toUpperCase();
-        if (lNum && mNum) {
-          if (lNum === mNum) return true;
-          const normL = lNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-          const normM = mNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-          if (normL === normM) return true;
-        }
-        const lName = (loan.memberName || '').toString().toLowerCase().trim();
-        const mName = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).toString().toLowerCase().trim();
-        if (lName && mName) {
-          if (lName === mName || lName.includes(mName) || mName.includes(lName)) return true;
-          const parts = mName.split(' ');
-          const last = parts[parts.length - 1];
-          if (last && last.length > 2 && lName.includes(last)) return true;
-        }
-        return false;
-      });
+      const borrower: any = resolveBorrower(loan);
 
       if (borrower && (Number(borrower.loanBalance || 0) !== principal)) {
         borrower.loanBalance = principal;
@@ -3561,18 +3785,26 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
         } catch {}
       }
 
-      // 2. Ensure Journal Entry and Member SL exist
-      const hasJe = entries.some((e: any) =>
-        e.referenceId === loan.id ||
-        (e.description && e.description.includes(loan.loanNumber))
+      const hasDisbursedJe = entries.some((e: any) =>
+        (e.referenceId === loan.id && e.referenceType === 'LOAN_DISBURSEMENT') ||
+        (e.description && e.description.includes(loan.loanNumber) && e.description.includes('Proceeds'))
       );
 
-      if (!hasJe) {
+      if (!hasDisbursedJe) {
+        const hasApprovalJe = entries.some((e: any) =>
+          e.referenceId === loan.id ||
+          (e.description && e.description.includes(loan.loanNumber) && (e.description.includes('Commitment') || e.description.includes('Approved')))
+        );
+
         const borrowerName = loan.memberName || (borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Borrower');
         const borrowerNumber = loan.memberNo || loan.memberNumber || borrower?.memberNumber || 'MEM-2026-0001';
         const borrowerId = loan.memberId || borrower?.id || 'mem_0001';
         const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
         const feeCalc = MonetizationService.calculatePlatformFee(principal, billingMode);
+
+        const mandatoryShareAmount = loan.mandatorySharePurchaseEnabled && loan.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION'
+          ? Number(loan.mandatoryShareAmount || (loan.mandatoryShareQuantity ? loan.mandatoryShareQuantity * 100 : 0))
+          : 0;
 
         const jeData = GeneralLedgerService.buildDisbursementEntry({
           loanId: loan.id,
@@ -3580,16 +3812,21 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
           grossPrincipal: principal,
           platformFee: feeCalc.grossFee,
           coopServiceFee: loan.coopServiceFee || 0,
-          netProceeds: principal - feeCalc.grossFee - (loan.coopServiceFee || 0),
+          netProceeds: principal - feeCalc.grossFee - (loan.coopServiceFee || 0) - mandatoryShareAmount,
           disbursementChannel: billingMode === 'PLATFORM_ESCROW' ? 'PLATFORM_ESCROW' : 'BANK',
           userId: 'usr_admin',
           memberId: borrowerId,
           memberNumber: borrowerNumber,
           memberName: borrowerName,
+          clearsApprovalPayable: hasApprovalJe,
+          mandatoryShareAmount,
         });
 
         const newJe = { id: `je_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...jeData };
         entries.push(newJe);
+        const memEntries = dbStore.journalEntries.get(tenantId) || [];
+        memEntries.push(newJe);
+        dbStore.journalEntries.set(tenantId, memEntries);
         try {
           await fsService.postJournalEntry(tenantId, newJe);
         } catch {}
@@ -3638,7 +3875,13 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
   const feeCalc = MonetizationService.calculatePlatformFee(principalAmount, billingMode);
   loan.platformFee = feeCalc.grossFee;
-  loan.netProceedsDisbursed = principalAmount - loan.platformFee - loan.coopServiceFee;
+
+  const mandatoryShareAmount = loan.mandatorySharePurchaseEnabled && loan.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION'
+    ? Number(loan.mandatoryShareAmount || (loan.mandatoryShareQuantity ? loan.mandatoryShareQuantity * 100 : 0))
+    : 0;
+  loan.mandatoryShareAmount = mandatoryShareAmount;
+
+  loan.netProceedsDisbursed = principalAmount - loan.platformFee - loan.coopServiceFee - mandatoryShareAmount;
   loan.status = 'DISBURSED';
   loan.disbursedAt = new Date().toISOString();
   loan.disbursementReference = loan.disbursementReference || `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
@@ -3651,8 +3894,14 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
       principalAmount,
       annualInterestRate: annualRate,
       termMonths: term,
-      paymentFrequency: loan.paymentFrequency || 'MONTHLY',
+      termWeeks: loan.termWeeks ? Number(loan.termWeeks) : undefined,
+      termUnit: loan.termUnit || 'MONTHS',
+      weeklyPaymentFrequency: loan.weeklyPaymentFrequency || 'EVERY_WEEK',
+      paymentFrequency: loan.paymentFrequency || (loan.termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
       method: loan.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      firstDueDate: loan.firstDueDate,
+      mandatorySharePaymentTreatment: loan.mandatorySharePurchaseEnabled ? loan.mandatorySharePaymentTreatment : undefined,
+      mandatoryShareAmount,
     });
     loan.schedule = scheduleData.schedule;
     loan.totalInterestExpected = scheduleData.totalInterest;
@@ -3700,11 +3949,23 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
     borrower.loanBalance = newBal;
     borrower.activeLoanId = loan.id;
     borrower.activeLoanNumber = loan.loanNumber;
+
+    if (mandatoryShareAmount > 0) {
+      const curShares = Number(borrower.paidUpShares || 0);
+      const addCount = Math.floor(mandatoryShareAmount / 100);
+      borrower.paidUpShares = curShares + mandatoryShareAmount;
+      borrower.sharesCount = Number(borrower.sharesCount || 0) + addCount;
+    }
+
     try {
       await fsService.updateMember(tenantId, borrower.id, {
         loanBalance: newBal,
         activeLoanId: loan.id,
         activeLoanNumber: loan.loanNumber,
+        ...(mandatoryShareAmount > 0 ? {
+          paidUpShares: borrower.paidUpShares,
+          sharesCount: borrower.sharesCount,
+        } : {}),
         updatedAt: new Date().toISOString(),
       });
     } catch (mErr) {
@@ -3734,6 +3995,12 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   const borrowerNumber = loan.memberNo || loan.memberNumber || borrower?.memberNumber || 'MEM-2026-0001';
   const borrowerMemId = loan.memberId || borrower?.id || 'mem_0001';
 
+  const existingEntries = await getTenantJournalEntries(tenantId);
+  const hasApprovalJe = existingEntries.some((e: any) =>
+    e.referenceId === loan.id ||
+    (e.description && e.description.includes(loan.loanNumber) && (e.description.includes('Commitment') || e.description.includes('Approved')))
+  );
+
   const jeData = GeneralLedgerService.buildDisbursementEntry({
     loanId: loan.id,
     loanNumber: loan.loanNumber,
@@ -3746,6 +4013,8 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
     memberId: borrowerMemId,
     memberNumber: borrowerNumber,
     memberName: borrowerName,
+    clearsApprovalPayable: hasApprovalJe,
+    mandatoryShareAmount,
   });
 
   const entries = dbStore.journalEntries.get(tenantId) || [];

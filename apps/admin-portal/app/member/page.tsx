@@ -385,12 +385,16 @@ export default function MemberPortalPage() {
               }
               const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
               const authLoanBal = parsed.loanBalance !== undefined ? Number(parsed.loanBalance) : 0;
+              const classification = parsed.classification || 'ASSOCIATE';
+              const isDividendEligible = parsed.isDividendEligible !== undefined ? Boolean(parsed.isDividendEligible) : (classification === 'REGULAR');
               setCustomMember({
                 id: parsed.id || 'mem_0001',
                 memberNumber: parsed.memberNumber || parsed.memberNo || 'MEM-2026-0001',
                 name: fullName,
                 initials: initials || 'MB',
-                type: parsed.position ? `${parsed.position} (Regular Member)` : (parsed.type || 'Regular Member'),
+                classification: classification,
+                isDividendEligible: isDividendEligible,
+                type: parsed.position ? `${parsed.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
                 paidUpCapital: parsed.paidUpCapital !== undefined ? Number(parsed.paidUpCapital) : (isTestTenant ? 25000 : 0),
                 sharesCount: parsed.sharesCount !== undefined ? Number(parsed.sharesCount) : (isTestTenant ? 250 : 0),
                 savingsBalance: parsed.savingsBalance !== undefined ? Number(parsed.savingsBalance) : 0,
@@ -417,6 +421,8 @@ export default function MemberPortalPage() {
                 memberNumber: parsedAdmin.memberNumber || parsedAdmin.memberNo || 'MEM-2026-0001',
                 name: fullName,
                 initials: initials || 'GM',
+                classification: 'REGULAR',
+                isDividendEligible: true,
                 type: 'General Manager (Regular Member)',
                 paidUpCapital: isTestTenant ? 10000 : 0,
                 sharesCount: isTestTenant ? 100 : 0,
@@ -493,15 +499,19 @@ export default function MemberPortalPage() {
 
                 const resolvedSavings = matched.savingsBalance !== undefined ? Number(matched.savingsBalance) : 0;
                 const resolvedLoanBal = matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0;
+                const classification = matched.classification || (matched.position === 'General Manager' ? 'REGULAR' : 'ASSOCIATE');
+                const isDividendEligible = matched.isDividendEligible !== undefined ? Boolean(matched.isDividendEligible) : (classification === 'REGULAR');
 
                 setCustomMember({
                   id: matched.id || 'MEM-2026-0001',
                   memberNumber: matched.memberNumber || matched.memberNo || 'MEM-2026-0001',
                   name: fullName,
                   initials: initials || 'GM',
-                  type: matched.position ? `${matched.position} (Regular Member)` : 'Regular Member',
-                  paidUpCapital: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : 10000,
-                  sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : 100,
+                  classification: classification,
+                  isDividendEligible: isDividendEligible,
+                  type: matched.position ? `${matched.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
+                  paidUpCapital: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : (isTestTenant ? 10000 : 0),
+                  sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : (isTestTenant ? 100 : 0),
                   savingsBalance: resolvedSavings,
                   loanBalance: resolvedLoanBal,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
@@ -534,12 +544,14 @@ export default function MemberPortalPage() {
     memberNumber: 'MEM-2026-0001',
     name: gmInfo.name || 'General Manager',
     initials: gmInitials || 'GM',
-    type: 'General Manager (Regular Member)',
+    classification: 'ASSOCIATE',
+    isDividendEligible: false,
+    type: 'Associate Member',
     paidUpCapital: isTestCoopTenant(tenantInfo.slug) ? 10000 : 0,
     sharesCount: isTestCoopTenant(tenantInfo.slug) ? 100 : 0,
     savingsBalance: 0,
     loanBalance: 0,
-    idType: 'CDA General Manager Verified PhilSys ID',
+    idType: 'CDA Verified Associate Member PhilSys ID',
   };
 
   const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
@@ -678,6 +690,7 @@ export default function MemberPortalPage() {
   const [loanAmount, setLoanAmount] = useState<number>(50000);
   const [desiredAmortization, setDesiredAmortization] = useState<number>(4442);
   const [loanTerm, setLoanTerm] = useState<number>(12);
+  const [loanTermWeeks, setLoanTermWeeks] = useState<number>(12);
   const [coMaker, setCoMaker] = useState<string>('Co-Maker Member (MEM-2026-0002)');
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [applicationSubmitted, setApplicationSubmitted] = useState<boolean>(false);
@@ -1148,11 +1161,30 @@ export default function MemberPortalPage() {
     ? Math.round(loanAmount * (coopFilingFeeRatePercent / 100) * 100) / 100
     : 0;
 
+  // Term unit & payment frequency calculations
+  const isWeeks = selectedProduct.termUnit === 'WEEKS';
+  const isBiWeekly = isWeeks && selectedProduct.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
+  const periodsPerYear = isWeeks ? (isBiWeekly ? 26.0 : 52.0) : 12.0;
+  const effectiveTermPeriods = isWeeks
+    ? (isBiWeekly ? Math.max(1, Math.ceil(loanTermWeeks / 2)) : Math.max(1, loanTermWeeks))
+    : Math.max(1, loanTerm);
+
+  // Mandatory Share Capital Purchase
+  const mandatorySharePrice = 100; // Par value per share
+  const mandatoryShareQty = selectedProduct.mandatoryShareQuantity || 10;
+  const mandatoryShareTotal = selectedProduct.mandatorySharePurchaseEnabled ? (mandatoryShareQty * mandatorySharePrice) : 0;
+  const isUpfrontShareDeduction = Boolean(selectedProduct.mandatorySharePurchaseEnabled) && selectedProduct.mandatorySharePaymentTreatment !== 'INCLUDED_IN_LOAN_PAYMENT';
+  const isInstallmentSharePayment = Boolean(selectedProduct.mandatorySharePurchaseEnabled) && selectedProduct.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT';
+  const shareAmortizationPerPeriod = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / effectiveTermPeriods) * 100) / 100 : 0;
+  const upfrontShareDeductionAmount = isUpfrontShareDeduction ? mandatoryShareTotal : 0;
+
   let advanceInterest = 0;
   if (selectedProduct.advanceInterestOption === 'FIRST_YEAR') {
-    advanceInterest = Math.round(loanAmount * annualRate * (Math.min(12, loanTerm) / 12.0) * 100) / 100;
+    const yearFraction = isWeeks ? Math.min(52, loanTermWeeks) / 52.0 : Math.min(12, loanTerm) / 12.0;
+    advanceInterest = Math.round(loanAmount * annualRate * yearFraction * 100) / 100;
   } else if (selectedProduct.advanceInterestOption === 'ENTIRE_LOAN') {
-    advanceInterest = Math.round(loanAmount * annualRate * (loanTerm / 12.0) * 100) / 100;
+    const yearFraction = isWeeks ? loanTermWeeks / 52.0 : loanTerm / 12.0;
+    advanceInterest = Math.round(loanAmount * annualRate * yearFraction * 100) / 100;
   }
 
   let optionalFeesTotal = 0;
@@ -1165,14 +1197,17 @@ export default function MemberPortalPage() {
     }, 0);
   }
 
-  const netProceeds = Math.max(0, loanAmount - memberTechFeeDeduction - coopServiceFee - advanceInterest - optionalFeesTotal);
+  const netProceeds = Math.max(0, loanAmount - memberTechFeeDeduction - coopServiceFee - advanceInterest - optionalFeesTotal - upfrontShareDeductionAmount);
 
-  // Monthly annuity installment
-  const monthlyRate = annualRate / 12.0;
-  const factor = Math.pow(1.0 + monthlyRate, loanTerm);
-  const monthlyInstallment = Math.round(((loanAmount * (monthlyRate * factor)) / (factor - 1.0)) * 100) / 100;
-  const totalInterest = Math.round(((monthlyInstallment * loanTerm) - loanAmount) * 100) / 100;
-  const eir = Math.round((((totalInterest + memberTechFeeDeduction + coopServiceFee + advanceInterest + optionalFeesTotal) / netProceeds) / (loanTerm / 12.0)) * 10000) / 100;
+  // Periodic annuity installment
+  const periodicRate = annualRate / periodsPerYear;
+  const periodicFactor = Math.pow(1.0 + periodicRate, effectiveTermPeriods);
+  const basePeriodicInstallment = Math.round(((loanAmount * (periodicRate * periodicFactor)) / (periodicFactor - 1.0)) * 100) / 100;
+  const monthlyInstallment = basePeriodicInstallment + shareAmortizationPerPeriod;
+  const totalInterest = Math.round(((basePeriodicInstallment * effectiveTermPeriods) - loanAmount) * 100) / 100;
+  const annualTermYears = isWeeks ? (loanTermWeeks / 52.0) : (loanTerm / 12.0);
+  const totalDeductions = memberTechFeeDeduction + coopServiceFee + advanceInterest + optionalFeesTotal + upfrontShareDeductionAmount;
+  const eir = Math.round((((totalInterest + totalDeductions) / Math.max(1, netProceeds)) / Math.max(0.08, annualTermYears)) * 10000) / 100;
 
   // Pass-On Fee for QR Ph
   const passOnFee = repayChannel === 'PAYMONGO_QRPH' ? Math.max(15.0, Math.round(repayAmount * 0.015 * 100) / 100) : 0.0;
@@ -1760,9 +1795,19 @@ export default function MemberPortalPage() {
                     </span>
                   </div>
                   <h2 className="text-xl font-bold truncate text-white">{currentMember.name}</h2>
-                  <p className="text-xs text-slate-300 font-mono mt-0.5">
-                    {currentMember.memberNumber} • Regular Member
-                  </p>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className="text-xs text-slate-300 font-mono">
+                      {currentMember.memberNumber}
+                    </span>
+                    <span className="text-slate-400">•</span>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                      currentMember.classification === 'REGULAR'
+                        ? 'bg-emerald-500/30 text-emerald-100 border border-emerald-400/30'
+                        : 'bg-amber-500/30 text-amber-100 border border-amber-400/30'
+                    }`}>
+                      {currentMember.classification === 'REGULAR' ? 'Regular Member (Dividend Eligible)' : 'Associate Member (Non-Dividend)'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -2600,10 +2645,17 @@ export default function MemberPortalPage() {
                                 const pRate = p.annualInterestRate || 0.12;
                                 const pMin = p.minAmount || 5000;
                                 const pMax = p.maxAmount || 100000;
-                                const nextTerm = loanTerm > p.maxTermMonths ? p.maxTermMonths : loanTerm;
-                                if (loanTerm > p.maxTermMonths) setLoanTerm(p.maxTermMonths);
+                                if (p.termUnit === 'WEEKS') {
+                                  const minW = p.minTermWeeks || 4;
+                                  const maxW = p.maxTermWeeks || 52;
+                                  if (loanTermWeeks > maxW) setLoanTermWeeks(maxW);
+                                  if (loanTermWeeks < minW) setLoanTermWeeks(minW);
+                                } else {
+                                  const nextTerm = loanTerm > p.maxTermMonths ? p.maxTermMonths : loanTerm;
+                                  if (loanTerm > p.maxTermMonths) setLoanTerm(p.maxTermMonths);
+                                }
                                 if (loanCalculationBasis === 'AMORTIZATION') {
-                                  const computed = computePrincipalFromAmortization(desiredAmortization, nextTerm, pRate);
+                                  const computed = computePrincipalFromAmortization(desiredAmortization, loanTerm, pRate);
                                   const clamped = Math.min(pMax, Math.max(pMin, computed));
                                   setLoanAmount(clamped);
                                 } else {
@@ -2624,11 +2676,19 @@ export default function MemberPortalPage() {
                                 </span>
                               </div>
                               <div className="text-[11px] font-normal text-slate-500 mt-1">
-                                {(p.annualInterestRate * 100).toFixed(1)}% p.a. • Up to {p.maxTermMonths} mos
+                                {(p.annualInterestRate * 100).toFixed(1)}% p.a. •{' '}
+                                {p.termUnit === 'WEEKS'
+                                  ? `Up to ${p.maxTermWeeks || 52} wks (${p.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ? 'Bi-Weekly' : 'Weekly'})`
+                                  : `Up to ${p.maxTermMonths} mos`}
                               </div>
                               <div className="text-[10px] text-emerald-700 font-medium mt-1">
                                 ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}
                               </div>
+                              {p.mandatorySharePurchaseEnabled && (
+                                <div className="text-[9px] font-semibold text-purple-700 mt-1 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 w-fit">
+                                  ★ Mandatory Share ({p.mandatoryShareQuantity || 10} shares • {p.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' ? 'Installments' : 'Upfront'})
+                                </div>
+                              )}
                             </button>
                           );
                         })
@@ -2791,30 +2851,57 @@ export default function MemberPortalPage() {
 
                   {/* Step 3: Repayment Term */}
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-2">3. Repayment Term</label>
-                    <div className="flex gap-2">
-                      {[3, 6, 12, 18, 24, 36].filter((t) => t >= (selectedProduct.minTermMonths || 1) && t <= (selectedProduct.maxTermMonths || 36)).map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => {
-                            setLoanTerm(t);
-                            if (loanCalculationBasis === 'AMORTIZATION') {
-                              const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate);
-                              const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
-                              setLoanAmount(clamped);
-                            }
-                          }}
-                          className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-colors ${
-                            loanTerm === t
-                              ? 'border-emerald-600 bg-emerald-600 text-white'
-                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          {t} Months
-                        </button>
-                      ))}
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-bold text-slate-700">
+                        3. Repayment Term {isWeeks ? `(Weeks • ${isBiWeekly ? 'Bi-Weekly Payment' : 'Weekly Payment'})` : '(Months • Monthly Payment)'}
+                      </label>
+                      <span className="text-[11px] font-semibold text-emerald-800 font-mono">
+                        {isWeeks ? `${loanTermWeeks} Weeks (${effectiveTermPeriods} Installments)` : `${loanTerm} Months`}
+                      </span>
                     </div>
+
+                    {isWeeks ? (
+                      <div className="flex flex-wrap gap-2">
+                        {[4, 8, 12, 16, 24, 36, 52].filter((w) => w >= (selectedProduct.minTermWeeks || 4) && w <= (selectedProduct.maxTermWeeks || 52)).map((w) => (
+                          <button
+                            key={w}
+                            type="button"
+                            onClick={() => setLoanTermWeeks(w)}
+                            className={`flex-1 min-w-[65px] py-2 rounded-lg border text-xs font-bold transition-colors ${
+                              loanTermWeeks === w
+                                ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            {w} Wks
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        {[3, 6, 12, 18, 24, 36].filter((t) => t >= (selectedProduct.minTermMonths || 1) && t <= (selectedProduct.maxTermMonths || 36)).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => {
+                              setLoanTerm(t);
+                              if (loanCalculationBasis === 'AMORTIZATION') {
+                                const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate);
+                                const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
+                                setLoanAmount(clamped);
+                              }
+                            }}
+                            className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-colors ${
+                              loanTerm === t
+                                ? 'border-emerald-600 bg-emerald-600 text-white'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            {t} Months
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Step 4: Disbursement & Settlement Details */}
@@ -3022,16 +3109,27 @@ export default function MemberPortalPage() {
                         productCode: selectedProduct.code,
                         annualRate: annualRate,
                         interestRateAnnual: annualRate,
-                        termMonths: loanTerm,
+                        termMonths: isWeeks ? Math.ceil(loanTermWeeks / 4) : loanTerm,
+                        termWeeks: isWeeks ? loanTermWeeks : undefined,
+                        termUnit: selectedProduct.termUnit || 'MONTHS',
+                        weeklyPaymentFrequency: selectedProduct.weeklyPaymentFrequency || 'EVERY_WEEK',
+                        paymentFrequency: isWeeks ? (isBiWeekly ? 'BI_WEEKLY' : 'WEEKLY') : 'MONTHLY',
+                        mandatorySharePurchaseEnabled: Boolean(selectedProduct.mandatorySharePurchaseEnabled),
+                        mandatoryShareQuantity: mandatoryShareQty,
+                        mandatoryShareAmount: mandatoryShareTotal,
+                        mandatorySharePaymentTreatment: selectedProduct.mandatorySharePaymentTreatment || 'UPFRONT_DEDUCTION',
+                        shareAmortizationPerPeriod: shareAmortizationPerPeriod,
                         principalAmount: loanAmount,
                         amount: loanAmount,
                         purpose: selectedProduct.name,
                         calculationBasis: loanCalculationBasis,
                         monthlyAmortization: monthlyInstallment,
+                        periodicInstallment: monthlyInstallment,
                         techFeeDeduction: memberTechFeeDeduction,
                         coopServiceFee: coopServiceFee,
                         advanceInterest: advanceInterest,
                         optionalFeesTotal: optionalFeesTotal,
+                        upfrontShareDeduction: upfrontShareDeductionAmount,
                         netProceeds: netProceeds,
                         effectiveInterestRate: eir,
                         totalInterest: totalInterest,
@@ -3136,10 +3234,21 @@ export default function MemberPortalPage() {
                         </div>
                       )}
 
+                      {isUpfrontShareDeduction && (
+                        <div className="flex justify-between text-purple-800 font-semibold">
+                          <span>
+                            Mandatory Share Capital ({mandatoryShareQty} shares @ ₱{mandatorySharePrice}):
+                          </span>
+                          <span className="font-bold">- ₱{mandatoryShareTotal.toFixed(2)}</span>
+                        </div>
+                      )}
+
                       <div className="border-t border-slate-200 pt-3 flex justify-between items-center bg-emerald-100/70 p-3 rounded-xl border border-emerald-200">
                         <div>
                           <div className="text-[11px] font-bold text-emerald-950 uppercase">Net Disbursed Proceeds</div>
-                          <div className="text-xs text-emerald-800">Direct transfer to bank / wallet / cash</div>
+                          <div className="text-xs text-emerald-800">
+                            {isUpfrontShareDeduction ? 'Credited to account (net of share capital & fees)' : 'Direct transfer to bank / wallet / cash'}
+                          </div>
                         </div>
                         <div className="text-xl font-black text-emerald-950">
                           ₱{netProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
@@ -3148,9 +3257,19 @@ export default function MemberPortalPage() {
 
                       <div className="pt-2 border-t border-slate-200 space-y-1.5">
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Monthly Amortization:</span>
-                          <span className="font-bold text-slate-900">₱{monthlyInstallment.toFixed(2)} / month</span>
+                          <span className="text-slate-600">
+                            {isWeeks ? (isBiWeekly ? 'Bi-Weekly Installment:' : 'Weekly Installment:') : 'Monthly Amortization:'}
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            ₱{monthlyInstallment.toFixed(2)} / {isWeeks ? (isBiWeekly ? '2 wks' : 'wk') : 'month'}
+                          </span>
                         </div>
+                        {isInstallmentSharePayment && (
+                          <div className="text-[11px] text-purple-700 flex justify-between bg-purple-50 p-1.5 rounded border border-purple-200">
+                            <span>Includes Share Capital installment:</span>
+                            <span className="font-semibold">+ ₱{shareAmortizationPerPeriod.toFixed(2)}/period</span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-slate-600">Total Interest Charge:</span>
                           <span className="font-semibold text-slate-800">₱{totalInterest.toFixed(2)}</span>
@@ -4127,6 +4246,29 @@ export default function MemberPortalPage() {
               <ArrowLeft className="w-4 h-4" />
               Back to More Services
             </button>
+
+            {(currentMember.classification === 'ASSOCIATE' || !currentMember.isDividendEligible) && (
+              <div className="p-5 bg-amber-50 border border-amber-300 rounded-2xl flex items-start gap-3.5 shadow-xs">
+                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div className="space-y-1.5">
+                  <div className="text-sm font-bold text-amber-950 flex items-center gap-2">
+                    <span>Associate Member Statutory Notice (RA 9520 Art. 26)</span>
+                    <span className="bg-amber-200 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      Non-Dividend Eligible
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900 leading-relaxed">
+                    Under Article 26 of Republic Act No. 9520 (Philippine Cooperative Code), <strong>Associate Members</strong> have the right to patronize the services and products of the cooperative, but do not possess voting rights and are not eligible to receive annual dividend distributions or interest on share capital.
+                  </p>
+                  <div className="p-3 bg-white/80 rounded-xl border border-amber-200 text-[11px] text-amber-900 space-y-1">
+                    <strong className="block text-amber-950 font-semibold">Path to Regular Membership &amp; Dividend Entitlement:</strong>
+                    <p>
+                      Associate members may petition the Board of Directors for reclassification to <strong>Regular Member</strong> upon: (1) completing the Pre-Membership Education Seminar (PMES), (2) meeting the required minimum subscribed and paid-up share capital threshold, and (3) maintaining continuous active patronage of cooperative services for at least one (1) year.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {!isTestTenant ? (
               <div className="bg-white p-8 sm:p-12 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
                 <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">

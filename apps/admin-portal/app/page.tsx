@@ -1457,8 +1457,16 @@ export default function AdminDashboard() {
   const [newProductMinAmount, setNewProductMinAmount] = useState<number>(10000);
   const [newProductMaxAmount, setNewProductMaxAmount] = useState<number>(150000);
   const [newProductRate, setNewProductRate] = useState<number>(10); // 10% p.a.
+  const [newProductTermUnit, setNewProductTermUnit] = useState<'MONTHS' | 'WEEKS'>('MONTHS');
   const [newProductMinTerm, setNewProductMinTerm] = useState<number>(6);
   const [newProductMaxTerm, setNewProductMaxTerm] = useState<number>(36);
+  const [newProductMinTermWeeks, setNewProductMinTermWeeks] = useState<number>(4);
+  const [newProductMaxTermWeeks, setNewProductMaxTermWeeks] = useState<number>(52);
+  const [newProductWeeklyFrequency, setNewProductWeeklyFrequency] = useState<'EVERY_WEEK' | 'EVERY_OTHER_WEEK'>('EVERY_WEEK');
+  const [newProductMandatoryShareEnabled, setNewProductMandatoryShareEnabled] = useState<boolean>(false);
+  const [newProductMandatoryShareQuantity, setNewProductMandatoryShareQuantity] = useState<number>(10);
+  const [newProductMandatoryShareTreatment, setNewProductMandatoryShareTreatment] = useState<'UPFRONT_DEDUCTION' | 'INCLUDED_IN_LOAN_PAYMENT'>('UPFRONT_DEDUCTION');
+  const [losFirstDueDate, setLosFirstDueDate] = useState<string>('');
   const [newProductMethod, setNewProductMethod] = useState<string>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
   const [newProductAdvanceInterest, setNewProductAdvanceInterest] = useState<'NONE' | 'FIRST_YEAR' | 'ENTIRE_LOAN'>('NONE');
   const [newProductSucceedingMethod, setNewProductSucceedingMethod] = useState<'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' | 'STRAIGHT_LINE'>('DIMINISHING_BALANCE_EQUAL_INSTALLMENT');
@@ -1549,6 +1557,13 @@ export default function AdminDashboard() {
     submittedBy?: string;
     submittedAt: string;
     status?: string;
+    firstDueDate?: string;
+    termUnit?: 'MONTHS' | 'WEEKS';
+    termWeeks?: number;
+    weeklyPaymentFrequency?: 'EVERY_WEEK' | 'EVERY_OTHER_WEEK';
+    mandatoryShareAmount?: number;
+    mandatoryShareQuantity?: number;
+    mandatorySharePaymentTreatment?: 'UPFRONT_DEDUCTION' | 'INCLUDED_IN_LOAN_PAYMENT';
   } | null>(null);
 
   // Load Loan Applications from localStorage and Backend API
@@ -1563,9 +1578,14 @@ export default function AdminDashboard() {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setLoanApplications(parsed);
-          setActiveLoanApplication((prev) => prev || parsed[0]);
+          setActiveLoanApplication((prev) => {
+            const next = prev || parsed[0];
+            if (next?.firstDueDate) setLosFirstDueDate(next.firstDueDate);
+            return next;
+          });
           if (!activeLoanApplication) {
             setLoanStatus(parsed[0].status || 'SUBMITTED');
+            if (parsed[0].firstDueDate) setLosFirstDueDate(parsed[0].firstDueDate);
           }
         }
       }
@@ -1608,6 +1628,13 @@ export default function AdminDashboard() {
             submittedBy: l.submittedBy || 'Member Self-Service',
             submittedAt: l.submittedAt || (l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'),
             status: l.status || 'SUBMITTED',
+            firstDueDate: l.firstDueDate || '',
+            termUnit: l.termUnit || 'MONTHS',
+            termWeeks: l.termWeeks,
+            weeklyPaymentFrequency: l.weeklyPaymentFrequency,
+            mandatoryShareAmount: l.mandatoryShareAmount,
+            mandatoryShareQuantity: l.mandatoryShareQuantity,
+            mandatorySharePaymentTreatment: l.mandatorySharePaymentTreatment,
           }));
 
           // Merge local cache if any pending submission not yet on server
@@ -1635,11 +1662,13 @@ export default function AdminDashboard() {
                 const refreshed = formatted.find((f: any) => f.id === prev.id);
                 if (refreshed) {
                   setLoanStatus(refreshed.status);
+                  if (refreshed.firstDueDate) setLosFirstDueDate(refreshed.firstDueDate);
                   return refreshed;
                 }
                 return prev;
               }
               setLoanStatus(formatted[0].status);
+              if (formatted[0].firstDueDate) setLosFirstDueDate(formatted[0].firstDueDate);
               return formatted[0];
             });
           }
@@ -1667,6 +1696,13 @@ export default function AdminDashboard() {
       annualInterestRate: Number(newProductRate) / 100,
       minTermMonths: Number(newProductMinTerm),
       maxTermMonths: Number(newProductMaxTerm),
+      termUnit: newProductTermUnit,
+      minTermWeeks: Number(newProductMinTermWeeks),
+      maxTermWeeks: Number(newProductMaxTermWeeks),
+      weeklyPaymentFrequency: newProductWeeklyFrequency,
+      mandatorySharePurchaseEnabled: newProductMandatoryShareEnabled,
+      mandatoryShareQuantity: Number(newProductMandatoryShareQuantity),
+      mandatorySharePaymentTreatment: newProductMandatoryShareTreatment,
       amortizationMethod: newProductMethod as any,
       advanceInterestOption: newProductAdvanceInterest,
       succeedingMethod: newProductSucceedingMethod,
@@ -2018,6 +2054,8 @@ export default function AdminDashboard() {
     tin: '',
     idType: 'PHILSYS_NATIONAL_ID',
     idNumber: '',
+    classification: 'ASSOCIATE',
+    isDividendEligible: false,
     subscribedShares: 50,
     initialDeposit: 1000,
     paymentMethod: 'CASHIER',
@@ -2060,6 +2098,9 @@ export default function AdminDashboard() {
           tin: newMemberForm.tin.trim(),
           idType: newMemberForm.idType,
           idNumber: newMemberForm.idNumber.trim() || 'N/A',
+          classification: newMemberForm.classification || 'ASSOCIATE',
+          isDividendEligible: newMemberForm.classification === 'REGULAR',
+          roleTitle: newMemberForm.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member',
           subscribedShares: Number(newMemberForm.subscribedShares) || Number(minSubscribedShares) || 50,
           parValuePerShare: Number(stockParValue) || 100,
           totalSubscribedAmount: (Number(newMemberForm.subscribedShares) || 50) * (Number(stockParValue) || 100),
@@ -2103,6 +2144,8 @@ export default function AdminDashboard() {
         idNumber: '',
         subscribedShares: Number(minSubscribedShares) || 50,
         initialDeposit: Number(minPaidUpAmount) || 1000,
+        classification: 'ASSOCIATE',
+        isDividendEligible: false,
         paymentMethod: 'CASHIER',
         initialStatus: 'ACTIVE',
       });
@@ -2880,7 +2923,11 @@ export default function AdminDashboard() {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/review?coop=${tenantInfo.slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
-          body: JSON.stringify({ approved: true, remarks: 'Endorsed by Loan Officer to Credit Committee.' }),
+          body: JSON.stringify({
+            approved: true,
+            remarks: 'Endorsed by Loan Officer to Credit Committee.',
+            firstDueDate: losFirstDueDate || undefined,
+          }),
         });
       } else if (targetStatus === 'BOD_APPROVAL' || (targetStatus === 'APPROVED' && losConfirmModal.stageTitle.includes('Committee'))) {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/committee-approve?coop=${tenantInfo.slug}`, {
@@ -2888,12 +2935,24 @@ export default function AdminDashboard() {
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
           body: JSON.stringify({ approved: true }),
         });
+        if (targetStatus === 'APPROVED') {
+          try {
+            await loadAccountingData();
+          } catch (e) {
+            console.warn('Error reloading accounting data after committee approval:', e);
+          }
+        }
       } else if (targetStatus === 'APPROVED') {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/bod-approve?coop=${tenantInfo.slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
           body: JSON.stringify({ approved: true }),
         });
+        try {
+          await loadAccountingData();
+        } catch (e) {
+          console.warn('Error reloading accounting data after BOD approval:', e);
+        }
       } else if (targetStatus === 'DISBURSED') {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/disburse?coop=${tenantInfo.slug}`, {
           method: 'POST',
@@ -5277,7 +5336,11 @@ export default function AdminDashboard() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">Repayment Term:</span>
-                          <span className="font-semibold text-slate-900">{p.minTermMonths} - {p.maxTermMonths} Months</span>
+                          <span className="font-semibold text-slate-900">
+                            {(p as any).termUnit === 'WEEKS'
+                              ? `${(p as any).minTermWeeks || 1} - ${(p as any).maxTermWeeks || 52} Weeks (${(p as any).weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ? 'Bi-weekly' : 'Weekly'})`
+                              : `${p.minTermMonths} - ${p.maxTermMonths} Months`}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">Amortization Engine:</span>
@@ -5285,6 +5348,14 @@ export default function AdminDashboard() {
                             {p.amortizationMethod === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' ? 'Diminishing Balance' : 'Straight-Line'}
                           </span>
                         </div>
+                        {(p as any).mandatorySharePurchaseEnabled && (
+                          <div className="flex justify-between items-center text-[11px] bg-emerald-50 text-emerald-800 p-1.5 rounded border border-emerald-200">
+                            <span className="font-semibold">Mandatory Share Capital:</span>
+                            <span className="font-mono font-bold">
+                              {(p as any).mandatoryShareQuantity || 0} Shares ({(p as any).mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' ? 'Amortized' : 'Upfront'})
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between items-center">
                           <span className="text-slate-500">Advance Interest:</span>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -5461,9 +5532,9 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Annual Interest Rate (%)</label>
+                        <label className="block font-semibold text-slate-700 mb-1">Annual Interest (%)</label>
                         <input
                           type="number"
                           step="0.1"
@@ -5474,28 +5545,101 @@ export default function AdminDashboard() {
                         />
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Min Term (Months)</label>
-                        <input
-                          type="number"
-                          min={1}
-                          required
-                          value={newProductMinTerm}
-                          onChange={(e) => setNewProductMinTerm(Number(e.target.value))}
-                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
+                        <label className="block font-semibold text-slate-700 mb-1">Term Unit</label>
+                        <select
+                          value={newProductTermUnit}
+                          onChange={(e) => setNewProductTermUnit(e.target.value as any)}
+                          className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        >
+                          <option value="MONTHS">Months</option>
+                          <option value="WEEKS">Weeks</option>
+                        </select>
                       </div>
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Max Term (Months)</label>
-                        <input
-                          type="number"
-                          min={1}
-                          required
-                          value={newProductMaxTerm}
-                          onChange={(e) => setNewProductMaxTerm(Number(e.target.value))}
-                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
-                      </div>
+                      {newProductTermUnit === 'MONTHS' ? (
+                        <>
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Min Term (Months)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              required
+                              value={newProductMinTerm}
+                              onChange={(e) => setNewProductMinTerm(Number(e.target.value))}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Max Term (Months)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              required
+                              value={newProductMaxTerm}
+                              onChange={(e) => setNewProductMaxTerm(Number(e.target.value))}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Min Term (Weeks)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              required
+                              value={newProductMinTermWeeks}
+                              onChange={(e) => setNewProductMinTermWeeks(Number(e.target.value))}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Max Term (Weeks)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              required
+                              value={newProductMaxTermWeeks}
+                              onChange={(e) => setNewProductMaxTermWeeks(Number(e.target.value))}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
+
+                    {newProductTermUnit === 'WEEKS' && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                        <label className="block font-semibold text-slate-800">Weekly Payment Frequency</label>
+                        <p className="text-[11px] text-slate-500">Specify whether installment payments occur weekly or bi-weekly (every other week).</p>
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setNewProductWeeklyFrequency('EVERY_WEEK')}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              newProductWeeklyFrequency === 'EVERY_WEEK'
+                                ? 'border-emerald-600 bg-white font-bold text-emerald-950 shadow-xs ring-1 ring-emerald-500'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="text-xs">Every Week</div>
+                            <div className="text-[10px] text-slate-500 font-normal">7-day interval (52 installments/yr)</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewProductWeeklyFrequency('EVERY_OTHER_WEEK')}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              newProductWeeklyFrequency === 'EVERY_OTHER_WEEK'
+                                ? 'border-emerald-600 bg-white font-bold text-emerald-950 shadow-xs ring-1 ring-emerald-500'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="text-xs">Every Other Week (Bi-Weekly)</div>
+                            <div className="text-[10px] text-slate-500 font-normal">14-day interval (26 installments/yr)</div>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Amortization Engine</label>
@@ -5504,9 +5648,65 @@ export default function AdminDashboard() {
                         onChange={(e) => setNewProductMethod(e.target.value)}
                         className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
                       >
-                        <option value="DIMINISHING_BALANCE_EQUAL_INSTALLMENT">Diminishing Balance (Equal Monthly Installment)</option>
+                        <option value="DIMINISHING_BALANCE_EQUAL_INSTALLMENT">Diminishing Balance (Equal Installment)</option>
                         <option value="STRAIGHT_LINE">Straight-Line Simple Amortization</option>
                       </select>
+                    </div>
+
+                    {/* Mandatory Share Purchase Configuration */}
+                    <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-emerald-950">Mandatory Share Capital Purchase</span>
+                          <p className="text-[11px] text-emerald-800">
+                            Require borrower to subscribe to additional share capital upon loan approval/disbursement.
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={newProductMandatoryShareEnabled}
+                          onChange={(e) => setNewProductMandatoryShareEnabled(e.target.checked)}
+                          className="w-4 h-4 text-emerald-600 rounded"
+                        />
+                      </div>
+
+                      {newProductMandatoryShareEnabled && (
+                        <div className="space-y-3 pt-2 border-t border-emerald-200">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block font-semibold text-emerald-950 mb-1">Required Share Quantity</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={newProductMandatoryShareQuantity}
+                                  onChange={(e) => setNewProductMandatoryShareQuantity(Number(e.target.value))}
+                                  className="w-full border border-emerald-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none font-bold"
+                                />
+                                <span className="text-xs font-semibold text-emerald-800 whitespace-nowrap">
+                                  = ₱{(newProductMandatoryShareQuantity * (Number(stockParValue) || 100)).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block font-semibold text-emerald-950 mb-1">Payment Treatment</label>
+                              <select
+                                value={newProductMandatoryShareTreatment}
+                                onChange={(e) => setNewProductMandatoryShareTreatment(e.target.value as any)}
+                                className="w-full border border-emerald-300 rounded-lg p-2 text-xs bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
+                              >
+                                <option value="UPFRONT_DEDUCTION">Upfront deduction from loan proceeds</option>
+                                <option value="INCLUDED_IN_LOAN_PAYMENT">Included along with loan payment installments</option>
+                              </select>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-emerald-800 bg-white/70 p-2 rounded-lg border border-emerald-200">
+                            {newProductMandatoryShareTreatment === 'UPFRONT_DEDUCTION'
+                              ? '₱' + (newProductMandatoryShareQuantity * (Number(stockParValue) || 100)).toLocaleString() + ' will be deducted from net proceeds at cash release and credited directly to the member\'s Paid-Up Share Capital.'
+                              : '₱' + (newProductMandatoryShareQuantity * (Number(stockParValue) || 100)).toLocaleString() + ' will be amortized across repayment installments and credited to share capital upon payment receipt.'}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     {/* Advanced Loan Options (Synchronized from Loan Calculator) */}
@@ -5776,6 +5976,7 @@ export default function AdminDashboard() {
                         onClick={() => {
                           setActiveLoanApplication(app);
                           setLoanStatus(app.status || 'SUBMITTED');
+                          setLosFirstDueDate(app.firstDueDate || '');
                         }}
                         className={`text-left p-3 rounded-xl border transition-all ${
                           isSelected
@@ -5914,8 +6115,23 @@ export default function AdminDashboard() {
                   <div className="text-base font-bold text-slate-900">
                     {activeLoanApplication.memberName} ({activeLoanApplication.memberClassification})
                   </div>
-                  <div className="text-xs text-slate-600">
-                    Product: {activeLoanApplication.productName} • {(activeLoanApplication.annualRate * 100).toFixed(1)}% p.a. • {activeLoanApplication.termMonths} Months term
+                  <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span>
+                      Product: <strong>{activeLoanApplication.productName}</strong> • {(activeLoanApplication.annualRate * 100).toFixed(1)}% p.a. •{' '}
+                      {activeLoanApplication.termUnit === 'WEEKS'
+                        ? `${activeLoanApplication.termWeeks || activeLoanApplication.termMonths * 4} Weeks (${activeLoanApplication.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ? 'Bi-Weekly' : 'Weekly'})`
+                        : `${activeLoanApplication.termMonths} Months term`}
+                    </span>
+                    {activeLoanApplication.firstDueDate && (
+                      <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        First Due: {activeLoanApplication.firstDueDate}
+                      </span>
+                    )}
+                    {activeLoanApplication.mandatoryShareAmount && activeLoanApplication.mandatoryShareAmount > 0 ? (
+                      <span className="font-semibold text-purple-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                        Mandatory Share: ₱{activeLoanApplication.mandatoryShareAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({activeLoanApplication.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' ? 'In Installments' : 'Upfront Deducted'})
+                      </span>
+                    ) : null}
                   </div>
                   {activeLoanApplication.coMakerName ? (
                     <div className="text-xs text-amber-900 mt-1 font-semibold flex items-center gap-1">
@@ -6071,7 +6287,13 @@ export default function AdminDashboard() {
                       <span className="text-slate-500">Triage Queue</span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 mb-3">Credit scoring & financial capacity verified.</p>
+                  <p className="text-[11px] text-slate-500 mb-2">Credit scoring & financial capacity verified.</p>
+                  {activeLoanApplication?.firstDueDate && ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) && (
+                    <div className="mb-2.5 p-1.5 bg-emerald-100/70 border border-emerald-300 rounded text-[11px] font-mono text-emerald-900 flex items-center justify-between">
+                      <span className="font-sans text-[10px] uppercase font-bold text-emerald-800">First Due Date:</span>
+                      <span className="font-bold">{activeLoanApplication.firstDueDate}</span>
+                    </div>
+                  )}
                   {loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
                     <button
                       type="button"
@@ -6091,7 +6313,24 @@ export default function AdminDashboard() {
                     </button>
                   )}
                   {loanStatus === 'SUBMITTED' && (
-                    <div>
+                    <div className="space-y-2">
+                      {(currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER') && (
+                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-left">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                            First Due Date (Schedule Anchor)
+                          </label>
+                          <input
+                            type="date"
+                            value={losFirstDueDate}
+                            onChange={(e) => setLosFirstDueDate(e.target.value)}
+                            className="w-full text-xs px-2 py-1.5 rounded border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800"
+                            placeholder="YYYY-MM-DD"
+                          />
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Anchors amortization schedule &amp; payment cycle.
+                          </p>
+                        </div>
+                      )}
                       {currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER' ? (
                         <div className="flex gap-1.5">
                           <button
@@ -6102,7 +6341,7 @@ export default function AdminDashboard() {
                                 targetStatus: 'UNDER_CREDIT_REVIEW',
                                 stageTitle: 'Loan Officer Endorsement',
                                 actionTitle: 'Proceed Approval to Credit Committee',
-                                message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.`,
+                                message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.${losFirstDueDate ? ` First due date anchored to ${losFirstDueDate}.` : ''}`,
                                 statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
                                 confirmBtnText: 'Proceed Approval',
                                 confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
@@ -12909,6 +13148,18 @@ export default function AdminDashboard() {
                         className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold focus:ring-2 focus:ring-blue-500"
                       />
                       <span className="text-[10px] text-slate-400 mt-0.5 block">Recorded to COA 3-01-01</span>
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">CDA Classification</label>
+                      <select
+                        value={newMemberForm.classification}
+                        onChange={(e) => setNewMemberForm({ ...newMemberForm, classification: e.target.value })}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-bold focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="ASSOCIATE">Associate Member (Default / Non-Dividend)</option>
+                        <option value="REGULAR">Regular Member (Voting &amp; Dividend)</option>
+                      </select>
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">Statutory RA 9520 Default</span>
                     </div>
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1">Admission Status</label>

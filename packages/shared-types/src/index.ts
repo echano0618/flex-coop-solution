@@ -151,6 +151,7 @@ export interface Member {
   occupation?: string;
   monthlyIncome?: number;
   classification: MemberClassification;
+  isDividendEligible?: boolean;
   status: MemberStatus;
   kycStatus: KYCStatus;
   joinedAt: string;
@@ -443,6 +444,10 @@ export interface EarlyLoanSettlementQuote {
   interestSavedByBorrower: number;
 }
 
+export type LoanTermUnit = 'MONTHS' | 'WEEKS';
+export type WeeklyPaymentFrequency = 'EVERY_WEEK' | 'EVERY_OTHER_WEEK';
+export type MandatorySharePaymentTreatment = 'UPFRONT_DEDUCTION' | 'INCLUDED_IN_LOAN_PAYMENT';
+
 export interface LoanProduct {
   id: string;
   tenantId?: string;
@@ -452,8 +457,17 @@ export interface LoanProduct {
   minAmount: number;
   maxAmount: number;
   annualInterestRate: number;
+  // Term Configuration: Weeks or Months
+  termUnit?: LoanTermUnit;
+  weeklyPaymentFrequency?: WeeklyPaymentFrequency;
   minTermMonths?: number;
   maxTermMonths: number;
+  minTermWeeks?: number;
+  maxTermWeeks?: number;
+  // Mandatory Share Purchase Option
+  mandatorySharePurchaseEnabled?: boolean;
+  mandatoryShareQuantity?: number;
+  mandatorySharePaymentTreatment?: MandatorySharePaymentTreatment;
   amortizationMethod: AmortizationMethod;
   serviceFeeRate: number; // Coop's own filing/service fee
   finesRateMonthly: number; // Penalty for overdue
@@ -462,6 +476,11 @@ export interface LoanProduct {
   coMakerRuleDescription?: string;
   requiresCollateral: boolean;
   isActive: boolean;
+  status?: string;
+  optionalFees?: any[];
+  advanceInterestOption?: string;
+  succeedingMethod?: string;
+  fixedMonthlyInstallment?: boolean;
 }
 
 export interface LoanApprovalStep {
@@ -480,6 +499,7 @@ export interface AmortizationScheduleItem {
   beginningBalance: number;
   principalAmount: number;
   interestAmount: number;
+  mandatoryShareAmount?: number;
   totalInstallment: number;
   endingBalance: number;
   paidPrincipal: number;
@@ -499,6 +519,15 @@ export interface Loan {
   principalAmount: number;
   interestRateAnnual: number;
   termMonths: number;
+  termWeeks?: number;
+  termUnit?: LoanTermUnit;
+  weeklyPaymentFrequency?: WeeklyPaymentFrequency;
+  firstDueDate?: string;
+  mandatorySharePurchaseEnabled?: boolean;
+  mandatoryShareQuantity?: number;
+  mandatoryShareAmount?: number;
+  mandatorySharePaymentTreatment?: MandatorySharePaymentTreatment;
+  mandatoryShareAmortizedPerInstallment?: number;
   paymentFrequency: PaymentFrequency;
   amortizationMethod: AmortizationMethod;
   status: LoanStatus;
@@ -569,14 +598,14 @@ export interface JournalEntryLine {
   memberId?: string;
   memberNumber?: string;
   memberName?: string;
-  subledgerType?: 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN' | 'ACCOUNTS_RECEIVABLE' | 'ACCOUNTS_PAYABLE';
+  subledgerType?: 'SHARE_CAPITAL' | 'SAVINGS' | 'LOAN' | 'ACCOUNTS_RECEIVABLE' | 'ACCOUNTS_PAYABLE' | 'OTHER';
 }
 
 export interface JournalEntry {
   id: string;
   entryNumber: string;
   postingDate: string;
-  referenceType: 'LOAN_DISBURSEMENT' | 'LOAN_REPAYMENT' | 'SHARE_CAPITAL_DEPOSIT' | 'SAVINGS_DEPOSIT' | 'MANUAL_JOURNAL';
+  referenceType: 'LOAN_DISBURSEMENT' | 'LOAN_APPROVAL' | 'LOAN_REPAYMENT' | 'SHARE_CAPITAL_DEPOSIT' | 'SAVINGS_DEPOSIT' | 'MANUAL_JOURNAL';
   referenceId?: string;
   description: string;
   lines: JournalEntryLine[];

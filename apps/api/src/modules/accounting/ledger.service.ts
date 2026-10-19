@@ -60,6 +60,63 @@ export class GeneralLedgerService {
   }
 
   /**
+   * Automated Entry: Loan Approval / Commitment
+   * Books Loans Receivable (1-02-01) and Accounts Payable - Loans for Release / Disbursement (2-01-01)
+   */
+  static buildLoanApprovalEntry(params: {
+    loanId: string;
+    loanNumber: string;
+    grossPrincipal: number;
+    userId: string;
+    memberId?: string;
+    memberNumber?: string;
+    memberName?: string;
+  }): Omit<JournalEntry, 'id'> {
+    const loanAccount = CDACoAManager.findByCode('1-02-01')!; // Loans Receivable - Regular
+    const payableAccount = CDACoAManager.findByCode('2-01-01')!; // Accounts Payable - Others / Loans for Release
+
+    const lines: JournalEntryLine[] = [
+      {
+        accountCode: loanAccount.code,
+        accountName: loanAccount.name,
+        debit: params.grossPrincipal,
+        credit: 0,
+        memo: `Approved loan receivable commitment - ${params.loanNumber}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'LOAN',
+      },
+      {
+        accountCode: payableAccount.code,
+        accountName: payableAccount.name,
+        debit: 0,
+        credit: params.grossPrincipal,
+        memo: `Approved loan voucher payable for release - ${params.loanNumber}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'OTHER',
+      },
+    ];
+
+    const validation = this.validateEntry(lines);
+    return {
+      entryNumber: `JE-LOAN-APP-${Date.now().toString(36).toUpperCase()}`,
+      postingDate: new Date().toISOString().split('T')[0],
+      referenceType: 'LOAN_APPROVAL',
+      referenceId: params.loanId,
+      description: `Loan Approved / Commitment: ${params.loanNumber} (${params.memberName || 'Member'})`,
+      lines,
+      totalDebit: validation.totalDebit,
+      totalCredit: validation.totalCredit,
+      isBalanced: true,
+      createdByUserId: params.userId,
+      postedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
    * Automated Entry: Loan Disbursement with Upfront Platform & Coop Deductions
    */
   static buildDisbursementEntry(params: {
@@ -74,6 +131,8 @@ export class GeneralLedgerService {
     memberId?: string;
     memberNumber?: string;
     memberName?: string;
+    clearsApprovalPayable?: boolean;
+    mandatoryShareAmount?: number;
   }): Omit<JournalEntry, 'id'> {
     const cashAccountCode =
       params.disbursementChannel === 'PLATFORM_ESCROW'
@@ -83,21 +142,25 @@ export class GeneralLedgerService {
         : '1-01-01'; // Cash on Hand
 
     const cashAccount = CDACoAManager.findByCode(cashAccountCode)!;
-    const loanAccount = CDACoAManager.findByCode('1-02-01')!; // Loans Receivable - Regular
+    const debitAccount = params.clearsApprovalPayable
+      ? CDACoAManager.findByCode('2-01-01')!
+      : CDACoAManager.findByCode('1-02-01')!;
     const feePayableAccount = CDACoAManager.findByCode('2-02-02')!; // Platform Fee Payable
     const coopIncomeAccount = CDACoAManager.findByCode('4-01-02')!; // Service Fee Income
 
     const lines: JournalEntryLine[] = [
       {
-        accountCode: loanAccount.code,
-        accountName: loanAccount.name,
+        accountCode: debitAccount.code,
+        accountName: debitAccount.name,
         debit: params.grossPrincipal,
         credit: 0,
-        memo: `Gross loan receivable - ${params.loanNumber}`,
+        memo: params.clearsApprovalPayable
+          ? `Settlement of approved loan voucher payable - ${params.loanNumber}`
+          : `Gross loan receivable - ${params.loanNumber}`,
         memberId: params.memberId,
         memberNumber: params.memberNumber,
         memberName: params.memberName,
-        subledgerType: 'LOAN',
+        subledgerType: params.clearsApprovalPayable ? 'OTHER' : 'LOAN',
       },
       {
         accountCode: cashAccount.code,
@@ -128,6 +191,21 @@ export class GeneralLedgerService {
         debit: 0,
         credit: params.coopServiceFee,
         memo: `Coop filing and service fee income`,
+      });
+    }
+
+    if (params.mandatoryShareAmount && params.mandatoryShareAmount > 0) {
+      const shareAccount = CDACoAManager.findByCode('3-01-01')!;
+      lines.push({
+        accountCode: shareAccount.code,
+        accountName: shareAccount.name,
+        debit: 0,
+        credit: params.mandatoryShareAmount,
+        memo: `Mandatory share capital purchase deducted from loan proceeds - ${params.loanNumber}`,
+        memberId: params.memberId,
+        memberNumber: params.memberNumber,
+        memberName: params.memberName,
+        subledgerType: 'SHARE_CAPITAL',
       });
     }
 
@@ -562,11 +640,35 @@ export class GeneralLedgerService {
 
     for (const entry of sortedEntries) {
       for (const line of entry.lines) {
-        // Check if line is tagged for this member (by id or memberNumber)
+        // Check if line is tagged for this member (by id, memberNumber with zero-normalization, or memberName)
+        const lineMemNo = (line.memberNumber || '').toUpperCase().trim();
+        const memNo = (member.memberNumber || (member as any).memberNo || '').toUpperCase().trim();
+        const isNumMatch = Boolean(
+          lineMemNo &&
+            memNo &&
+            (lineMemNo === memNo ||
+              lineMemNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1') ===
+                memNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1'))
+        );
+        const memberFullName = (
+          (member as any).name || `${member.firstName || ''} ${member.lastName || ''}`
+        )
+          .toLowerCase()
+          .trim();
+        const isNameMatch = Boolean(
+          line.memberName &&
+            memberFullName &&
+            (line.memberName.toLowerCase().trim() === memberFullName ||
+              line.memberName.toLowerCase().trim().includes(memberFullName) ||
+              memberFullName.includes(line.memberName.toLowerCase().trim()))
+        );
+
         const isTargetMember =
           line.memberId === member.id ||
-          line.memberNumber === member.memberNumber ||
-          (entry.referenceId === member.id && (line.accountCode.startsWith('3-01-') || line.accountCode.startsWith('2-01-')));
+          isNumMatch ||
+          isNameMatch ||
+          (entry.referenceId === member.id &&
+            (line.accountCode.startsWith('3-01-') || line.accountCode.startsWith('2-01-')));
 
         if (!isTargetMember) continue;
 

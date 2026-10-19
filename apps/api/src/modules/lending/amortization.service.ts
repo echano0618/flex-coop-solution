@@ -7,46 +7,108 @@ export class AmortizationService {
   static generateSchedule(params: {
     principalAmount: number;
     annualInterestRate: number; // e.g., 0.12 for 12%
-    termMonths: number;
-    paymentFrequency: PaymentFrequency;
+    termMonths?: number;
+    termWeeks?: number;
+    termUnit?: 'MONTHS' | 'WEEKS';
+    weeklyPaymentFrequency?: 'EVERY_WEEK' | 'EVERY_OTHER_WEEK';
+    paymentFrequency?: PaymentFrequency;
     method: AmortizationMethod;
     startDate?: Date;
+    firstDueDate?: Date | string;
+    mandatoryShareAmount?: number;
+    mandatorySharePaymentTreatment?: 'UPFRONT_DEDUCTION' | 'INCLUDED_IN_LOAN_PAYMENT';
   }): {
     schedule: AmortizationScheduleItem[];
     totalInterest: number;
     totalPayable: number;
+    mandatoryShareTotal?: number;
   } {
-    const { principalAmount, annualInterestRate, termMonths, method } = params;
+    const { principalAmount, annualInterestRate, method } = params;
     const startDate = params.startDate || new Date();
+    const isWeeks = params.termUnit === 'WEEKS';
+    const isBiWeekly = isWeeks && params.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
 
-    // Standard monthly period assumption for cooperative term
-    const monthlyRate = annualInterestRate / 12;
+    // Calculate number of installments (n) and periodic interest rate (r)
+    let n = 12;
+    let periodicRate = annualInterestRate / 12;
+    let intervalDays = 30;
+
+    if (isWeeks) {
+      const rawWeeks = params.termWeeks || (params.termMonths ? params.termMonths * 4 : 12);
+      if (isBiWeekly) {
+        n = Math.max(1, Math.ceil(rawWeeks / 2));
+        periodicRate = annualInterestRate / 26; // 26 bi-weekly periods per year
+        intervalDays = 14;
+      } else {
+        n = Math.max(1, rawWeeks);
+        periodicRate = annualInterestRate / 52; // 52 weekly periods per year
+        intervalDays = 7;
+      }
+    } else {
+      n = Math.max(1, params.termMonths || 12);
+      periodicRate = annualInterestRate / 12; // 12 monthly periods per year
+      intervalDays = 30;
+    }
+
+    // Mandatory Share Capital contribution included in installments
+    const isShareAmortized =
+      params.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' &&
+      Number(params.mandatoryShareAmount || 0) > 0;
+    const totalShare = isShareAmortized ? Number(params.mandatoryShareAmount) : 0;
+    const perInstallmentShare = isShareAmortized ? Math.round((totalShare / n) * 100) / 100 : 0;
+
     let schedule: AmortizationScheduleItem[] = [];
     let totalInterest = 0;
-
+    let accumulatedShare = 0;
     let balance = principalAmount;
 
+    // Helper to calculate due date for installment i (1-indexed)
+    const computeDueDate = (i: number): string => {
+      if (params.firstDueDate) {
+        const first = new Date(params.firstDueDate);
+        if (i === 1) return first.toISOString().split('T')[0];
+        if (isWeeks) {
+          const d = new Date(first.getTime() + (i - 1) * intervalDays * 86400000);
+          return d.toISOString().split('T')[0];
+        } else {
+          const d = new Date(first);
+          d.setMonth(d.getMonth() + (i - 1));
+          return d.toISOString().split('T')[0];
+        }
+      }
+      if (isWeeks) {
+        const d = new Date(startDate.getTime() + i * intervalDays * 86400000);
+        return d.toISOString().split('T')[0];
+      }
+      const d = new Date(startDate);
+      d.setMonth(d.getMonth() + i);
+      return d.toISOString().split('T')[0];
+    };
+
     if (method === 'STRAIGHT_LINE') {
-      const fixedMonthlyPrincipal = Math.round((principalAmount / termMonths) * 100) / 100;
-      const fixedMonthlyInterest = Math.round((principalAmount * monthlyRate) * 100) / 100;
+      const fixedPrincipal = Math.round((principalAmount / n) * 100) / 100;
+      const fixedInterest = Math.round((principalAmount * periodicRate) * 100) / 100;
 
-      for (let i = 1; i <= termMonths; i++) {
-        const dueDate = new Date(startDate);
-        dueDate.setMonth(dueDate.getMonth() + i);
+      for (let i = 1; i <= n; i++) {
+        const dueDate = computeDueDate(i);
+        const isLast = i === n;
+        const principal = isLast ? balance : fixedPrincipal;
+        const interest = fixedInterest;
+        const shareContrib = isShareAmortized
+          ? (isLast ? Math.round((totalShare - accumulatedShare) * 100) / 100 : perInstallmentShare)
+          : 0;
+        accumulatedShare += shareContrib;
 
-        // Adjust last month rounding
-        const isLast = i === termMonths;
-        const principal = isLast ? balance : fixedMonthlyPrincipal;
-        const interest = fixedMonthlyInterest;
-        const total = Math.round((principal + interest) * 100) / 100;
+        const total = Math.round((principal + interest + shareContrib) * 100) / 100;
         const ending = Math.max(0, Math.round((balance - principal) * 100) / 100);
 
         schedule.push({
           installmentNumber: i,
-          dueDate: dueDate.toISOString().split('T')[0],
+          dueDate,
           beginningBalance: balance,
           principalAmount: principal,
           interestAmount: interest,
+          mandatoryShareAmount: shareContrib > 0 ? shareContrib : undefined,
           totalInstallment: total,
           endingBalance: ending,
           paidPrincipal: 0,
@@ -61,27 +123,31 @@ export class AmortizationService {
     } else if (method === 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT') {
       // Annuity formula: PMT = P * [r(1+r)^n] / [(1+r)^n - 1]
       const pmt =
-        monthlyRate === 0
-          ? principalAmount / termMonths
-          : (principalAmount * (monthlyRate * Math.pow(1 + monthlyRate, termMonths))) /
-            (Math.pow(1 + monthlyRate, termMonths) - 1);
+        periodicRate === 0
+          ? principalAmount / n
+          : (principalAmount * (periodicRate * Math.pow(1 + periodicRate, n))) /
+            (Math.pow(1 + periodicRate, n) - 1);
 
-      for (let i = 1; i <= termMonths; i++) {
-        const dueDate = new Date(startDate);
-        dueDate.setMonth(dueDate.getMonth() + i);
-
-        const interest = Math.round(balance * monthlyRate * 100) / 100;
-        const isLast = i === termMonths;
+      for (let i = 1; i <= n; i++) {
+        const dueDate = computeDueDate(i);
+        const interest = Math.round(balance * periodicRate * 100) / 100;
+        const isLast = i === n;
         const principal = isLast ? balance : Math.round((pmt - interest) * 100) / 100;
-        const total = Math.round((principal + interest) * 100) / 100;
+        const shareContrib = isShareAmortized
+          ? (isLast ? Math.round((totalShare - accumulatedShare) * 100) / 100 : perInstallmentShare)
+          : 0;
+        accumulatedShare += shareContrib;
+
+        const total = Math.round((principal + interest + shareContrib) * 100) / 100;
         const ending = Math.max(0, Math.round((balance - principal) * 100) / 100);
 
         schedule.push({
           installmentNumber: i,
-          dueDate: dueDate.toISOString().split('T')[0],
+          dueDate,
           beginningBalance: balance,
           principalAmount: principal,
           interestAmount: interest,
+          mandatoryShareAmount: shareContrib > 0 ? shareContrib : undefined,
           totalInstallment: total,
           endingBalance: ending,
           paidPrincipal: 0,
@@ -95,24 +161,28 @@ export class AmortizationService {
       }
     } else {
       // DIMINISHING_BALANCE_EQUAL_PRINCIPAL
-      const fixedMonthlyPrincipal = Math.round((principalAmount / termMonths) * 100) / 100;
+      const fixedPrincipal = Math.round((principalAmount / n) * 100) / 100;
 
-      for (let i = 1; i <= termMonths; i++) {
-        const dueDate = new Date(startDate);
-        dueDate.setMonth(dueDate.getMonth() + i);
+      for (let i = 1; i <= n; i++) {
+        const dueDate = computeDueDate(i);
+        const interest = Math.round(balance * periodicRate * 100) / 100;
+        const isLast = i === n;
+        const principal = isLast ? balance : fixedPrincipal;
+        const shareContrib = isShareAmortized
+          ? (isLast ? Math.round((totalShare - accumulatedShare) * 100) / 100 : perInstallmentShare)
+          : 0;
+        accumulatedShare += shareContrib;
 
-        const interest = Math.round(balance * monthlyRate * 100) / 100;
-        const isLast = i === termMonths;
-        const principal = isLast ? balance : fixedMonthlyPrincipal;
-        const total = Math.round((principal + interest) * 100) / 100;
+        const total = Math.round((principal + interest + shareContrib) * 100) / 100;
         const ending = Math.max(0, Math.round((balance - principal) * 100) / 100);
 
         schedule.push({
           installmentNumber: i,
-          dueDate: dueDate.toISOString().split('T')[0],
+          dueDate,
           beginningBalance: balance,
           principalAmount: principal,
           interestAmount: interest,
+          mandatoryShareAmount: shareContrib > 0 ? shareContrib : undefined,
           totalInstallment: total,
           endingBalance: ending,
           paidPrincipal: 0,
@@ -127,12 +197,13 @@ export class AmortizationService {
     }
 
     totalInterest = Math.round(totalInterest * 100) / 100;
-    const totalPayable = Math.round((principalAmount + totalInterest) * 100) / 100;
+    const totalPayable = Math.round((principalAmount + totalInterest + totalShare) * 100) / 100;
 
     return {
       schedule,
       totalInterest,
       totalPayable,
+      mandatoryShareTotal: totalShare > 0 ? totalShare : undefined,
     };
   }
 
