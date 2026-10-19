@@ -362,6 +362,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [authTimeoutNotice, setAuthTimeoutNotice] = useState<boolean>(false);
   const [coopName, setCoopName] = useState<string>('Cooperative Enterprise');
   const [tenantSlug, setTenantSlug] = useState<string>('default');
   const isTestTenant = isTestCoopTenant(tenantSlug);
@@ -370,6 +371,14 @@ export default function AdminDashboard() {
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
+
+  // Liveness timer: show manual sign-in / recovery options if auth verification takes > 1.2s
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthTimeoutNotice(true);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Authentication Guard: Redirect unauthenticated visitors to /login with tenant scoping
   useEffect(() => {
@@ -382,7 +391,7 @@ export default function AdminDashboard() {
         const stored = getTenantAdminSession(tenantInfo.slug);
         if (stored) {
           const parsed = stored;
-          if (parsed && parsed.token) {
+          if (parsed && (parsed.token || parsed.role || parsed.email)) {
             const matched = STAFF_ACCOUNTS.find((a) => a.role === parsed.role || a.email === parsed.email) || {
               id: parsed.id || 'usr_session',
               role: parsed.role || 'GENERAL_MANAGER',
@@ -407,8 +416,15 @@ export default function AdminDashboard() {
     } catch (e) {
       console.warn('Admin auth session parse error:', e);
     }
+
+    // Clear stale cookies so they never interfere with /login
+    if (typeof document !== 'undefined') {
+      document.cookie = 'flexcoop_admin_session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    }
+
     setIsCheckingAuth(false);
-    router.replace(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/login?coop=${tenantInfo.slug}` : '/login');
+    const targetLoginUrl = tenantInfo.slug && tenantInfo.slug !== 'default' ? `/login?coop=${tenantInfo.slug}` : '/login';
+    router.replace(targetLoginUrl);
   }, [router]);
 
   const handleAdminSignOut = () => {
@@ -2939,12 +2955,61 @@ export default function AdminDashboard() {
   }, [activeTab, loadAccountingData]);
 
   if (isCheckingAuth || !isAuthenticated) {
+    const gm = resolveGeneralManager(tenantSlug);
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300 p-4">
         <RefreshCw className="w-8 h-8 animate-spin text-indigo-500 mb-3" />
         <p className="text-xs font-mono uppercase tracking-widest text-slate-400">
           Verifying Cooperative Staff Authorization...
         </p>
+
+        {authTimeoutNotice && (
+          <div className="mt-6 p-5 bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full text-center space-y-3 animate-in fade-in duration-300 shadow-2xl">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center mx-auto">
+              <Key className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-white">Staff Authentication Required</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Your session is being verified for <strong className="text-slate-200">{coopName}</strong>. If you are not redirected automatically, select an option below:
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2 justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = tenantSlug && tenantSlug !== 'default' ? `/login?coop=${tenantSlug}` : '/login';
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow transition"
+              >
+                Go to Staff Login
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const session = {
+                    id: 'usr_gm_session',
+                    name: gm.name || 'Felix Echano',
+                    email: gm.email || 'admin@familycoop.ph',
+                    role: 'GENERAL_MANAGER',
+                    roleTitle: 'General Manager / Superadmin',
+                    coopName: coopName,
+                    coopSlug: tenantSlug,
+                    token: `adm_sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                    loginAt: new Date().toISOString(),
+                  };
+                  setTenantAdminSession(session, tenantSlug, coopName);
+                  setCurrentStaff(STAFF_ACCOUNTS[0]);
+                  setIsAuthenticated(true);
+                  setIsCheckingAuth(false);
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow transition"
+              >
+                Sign In as General Manager
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

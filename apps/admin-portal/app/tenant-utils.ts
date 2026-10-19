@@ -84,36 +84,46 @@ export function isCoopSlugMatch(slugA?: string, slugB?: string): boolean {
   return a === b;
 }
 
-export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; type?: string; isTest?: boolean }> = {
+export const KNOWN_COOPERATIVES: Record<string, { name: string; regNo: string; type?: string; isTest?: boolean; gmName?: string; gmEmail?: string }> = {
   family: {
     name: 'Family Multi-Purpose Cooperative',
     regNo: 'CDA-NCR-2024-00892',
     type: 'Multi-Purpose',
     isTest: false, // Strictly Production Instance
+    gmName: 'Felix Echano',
+    gmEmail: 'admin@familycoop.ph',
   },
   'family-coop': {
     name: 'Family Multi-Purpose Cooperative',
     regNo: 'CDA-NCR-2024-00892',
     type: 'Multi-Purpose',
     isTest: false,
+    gmName: 'Felix Echano',
+    gmEmail: 'admin@familycoop.ph',
   },
   bayani: {
     name: 'Bayani Multi-Purpose Cooperative',
     regNo: 'CDA-R4A-2023-00451',
     type: 'Multi-Purpose',
     isTest: true, // Designated Test Instance
+    gmName: 'General Manager',
+    gmEmail: 'gm@bayani-coop.tuntongtech.com',
   },
   'bayani-coop': {
     name: 'Bayani Multi-Purpose Cooperative',
     regNo: 'CDA-R4A-2023-00451',
     type: 'Multi-Purpose',
     isTest: true,
+    gmName: 'General Manager',
+    gmEmail: 'gm@bayani-coop.tuntongtech.com',
   },
   demo: {
     name: 'Demo Multi-Purpose Cooperative',
     regNo: 'CDA-NCR-2024-00100',
     type: 'Multi-Purpose',
     isTest: true,
+    gmName: 'General Manager',
+    gmEmail: 'gm@demo-coop.tuntongtech.com',
   },
 };
 
@@ -208,7 +218,8 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
 
   // 5. Match against known cooperatives
   // 5. Fallback to default production cooperative if no slug resolved
-  const effectiveSlug = slug && slug !== 'default' ? slug : 'family-coop';
+  const rawSlug = slug && slug !== 'default' ? slug : 'family-coop';
+  const effectiveSlug = normalizeCoopSlug(rawSlug);
 
   if (KNOWN_COOPERATIVES[effectiveSlug]) {
     const known = KNOWN_COOPERATIVES[effectiveSlug];
@@ -306,23 +317,32 @@ export function getTenantAdminSession(expectedSlug?: string): any | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    if (expectedSlug && expectedSlug !== 'default') {
-      const scoped = localStorage.getItem(`flexcoop_admin_session_${expectedSlug}`);
-      if (scoped) {
-        return JSON.parse(scoped);
+    const norm = normalizeCoopSlug(expectedSlug);
+    const cleanBase = norm.replace(/[-_]coop$/, '');
+    const candidateKeys = [
+      `flexcoop_admin_session_${norm}`,
+      expectedSlug && expectedSlug !== 'default' ? `flexcoop_admin_session_${expectedSlug.toLowerCase().trim()}` : null,
+      cleanBase ? `flexcoop_admin_session_${cleanBase}` : null,
+      'flexcoop_admin_session',
+    ].filter(Boolean) as string[];
+
+    for (const key of candidateKeys) {
+      const val = localStorage.getItem(key);
+      if (val) {
+        try {
+          const parsed = JSON.parse(val);
+          if (parsed && (parsed.token || parsed.role || parsed.email)) {
+            if (expectedSlug && expectedSlug !== 'default') {
+              if (parsed.coopSlug && !isCoopSlugMatch(parsed.coopSlug, expectedSlug)) {
+                continue;
+              }
+            }
+            return parsed;
+          }
+        } catch {}
       }
     }
-
-    const raw = localStorage.getItem('flexcoop_admin_session');
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-
-    if (expectedSlug && expectedSlug !== 'default') {
-      if (parsed.coopSlug && parsed.coopSlug.toLowerCase() !== expectedSlug.toLowerCase()) {
-        return null;
-      }
-    }
-    return parsed;
+    return null;
   } catch {
     return null;
   }
@@ -330,26 +350,38 @@ export function getTenantAdminSession(expectedSlug?: string): any | null {
 
 export function setTenantAdminSession(session: any, slug: string, coopName?: string) {
   if (typeof window === 'undefined') return;
+  const norm = normalizeCoopSlug(slug);
+  const cleanBase = norm.replace(/[-_]coop$/, '');
   const enriched = {
     ...session,
-    coopSlug: slug,
+    coopSlug: norm,
     coopName: coopName || session.coopName,
   };
   const str = JSON.stringify(enriched);
   localStorage.setItem('flexcoop_admin_session', str);
-  if (slug && slug !== 'default') {
-    localStorage.setItem(`flexcoop_admin_session_${slug}`, str);
+  localStorage.setItem(`flexcoop_admin_session_${norm}`, str);
+  if (slug && slug !== norm) {
+    localStorage.setItem(`flexcoop_admin_session_${slug.toLowerCase().trim()}`, str);
   }
-  document.cookie = `flexcoop_admin_session=${encodeURIComponent(enriched.token)}; path=/; max-age=86400; SameSite=Lax`;
+  if (cleanBase && cleanBase !== norm) {
+    localStorage.setItem(`flexcoop_admin_session_${cleanBase}`, str);
+  }
+  document.cookie = `flexcoop_admin_session=${encodeURIComponent(enriched.token || enriched.email || 'active')}; path=/; max-age=86400; SameSite=Lax`;
 }
 
 export function clearTenantAdminSession(slug?: string) {
   if (typeof window === 'undefined') return;
+  const norm = normalizeCoopSlug(slug);
+  const cleanBase = norm.replace(/[-_]coop$/, '');
   localStorage.removeItem('flexcoop_admin_session');
-  if (slug && slug !== 'default') {
-    localStorage.removeItem(`flexcoop_admin_session_${slug}`);
+  localStorage.removeItem(`flexcoop_admin_session_${norm}`);
+  if (slug) {
+    localStorage.removeItem(`flexcoop_admin_session_${slug.toLowerCase().trim()}`);
   }
-  document.cookie = 'flexcoop_admin_session=; path=/; max-age=0';
+  if (cleanBase) {
+    localStorage.removeItem(`flexcoop_admin_session_${cleanBase}`);
+  }
+  document.cookie = 'flexcoop_admin_session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
 }
 
 export interface GeneralManagerInfo {
@@ -368,14 +400,15 @@ export interface GeneralManagerInfo {
 export function resolveGeneralManager(targetSlug?: string): GeneralManagerInfo {
   if (typeof window === 'undefined') {
     return {
-      name: 'General Manager',
-      email: 'gm@coop.tuntongtech.com',
-      address: 'Philippines',
+      name: 'Felix Echano',
+      email: 'admin@familycoop.ph',
+      address: 'Ortigas Center, Pasig City, Metro Manila',
     };
   }
 
   const tenantInfo = resolveTenantCoop();
   const slug = targetSlug || tenantInfo.slug;
+  const norm = normalizeCoopSlug(slug);
 
   // 1. Check registrations in localStorage (from coop-register or approved queue)
   try {
@@ -385,7 +418,7 @@ export function resolveGeneralManager(targetSlug?: string): GeneralManagerInfo {
       if (Array.isArray(regs) && regs.length > 0) {
         const match =
           slug && slug !== 'default'
-            ? regs.find((r: any) => r.slug?.toLowerCase() === slug.toLowerCase())
+            ? regs.find((r: any) => isCoopSlugMatch(r.slug, slug))
             : regs.find((r: any) => r.status === 'APPROVED') || regs[0];
 
         if (match) {
@@ -427,7 +460,16 @@ export function resolveGeneralManager(targetSlug?: string): GeneralManagerInfo {
     }
   } catch {}
 
-  // 3. Known / fallback defaults
+  // 3. Check KNOWN_COOPERATIVES
+  if (KNOWN_COOPERATIVES[norm]?.gmName) {
+    return {
+      name: KNOWN_COOPERATIVES[norm].gmName!,
+      email: KNOWN_COOPERATIVES[norm].gmEmail || `admin@${norm}.ph`,
+      address: 'Ortigas Center, Pasig City, Metro Manila',
+    };
+  }
+
+  // 4. Known / fallback defaults
   const emailDomain =
     slug && slug !== 'default' ? `${slug}-coop.tuntongtech.com` : 'coop.tuntongtech.com';
   return {

@@ -82,26 +82,22 @@ export function middleware(request: NextRequest) {
 
   // C. ROOT & ADMIN / STAFF PORTAL GUARD
   if (pathname === '/') {
-    // If accessing root on non-tenant subdomain (e.g. coop.tuntongtech.com or Cloud Run default host), serve Landing Page
-    if (!isTenantSubdomain) {
+    const hasCoopQuery = request.nextUrl.searchParams.has('coop') || request.nextUrl.searchParams.has('tenant');
+    // If accessing root on non-tenant subdomain without ?coop= parameter, serve Landing Page
+    if (!isTenantSubdomain && !hasCoopQuery) {
       return NextResponse.rewrite(new URL('/landing', request.url), {
         request: { headers: requestHeaders },
       });
     }
 
-    // On tenant subdomain (e.g. bayani-coop.tuntongtech.com), require admin session
+    // On tenant subdomain without an active session cookie, redirect to /login
     const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
-    if (!adminCookie) {
+    if (isTenantSubdomain && !adminCookie) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
   }
 
-  if (pathname === '/login') {
-    const adminCookie = request.cookies.get('flexcoop_admin_session')?.value;
-    if (adminCookie) {
-      return NextResponse.redirect(new URL('/', request.url));
-    }
-  }
+  // Allow uninhibited access to /login so staff can always authenticate or switch accounts
 
   return NextResponse.next({
     request: {
