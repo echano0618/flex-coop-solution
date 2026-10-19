@@ -250,8 +250,8 @@ export class PayMongoService {
     }
 
     const nextAction = attachData.data.attributes?.next_action;
-    const qrImageUrl = nextAction?.data?.image_url || '';
-    const expiresAt = nextAction?.data?.expires_at || new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const qrImageUrl = nextAction?.code?.image_url || nextAction?.data?.image_url || '';
+    const expiresAt = nextAction?.code?.expires_at || nextAction?.data?.expires_at || new Date(Date.now() + 30 * 60 * 1000).toISOString();
     const status = attachData.data.attributes?.status || 'awaiting_payment_method';
 
     return {
