@@ -3841,26 +3841,53 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       } catch {}
     }
 
-    const resolveBorrower = (loan: any) => members.find((m: any) => {
-      if (loan.memberId && (m.id === loan.memberId || m.memberNumber === loan.memberId || m.memberNo === loan.memberId)) return true;
-      const lNum = (loan.memberNo || loan.memberNumber || '').toString().trim().toUpperCase();
-      const mNum = (m.memberNumber || m.memberNo || m.id || '').toString().trim().toUpperCase();
-      if (lNum && mNum) {
-        if (lNum === mNum) return true;
-        const normL = lNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-        const normM = mNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-        if (normL === normM) return true;
+    const normalizeMemberCode = (v: any) =>
+      String(v || '')
+        .trim()
+        .toUpperCase()
+        .replace(/[-_ ]/g, '')
+        .replace(/^(MEM\d{0,4})0+/, '$1');
+
+    const resolveBorrower = (loan: any) => {
+      if (!loan) return undefined;
+      const loanMemberId = String(loan.memberId || '').trim();
+      const loanMemberNo = String(loan.memberNo || loan.memberNumber || '').trim();
+
+      // 1. Exact ID or memberNumber match against loan.memberId
+      if (loanMemberId) {
+        const byId = members.find(
+          (m: any) =>
+            m.id === loanMemberId ||
+            m.memberNumber === loanMemberId ||
+            m.memberNo === loanMemberId ||
+            normalizeMemberCode(m.memberNumber || m.memberNo || m.id) === normalizeMemberCode(loanMemberId)
+        );
+        if (byId) return byId;
       }
-      const lName = (loan.memberName || '').toString().toLowerCase().trim();
-      const mName = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).toString().toLowerCase().trim();
-      if (lName && mName) {
-        if (lName === mName || lName.includes(mName) || mName.includes(lName)) return true;
-        const parts = mName.split(' ');
-        const last = parts[parts.length - 1];
-        if (last && last.length > 2 && lName.includes(last)) return true;
+
+      // 2. Normalized memberNumber / memberNo match
+      if (loanMemberNo) {
+        const normL = normalizeMemberCode(loanMemberNo);
+        const byNo = members.find((m: any) => {
+          const mNo = m.memberNumber || m.memberNo || '';
+          return Boolean(mNo) && normalizeMemberCode(mNo) === normL;
+        });
+        if (byNo) return byNo;
       }
-      return false;
-    });
+
+      // If loan explicitly specifies a memberId or memberNo that didn't match, only allow exact full-name match
+      const lName = String(loan.memberName || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      if (lName) {
+        return members.find((m: any) => {
+          const mName = String(m.name || `${m.firstName || ''} ${m.lastName || ''}`)
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+          return Boolean(mName) && lName === mName;
+        });
+      }
+      return undefined;
+    };
 
     // 1. Synchronize APPROVED loans (Book Commitment Entry)
     const approvedLoans = loans.filter((l: any) => l.status === 'APPROVED');
@@ -3913,8 +3940,10 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       }
     }
 
-    // 2. Synchronize DISBURSED loans (Book Cash Release Entry)
+    // 2. Synchronize DISBURSED loans (Book Cash Release Entry) and heal any falsely assigned member loanBalances
     const disbursed = loans.filter((l: any) => l.status === 'DISBURSED');
+    const trueBorrowerBalances = new Map<string, { balance: number; loanId: string; loanNumber: string }>();
+
     for (const rawLoan of disbursed) {
       const loan = rawLoan as any;
       const principal = Number(loan.principalAmount || loan.amount || 0);
@@ -3926,18 +3955,28 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
 
       const borrower: any = resolveBorrower(loan);
 
-      if (borrower && (Number(borrower.loanBalance || 0) !== effectiveLoanBalance)) {
-        borrower.loanBalance = effectiveLoanBalance;
-        borrower.activeLoanId = loan.id;
-        borrower.activeLoanNumber = loan.loanNumber;
-        try {
-          await fsService.updateMember(tenantId, borrower.id, {
-            loanBalance: effectiveLoanBalance,
-            activeLoanId: loan.id,
-            activeLoanNumber: loan.loanNumber,
-            updatedAt: new Date().toISOString(),
-          });
-        } catch {}
+      if (borrower) {
+        const prev = trueBorrowerBalances.get(borrower.id)?.balance || 0;
+        const nextBal = Math.round((prev + effectiveLoanBalance) * 100) / 100;
+        trueBorrowerBalances.set(borrower.id, {
+          balance: nextBal,
+          loanId: loan.id,
+          loanNumber: loan.loanNumber,
+        });
+
+        if (Number(borrower.loanBalance || 0) !== nextBal) {
+          borrower.loanBalance = nextBal;
+          borrower.activeLoanId = loan.id;
+          borrower.activeLoanNumber = loan.loanNumber;
+          try {
+            await fsService.updateMember(tenantId, borrower.id, {
+              loanBalance: nextBal,
+              activeLoanId: loan.id,
+              activeLoanNumber: loan.loanNumber,
+              updatedAt: new Date().toISOString(),
+            });
+          } catch {}
+        }
       }
 
       const hasDisbursedJe = entries.some((e: any) =>
@@ -3986,6 +4025,26 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
           await fsService.postJournalEntry(tenantId, newJe);
         } catch {}
       }
+    }
+
+    // 3. Heal any member whose loanBalance was previously polluted by surname-matching when they have no active disbursed loan
+    if (loans.length > 0) {
+      for (const m of members as any[]) {
+        if (!trueBorrowerBalances.has(m.id) && Number(m.loanBalance || 0) > 0) {
+          m.loanBalance = 0;
+          delete m.activeLoanId;
+          delete m.activeLoanNumber;
+          try {
+            await fsService.updateMember(tenantId, m.id, {
+              loanBalance: 0,
+              activeLoanId: '',
+              activeLoanNumber: '',
+              updatedAt: new Date().toISOString(),
+            });
+          } catch {}
+        }
+      }
+      dbStore.members.set(tenantId, members);
     }
   } catch (err) {
     console.warn('synchronizeDisbursedLoans error:', err);

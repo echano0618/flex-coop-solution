@@ -66,26 +66,50 @@ import {
 
 function matchesMember(app: any, member: { id?: string; memberNumber?: string; memberNo?: string; name?: string }): boolean {
   if (!app || !member) return false;
-  if (app.memberId && (app.memberId === member.id || app.memberId === member.memberNumber)) return true;
-  const appNo = (app.memberNo || app.memberNumber || app.memberId || '').toString().trim().toUpperCase();
-  const memNo = (member.memberNumber || member.memberNo || member.id || '').toString().trim().toUpperCase();
-  if (appNo && memNo) {
-    if (appNo === memNo) return true;
-    const normApp = appNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-    const normMem = memNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
-    if (normApp === normMem) return true;
+  const normalizeCode = (val: any) =>
+    String(val || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[-_ ]/g, '')
+      .replace(/^(MEM\d{0,4})0+/, '$1');
+
+  const appId = String(app.memberId || '').trim();
+  const memId = String(member.id || '').trim();
+  const memNoRaw = String(member.memberNumber || member.memberNo || '').trim();
+  const appNoRaw = String(app.memberNo || app.memberNumber || '').trim();
+
+  if (appId && (appId === memId || (memNoRaw && normalizeCode(appId) === normalizeCode(memNoRaw)))) {
+    return true;
   }
-  const appName = (app.memberName || '').toString().toLowerCase().trim();
-  const memName = (member.name || '').toString().toLowerCase().trim();
-  if (appName && memName) {
-    if (appName === memName) return true;
-    if (appName.includes(memName) || memName.includes(appName)) return true;
-    const parts = memName.split(' ');
-    const last = parts[parts.length - 1];
-    if (last && last.length > 2 && appName.includes(last)) return true;
+
+  // If both the loan and the member have explicit member numbers, they MUST match.
+  // Do NOT fall through to name matching if the member numbers belong to different members!
+  if (appNoRaw && memNoRaw) {
+    return normalizeCode(appNoRaw) === normalizeCode(memNoRaw);
+  }
+
+  // If app.memberId looks like a member code or member ID and we have member identifiers that don't match it, reject.
+  if (appId && (memId || memNoRaw)) {
+    const normAppId = normalizeCode(appId);
+    const normMemId = normalizeCode(memId);
+    const normMemNo = normalizeCode(memNoRaw);
+    if (normAppId === normMemId || (normMemNo && normAppId === normMemNo)) {
+      return true;
+    }
+    if (appNoRaw || appId.toUpperCase().startsWith('MEM')) {
+      return false;
+    }
+  }
+
+  // Fallback only when member ID/number is missing on the loan record: require exact full name match (never surname/substring)
+  const appName = String(app.memberName || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const memName = String(member.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (appName && memName && appName === memName) {
+    return true;
   }
   return false;
 }
+
 
 const DEFAULT_LOAN_PRODUCTS = [
   {
@@ -465,7 +489,40 @@ export default function MemberPortalPage() {
 
   // Member Persona Switcher (Maria = Borrower, Juan = Co-Maker)
   const [currentPersona, setCurrentPersona] = useState<'maria' | 'juan'>('maria');
-  const [customMember, setCustomMember] = useState<any>(null);
+  const [customMember, setCustomMember] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const info = resolveTenantCoop();
+        const isTestTenant = isTestCoopTenant(info.slug);
+        const auth = getTenantMemberSession(info.slug);
+        if (auth) {
+          let fullName = auth.name || `${auth.firstName || ''} ${auth.lastName || ''}`.trim() || auth.email || 'Cooperative Member';
+          if (fullName.toUpperCase() === 'ECHANO0618') {
+            fullName = 'Felix II Echano';
+          }
+          const initials = ((auth.firstName?.[0] || '') + (auth.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
+          const classification = auth.classification || 'ASSOCIATE';
+          const isDividendEligible = auth.isDividendEligible !== undefined ? Boolean(auth.isDividendEligible) : (classification === 'REGULAR');
+          return {
+            id: auth.id || auth.email || '',
+            memberNumber: auth.memberNumber || auth.memberNo || '',
+            email: auth.email || '',
+            name: fullName,
+            initials: initials || 'MB',
+            classification: classification,
+            isDividendEligible: isDividendEligible,
+            type: auth.position ? `${auth.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
+            paidUpCapital: auth.paidUpCapital !== undefined ? Number(auth.paidUpCapital) : (isTestTenant ? 25000 : 0),
+            sharesCount: auth.sharesCount !== undefined ? Number(auth.sharesCount) : (isTestTenant ? 250 : 0),
+            savingsBalance: auth.savingsBalance !== undefined ? Number(auth.savingsBalance) : 0,
+            loanBalance: 0,
+            idType: auth.idType || 'PhilSys Verified Member ID',
+          };
+        }
+      } catch {}
+    }
+    return null;
+  });
 
   // Load authenticated member or General Manager profile
   useEffect(() => {
@@ -490,7 +547,6 @@ export default function MemberPortalPage() {
                 fullName = 'Felix II Echano';
               }
               const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
-              const authLoanBal = parsed.loanBalance !== undefined ? Number(parsed.loanBalance) : 0;
               const classification = parsed.classification || 'ASSOCIATE';
               const isDividendEligible = parsed.isDividendEligible !== undefined ? Boolean(parsed.isDividendEligible) : (classification === 'REGULAR');
               setCustomMember({
@@ -505,12 +561,9 @@ export default function MemberPortalPage() {
                 paidUpCapital: parsed.paidUpCapital !== undefined ? Number(parsed.paidUpCapital) : (isTestTenant ? 25000 : 0),
                 sharesCount: parsed.sharesCount !== undefined ? Number(parsed.sharesCount) : (isTestTenant ? 250 : 0),
                 savingsBalance: parsed.savingsBalance !== undefined ? Number(parsed.savingsBalance) : 0,
-                loanBalance: authLoanBal,
+                loanBalance: 0,
                 idType: parsed.idType || 'PhilSys Verified Member ID',
               });
-              if (authLoanBal > 0) {
-                setLoanBalance(authLoanBal);
-              }
             }
           } catch {}
         } else if (admin) {
@@ -522,7 +575,6 @@ export default function MemberPortalPage() {
                 fullName = 'Felix II Echano';
               }
               const initials = fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-              const adminLoanBal = parsedAdmin.loanBalance !== undefined ? Number(parsedAdmin.loanBalance) : 0;
               setCustomMember({
                 id: parsedAdmin.id || 'MEM-2026-0001',
                 memberNumber: parsedAdmin.memberNumber || parsedAdmin.memberNo || 'MEM-2026-0001',
@@ -534,12 +586,9 @@ export default function MemberPortalPage() {
                 paidUpCapital: isTestTenant ? 10000 : 0,
                 sharesCount: isTestTenant ? 100 : 0,
                 savingsBalance: 0,
-                loanBalance: adminLoanBal,
+                loanBalance: 0,
                 idType: 'CDA General Manager Verified PhilSys ID',
               });
-              if (adminLoanBal > 0) {
-                setLoanBalance(adminLoanBal);
-              }
             }
           } catch {}
         } else {
@@ -610,13 +659,12 @@ export default function MemberPortalPage() {
                 ).toUpperCase();
 
                 const resolvedSavings = matched.savingsBalance !== undefined ? Number(matched.savingsBalance) : 0;
-                const resolvedLoanBal = matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0;
                 const classification = matched.classification || (matched.position === 'General Manager' ? 'REGULAR' : 'ASSOCIATE');
                 const isDividendEligible = matched.isDividendEligible !== undefined ? Boolean(matched.isDividendEligible) : (classification === 'REGULAR');
 
-                setCustomMember({
-                  id: matched.id || 'MEM-2026-0001',
-                  memberNumber: matched.memberNumber || matched.memberNo || 'MEM-2026-0001',
+                setCustomMember((prev: any) => ({
+                  id: matched.id || prev?.id || 'MEM-2026-0001',
+                  memberNumber: matched.memberNumber || matched.memberNo || prev?.memberNumber || 'MEM-2026-0001',
                   name: fullName,
                   initials: initials || 'GM',
                   classification: classification,
@@ -625,12 +673,9 @@ export default function MemberPortalPage() {
                   paidUpCapital: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : (isTestTenant ? 10000 : 0),
                   sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : (isTestTenant ? 100 : 0),
                   savingsBalance: resolvedSavings,
-                  loanBalance: resolvedLoanBal,
+                  loanBalance: prev?.loanBalance ?? 0,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
-                });
-                if (resolvedLoanBal > 0) {
-                  setLoanBalance(resolvedLoanBal);
-                }
+                }));
               }
             }
           })
@@ -850,31 +895,34 @@ export default function MemberPortalPage() {
   const [repayAmount, setRepayAmount] = useState<number>(4442.44);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
 
-  // Active Loan State (Synchronized immediately with session and cached loan applications for 0ms initial render latency)
+  // Active Loan State (Synchronized strictly with the authenticated member's own active loans)
   const [loanBalance, setLoanBalance] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       try {
         const info = resolveTenantCoop();
         const auth = getTenantMemberSession(info.slug) || getTenantAdminSession(info.slug);
-        if (auth && auth.loanBalance !== undefined && Number(auth.loanBalance) > 0) {
-          return Number(auth.loanBalance);
-        }
-        // Calculate immediately from cached loan applications
+        if (!auth) return 0.0;
+        const memberObj = {
+          id: auth.id || auth.email || '',
+          memberNumber: auth.memberNumber || auth.memberNo || '',
+          name: auth.name || `${auth.firstName || ''} ${auth.lastName || ''}`.trim(),
+        };
         const storageKey = `flexcoop_loan_applications_${info.slug}`;
         const raw = localStorage.getItem(storageKey);
         if (raw) {
           const apps = JSON.parse(raw);
           if (Array.isArray(apps)) {
-            const userName = (auth?.name || `${auth?.firstName || ''} ${auth?.lastName || ''}`).toLowerCase().trim();
-            const userNum = (auth?.memberNumber || auth?.memberNo || auth?.id || '').toUpperCase().trim();
             const disbursed = apps.filter((a: any) => {
-              if (a.status !== 'DISBURSED') return false;
-              if (userNum && (a.memberNo === userNum || a.memberNumber === userNum || a.memberId === userNum)) return true;
-              if (userName && a.memberName && (a.memberName.toLowerCase().trim() === userName || a.memberName.toLowerCase().includes(userName))) return true;
-              return false;
+              const st = String(a.status || '').toUpperCase();
+              if (!['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'].includes(st)) return false;
+              return matchesMember(a, memberObj);
             });
             if (disbursed.length > 0) {
-              return disbursed.reduce((sum: number, l: any) => sum + (l.balanceRemaining !== undefined ? Number(l.balanceRemaining) : Number(l.amount || 0)), 0);
+              return disbursed.reduce(
+                (sum: number, l: any) =>
+                  sum + (l.balanceRemaining !== undefined && Number(l.balanceRemaining) > 0 ? Number(l.balanceRemaining) : Number(l.principalAmount || l.amount || 0)),
+                0
+              );
             }
           }
         }
@@ -935,20 +983,12 @@ export default function MemberPortalPage() {
   const [biometricsLoading, setBiometricsLoading] = useState<boolean>(false);
   const [biometricsNotice, setBiometricsNotice] = useState<string | null>(null);
 
-  // Keep balances synchronized with authenticated member
+  // Keep share capital & savings balances synchronized with authenticated member
   useEffect(() => {
     if (customMember) {
       if (customMember.paidUpCapital !== undefined) setPaidUpCapital(Number(customMember.paidUpCapital));
       if (customMember.sharesCount !== undefined) setSharesCount(Number(customMember.sharesCount));
       if (customMember.savingsBalance !== undefined) setSavingsBalance(Number(customMember.savingsBalance));
-      if (customMember.loanBalance !== undefined && Number(customMember.loanBalance) > 0) {
-        setLoanBalance(Number(customMember.loanBalance));
-      } else {
-        const info = resolveTenantCoop();
-        if (!isTestCoopTenant(info.slug)) {
-          setLoanBalance((prev) => (prev > 0 ? prev : 0.0));
-        }
-      }
     }
   }, [customMember]);
 
@@ -1369,7 +1409,7 @@ export default function MemberPortalPage() {
 
     setMemberLoanApplications(filtered);
 
-    // Synchronize loan balance with any active disbursed or approved loans
+    // Synchronize loan balance strictly with the member's own active disbursed or approved loans
     const activeLoans = filtered.filter((app: any) =>
       ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'].includes(
         String(app.status || '').toUpperCase()
@@ -1384,10 +1424,10 @@ export default function MemberPortalPage() {
         return sum + bal;
       }, 0);
       setLoanBalance(totalBalance);
-    } else if (customMember?.loanBalance !== undefined && Number(customMember.loanBalance) > 0) {
-      setLoanBalance(Number(customMember.loanBalance));
+    } else {
+      setLoanBalance(0);
     }
-  }, [currentMember.id, currentMember.memberNumber, currentMember.name, customMember?.loanBalance]);
+  }, [currentMember.id, currentMember.memberNumber, currentMember.name]);
 
   useEffect(() => {
     fetchMemberLoanApplications();
@@ -2510,22 +2550,25 @@ export default function MemberPortalPage() {
             {(() => {
               const ACTIVE_LOAN_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
               const activeDisbursedLoan =
-                memberLoanApplications.find((app: any) => app.status === 'DISBURSED' && Number(app.balanceRemaining ?? app.amount ?? 1) > 0) ||
+                memberLoanApplications.find(
+                  (app: any) =>
+                    app.status === 'DISBURSED' &&
+                    matchesMember(app, currentMember) &&
+                    Number(app.balanceRemaining ?? app.amount ?? 1) > 0
+                ) ||
                 memberLoanApplications.find(
                   (app: any) =>
                     ACTIVE_LOAN_STATUSES.includes(String(app.status || '').toUpperCase()) &&
+                    matchesMember(app, currentMember) &&
                     Number(app.balanceRemaining ?? app.amount ?? 1) > 0
                 );
-              const hasActiveLoan = Boolean(activeDisbursedLoan || loanBalance > 0);
-              if (!hasActiveLoan) return null;
+              if (!activeDisbursedLoan) return null;
 
-              const effectiveBal =
-                pickNumber(
-                  activeDisbursedLoan?.balanceRemaining,
-                  activeDisbursedLoan?.principalAmount,
-                  activeDisbursedLoan?.amount,
-                  loanBalance
-                ) || loanBalance;
+              const effectiveBal = pickNumber(
+                activeDisbursedLoan?.balanceRemaining,
+                activeDisbursedLoan?.principalAmount,
+                activeDisbursedLoan?.amount
+              );
               if (effectiveBal <= 0) return null;
 
               const scheduleRows = getLoanScheduleRows(activeDisbursedLoan, effectiveBal);
@@ -3109,9 +3152,13 @@ export default function MemberPortalPage() {
                   {(() => {
                     const ACTIVE_LOAN_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
                     const activeDisbursedLoan =
-                      memberLoanApplications.find((app: any) => app.status === 'DISBURSED') ||
-                      memberLoanApplications.find((app: any) => ACTIVE_LOAN_STATUSES.includes(String(app.status || '').toUpperCase()));
-                    const hasActiveLoan = Boolean(activeDisbursedLoan || loanBalance > 0 || (isTestTenant && currentPersona === 'maria' && loanBalance > 0));
+                      memberLoanApplications.find((app: any) => app.status === 'DISBURSED' && matchesMember(app, currentMember)) ||
+                      memberLoanApplications.find(
+                        (app: any) =>
+                          ACTIVE_LOAN_STATUSES.includes(String(app.status || '').toUpperCase()) &&
+                          matchesMember(app, currentMember)
+                      );
+                    const hasActiveLoan = Boolean(activeDisbursedLoan || (isTestTenant && !customMember && currentPersona === 'maria' && loanBalance > 0));
 
                     if (!hasActiveLoan) {
                       return (
