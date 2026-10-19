@@ -2874,6 +2874,38 @@ export default function AdminDashboard() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
         });
+
+        // 1. Immediately reload platform credit to reflect tech fee auto-deduction
+        try {
+          await loadPlatformCredit();
+        } catch (e) {
+          console.warn('Error reloading platform credit after disbursement:', e);
+        }
+
+        // 2. Synchronize accounting and journal entries (Member Subsidiary Ledger)
+        try {
+          await loadAccountingData();
+        } catch (e) {
+          console.warn('Error reloading accounting data after disbursement:', e);
+        }
+
+        // 3. Update borrower member record in state to reflect active loan balance
+        const loanAmt = Number(targetApp?.amount || 0);
+        setMembers((prevMembers) =>
+          prevMembers.map((m) => {
+            const isBorrower =
+              m.id === targetApp?.memberId ||
+              m.memberNo === (targetApp as any)?.memberNo ||
+              (targetApp?.memberName && m.name?.toLowerCase().trim() === targetApp.memberName.toLowerCase().trim());
+            if (isBorrower) {
+              return {
+                ...m,
+                loanBalance: (Number(m.loanBalance) || 0) + loanAmt,
+              };
+            }
+            return m;
+          })
+        );
       } else if (targetStatus === 'REJECTED') {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/reject?coop=${tenantInfo.slug}`, {
           method: 'POST',
@@ -3808,8 +3840,14 @@ export default function AdminDashboard() {
           <div className="space-y-6">
             {/* KPI Cards */}
             {(() => {
-              const activeLoansCount = members.filter((m) => (m.loanBalance || 0) > 0).length;
-              const totalActiveLoanPortfolio = members.reduce((sum, m) => sum + (m.loanBalance || 0), 0);
+              const disbursedApps = loanApplications.filter((a) => a.status === 'DISBURSED');
+              const disbursedAppsTotal = disbursedApps.reduce((sum, a) => {
+                const bal = a.balanceRemaining !== undefined ? Number(a.balanceRemaining) : Number(a.amount || 0);
+                return sum + bal;
+              }, 0);
+              const membersLoanSum = members.reduce((sum, m) => sum + (Number(m.loanBalance) || 0), 0);
+              const totalActiveLoanPortfolio = Math.max(membersLoanSum, disbursedAppsTotal);
+              const activeLoansCount = Math.max(members.filter((m) => (Number(m.loanBalance) || 0) > 0).length, disbursedApps.length);
               const totalPaidUpShareCapital = members.reduce((sum, m) => sum + (m.paidUpShares || 0), 0);
               const membersCount = members.length;
 
@@ -8330,7 +8368,8 @@ export default function AdminDashboard() {
                       l.accountCode === accCode &&
                       (l.memberId === activeMember.id ||
                         l.memberNumber === activeMember.memberNo ||
-                        (activeMember.email && l.memo?.toLowerCase().includes(activeMember.email.toLowerCase())))
+                        (activeMember.email && l.memo?.toLowerCase().includes(activeMember.email.toLowerCase())) ||
+                        (activeMember.name && (l.memberName?.toLowerCase().trim() === activeMember.name.toLowerCase().trim() || l.memo?.toLowerCase().includes(activeMember.name.toLowerCase()))))
                   );
                   if (line) {
                     const dr = line.debit || 0;
@@ -8350,6 +8389,27 @@ export default function AdminDashboard() {
                     });
                   }
                 });
+
+                if (memberTxs.length === 0 && accCode === '1-02-01') {
+                  const mLoan = loanApplications.find(
+                    (a) =>
+                      a.status === 'DISBURSED' &&
+                      (a.memberId === activeMember.id ||
+                        (a as any).memberNo === activeMember.memberNo ||
+                        a.memberName?.toLowerCase().trim() === activeMember.name?.toLowerCase().trim())
+                  );
+                  const bal = Number(mLoan?.amount || activeMember.loanBalance || 0);
+                  if (bal > 0) {
+                    memberTxs.push({
+                      date: mLoan?.disbursedAt ? new Date(mLoan.disbursedAt).toISOString().split('T')[0] : '2026-10-19',
+                      ref: mLoan?.id || `LN-DISB-${activeMember.memberNo || '001'}`,
+                      desc: `Disbursement: ${mLoan?.productName || 'Regular Member Loan'} for ${activeMember.name}`,
+                      dr: bal,
+                      cr: 0,
+                      bal: bal,
+                    });
+                  }
+                }
 
                 return memberTxs;
               };
@@ -8377,7 +8437,17 @@ export default function AdminDashboard() {
                   title: 'Loans Receivable - Regular',
                   type: 'LOAN',
                   normal: 'DEBIT' as const,
-                  balance: activeMember.loanBalance || 0,
+                  balance: (() => {
+                    if ((activeMember.loanBalance || 0) > 0) return activeMember.loanBalance;
+                    const mLoan = loanApplications.find(
+                      (a) =>
+                        a.status === 'DISBURSED' &&
+                        (a.memberId === activeMember.id ||
+                          (a as any).memberNo === activeMember.memberNo ||
+                          a.memberName?.toLowerCase().trim() === activeMember.name?.toLowerCase().trim())
+                    );
+                    return Number(mLoan?.balanceRemaining ?? mLoan?.amount ?? 0);
+                  })(),
                   txs: getMemberAccountTxs('1-02-01', 'DEBIT'),
                 },
               ];
@@ -9398,7 +9468,17 @@ export default function AdminDashboard() {
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded">
                     <span>Active Loan Portfolio:</span>
-                    <strong className="text-slate-900">₱{members.reduce((s, m) => s + (m.loanBalance || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({members.filter((m) => (m.loanBalance || 0) > 0).length} Active)</strong>
+                    {(() => {
+                      const disbursedTotal = loanApplications.filter((a) => a.status === 'DISBURSED').reduce((s, a) => s + (a.balanceRemaining !== undefined ? Number(a.balanceRemaining) : Number(a.amount || 0)), 0);
+                      const memTotal = members.reduce((s, m) => s + (Number(m.loanBalance) || 0), 0);
+                      const finalTotal = Math.max(memTotal, disbursedTotal);
+                      const activeCount = Math.max(members.filter((m) => (Number(m.loanBalance) || 0) > 0).length, loanApplications.filter((a) => a.status === 'DISBURSED').length);
+                      return (
+                        <strong className="text-slate-900">
+                          ₱{finalTotal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({activeCount} Active)
+                        </strong>
+                      );
+                    })()}
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded">
                     <span>Collection Efficiency:</span>

@@ -1077,6 +1077,17 @@ https://tuntongtech.com`;
     notes: string;
     performedBy: string;
   }): Promise<{ success: boolean; newBalance: number; transaction: PlatformCreditTransaction }> {
+    this.ensureInitialized();
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        const tenantDoc = await fs.getTenant(params.tenantId);
+        if (tenantDoc && (tenantDoc as any).platformCreditBalance !== undefined) {
+          dbStore.platformCredits.set(params.tenantId, Number((tenantDoc as any).platformCreditBalance));
+        }
+      } catch {}
+    }
+
     const res = this.adjustPlatformCredit(params);
 
     if (process.env.NODE_ENV !== 'test') {

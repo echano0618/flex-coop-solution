@@ -263,4 +263,67 @@ export class MonetizationService {
       message: `₱${feeCalc.grossFee.toFixed(2)} (1.0% technology fee) automatically deducted from platform credit for Loan ${params.loanNumber}. New balance: ₱${adjustResult.newBalance.toFixed(2)}${isLowCredit ? ' ⚠️ CRITICAL LOW BALANCE: Credit below ₱1,000 threshold!' : ''}`,
     };
   }
+
+  /**
+   * Asynchronously auto-deducts 1.0% technology fee and persists to Cloud Firestore
+   */
+  static async processLoanFeeAutoDeductionAsync(params: {
+    tenantId: string;
+    loanId: string;
+    loanNumber: string;
+    principalAmount: number;
+    invoiceNumber: string;
+  }) {
+    const { OperatorService } = require('../operator/operator.service');
+    const { dbStore } = require('../../core/store');
+    const { FirestoreCoopService } = require('../../core/firestore.service');
+
+    const feeCalc = this.calculatePlatformFee(params.principalAmount);
+
+    let currentBalance = dbStore.platformCredits.get(params.tenantId);
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      const tenantDoc = await fs.getTenant(params.tenantId);
+      if (tenantDoc && (tenantDoc as any).platformCreditBalance !== undefined) {
+        currentBalance = Number((tenantDoc as any).platformCreditBalance);
+        dbStore.platformCredits.set(params.tenantId, currentBalance);
+      }
+    } catch {}
+
+    if (currentBalance === undefined) {
+      currentBalance = 0;
+    }
+
+    if (currentBalance < feeCalc.grossFee) {
+      return {
+        deducted: false,
+        feeAmount: feeCalc.grossFee,
+        feeCalculation: feeCalc,
+        currentCreditBalance: currentBalance,
+        error: 'INSUFFICIENT_PLATFORM_CREDIT',
+        message: `Insufficient platform credit balance (₱${currentBalance.toFixed(2)}). Required: ₱${feeCalc.grossFee.toFixed(2)} for Loan ${params.loanNumber}. No grace period permitted. Cooperative must top up Platform Credit before disbursement.`,
+      };
+    }
+
+    const adjustResult = await OperatorService.adjustPlatformCreditAsync({
+      tenantId: params.tenantId,
+      amount: -feeCalc.grossFee,
+      type: 'FEE_DEDUCTION',
+      reference: params.invoiceNumber,
+      notes: `1.0% Loan Technology Fee for Loan ${params.loanNumber} (Principal: ₱${params.principalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
+      performedBy: 'SYSTEM_BILLING_AUTOMATION',
+    });
+
+    const isLowCredit = adjustResult.newBalance < 1000.0;
+
+    return {
+      deducted: true,
+      feeAmount: feeCalc.grossFee,
+      feeCalculation: feeCalc,
+      newCreditBalance: adjustResult.newBalance,
+      transaction: adjustResult.transaction,
+      isLowCreditWarning: isLowCredit,
+      message: `₱${feeCalc.grossFee.toFixed(2)} (1.0% technology fee) automatically deducted from platform credit for Loan ${params.loanNumber}. New balance: ₱${adjustResult.newBalance.toFixed(2)}${isLowCredit ? ' ⚠️ CRITICAL LOW BALANCE: Credit below ₱1,000 threshold!' : ''}`,
+    };
+  }
 }

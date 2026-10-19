@@ -230,6 +230,68 @@ function getStatusBadgeClass(status: string): string {
   }
 }
 
+function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
+  if (loan?.schedule && Array.isArray(loan.schedule) && loan.schedule.length > 0) {
+    return loan.schedule.map((item: any, idx: number) => ({
+      seq: item.period || item.seq || idx + 1,
+      due: item.dueDate || item.due || item.paymentDate || `2026-${String((idx + 2) % 12 || 12).padStart(2, '0')}-20`,
+      pr: item.principalPayment !== undefined ? item.principalPayment : (item.principal || item.pr || 0),
+      in: item.interestPayment !== undefined ? item.interestPayment : (item.interest || item.in || 0),
+      tot: item.totalPayment !== undefined ? item.totalPayment : (item.monthlyInstallment || item.tot || 0),
+      bal: item.remainingBalance !== undefined ? item.remainingBalance : (item.bal || 0),
+      status: item.status || (idx === 0 ? 'DUE_NOW' : 'UPCOMING'),
+    }));
+  }
+
+  const principal = Number(loan?.amount || loan?.principalAmount || currentBalance || 50000);
+  const term = Number(loan?.termMonths || loan?.term || 12);
+  const annualRate = Number(loan?.annualRate || loan?.interestRateAnnual || 0.12);
+  const monthlyRate = annualRate / 12;
+  const monthlyPayment = (principal * (monthlyRate * Math.pow(1 + monthlyRate, term))) / (Math.pow(1 + monthlyRate, term) - 1);
+
+  let remaining = principal;
+  const rows = [];
+  for (let i = 1; i <= term; i++) {
+    const interest = remaining * monthlyRate;
+    const pr = i === term ? remaining : monthlyPayment - interest;
+    remaining = Math.max(0, remaining - pr);
+    const m = ((i + 1) % 12) + 1;
+    const y = 2026 + Math.floor((i + 1) / 12);
+    rows.push({
+      seq: i,
+      due: `${y}-${String(m).padStart(2, '0')}-20`,
+      pr: Math.round(pr * 100) / 100,
+      in: Math.round(interest * 100) / 100,
+      tot: Math.round((pr + interest) * 100) / 100,
+      bal: Math.round(remaining * 100) / 100,
+      status: i === 1 ? 'DUE_NOW' : 'UPCOMING',
+    });
+  }
+  return rows;
+}
+
+function getLoanLedgerTransactions(loan: any, currentBalance: number = 50000, existingTxs: any[] = []) {
+  if (existingTxs && existingTxs.length > 0) {
+    return existingTxs;
+  }
+  const principal = Number(loan?.amount || loan?.principalAmount || currentBalance || 50000);
+  const disbDate = loan?.disbursedAt
+    ? new Date(loan.disbursedAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
+    : 'Oct 19, 2026';
+  const disbRef = loan?.disbursementReference || loan?.loanNumber || `DISB-TX-${loan?.id?.slice(0, 6) || '001'}`;
+
+  return [
+    {
+      date: disbDate,
+      ref: disbRef,
+      particulars: `Initial Loan Proceeds Disbursed (${loan?.productName || 'Regular Member Loan'})`,
+      debit: principal,
+      credit: 0,
+      balance: principal,
+    },
+  ];
+}
+
 export default function MemberPortalPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -385,8 +447,12 @@ export default function MemberPortalPage() {
                   paidUpCapital: matched.paidUpShares !== undefined ? matched.paidUpShares : 10000,
                   sharesCount: matched.sharesCount !== undefined ? matched.sharesCount : 100,
                   savingsBalance: matched.savingsBalance !== undefined ? matched.savingsBalance : 5000,
+                  loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
                 });
+                if (matched.loanBalance !== undefined && Number(matched.loanBalance) > 0) {
+                  setLoanBalance(Number(matched.loanBalance));
+                }
               }
             }
           })
@@ -646,9 +712,13 @@ export default function MemberPortalPage() {
       if (customMember.paidUpCapital !== undefined) setPaidUpCapital(Number(customMember.paidUpCapital));
       if (customMember.sharesCount !== undefined) setSharesCount(Number(customMember.sharesCount));
       if (customMember.savingsBalance !== undefined) setSavingsBalance(Number(customMember.savingsBalance));
-      const info = resolveTenantCoop();
-      if (!isTestCoopTenant(info.slug)) {
-        setLoanBalance(0.0);
+      if (customMember.loanBalance !== undefined && Number(customMember.loanBalance) > 0) {
+        setLoanBalance(Number(customMember.loanBalance));
+      } else {
+        const info = resolveTenantCoop();
+        if (!isTestCoopTenant(info.slug)) {
+          setLoanBalance((prev) => (prev > 0 ? prev : 0.0));
+        }
       }
     }
   }, [customMember]);
@@ -925,6 +995,16 @@ export default function MemberPortalPage() {
     });
 
     setMemberLoanApplications(filtered);
+
+    // Synchronize loan balance with any active disbursed loans
+    const disbursed = filtered.filter((app: any) => app.status === 'DISBURSED');
+    if (disbursed.length > 0) {
+      const totalBalance = disbursed.reduce((sum: number, loan: any) => {
+        const bal = loan.balanceRemaining !== undefined ? Number(loan.balanceRemaining) : Number(loan.amount || 0);
+        return sum + bal;
+      }, 0);
+      setLoanBalance(totalBalance);
+    }
   }, [currentMember.id, currentMember.memberNumber, currentMember.name]);
 
   useEffect(() => {
@@ -2091,157 +2171,166 @@ export default function MemberPortalPage() {
               {/* SUB-LEDGER 3: LOANS RECEIVABLE & AMORTIZATION (1-02-01) */}
               {passbookSubTab === 'loan' && (
                 <div className="p-6 space-y-6">
-                  {isTestTenant && currentPersona === 'maria' && loanBalance > 0 ? (
-                    <>
-                      {/* Active Loan Details Card */}
-                      <div className="p-5 bg-indigo-50/70 border border-indigo-200 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-xs">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono bg-indigo-200 text-indigo-950 font-bold px-2 py-0.5 rounded text-[11px]">
-                              LN-2026-00001
-                            </span>
-                            <strong className="text-sm text-slate-900">Regular Member Loan (12 Mos @ 12.0% p.a.)</strong>
-                          </div>
-                          <p className="text-slate-600 mt-1">
-                            Disbursed: Jan 20, 2026 • Maturity: Jan 20, 2027 • Diminishing Balance Equal Monthly Installment
-                          </p>
-                        </div>
+                  {(() => {
+                    const activeDisbursedLoan = memberLoanApplications.find((app: any) => app.status === 'DISBURSED');
+                    const hasActiveLoan = Boolean(activeDisbursedLoan || loanBalance > 0 || (isTestTenant && currentPersona === 'maria' && loanBalance > 0));
 
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <div className="text-[10px] text-slate-500 uppercase font-bold">Monthly Installment</div>
-                            <div className="text-base font-black text-indigo-900 font-mono">₱4,442.44</div>
+                    if (!hasActiveLoan) {
+                      return (
+                        /* Zero Active Borrowings */
+                        <div className="p-12 text-center bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                          <CreditCard className="w-12 h-12 text-slate-400 mx-auto" />
+                          <h3 className="font-bold text-base text-slate-800">Zero Active Borrowings</h3>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            {currentMember.name} ({currentMember.memberNumber}) has clean credit standing with no outstanding loan obligations. Member is eligible to co-make or apply for up to 3x their share capital.
+                          </p>
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('apply')}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition"
+                            >
+                              Apply for New Loan
+                            </button>
                           </div>
+                        </div>
+                      );
+                    }
+
+                    const effectiveBal = loanBalance > 0 ? loanBalance : Number(activeDisbursedLoan?.balanceRemaining ?? activeDisbursedLoan?.amount ?? 50000);
+                    const loanScheduleRows = getLoanScheduleRows(activeDisbursedLoan, effectiveBal);
+                    const defaultMariaLedger = (isTestTenant && currentPersona === 'maria' && !activeDisbursedLoan) ? mariaLoanLedger : [];
+                    const loanLedgerRows = getLoanLedgerTransactions(activeDisbursedLoan, effectiveBal, defaultMariaLedger);
+                    const monthlyInstallment = activeDisbursedLoan?.monthlyAmortization || activeDisbursedLoan?.monthlyPayment || (loanScheduleRows[0]?.tot ?? 4442.44);
+                    const loanTitle = `${activeDisbursedLoan?.productName || 'Regular Member Loan'} (${activeDisbursedLoan?.termMonths || activeDisbursedLoan?.term || 12} Mos @ ${activeDisbursedLoan?.interestRateAnnual ? (activeDisbursedLoan.interestRateAnnual * 100).toFixed(1) : '12.0'}% p.a.)`;
+                    const loanRef = activeDisbursedLoan?.loanNumber || activeDisbursedLoan?.id || 'LN-2026-00001';
+                    const disbDateFormatted = activeDisbursedLoan?.disbursedAt
+                      ? new Date(activeDisbursedLoan.disbursedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : 'Jan 20, 2026';
+
+                    return (
+                      <>
+                        {/* Active Loan Details Card */}
+                        <div className="p-5 bg-indigo-50/70 border border-indigo-200 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-xs">
                           <div>
-                            <div className="text-[10px] text-slate-500 uppercase font-bold">Remaining Principal</div>
-                            <div className="text-base font-black text-indigo-900 font-mono">
-                              ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono bg-indigo-200 text-indigo-950 font-bold px-2 py-0.5 rounded text-[11px]">
+                                {loanRef}
+                              </span>
+                              <strong className="text-sm text-slate-900">{loanTitle}</strong>
+                            </div>
+                            <p className="text-slate-600 mt-1">
+                              Disbursed: {disbDateFormatted} • Diminishing Balance Equal Monthly Installment
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-4">
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase font-bold">Monthly Installment</div>
+                              <div className="text-base font-black text-indigo-900 font-mono">
+                                ₱{Number(monthlyInstallment).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase font-bold">Remaining Principal</div>
+                              <div className="text-base font-black text-indigo-900 font-mono">
+                                ₱{effectiveBal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* Loan Subsidiary Ledger Transactions Table */}
-                      <div>
-                        <h3 className="text-xs font-bold text-slate-900 mb-2 uppercase tracking-wider">
-                          Subsidiary Ledger Activity (1-02-01)
-                        </h3>
-                        <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                          <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                              <tr>
-                                <th className="p-3.5">Posting Date</th>
-                                <th className="p-3.5">Ref No.</th>
-                                <th className="p-3.5">Particulars</th>
-                                <th className="p-3.5 text-right">Debit (Disbursement)</th>
-                                <th className="p-3.5 text-right">Credit (Principal Repaid)</th>
-                                <th className="p-3.5 text-right">Principal Outstanding Balance</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                              {mariaLoanLedger.map((tx, idx) => (
-                                <tr key={idx} className="hover:bg-indigo-50/20 transition">
-                                  <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
-                                  <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
-                                  <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
-                                  <td className="p-3.5 text-right font-bold text-rose-700">
-                                    {tx.debit > 0 ? `₱${tx.debit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00'}
-                                  </td>
-                                  <td className="p-3.5 text-right font-bold text-emerald-700">
-                                    {tx.credit > 0 ? `₱${tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00'}
-                                  </td>
-                                  <td className="p-3.5 text-right font-black text-slate-900">
-                                    ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      {/* Complete 12-Month Amortization Schedule Table */}
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                          <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                            Full Diminishing Balance Amortization Schedule
+                        {/* Loan Subsidiary Ledger Transactions Table */}
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-900 mb-2 uppercase tracking-wider">
+                            Subsidiary Ledger Activity (1-02-01)
                           </h3>
-                          <span className="text-[11px] text-slate-500 font-medium">12.0% Annual Rate (1.0% / month)</span>
-                        </div>
-                        <div className="overflow-x-auto border border-slate-200 rounded-2xl max-h-80 overflow-y-auto">
-                          <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
-                              <tr>
-                                <th className="p-3">#</th>
-                                <th className="p-3">Due Date</th>
-                                <th className="p-3 text-right">Principal</th>
-                                <th className="p-3 text-right">Interest (1%)</th>
-                                <th className="p-3 text-right">Total Installment</th>
-                                <th className="p-3 text-right">Ending Principal</th>
-                                <th className="p-3 text-center">Payment Status</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                              {[
-                                { seq: 1, due: '2026-02-20', pr: 3942.44, in: 500.0, tot: 4442.44, bal: 46057.56, status: 'PAID' },
-                                { seq: 2, due: '2026-03-20', pr: 3981.86, in: 460.58, tot: 4442.44, bal: 42075.7, status: loanBalance < 46000 ? 'PAID' : 'DUE_NOW' },
-                                { seq: 3, due: '2026-04-20', pr: 4021.68, in: 420.76, tot: 4442.44, bal: 38054.02, status: 'UPCOMING' },
-                                { seq: 4, due: '2026-05-20', pr: 4061.9, in: 380.54, tot: 4442.44, bal: 33992.12, status: 'UPCOMING' },
-                                { seq: 5, due: '2026-06-20', pr: 4102.52, in: 339.92, tot: 4442.44, bal: 29889.6, status: 'UPCOMING' },
-                                { seq: 6, due: '2026-07-20', pr: 4143.55, in: 298.9, tot: 4442.44, bal: 25746.05, status: 'UPCOMING' },
-                                { seq: 7, due: '2026-08-20', pr: 4184.99, in: 257.46, tot: 4442.44, bal: 21561.06, status: 'UPCOMING' },
-                                { seq: 8, due: '2026-09-20', pr: 4226.84, in: 215.61, tot: 4442.44, bal: 17334.22, status: 'UPCOMING' },
-                                { seq: 9, due: '2026-10-20', pr: 4269.11, in: 173.34, tot: 4442.44, bal: 13065.11, status: 'UPCOMING' },
-                                { seq: 10, due: '2026-11-20', pr: 4311.8, in: 130.65, tot: 4442.44, bal: 8753.31, status: 'UPCOMING' },
-                                { seq: 11, due: '2026-12-20', pr: 4354.92, in: 87.53, tot: 4442.44, bal: 4398.39, status: 'UPCOMING' },
-                                { seq: 12, due: '2027-01-20', pr: 4398.39, in: 43.98, tot: 4442.37, bal: 0.0, status: 'UPCOMING' },
-                              ].map((row) => (
-                                <tr key={row.seq} className={row.status === 'DUE_NOW' ? 'bg-amber-50/50 font-bold' : ''}>
-                                  <td className="p-3 text-slate-500 font-sans">{row.seq}</td>
-                                  <td className="p-3 font-sans font-medium text-slate-900">{row.due}</td>
-                                  <td className="p-3 text-right">₱{row.pr.toFixed(2)}</td>
-                                  <td className="p-3 text-right text-amber-700">₱{row.in.toFixed(2)}</td>
-                                  <td className="p-3 text-right font-black text-slate-900">₱{row.tot.toFixed(2)}</td>
-                                  <td className="p-3 text-right text-slate-600">₱{row.bal.toFixed(2)}</td>
-                                  <td className="p-3 text-center">
-                                    <span
-                                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                        row.status === 'PAID'
-                                          ? 'bg-emerald-100 text-emerald-800'
-                                          : row.status === 'DUE_NOW'
-                                          ? 'bg-amber-200 text-amber-950 animate-pulse'
-                                          : 'bg-slate-100 text-slate-500'
-                                      }`}
-                                    >
-                                      {row.status}
-                                    </span>
-                                  </td>
+                          <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                                <tr>
+                                  <th className="p-3.5">Posting Date</th>
+                                  <th className="p-3.5">Ref No.</th>
+                                  <th className="p-3.5">Particulars</th>
+                                  <th className="p-3.5 text-right">Debit (Disbursement)</th>
+                                  <th className="p-3.5 text-right">Credit (Principal Repaid)</th>
+                                  <th className="p-3.5 text-right">Principal Outstanding Balance</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                                {loanLedgerRows.map((tx: any, idx: number) => (
+                                  <tr key={idx} className="hover:bg-indigo-50/20 transition">
+                                    <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                                    <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                                    <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                                    <td className="p-3.5 text-right font-bold text-rose-700">
+                                      {tx.debit > 0 ? `₱${tx.debit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00'}
+                                    </td>
+                                    <td className="p-3.5 text-right font-bold text-emerald-700">
+                                      {tx.credit > 0 ? `₱${tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '₱0.00'}
+                                    </td>
+                                    <td className="p-3.5 text-right font-black text-slate-900">
+                                      ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                      </div>
-                    </>
-                  ) : (
-                    /* Zero Active Borrowings */
-                    <div className="p-12 text-center bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                      <CreditCard className="w-12 h-12 text-slate-400 mx-auto" />
-                      <h3 className="font-bold text-base text-slate-800">Zero Active Borrowings</h3>
-                      <p className="text-xs text-slate-500 max-w-md mx-auto">
-                        {currentMember.name} ({currentMember.memberNumber}) has clean credit standing with no outstanding loan obligations. Member is eligible to co-make or apply for up to 3x their share capital.
-                      </p>
-                      <div className="pt-2">
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('apply')}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition"
-                        >
-                          Apply for New Loan
-                        </button>
-                      </div>
-                    </div>
-                  )}
+
+                        {/* Complete Diminishing Balance Amortization Schedule Table */}
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                              Full Diminishing Balance Amortization Schedule
+                            </h3>
+                            <span className="text-[11px] text-slate-500 font-medium">Equal Monthly Installment</span>
+                          </div>
+                          <div className="overflow-x-auto border border-slate-200 rounded-2xl max-h-80 overflow-y-auto">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                                <tr>
+                                  <th className="p-3">#</th>
+                                  <th className="p-3">Due Date</th>
+                                  <th className="p-3 text-right">Principal</th>
+                                  <th className="p-3 text-right">Interest</th>
+                                  <th className="p-3 text-right">Total Installment</th>
+                                  <th className="p-3 text-right">Ending Principal</th>
+                                  <th className="p-3 text-center">Payment Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                                {loanScheduleRows.map((row: any) => (
+                                  <tr key={row.seq} className={row.status === 'DUE_NOW' ? 'bg-amber-50/50 font-bold' : ''}>
+                                    <td className="p-3 text-slate-500 font-sans">{row.seq}</td>
+                                    <td className="p-3 font-sans font-medium text-slate-900">{row.due}</td>
+                                    <td className="p-3 text-right">₱{Number(row.pr).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-right text-amber-700">₱{Number(row.in).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-right font-black text-slate-900">₱{Number(row.tot).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-right text-slate-600">₱{Number(row.bal).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-center">
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          row.status === 'PAID'
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : row.status === 'DUE_NOW'
+                                            ? 'bg-amber-200 text-amber-950 animate-pulse'
+                                            : 'bg-slate-100 text-slate-500'
+                                        }`}
+                                      >
+                                        {row.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>

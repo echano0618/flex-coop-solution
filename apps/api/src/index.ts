@@ -1594,6 +1594,9 @@ app.get('/api/v1/billing/credit/topup-requests', async (req: Request, res: Respo
 app.get('/api/v1/members', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
+    try {
+      await synchronizeDisbursedLoans(tenantId);
+    } catch {}
     let members: Member[] = [];
 
     try {
@@ -3477,6 +3480,9 @@ app.get('/api/v1/loans', async (req: Request, res: Response) => {
       dbStore.loans.set(tenantId, loans);
     }
 
+    // Auto-synchronize any disbursed loans with member balances and accounting ledgers
+    await synchronizeDisbursedLoans(tenantId, loans);
+
     // Sort newest first
     loans.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
@@ -3486,14 +3492,113 @@ app.get('/api/v1/loans', async (req: Request, res: Response) => {
   }
 });
 
+async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
+  try {
+    const fsService = FirestoreCoopService.getInstance();
+    let loans = knownLoans;
+    if (!loans || loans.length === 0) {
+      try {
+        loans = await fsService.listLoans(tenantId);
+      } catch {}
+      if (!loans || loans.length === 0) loans = dbStore.loans.get(tenantId) || [];
+    }
+
+    const disbursed = loans.filter((l: any) => l.status === 'DISBURSED');
+    if (disbursed.length === 0) return;
+
+    let members: any[] = [];
+    try {
+      members = await fsService.listMembers(tenantId);
+    } catch {}
+    if (!members || members.length === 0) members = dbStore.members.get(tenantId) || [];
+
+    const entries = await getTenantJournalEntries(tenantId);
+    let tenant = dbStore.tenants.get(tenantId);
+    if (!tenant) {
+      try {
+        tenant = (await fsService.getTenant(tenantId)) || undefined;
+      } catch {}
+    }
+
+    for (const rawLoan of disbursed) {
+      const loan = rawLoan as any;
+      const principal = Number(loan.principalAmount || loan.amount || 0);
+      if (principal <= 0) continue;
+
+      // 1. Ensure borrower member has loanBalance updated
+      const borrower: any = members.find((m: any) =>
+        (loan.memberId && m.id === loan.memberId) ||
+        ((loan.memberNo || loan.memberNumber) && m.memberNumber === (loan.memberNo || loan.memberNumber)) ||
+        (loan.memberName && (m.name === loan.memberName || `${m.firstName} ${m.lastName}` === loan.memberName))
+      );
+
+      if (borrower && (Number(borrower.loanBalance || 0) < principal)) {
+        borrower.loanBalance = principal;
+        borrower.activeLoanId = loan.id;
+        borrower.activeLoanNumber = loan.loanNumber;
+        try {
+          await fsService.updateMember(tenantId, borrower.id, {
+            loanBalance: principal,
+            activeLoanId: loan.id,
+            activeLoanNumber: loan.loanNumber,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {}
+      }
+
+      // 2. Ensure Journal Entry and Member SL exist
+      const hasJe = entries.some((e: any) =>
+        e.referenceId === loan.id ||
+        (e.description && e.description.includes(loan.loanNumber))
+      );
+
+      if (!hasJe) {
+        const borrowerName = loan.memberName || (borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Borrower');
+        const borrowerNumber = loan.memberNo || loan.memberNumber || borrower?.memberNumber || 'MEM-2026-0001';
+        const borrowerId = loan.memberId || borrower?.id || 'mem_0001';
+        const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
+        const feeCalc = MonetizationService.calculatePlatformFee(principal, billingMode);
+
+        const jeData = GeneralLedgerService.buildDisbursementEntry({
+          loanId: loan.id,
+          loanNumber: loan.loanNumber,
+          grossPrincipal: principal,
+          platformFee: feeCalc.grossFee,
+          coopServiceFee: loan.coopServiceFee || 0,
+          netProceeds: principal - feeCalc.grossFee - (loan.coopServiceFee || 0),
+          disbursementChannel: billingMode === 'PLATFORM_ESCROW' ? 'PLATFORM_ESCROW' : 'BANK',
+          userId: 'usr_admin',
+          memberId: borrowerId,
+          memberNumber: borrowerNumber,
+          memberName: borrowerName,
+        });
+
+        const newJe = { id: `je_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`, ...jeData };
+        entries.push(newJe);
+        try {
+          await fsService.postJournalEntry(tenantId, newJe);
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('synchronizeDisbursedLoans error:', err);
+  }
+}
+
 app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
-  const tenant = dbStore.tenants.get(tenantId)!;
-  const loanId = req.params.id;
   const fsService = FirestoreCoopService.getInstance();
+  let tenant = dbStore.tenants.get(tenantId);
+  if (!tenant) {
+    try {
+      tenant = (await fsService.getTenant(tenantId)) || undefined;
+      if (tenant) dbStore.tenants.set(tenantId, tenant);
+    } catch {}
+  }
 
+  const loanId = req.params.id;
   const loans = dbStore.loans.get(tenantId) || [];
-  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  let loan: any = loans.find((l: any) => l.id === loanId || l.loanNumber === loanId);
   if (!loan) {
     try {
       loan = (await fsService.getLoan(tenantId, loanId)) as any;
@@ -3509,12 +3614,35 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   }
 
   // 1. Calculate pass-through fee based on tenant billing mode
-  const feeCalc = MonetizationService.calculatePlatformFee(loan.principalAmount, tenant.billingMode);
+  const principalAmount = Number(loan.principalAmount || loan.amount || 0);
+  loan.principalAmount = principalAmount;
+  loan.amount = principalAmount;
+  loan.balanceRemaining = Number(loan.balanceRemaining || principalAmount);
+  loan.coopServiceFee = Number(loan.coopServiceFee || 0);
+
+  const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
+  const feeCalc = MonetizationService.calculatePlatformFee(principalAmount, billingMode);
   loan.platformFee = feeCalc.grossFee;
-  loan.netProceedsDisbursed = loan.principalAmount - loan.platformFee - loan.coopServiceFee;
+  loan.netProceedsDisbursed = principalAmount - loan.platformFee - loan.coopServiceFee;
   loan.status = 'DISBURSED';
   loan.disbursedAt = new Date().toISOString();
-  loan.disbursementReference = `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
+  loan.disbursementReference = loan.disbursementReference || `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
+
+  // Ensure amortization schedule exists
+  if (!loan.schedule || loan.schedule.length === 0) {
+    const term = Number(loan.termMonths || loan.term || 12);
+    const annualRate = loan.annualRate !== undefined ? loan.annualRate : (loan.interestRateAnnual || 0.12);
+    const scheduleData = AmortizationService.generateSchedule({
+      principalAmount,
+      annualInterestRate: annualRate,
+      termMonths: term,
+      paymentFrequency: loan.paymentFrequency || 'MONTHLY',
+      method: loan.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    });
+    loan.schedule = scheduleData.schedule;
+    loan.totalInterestExpected = scheduleData.totalInterest;
+    loan.totalPayable = scheduleData.totalPayable;
+  }
 
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, 'DISBURSED', {
@@ -3522,33 +3650,87 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
       netProceedsDisbursed: loan.netProceedsDisbursed,
       disbursedAt: loan.disbursedAt,
       disbursementReference: loan.disbursementReference,
+      balanceRemaining: loan.balanceRemaining,
+      schedule: loan.schedule,
+      totalPayable: loan.totalPayable,
       updatedAt: new Date().toISOString(),
     });
+    await fsService.saveLoan(tenantId, loan);
   } catch (fsErr) {
     console.warn('Firestore updateLoanStatus error on disburse:', fsErr);
   }
 
-  // 2. Generate 12% Output VAT Official Invoice
+  const loanIdx = loans.findIndex((l: any) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+  if (loanIdx >= 0) loans[loanIdx] = loan; else loans.unshift(loan);
+  dbStore.loans.set(tenantId, loans);
+
+  // 2. Resolve Borrower Member and update loanBalance in Firestore
+  let members = dbStore.members.get(tenantId) || [];
+  try {
+    const fsMembers = await fsService.listMembers(tenantId);
+    if (fsMembers && fsMembers.length > 0) members = fsMembers;
+  } catch {}
+
+  const borrowerId = loan.memberId;
+  const borrowerNo = loan.memberNo || loan.memberNumber;
+  let borrower: any = members.find((m: any) =>
+    (borrowerId && m.id === borrowerId) ||
+    (borrowerNo && m.memberNumber === borrowerNo) ||
+    (loan.memberName && (m.name === loan.memberName || `${m.firstName} ${m.lastName}` === loan.memberName))
+  );
+
+  if (borrower) {
+    const prevBal = Number(borrower.loanBalance || 0);
+    const newBal = prevBal + principalAmount;
+    borrower.loanBalance = newBal;
+    borrower.activeLoanId = loan.id;
+    borrower.activeLoanNumber = loan.loanNumber;
+    try {
+      await fsService.updateMember(tenantId, borrower.id, {
+        loanBalance: newBal,
+        activeLoanId: loan.id,
+        activeLoanNumber: loan.loanNumber,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (mErr) {
+      console.warn('Failed to update member loanBalance in Firestore:', mErr);
+    }
+    const memIdx = members.findIndex((m: any) => m.id === borrower.id);
+    if (memIdx >= 0) members[memIdx] = borrower; else members.push(borrower);
+    dbStore.members.set(tenantId, members);
+  }
+
+  // 3. Generate 12% Output VAT Official Invoice & Persist to Firestore
   const invoice = MonetizationService.generatePlatformInvoice({
     tenantId,
     loanId: loan.id,
     disbursementReference: loan.disbursementReference,
-    loanAmount: loan.principalAmount,
-    billingMode: tenant.billingMode,
-    tenantTin: tenant.tin,
+    loanAmount: principalAmount,
+    billingMode,
+    tenantTin: tenant?.tin || '000-000-000-000',
   });
   dbStore.platformInvoices.push(invoice);
+  try {
+    await fsService.recordInvoice(tenantId, invoice);
+  } catch {}
 
-  // 3. Post Balanced CDA Journal Entry
+  // 4. Post Balanced CDA Journal Entry Tagged with Borrower for Member Subsidiary Ledger
+  const borrowerName = loan.memberName || (borrower ? `${borrower.firstName} ${borrower.lastName}` : 'Borrower');
+  const borrowerNumber = loan.memberNo || loan.memberNumber || borrower?.memberNumber || 'MEM-2026-0001';
+  const borrowerMemId = loan.memberId || borrower?.id || 'mem_0001';
+
   const jeData = GeneralLedgerService.buildDisbursementEntry({
     loanId: loan.id,
     loanNumber: loan.loanNumber,
-    grossPrincipal: loan.principalAmount,
+    grossPrincipal: principalAmount,
     platformFee: feeCalc.grossFee,
     coopServiceFee: loan.coopServiceFee,
     netProceeds: loan.netProceedsDisbursed,
-    disbursementChannel: tenant.billingMode === 'PLATFORM_ESCROW' ? 'PLATFORM_ESCROW' : 'BANK',
+    disbursementChannel: billingMode === 'PLATFORM_ESCROW' ? 'PLATFORM_ESCROW' : 'BANK',
     userId: 'usr_admin',
+    memberId: borrowerMemId,
+    memberNumber: borrowerNumber,
+    memberName: borrowerName,
   });
 
   const entries = dbStore.journalEntries.get(tenantId) || [];
@@ -3556,23 +3738,29 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   entries.push(journalEntry);
   dbStore.journalEntries.set(tenantId, entries);
 
-  // 4. AMLC Check on disbursement
+  try {
+    await fsService.postJournalEntry(tenantId, journalEntry);
+  } catch (jeErr) {
+    console.warn('Failed to post journal entry to Firestore:', jeErr);
+  }
+
+  // 5. AMLC Check on disbursement
   const amlcAlert = RegulatoryReportsService.checkAMLCThreshold({
     transactionId: loan.disbursementReference,
     memberId: loan.memberId,
-    amount: loan.principalAmount,
+    amount: principalAmount,
     transactionType: 'LOAN_DISBURSEMENT',
   });
   if (amlcAlert) {
     dbStore.amlcAlerts.push(amlcAlert);
   }
 
-  // 5. Auto-Deduct 1.0% Technology Fee from cooperative's prepaid platform credit
-  const creditDeduction = MonetizationService.processLoanFeeAutoDeduction({
+  // 6. Auto-Deduct 1.0% Technology Fee from cooperative's prepaid platform credit asynchronously in Firestore
+  const creditDeduction = await MonetizationService.processLoanFeeAutoDeductionAsync({
     tenantId,
     loanId: loan.id,
     loanNumber: loan.loanNumber,
-    principalAmount: loan.principalAmount,
+    principalAmount,
     invoiceNumber: invoice.invoiceNumber,
   });
 
@@ -3749,6 +3937,9 @@ app.get('/api/v1/accounting/coa', (_req: Request, res: Response) => {
 
 // Helpers to retrieve online accounting data from Cloud Firestore
 async function getTenantJournalEntries(tenantId: string): Promise<JournalEntry[]> {
+  try {
+    await synchronizeDisbursedLoans(tenantId);
+  } catch {}
   try {
     const fsService = FirestoreCoopService.getInstance();
     const fsEntries = await fsService.listJournalEntries(tenantId);

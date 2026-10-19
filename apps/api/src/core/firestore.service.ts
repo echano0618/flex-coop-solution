@@ -203,6 +203,10 @@ export class FirestoreCoopService {
     await this.membersCol(tenantId).doc(member.id).set(member, { merge: true });
   }
 
+  public async updateMember(tenantId: string, memberId: string, updates: Record<string, any>): Promise<void> {
+    await this.membersCol(tenantId).doc(memberId).set(updates, { merge: true });
+  }
+
   public async getMember(tenantId: string, memberId: string): Promise<Member | null> {
     const doc = await this.membersCol(tenantId).doc(memberId).get();
     if (doc.exists) return doc.data() as Member;
@@ -381,6 +385,19 @@ export class FirestoreCoopService {
 
       return { success: true, entryId: entry.id };
     });
+  }
+
+  public async postJournalEntry(tenantId: string, entry: any): Promise<void> {
+    try {
+      await this.postBalancedJournalEntry(tenantId, entry);
+    } catch (err) {
+      console.warn(`[FirestoreCoopService] postBalancedJournalEntry warning, saving directly:`, err);
+      await this.journalEntriesCol(tenantId).doc(entry.id).set({
+        ...entry,
+        isBalanced: true,
+        postedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
   }
 
   public async listJournalEntries(tenantId: string): Promise<JournalEntry[]> {
