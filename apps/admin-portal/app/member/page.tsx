@@ -738,6 +738,11 @@ export default function MemberPortalPage() {
 
   // Option 4: Digital Passbook & Subsidiary Ledger State
   const [passbookSubTab, setPassbookSubTab] = useState<'shares' | 'savings' | 'loan'>('shares');
+  useEffect(() => {
+    if (!savingsDepositEnabled && passbookSubTab === 'savings') {
+      setPassbookSubTab('shares');
+    }
+  }, [savingsDepositEnabled, passbookSubTab]);
   const [showPassbookStatementModal, setShowPassbookStatementModal] = useState<boolean>(false);
   const [passbookPayModal, setPassbookPayModal] = useState<{
     open: boolean;
@@ -1274,19 +1279,21 @@ export default function MemberPortalPage() {
               </div>
 
               {/* Financial Quick Glance */}
-              <div className="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-emerald-700/50 text-center">
+              <div className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-5 pt-4 border-t border-emerald-700/50 text-center`}>
                 <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
                   <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Share Capital</div>
                   <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
                     ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
-                  <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Savings</div>
-                  <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
-                    ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                {savingsDepositEnabled && (
+                  <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
+                    <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Savings</div>
+                    <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
+                      ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
                   </div>
-                </div>
+                )}
                 <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
                   <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Loan Balance</div>
                   <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
@@ -1368,103 +1375,8 @@ export default function MemberPortalPage() {
         {/* TAB: DIGITAL PASSBOOK & MEMBER SUBSIDIARY LEDGER (OPTION 4) */}
         {activeTab === 'passbook' && (
           <div className="space-y-6">
-            {/* CDA Certified Digital Passbook Header */}
-            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-700 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10 border-b border-slate-700/60 pb-6">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-400 text-slate-950 uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>Certified CDA Digital Passbook</span>
-                    </span>
-                    <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>PhilSys KYC Verified</span>
-                    </span>
-                    <span className="text-slate-400 text-xs font-mono">
-                      CDA Reg: CDA-NCR-2024-00921 • TIN: 004-912-340-000
-                    </span>
-                  </div>
-
-                  <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                    {currentMember.name}&apos;s Official Subsidiary Ledger
-                  </h1>
-                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                    Compliant with CDA Standard Chart of Accounts (MC 2015-06) and Republic Act No. 9520. All share capital, savings liabilities, and loan amortizations are verified against the cooperative general ledger.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowPassbookStatementModal(true)}
-                    className="px-4 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-100 rounded-xl font-bold text-xs border border-slate-600 shadow-sm flex items-center gap-1.5 transition"
-                  >
-                    <Download className="w-4 h-4 text-emerald-400" />
-                    <span>Official Statement (SOA)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (passbookSubTab === 'loan') {
-                        setPassbookPayModal({
-                          open: true,
-                          type: 'LOAN',
-                          amount: 4442.44,
-                          description: 'Monthly Loan Amortization Installment #2',
-                        });
-                      } else if (passbookSubTab === 'savings') {
-                        setPassbookPayModal({
-                          open: true,
-                          type: 'SAVINGS',
-                          amount: 1000,
-                          description: 'Voluntary Savings Deposit',
-                        });
-                      } else {
-                        setPassbookPayModal({
-                          open: true,
-                          type: 'SHARES',
-                          amount: 1000,
-                          description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
-                        });
-                      }
-                    }}
-                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-950/20 flex items-center gap-1.5 transition"
-                  >
-                    <QrCode className="w-4 h-4" />
-                    <span>Pay via QR Ph Rail</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Passbook Identification Matrix */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6 text-xs text-slate-300">
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Passbook Number:</span>
-                  <span className="font-mono font-bold text-white text-sm">
-                    {currentMember.memberNumber ? `PB-${(currentMember.memberNumber || '').replace(/\D/g, '') || '0001'}` : 'PB-2026-0001'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Member ID:</span>
-                  <span className="font-mono font-bold text-emerald-300 text-sm">{currentMember.memberNumber}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Membership Class:</span>
-                  <span className="font-semibold text-white">Regular (Good Standing)</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Registered PSGC Address:</span>
-                  <span className="font-semibold text-white truncate block">Region III • San Jose, Nueva Ecija</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 3 Subsidiary Ledger Balances Bar */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Subsidiary Ledger Balances Bar */}
+            <div className={`grid grid-cols-1 ${savingsDepositEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-5`}>
               {/* Card 1: Share Capital SL (3-01-03) */}
               <div
                 onClick={() => setPassbookSubTab('shares')}
@@ -1494,32 +1406,34 @@ export default function MemberPortalPage() {
               </div>
 
               {/* Card 2: Savings Passbook (2-01-01) */}
-              <div
-                onClick={() => setPassbookSubTab('savings')}
-                className={`p-6 rounded-2xl border transition cursor-pointer ${
-                  passbookSubTab === 'savings'
-                    ? 'bg-emerald-50/50 border-emerald-400 shadow-md ring-2 ring-emerald-400/20'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
-                  <span>Savings Deposits Passbook</span>
-                  <span className="font-mono text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
-                    GL 2-01-01
-                  </span>
+              {savingsDepositEnabled && (
+                <div
+                  onClick={() => setPassbookSubTab('savings')}
+                  className={`p-6 rounded-2xl border transition cursor-pointer ${
+                    passbookSubTab === 'savings'
+                      ? 'bg-emerald-50/50 border-emerald-400 shadow-md ring-2 ring-emerald-400/20'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                    <span>Savings Deposits Passbook</span>
+                    <span className="font-mono text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
+                      GL 2-01-01
+                    </span>
+                  </div>
+                  <div className="text-3xl font-black font-mono text-slate-900 mt-2">
+                    ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 flex justify-between">
+                    <span>Compulsory + Voluntary</span>
+                    <span className="text-emerald-700 font-bold">3.0% p.a. Interest</span>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-emerald-900 font-semibold">
+                    <span>Click to view passbook</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
                 </div>
-                <div className="text-3xl font-black font-mono text-slate-900 mt-2">
-                  ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                </div>
-                <div className="text-xs text-slate-500 mt-1 flex justify-between">
-                  <span>Compulsory + Voluntary</span>
-                  <span className="text-emerald-700 font-bold">3.0% p.a. Interest</span>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-emerald-900 font-semibold">
-                  <span>Click to view passbook</span>
-                  <ChevronRight className="w-4 h-4" />
-                </div>
-              </div>
+              )}
 
               {/* Card 3: Loans Receivable (1-02-01) */}
               <div
@@ -1570,18 +1484,20 @@ export default function MemberPortalPage() {
                     <span>Share Capital Ledger (3-01-03)</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setPassbookSubTab('savings')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-                      passbookSubTab === 'savings'
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <PiggyBank className="w-3.5 h-3.5" />
-                    <span>Savings Passbook (2-01-01)</span>
-                  </button>
+                  {savingsDepositEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setPassbookSubTab('savings')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                        passbookSubTab === 'savings'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <PiggyBank className="w-3.5 h-3.5" />
+                      <span>Savings Passbook (2-01-01)</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -1598,50 +1514,41 @@ export default function MemberPortalPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {passbookSubTab === 'savings' && !savingsDepositEnabled ? (
-                    <span className="px-3 py-1.5 bg-slate-100 text-slate-500 text-xs font-semibold rounded-lg border border-slate-200">
-                      Savings Deposits Disabled
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (passbookSubTab === 'loan') {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'LOAN',
+                          amount: 4442.44,
+                          description: 'Monthly Loan Amortization Installment #2',
+                        });
+                      } else if (passbookSubTab === 'savings' && savingsDepositEnabled) {
+                        setPassbookPayModal({
+                          open: true,
+                          type: 'SAVINGS',
+                          amount: 1000,
+                          description: 'Voluntary Savings Deposit',
+                        });
+                      } else {
+                        setDepositModalType('SHARES');
+                        setDepositChannel('PAYMONGO_QRPH');
+                        setPaymongoActivePayment(null);
+                        setDepositSuccessResult(null);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>
+                      {passbookSubTab === 'shares'
+                        ? 'Purchase Shares (+QR Ph)'
+                        : passbookSubTab === 'savings' && savingsDepositEnabled
+                        ? 'Deposit Savings (+QR Ph)'
+                        : 'Pay Installment (+QR Ph)'}
                     </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (passbookSubTab === 'loan') {
-                          setPassbookPayModal({
-                            open: true,
-                            type: 'LOAN',
-                            amount: 4442.44,
-                            description: 'Monthly Loan Amortization Installment #2',
-                          });
-                        } else if (passbookSubTab === 'savings') {
-                          if (!savingsDepositEnabled) return;
-                          setPassbookPayModal({
-                            open: true,
-                            type: 'SAVINGS',
-                            amount: 1000,
-                            description: 'Voluntary Savings Deposit',
-                          });
-                        } else {
-                          setPassbookPayModal({
-                            open: true,
-                            type: 'SHARES',
-                            amount: 1000,
-                            description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
-                          });
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>
-                        {passbookSubTab === 'shares'
-                          ? 'Purchase Shares (+QR Ph)'
-                          : passbookSubTab === 'savings'
-                          ? 'Deposit Savings (+QR Ph)'
-                          : 'Pay Installment (+QR Ph)'}
-                      </span>
-                    </button>
-                  )}
+                  </button>
                 </div>
               </div>
 
@@ -1721,7 +1628,7 @@ export default function MemberPortalPage() {
               )}
 
               {/* SUB-LEDGER 2: SAVINGS PASSBOOK (2-01-01) */}
-              {passbookSubTab === 'savings' && (
+              {savingsDepositEnabled && passbookSubTab === 'savings' && (
                 <div className="p-6 space-y-6">
                   {/* Savings Account Summary */}
                   <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
@@ -4280,14 +4187,16 @@ export default function MemberPortalPage() {
                         </td>
                         <td className="p-3 font-sans text-emerald-700 font-bold">{sharesCount} Shares @ ₱100 Par (Dividend Active)</td>
                       </tr>
-                      <tr>
-                        <td className="p-3 font-sans font-bold text-slate-900">Deposit Liabilities (Savings)</td>
-                        <td className="p-3 text-slate-600">2-01-01</td>
-                        <td className="p-3 font-bold text-slate-900">
-                          ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-3 font-sans text-emerald-700 font-bold">3.0% Annual Interest Compounded</td>
-                      </tr>
+                      {savingsDepositEnabled && (
+                        <tr>
+                          <td className="p-3 font-sans font-bold text-slate-900">Deposit Liabilities (Savings)</td>
+                          <td className="p-3 text-slate-600">2-01-01</td>
+                          <td className="p-3 font-bold text-slate-900">
+                            ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 font-sans text-emerald-700 font-bold">3.0% Annual Interest Compounded</td>
+                        </tr>
+                      )}
                       <tr>
                         <td className="p-3 font-sans font-bold text-slate-900">Loans Receivable (Regular)</td>
                         <td className="p-3 text-slate-600">1-02-01</td>

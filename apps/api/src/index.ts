@@ -2288,14 +2288,46 @@ app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res
     return res.status(400).json({ success: false, error: 'Valid memberId and sharesCount/amount required.' });
   }
 
-  // Check PayMongo status if intent or link ID is provided
+  // Strictly enforce PayMongo payment verification
+  if (!paymentIntentId && !checkoutLinkId) {
+    return res.status(400).json({
+      success: false,
+      error: 'A valid paymentIntentId or checkoutLinkId is required to verify PayMongo payment.',
+    });
+  }
+
+  let isPaid = false;
+  let paymentStatus = 'pending';
+
   if (paymentIntentId) {
     try {
       const statusRes = await PayMongoService.checkPaymentIntentStatus(paymentIntentId);
-      console.log(`[PAYMONGO] Intent ${paymentIntentId} status: ${statusRes.status}, isPaid: ${statusRes.isPaid}`);
-    } catch (checkErr) {
-      console.warn('[PAYMONGO] Could not verify intent with PayMongo API:', checkErr);
+      paymentStatus = statusRes.status;
+      if (statusRes.isPaid) {
+        isPaid = true;
+      }
+    } catch (checkErr: any) {
+      console.warn('[PAYMONGO] Could not verify intent with PayMongo API:', checkErr.message);
     }
+  }
+
+  if (!isPaid && checkoutLinkId) {
+    try {
+      const linkRes = await PayMongoService.checkCheckoutLinkStatus(checkoutLinkId);
+      if (linkRes.isPaid) {
+        isPaid = true;
+        paymentStatus = 'paid';
+      }
+    } catch (linkErr: any) {
+      console.warn('[PAYMONGO] Could not verify link with PayMongo API:', linkErr.message);
+    }
+  }
+
+  if (!isPaid) {
+    return res.status(400).json({
+      success: false,
+      error: `PayMongo transaction has not been confirmed yet (status: ${paymentStatus}). Please complete payment in your banking or e-wallet app first.`,
+    });
   }
 
   const sysConfig = dbStore.systemConfigs.get(tenantId);
