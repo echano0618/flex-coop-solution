@@ -1384,10 +1384,23 @@ export default function AdminDashboard() {
   const [loanProducts, setLoanProducts] = useState<any[]>(DEFAULT_LOAN_PRODUCTS);
   const [productSaveNotification, setProductSaveNotification] = useState<string | null>(null);
 
-  // Load persisted products from backend API with offline cache
+  // Load persisted products from backend API with offline cache and deduplication
   useEffect(() => {
     const tenantInfo = resolveTenantCoop();
     const storageKey = `flexcoop_loan_products_${tenantInfo.slug}`;
+
+    const deduplicateProducts = (list: any[]) => {
+      const seen = new Set<string>();
+      const out: any[] = [];
+      for (const p of list) {
+        const key = (p.code || p.name || p.id || '').trim().toUpperCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(p);
+        }
+      }
+      return out;
+    };
 
     // 1. Initial cached products from localStorage if available
     try {
@@ -1395,7 +1408,7 @@ export default function AdminDashboard() {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setLoanProducts(parsed);
+          setLoanProducts(deduplicateProducts(parsed));
         }
       }
     } catch {}
@@ -1407,9 +1420,10 @@ export default function AdminDashboard() {
       .then((res) => res.json())
       .then((resData) => {
         if (resData && resData.success && Array.isArray(resData.data) && resData.data.length > 0) {
-          setLoanProducts(resData.data);
+          const deduped = deduplicateProducts(resData.data);
+          setLoanProducts(deduped);
           try {
-            localStorage.setItem(storageKey, JSON.stringify(resData.data));
+            localStorage.setItem(storageKey, JSON.stringify(deduped));
           } catch {}
         }
       })
@@ -1483,9 +1497,13 @@ export default function AdminDashboard() {
   const [walkInSettlementAccountNo, setWalkInSettlementAccountNo] = useState<string>('0123-4567-89');
   const [walkInSettlementAccountName, setWalkInSettlementAccountName] = useState<string>('');
 
+  // Loan Applications Queue State for LOS
+  const [loanApplications, setLoanApplications] = useState<any[]>([]);
+
   // Active Loan Application for LOS Pipeline Display
   const [activeLoanApplication, setActiveLoanApplication] = useState<{
     id: string;
+    rawId?: string;
     memberId: string;
     memberName: string;
     memberNo: string;
@@ -1511,13 +1529,118 @@ export default function AdminDashboard() {
     submissionSource: 'MEMBER_SELF_SERVICE' | 'STAFF_WALK_IN';
     submittedBy?: string;
     submittedAt: string;
+    status?: string;
   } | null>(null);
+
+  // Load Loan Applications from localStorage and Backend API
+  const fetchLoanApplications = () => {
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_applications_${tenantInfo.slug}`;
+
+    // 1. Initial cached applications from localStorage
+    try {
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLoanApplications(parsed);
+          setActiveLoanApplication((prev) => prev || parsed[0]);
+          if (!activeLoanApplication) {
+            setLoanStatus(parsed[0].status || 'SUBMITTED');
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Fetch from backend API
+    fetch(`${getApiBaseUrl()}/loans?coop=${tenantInfo.slug}`, {
+      headers: { 'x-tenant-slug': tenantInfo.slug },
+    })
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData && resData.success && Array.isArray(resData.data)) {
+          const formatted = resData.data.map((l: any) => ({
+            id: l.loanNumber || l.id,
+            rawId: l.id,
+            loanNumber: l.loanNumber || l.id,
+            memberId: l.memberId,
+            memberName: l.memberName || `Member (${l.memberId})`,
+            memberNo: l.memberNo || (l.memberId?.startsWith('mem_') ? 'MEM-2026-' + l.memberId.slice(4) : l.memberId),
+            memberClassification: l.memberClassification || 'Regular Member',
+            productId: l.productId,
+            productName: l.productName || 'Cooperative Member Loan',
+            annualRate: l.interestRateAnnual !== undefined ? l.interestRateAnnual : (l.annualRate || 0.12),
+            termMonths: l.termMonths || 12,
+            amount: l.principalAmount || l.amount || 50000,
+            purpose: l.purpose || l.productName || 'Cooperative Loan',
+            coMakerId: l.coMakerId || l.coMaker?.coMakerMemberId,
+            coMakerName: l.coMakerName || l.coMaker?.coMakerName,
+            coMakerNo: l.coMakerNo || l.coMaker?.coMakerMemberNumber,
+            settlement: l.settlement || {
+              channel: 'BANK_TRANSFER',
+              institutionName: 'Land Bank of the Philippines',
+              accountNumber: '1092-8374-65',
+              accountName: l.memberName || 'Coop Member',
+            },
+            advanceInterestOption: l.advanceInterestOption || 'NONE',
+            succeedingMethod: l.succeedingMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+            fixedMonthlyInstallment: l.fixedMonthlyInstallment !== false,
+            submissionSource: l.submissionSource || 'MEMBER_SELF_SERVICE',
+            submittedBy: l.submittedBy || 'Member Self-Service',
+            submittedAt: l.submittedAt || (l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'),
+            status: l.status || 'SUBMITTED',
+          }));
+
+          // Merge local cache if any pending submission not yet on server
+          try {
+            const cached = localStorage.getItem(storageKey);
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed)) {
+                for (const item of parsed) {
+                  if (!formatted.some((f: any) => f.id === item.id)) {
+                    formatted.push(item);
+                  }
+                }
+              }
+            }
+          } catch {}
+
+          if (formatted.length > 0) {
+            setLoanApplications(formatted);
+            try {
+              localStorage.setItem(storageKey, JSON.stringify(formatted));
+            } catch {}
+            setActiveLoanApplication((prev) => {
+              if (prev) {
+                const refreshed = formatted.find((f: any) => f.id === prev.id);
+                if (refreshed) {
+                  setLoanStatus(refreshed.status);
+                  return refreshed;
+                }
+                return prev;
+              }
+              setLoanStatus(formatted[0].status);
+              return formatted[0];
+            });
+          }
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchLoanApplications();
+  }, [activeTab]);
 
   const handleAddLoanProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanCode = newProductCode.toUpperCase().replace(/\s+/g, '_');
+    const existing = loanProducts.find((p) => p.code?.toUpperCase() === cleanCode);
+
     const createdProduct = {
-      id: `prod_${Date.now()}`,
-      code: newProductCode.toUpperCase().replace(/\s+/g, '_'),
+      id: existing ? existing.id : `prod_${Date.now()}`,
+      code: cleanCode,
       name: newProductName,
       type: newProductType as any,
       minAmount: Number(newProductMinAmount),
@@ -1565,6 +1688,37 @@ export default function AdminDashboard() {
     setProductSaveNotification(`Loan Product "${createdProduct.name}" (${createdProduct.code}) saved with status ${newProductStatus}!`);
     setTimeout(() => setProductSaveNotification(null), 5000);
     setShowProductModal(false);
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    const targetProduct = loanProducts.find((p) => p.id === productId);
+    if (!targetProduct) return;
+    if (!confirm(`Are you sure you want to permanently delete loan product "${targetProduct.name}" (${targetProduct.code})?`)) {
+      return;
+    }
+
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_loan_products_${tenantInfo.slug}`;
+
+    const updated = loanProducts.filter((p) => p.id !== productId);
+    setLoanProducts(updated);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+    } catch {}
+
+    try {
+      await fetch(`${getApiBaseUrl()}/loan-products/${productId}?coop=${tenantInfo.slug}`, {
+        method: 'DELETE',
+        headers: {
+          'x-tenant-slug': tenantInfo.slug,
+        },
+      });
+    } catch (err) {
+      console.warn('API delete product warning:', err);
+    }
+
+    setProductSaveNotification(`Loan Product "${targetProduct.name}" removed from catalog.`);
+    setTimeout(() => setProductSaveNotification(null), 5000);
   };
 
   const handleToggleProductStatus = async (productId: string) => {
@@ -2395,6 +2549,20 @@ export default function AdminDashboard() {
 
     setActiveLoanApplication(newApp);
     setLoanStatus(newStatus);
+    const tenantInfo = resolveTenantCoop();
+    const updatedApps = [newApp, ...loanApplications.filter((a) => a.id !== newApp.id)];
+    setLoanApplications(updatedApps);
+    try {
+      localStorage.setItem(`flexcoop_loan_applications_${tenantInfo.slug}`, JSON.stringify(updatedApps));
+      localStorage.setItem(`flexcoop_active_loan_application_${tenantInfo.slug}`, JSON.stringify(newApp));
+    } catch {}
+
+    fetch(`${getApiBaseUrl()}/loans/apply?coop=${tenantInfo.slug}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+      body: JSON.stringify(newApp),
+    }).catch(() => {});
+
     setShowWalkInLoanModal(false);
     setLosNotification(
       `Walk-In Loan Application ${newAppId} submitted for ${applicant.name} (${applicant.memberNo}) by ${currentStaff.name}! Status: ${newStatus}. Settlement: ${newApp.settlement.institutionName} (${newApp.settlement.accountNumber}).`
@@ -2644,16 +2812,71 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleConfirmLosAction = () => {
+  const handleConfirmLosAction = async () => {
     if (!losConfirmModal) return;
-    setLoanStatus(losConfirmModal.targetStatus);
+    const targetStatus = losConfirmModal.targetStatus;
+    setLoanStatus(targetStatus);
+
+    const targetApp = activeLoanApplication;
+    const appId = targetApp?.id || 'LN-2026-00001';
+    const rawId = (targetApp as any)?.rawId || appId;
+
+    if (activeLoanApplication) {
+      const updatedApp = { ...activeLoanApplication, status: targetStatus };
+      setActiveLoanApplication(updatedApp);
+      const updatedList = loanApplications.map((a) => (a.id === updatedApp.id ? updatedApp : a));
+      setLoanApplications(updatedList);
+      try {
+        const tenantInfo = resolveTenantCoop();
+        localStorage.setItem(`flexcoop_loan_applications_${tenantInfo.slug}`, JSON.stringify(updatedList));
+        localStorage.setItem(`flexcoop_active_loan_application_${tenantInfo.slug}`, JSON.stringify(updatedApp));
+      } catch {}
+    }
+
     const actionLabel =
       losConfirmModal.actionType === 'PROCEED_APPROVAL' ? 'Approved & Advanced' : 'Cancelled';
     setLosNotification(
-      `Application LN-2026-00001: ${losConfirmModal.stageTitle} ${actionLabel}. New Status: ${losConfirmModal.targetStatus}.`
+      `Application ${appId}: ${losConfirmModal.stageTitle} ${actionLabel}. New Status: ${targetStatus}.`
     );
     setTimeout(() => setLosNotification(null), 5000);
     setLosConfirmModal(null);
+
+    // Call backend API to persist stage advance
+    try {
+      const tenantInfo = resolveTenantCoop();
+      if (targetStatus === 'UNDER_CREDIT_REVIEW') {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/review?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+          body: JSON.stringify({ approved: true, remarks: 'Endorsed by Loan Officer to Credit Committee.' }),
+        });
+      } else if (targetStatus === 'BOD_APPROVAL' || (targetStatus === 'APPROVED' && losConfirmModal.stageTitle.includes('Committee'))) {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/committee-approve?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+          body: JSON.stringify({ approved: true }),
+        });
+      } else if (targetStatus === 'APPROVED') {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/bod-approve?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+          body: JSON.stringify({ approved: true }),
+        });
+      } else if (targetStatus === 'DISBURSED') {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/disburse?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+        });
+      } else if (targetStatus === 'CANCELLED') {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/review?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+          body: JSON.stringify({ approved: false, remarks: 'Formally cancelled by cooperative administration.' }),
+        });
+      }
+    } catch (err) {
+      console.warn('API loan stage advance warning:', err);
+    }
   };
 
   // Interactive Loan Calculator State
@@ -5039,25 +5262,35 @@ export default function AdminDashboard() {
 
                     <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
                       <span>Fee: {(p.serviceFeeRate * 100).toFixed(1)}% • Pen: {(p.finesRateMonthly * 100).toFixed(1)}%/mo</span>
-                      {isActive ? (
+                      <div className="flex items-center gap-1.5">
+                        {isActive ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleProductStatus(p.id)}
+                            className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded border border-rose-200 transition flex items-center gap-1"
+                            title="Deactivate this product so it is hidden from member applications"
+                          >
+                            <Ban className="w-3 h-3" /> Deactivate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleProductStatus(p.id)}
+                            className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2 py-1 rounded border border-emerald-300 transition flex items-center gap-1"
+                            title="Activate this product for member applications"
+                          >
+                            <Check className="w-3 h-3" /> Activate
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => handleToggleProductStatus(p.id)}
-                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded border border-rose-200 transition flex items-center gap-1"
-                          title="Deactivate this product so it is hidden from member applications"
+                          onClick={() => handleDeleteProduct(p.id)}
+                          className="text-[10px] font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded border border-slate-200 hover:border-rose-200 transition flex items-center gap-1"
+                          title="Permanently delete this loan product from catalog"
                         >
-                          <Ban className="w-3 h-3" /> Deactivate
+                          <Trash2 className="w-3 h-3" /> Delete
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleProductStatus(p.id)}
-                          className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2.5 py-1 rounded border border-emerald-300 transition flex items-center gap-1"
-                          title="Activate this product for member applications"
-                        >
-                          <Check className="w-3 h-3" /> Activate
-                        </button>
-                      )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -5431,6 +5664,75 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </div>
+
+            {/* Loan Underwriting Applications Queue Selector */}
+            {loanApplications.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-emerald-700" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Loan Underwriting Queue ({loanApplications.length})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchLoanApplications}
+                    className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 hover:underline"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Refresh Applications
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {loanApplications.map((app) => {
+                    const isSelected = activeLoanApplication?.id === app.id;
+                    return (
+                      <button
+                        key={app.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveLoanApplication(app);
+                          setLoanStatus(app.status || 'SUBMITTED');
+                        }}
+                        className={`text-left p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
+                            : 'border-slate-200 bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-[11px] font-mono font-bold text-slate-700">{app.id}</span>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                            app.submissionSource === 'STAFF_WALK_IN'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {app.submissionSource === 'STAFF_WALK_IN' ? 'Walk-In' : 'Member Portal'}
+                          </span>
+                        </div>
+                        <div className="font-bold text-xs text-slate-900 truncate">{app.memberName}</div>
+                        <div className="text-[11px] text-slate-500 truncate">{app.productName}</div>
+                        <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
+                          <span className="font-black text-slate-900">₱{Number(app.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            app.status === 'DISBURSED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : app.status === 'APPROVED'
+                              ? 'bg-teal-100 text-teal-800'
+                              : app.status === 'CANCELLED'
+                              ? 'bg-rose-100 text-rose-800'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}>
+                            {app.status || 'SUBMITTED'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Live Co-Maker Status Banner (Production: Simulation Buttons Removed) */}
             {activeLoanApplication && loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (

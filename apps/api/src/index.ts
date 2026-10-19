@@ -2686,8 +2686,35 @@ app.get('/api/v1/loan-products', async (req: Request, res: Response) => {
       products = defaults;
     }
 
-    dbStore.loanProducts.set(tenantId, products);
-    res.json({ success: true, count: products.length, data: products });
+    // Deduplicate products by normalized product code, keeping the newest updated product
+    const seenCodes = new Set<string>();
+    const deduplicated: any[] = [];
+    const duplicateIdsToDelete: string[] = [];
+
+    // Sort newest first
+    products.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime());
+
+    for (const prod of products) {
+      const codeKey = (prod.code || prod.name || prod.id || '').trim().toUpperCase();
+      if (!seenCodes.has(codeKey)) {
+        seenCodes.add(codeKey);
+        deduplicated.push(prod);
+      } else {
+        if (prod.id) {
+          duplicateIdsToDelete.push(prod.id);
+        }
+      }
+    }
+
+    // Clean up duplicate documents from Firestore asynchronously
+    if (duplicateIdsToDelete.length > 0) {
+      for (const dupId of duplicateIdsToDelete) {
+        fsService.deleteLoanProduct(tenantId, dupId).catch(() => {});
+      }
+    }
+
+    dbStore.loanProducts.set(tenantId, deduplicated);
+    res.json({ success: true, count: deduplicated.length, data: deduplicated });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -2725,7 +2752,11 @@ app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'name, code, minAmount, maxAmount, and annualInterestRate are required.' });
     }
 
-    const prodId = id || `prod_${code.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+    const fsService = FirestoreCoopService.getInstance();
+    const existingProducts = await fsService.listLoanProducts(tenantId).catch(() => dbStore.loanProducts.get(tenantId) || []);
+    const matchingExisting = existingProducts.find((p: any) => p.code?.trim().toUpperCase() === code.trim().toUpperCase());
+
+    const prodId = id || matchingExisting?.id || `prod_${code.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
     const newProduct: any = {
       id: prodId,
       tenantId,
@@ -2750,22 +2781,23 @@ app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
       requiresCollateral: Boolean(requiresCollateral),
       isActive: isActive !== undefined ? Boolean(isActive) : (status !== 'INACTIVE'),
       status: status || (isActive !== false ? 'ACTIVE' : 'INACTIVE'),
-      createdAt: new Date().toISOString(),
+      createdAt: matchingExisting?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     // Save to Cloud Firestore
-    const fsService = FirestoreCoopService.getInstance();
     await fsService.saveLoanProduct(tenantId, newProduct);
 
-    // Update in-memory cache
-    const products = dbStore.loanProducts.get(tenantId) || [];
-    const existingIdx = products.findIndex((p: any) => p.id === newProduct.id || p.code === newProduct.code);
-    if (existingIdx >= 0) {
-      products[existingIdx] = newProduct;
-    } else {
-      products.unshift(newProduct);
+    // If there were other duplicate documents with this code under a different ID, delete them from Firestore
+    for (const p of existingProducts) {
+      if (p.id !== prodId && p.code?.trim().toUpperCase() === code.trim().toUpperCase()) {
+        fsService.deleteLoanProduct(tenantId, p.id).catch(() => {});
+      }
     }
+
+    // Update in-memory cache
+    const products = (dbStore.loanProducts.get(tenantId) || []).filter((p: any) => p.code?.trim().toUpperCase() !== code.trim().toUpperCase() && p.id !== prodId);
+    products.unshift(newProduct);
     dbStore.loanProducts.set(tenantId, products);
 
     res.status(201).json({
@@ -2840,117 +2872,209 @@ app.delete('/api/v1/loan-products/:id', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/v1/loans/apply', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const tenant = dbStore.tenants.get(tenantId);
-  const { memberId, productId, principalAmount, termMonths, paymentFrequency, coMakerMemberId } = req.body;
+app.post('/api/v1/loans/apply', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const tenant = dbStore.tenants.get(tenantId);
+    const {
+      memberId,
+      productId,
+      principalAmount,
+      amount,
+      termMonths,
+      paymentFrequency,
+      coMakerMemberId,
+      coMakerId,
+      coMakerName,
+      coMakerNo,
+      memberName,
+      memberNo,
+      memberClassification,
+      productName,
+      productCode,
+      settlement,
+      submissionSource,
+      submittedBy,
+      purpose,
+      advanceInterestOption,
+      succeedingMethod,
+      fixedMonthlyInstallment,
+    } = req.body;
 
-  if (!memberId || !productId || !principalAmount) {
-    return res.status(400).json({ success: false, error: 'memberId, productId, and principalAmount are required.' });
-  }
-
-  const products = dbStore.loanProducts.get(tenantId) || [];
-  const product = products.find((p) => p.id === productId);
-  if (!product) {
-    return res.status(404).json({ success: false, error: 'Loan product not found.' });
-  }
-
-  const members = dbStore.members.get(tenantId) || [];
-  const borrower = members.find((m) => m.id === memberId || m.memberNumber === memberId);
-  if (!borrower) {
-    return res.status(404).json({ success: false, error: 'Borrower member not found.' });
-  }
-
-  // Co-Maker Requirement & Member ID Validation
-  let coMakerEndorsement: any = undefined;
-  if (product.requiresCoMaker) {
-    if (!coMakerMemberId) {
-      return res.status(400).json({
-        success: false,
-        error: `Loan product '${product.name}' requires designating at least ${product.minCoMakers || 1} co-maker by Member ID.`,
-      });
+    const finalPrincipal = Number(principalAmount || amount);
+    if (!memberId || !productId || !finalPrincipal) {
+      return res.status(400).json({ success: false, error: 'memberId, productId, and principalAmount are required.' });
     }
 
-    const coMaker = members.find((m) => m.id === coMakerMemberId || m.memberNumber === coMakerMemberId);
-    if (!coMaker) {
-      return res.status(404).json({
-        success: false,
-        error: `Designated co-maker Member ID '${coMakerMemberId}' does not exist in this cooperative.`,
-      });
+    const fsService = FirestoreCoopService.getInstance();
+
+    // 1. Resolve Product
+    let products = dbStore.loanProducts.get(tenantId) || [];
+    if (products.length === 0) {
+      try {
+        products = await fsService.listLoanProducts(tenantId);
+        dbStore.loanProducts.set(tenantId, products);
+      } catch {}
+    }
+    let product: any = products.find((p: any) => p.id === productId || p.code?.toUpperCase() === String(productId).toUpperCase());
+    if (!product && productName) {
+      product = {
+        id: productId,
+        name: productName,
+        code: productCode || 'LOAN',
+        annualInterestRate: req.body.annualRate !== undefined ? Number(req.body.annualRate) : 0.12,
+        amortizationMethod: req.body.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+        serviceFeeRate: 0.015,
+        requiresCoMaker: Boolean(req.body.requiresCoMaker),
+        minCoMakers: req.body.minCoMakers || (req.body.requiresCoMaker ? 1 : 0),
+      };
+    } else if (!product) {
+      return res.status(404).json({ success: false, error: 'Loan product not found.' });
     }
 
-    if (coMaker.id === borrower.id) {
-      return res.status(400).json({
-        success: false,
-        error: 'Statutory violation: Borrower cannot designate themselves as their own co-maker.',
-      });
+    // 2. Resolve Borrower
+    let members = dbStore.members.get(tenantId) || [];
+    if (members.length === 0) {
+      try {
+        members = await fsService.listMembers(tenantId);
+        dbStore.members.set(tenantId, members);
+      } catch {}
+    }
+    let borrower: any = members.find((m: any) => m.id === memberId || m.memberNumber === memberId || m.email === memberId);
+    if (!borrower) {
+      borrower = {
+        id: memberId,
+        memberNumber: memberNo || (memberId.startsWith('mem_') ? 'MEM-2026-' + memberId.slice(4) : memberId),
+        firstName: memberName?.split(' ')[0] || 'Member',
+        lastName: memberName?.split(' ').slice(1).join(' ') || 'Borrower',
+        classification: memberClassification?.includes('Associate') ? 'ASSOCIATE' : 'REGULAR',
+      };
     }
 
-    coMakerEndorsement = {
-      coMakerMemberId: coMaker.id,
-      coMakerMemberNumber: coMaker.memberNumber,
-      coMakerName: `${coMaker.firstName} ${coMaker.lastName}`,
-      status: 'PENDING',
-      jointSolidaryAgreementAccepted: false,
+    // 3. Co-Maker Endorsement (if required)
+    let coMakerEndorsement: any = undefined;
+    const finalCoMakerId = coMakerMemberId || coMakerId;
+    if (product.requiresCoMaker) {
+      if (!finalCoMakerId) {
+        return res.status(400).json({
+          success: false,
+          error: `Loan product '${product.name}' requires designating at least ${product.minCoMakers || 1} co-maker by Member ID.`,
+        });
+      }
+
+      const coMaker = members.find((m: any) => m.id === finalCoMakerId || m.memberNumber === finalCoMakerId);
+      if (coMaker && coMaker.id === borrower.id) {
+        return res.status(400).json({
+          success: false,
+          error: 'Statutory violation: Borrower cannot designate themselves as their own co-maker.',
+        });
+      }
+
+      coMakerEndorsement = {
+        coMakerMemberId: coMaker ? coMaker.id : finalCoMakerId,
+        coMakerMemberNumber: coMaker ? coMaker.memberNumber : (coMakerNo || finalCoMakerId),
+        coMakerName: coMaker ? `${coMaker.firstName} ${coMaker.lastName}` : (coMakerName || `Co-Maker (${finalCoMakerId})`),
+        status: 'PENDING',
+        jointSolidaryAgreementAccepted: false,
+      };
+    }
+
+    const term = Number(termMonths || 12);
+    const annualRate = product.annualInterestRate !== undefined ? product.annualInterestRate : 0.12;
+    const scheduleData = AmortizationService.generateSchedule({
+      principalAmount: finalPrincipal,
+      annualInterestRate: annualRate,
+      termMonths: term,
+      paymentFrequency: paymentFrequency || 'MONTHLY',
+      method: product.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    });
+
+    const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
+    const feeCalc = MonetizationService.calculatePlatformFee(finalPrincipal, billingMode);
+    const coopServiceFee = Math.round(finalPrincipal * (product.serviceFeeRate || 0.015) * 100) / 100;
+    const netProceeds = finalPrincipal - feeCalc.grossFee - coopServiceFee;
+
+    const loanId = req.body.id || `loan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const loanNumber = req.body.loanNumber || `LN-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+
+    const initialStatus: LoanStatus = product.requiresCoMaker ? 'PENDING_CO_MAKER_ACCEPTANCE' : 'SUBMITTED';
+
+    const newLoan: any = {
+      id: loanId,
+      loanNumber,
+      memberId: borrower.id,
+      memberName: memberName || `${borrower.firstName} ${borrower.lastName}`,
+      memberNo: memberNo || borrower.memberNumber,
+      memberClassification: memberClassification || (borrower.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
+      productId: product.id,
+      productName: productName || product.name,
+      productCode: productCode || product.code,
+      principalAmount: finalPrincipal,
+      amount: finalPrincipal,
+      interestRateAnnual: annualRate,
+      annualRate,
+      termMonths: term,
+      paymentFrequency: paymentFrequency || 'MONTHLY',
+      amortizationMethod: product.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      status: initialStatus,
+      platformFee: feeCalc.grossFee,
+      coopServiceFee,
+      netProceedsDisbursed: netProceeds,
+      totalInterestExpected: scheduleData.totalInterest,
+      totalPayable: scheduleData.totalPayable,
+      balanceRemaining: finalPrincipal,
+      schedule: scheduleData.schedule,
+      coMaker: coMakerEndorsement,
+      coMakerId: coMakerEndorsement?.coMakerMemberId || finalCoMakerId,
+      coMakerName: coMakerEndorsement?.coMakerName || coMakerName,
+      coMakerNo: coMakerEndorsement?.coMakerMemberNumber || coMakerNo,
+      settlement: settlement || {
+        channel: 'BANK_TRANSFER',
+        institutionName: 'Land Bank of the Philippines',
+        accountNumber: '1092-8374-65',
+        accountName: memberName || `${borrower.firstName} ${borrower.lastName}`,
+      },
+      purpose: purpose || product.name,
+      advanceInterestOption: advanceInterestOption || product.advanceInterestOption || 'NONE',
+      succeedingMethod: succeedingMethod || product.succeedingMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      fixedMonthlyInstallment: fixedMonthlyInstallment !== undefined ? fixedMonthlyInstallment : true,
+      submissionSource: submissionSource || 'MEMBER_SELF_SERVICE',
+      submittedBy: submittedBy || `${memberName || borrower.firstName || 'Member'} (Member Self-Service)`,
+      submittedAt: req.body.submittedAt || new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
+
+    // Save to Cloud Firestore
+    try {
+      await fsService.saveLoan(tenantId, newLoan);
+    } catch (fsErr) {
+      console.warn('Failed to save loan to Firestore:', fsErr);
+    }
+
+    // Update in-memory cache
+    const loans = dbStore.loans.get(tenantId) || [];
+    const existingIdx = loans.findIndex((l: any) => l.id === newLoan.id || l.loanNumber === newLoan.loanNumber);
+    if (existingIdx >= 0) {
+      loans[existingIdx] = newLoan;
+    } else {
+      loans.unshift(newLoan);
+    }
+    dbStore.loans.set(tenantId, loans);
+
+    const statusMsg =
+      initialStatus === 'PENDING_CO_MAKER_ACCEPTANCE'
+        ? `Application created. Awaiting Co-Maker (${coMakerEndorsement.coMakerName}) acceptance via their account before loan triage.`
+        : `Loan application ${loanNumber} submitted successfully. Pending Loan Officer review.`;
+
+    res.status(201).json({
+      success: true,
+      message: statusMsg,
+      data: newLoan,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
-
-  const term = Number(termMonths || 12);
-  const scheduleData = AmortizationService.generateSchedule({
-    principalAmount: Number(principalAmount),
-    annualInterestRate: product.annualInterestRate,
-    termMonths: term,
-    paymentFrequency: paymentFrequency || 'MONTHLY',
-    method: product.amortizationMethod,
-  });
-
-  const billingMode = tenant?.billingMode || 'PLATFORM_ESCROW';
-  const feeCalc = MonetizationService.calculatePlatformFee(Number(principalAmount), billingMode);
-  const coopServiceFee = Math.round(Number(principalAmount) * product.serviceFeeRate * 100) / 100;
-  const netProceeds = Number(principalAmount) - feeCalc.grossFee - coopServiceFee;
-
-  const loanId = `loan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const loanNumber = `LN-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
-
-  const initialStatus: LoanStatus = product.requiresCoMaker ? 'PENDING_CO_MAKER_ACCEPTANCE' : 'SUBMITTED';
-
-  const newLoan: Loan = {
-    id: loanId,
-    loanNumber,
-    memberId: borrower.id,
-    productId,
-    principalAmount: Number(principalAmount),
-    interestRateAnnual: product.annualInterestRate,
-    termMonths: term,
-    paymentFrequency: paymentFrequency || 'MONTHLY',
-    amortizationMethod: product.amortizationMethod,
-    status: initialStatus,
-    platformFee: feeCalc.grossFee,
-    coopServiceFee,
-    netProceedsDisbursed: netProceeds,
-    totalInterestExpected: scheduleData.totalInterest,
-    totalPayable: scheduleData.totalPayable,
-    balanceRemaining: Number(principalAmount),
-    schedule: scheduleData.schedule,
-    coMaker: coMakerEndorsement,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  const loans = dbStore.loans.get(tenantId) || [];
-  loans.push(newLoan);
-  dbStore.loans.set(tenantId, loans);
-
-  const statusMsg =
-    initialStatus === 'PENDING_CO_MAKER_ACCEPTANCE'
-      ? `Application created. Awaiting Co-Maker (${coMakerEndorsement.coMakerName}) acceptance via their account before loan triage.`
-      : `Loan application ${loanNumber} submitted successfully. Pending Loan Officer review.`;
-
-  res.status(201).json({
-    success: true,
-    message: statusMsg,
-    data: newLoan,
-  });
 });
 
 // ==========================================
@@ -3064,23 +3188,31 @@ app.post('/api/v1/co-maker/endorse', (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/v1/loans/:id/review', (req: Request, res: Response) => {
+app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
   const { remarks, approved } = req.body;
+  const fsService = FirestoreCoopService.getInstance();
 
-  const loans = dbStore.loans.get(tenantId) || [];
-  const loan = loans.find((l) => l.id === loanId);
+  let loans = dbStore.loans.get(tenantId) || [];
+  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  if (!loan) {
+    try {
+      loan = (await fsService.getLoan(tenantId, loanId)) as any;
+    } catch {}
+  }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
   if (approved === false) {
     loan.status = 'REJECTED';
     loan.updatedAt = new Date().toISOString();
+    try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
     return res.json({ success: true, message: 'Loan rejected by Loan Officer.', loan });
   }
 
   loan.status = 'UNDER_CREDIT_REVIEW';
   loan.updatedAt = new Date().toISOString();
+  try { await fsService.updateLoanStatus(tenantId, loan.id, 'UNDER_CREDIT_REVIEW', { updatedAt: loan.updatedAt }); } catch {}
 
   res.json({
     success: true,
@@ -3090,18 +3222,25 @@ app.post('/api/v1/loans/:id/review', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/v1/loans/:id/committee-approve', (req: Request, res: Response) => {
+app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
   const { approved } = req.body;
+  const fsService = FirestoreCoopService.getInstance();
 
-  const loans = dbStore.loans.get(tenantId) || [];
-  const loan = loans.find((l) => l.id === loanId);
+  let loans = dbStore.loans.get(tenantId) || [];
+  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  if (!loan) {
+    try {
+      loan = (await fsService.getLoan(tenantId, loanId)) as any;
+    } catch {}
+  }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
   if (approved === false) {
     loan.status = 'REJECTED';
     loan.updatedAt = new Date().toISOString();
+    try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
     return res.json({ success: true, message: 'Loan rejected by Credit Committee.', loan });
   }
 
@@ -3112,6 +3251,7 @@ app.post('/api/v1/loans/:id/committee-approve', (req: Request, res: Response) =>
     loan.status = 'APPROVED';
   }
   loan.updatedAt = new Date().toISOString();
+  try { await fsService.updateLoanStatus(tenantId, loan.id, loan.status, { updatedAt: loan.updatedAt }); } catch {}
 
   res.json({
     success: true,
@@ -3120,23 +3260,31 @@ app.post('/api/v1/loans/:id/committee-approve', (req: Request, res: Response) =>
   });
 });
 
-app.post('/api/v1/loans/:id/bod-approve', (req: Request, res: Response) => {
+app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
   const { approved } = req.body;
+  const fsService = FirestoreCoopService.getInstance();
 
-  const loans = dbStore.loans.get(tenantId) || [];
-  const loan = loans.find((l) => l.id === loanId);
+  let loans = dbStore.loans.get(tenantId) || [];
+  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  if (!loan) {
+    try {
+      loan = (await fsService.getLoan(tenantId, loanId)) as any;
+    } catch {}
+  }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
   if (approved === false) {
     loan.status = 'REJECTED';
     loan.updatedAt = new Date().toISOString();
+    try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
     return res.json({ success: true, message: 'Loan rejected by Board of Directors.', loan });
   }
 
   loan.status = 'APPROVED';
   loan.updatedAt = new Date().toISOString();
+  try { await fsService.updateLoanStatus(tenantId, loan.id, 'APPROVED', { updatedAt: loan.updatedAt }); } catch {}
 
   res.json({
     success: true,
@@ -3199,19 +3347,53 @@ app.post('/api/v1/loans/calculate', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/v1/loans', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const loans = dbStore.loans.get(tenantId) || [];
-  res.json({ success: true, count: loans.length, data: loans });
+app.get('/api/v1/loans', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const fsService = FirestoreCoopService.getInstance();
+    let loans: any[] = [];
+    try {
+      loans = await fsService.listLoans(tenantId);
+    } catch (fsErr) {
+      console.warn('Firestore listLoans fallback:', fsErr);
+    }
+
+    if (!loans || loans.length === 0) {
+      loans = dbStore.loans.get(tenantId) || [];
+    } else {
+      // Merge with in-memory store
+      const memLoans = dbStore.loans.get(tenantId) || [];
+      const mergedMap = new Map<string, any>();
+      for (const l of loans) mergedMap.set(l.id, l);
+      for (const m of memLoans) {
+        if (!mergedMap.has(m.id)) mergedMap.set(m.id, m);
+      }
+      loans = Array.from(mergedMap.values());
+      dbStore.loans.set(tenantId, loans);
+    }
+
+    // Sort newest first
+    loans.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    res.json({ success: true, count: loans.length, data: loans });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.post('/api/v1/loans/:id/disburse', (req: Request, res: Response) => {
+app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const tenant = dbStore.tenants.get(tenantId)!;
   const loanId = req.params.id;
+  const fsService = FirestoreCoopService.getInstance();
 
   const loans = dbStore.loans.get(tenantId) || [];
-  const loan = loans.find((l) => l.id === loanId);
+  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  if (!loan) {
+    try {
+      loan = (await fsService.getLoan(tenantId, loanId)) as any;
+    } catch {}
+  }
 
   if (!loan) {
     return res.status(404).json({ success: false, error: 'Loan not found' });
@@ -3228,6 +3410,18 @@ app.post('/api/v1/loans/:id/disburse', (req: Request, res: Response) => {
   loan.status = 'DISBURSED';
   loan.disbursedAt = new Date().toISOString();
   loan.disbursementReference = `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
+
+  try {
+    await fsService.updateLoanStatus(tenantId, loan.id, 'DISBURSED', {
+      platformFee: loan.platformFee,
+      netProceedsDisbursed: loan.netProceedsDisbursed,
+      disbursedAt: loan.disbursedAt,
+      disbursementReference: loan.disbursementReference,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (fsErr) {
+    console.warn('Firestore updateLoanStatus error on disburse:', fsErr);
+  }
 
   // 2. Generate 12% Output VAT Official Invoice
   const invoice = MonetizationService.generatePlatformInvoice({

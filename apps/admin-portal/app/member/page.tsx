@@ -432,8 +432,21 @@ export default function MemberPortalPage() {
       .catch(() => {});
   }, []);
 
-  // Show only ACTIVE products to members for new loan applications
-  const activeLoanProducts = loanProducts.filter((p) => p.isActive !== false && p.status !== 'INACTIVE');
+  // Show only ACTIVE products to members for new loan applications, deduplicated by code/name
+  const activeLoanProducts = (() => {
+    const rawActive = loanProducts.filter((p) => p.isActive !== false && p.status !== 'INACTIVE');
+    const seen = new Set<string>();
+    const deduplicated: any[] = [];
+    for (const p of rawActive) {
+      const key = (p.code || p.name || p.id || '').trim().toUpperCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(p);
+      }
+    }
+    return deduplicated;
+  })();
+
   const selectedProduct =
     activeLoanProducts.find((p) => p.id === selectedProductId) ||
     activeLoanProducts[0] ||
@@ -448,6 +461,8 @@ export default function MemberPortalPage() {
   const [coMaker, setCoMaker] = useState<string>('Co-Maker Member (MEM-2026-0002)');
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [applicationSubmitted, setApplicationSubmitted] = useState<boolean>(false);
+  const [submittedLoanId, setSubmittedLoanId] = useState<string>('');
+  const [isSubmittingLoan, setIsSubmittingLoan] = useState<boolean>(false);
 
   // Loan Settlement & Disbursement Details State
   const [settlementChannel, setSettlementChannel] = useState<'BANK_TRANSFER' | 'E_WALLET' | 'CASH_COUNTER'>('BANK_TRANSFER');
@@ -1838,17 +1853,32 @@ export default function MemberPortalPage() {
 
             {applicationSubmitted ? (
               <div className="p-8 text-center bg-emerald-50 border border-emerald-200 rounded-2xl space-y-4">
-                <div className="w-16 h-16 bg-amber-500 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
-                  <Clock className="w-8 h-8" />
+                <div className={`w-16 h-16 ${requiresCoMaker ? 'bg-amber-500' : 'bg-emerald-600'} text-white rounded-full flex items-center justify-center mx-auto shadow-md`}>
+                  {requiresCoMaker ? <Clock className="w-8 h-8" /> : <CheckCircle2 className="w-8 h-8" />}
                 </div>
-                <h3 className="text-lg font-bold text-slate-900">Application Awaiting Co-Maker Endorsement</h3>
+                <div>
+                  <div className="text-[11px] font-mono font-bold text-slate-500 bg-white inline-block px-2.5 py-0.5 rounded border border-slate-200 mb-2">
+                    Application #{submittedLoanId || 'LN-2026-PENDING'}
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    {requiresCoMaker ? 'Application Awaiting Co-Maker Endorsement' : 'Loan Application Submitted Successfully!'}
+                  </h3>
+                </div>
                 <p className="text-xs text-slate-600 max-w-md mx-auto">
-                  Your application for <strong>₱{loanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong> has been created with status:{' '}
-                  <span className="font-mono bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-bold">
-                    PENDING_CO_MAKER_ACCEPTANCE
+                  Your application for <strong>₱{loanAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong> has been recorded with status:{' '}
+                  <span className={`font-mono ${requiresCoMaker ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'} px-2 py-0.5 rounded font-bold`}>
+                    {requiresCoMaker ? 'PENDING_CO_MAKER_ACCEPTANCE' : 'SUBMITTED'}
                   </span>.
                   <br /><br />
-                  Co-maker <strong>{coMaker || `Member (${coMakerMemberIdInput})`}</strong> must log into their own account and accept the Joint & Solidary Liability Undertaking before this application can be pushed to the Loan Officer review pipeline.
+                  {requiresCoMaker ? (
+                    <>
+                      Co-maker <strong>{coMaker || `Member (${coMakerMemberIdInput})`}</strong> must log into their own account and accept the Joint &amp; Solidary Liability Undertaking before this application can be pushed to the Loan Officer review pipeline.
+                    </>
+                  ) : (
+                    <>
+                      Your application has been received and routed to the cooperative Loan Origination System (LOS). The Loan Officer will review your requirements for Credit Committee triage.
+                    </>
+                  )}
                 </p>
 
                 {submittedSettlementRecord && (
@@ -2305,8 +2335,8 @@ export default function MemberPortalPage() {
 
                   <button
                     type="button"
-                    disabled={!agreedToTerms || Boolean(coMakerError)}
-                    onClick={() => {
+                    disabled={!agreedToTerms || Boolean(coMakerError) || isSubmittingLoan}
+                    onClick={async () => {
                       if (requiresCoMaker) {
                         if (!coMakerMemberIdInput.trim()) {
                           setCoMakerError('Co-maker Member ID is required.');
@@ -2317,17 +2347,92 @@ export default function MemberPortalPage() {
                           return;
                         }
                       }
-                      setSubmittedSettlementRecord({
+
+                      setIsSubmittingLoan(true);
+
+                      const settlementRecord = {
                         channel: settlementChannel,
                         institutionName: settlementChannel === 'CASH_COUNTER' ? 'Cooperative Branch Cashier Counter' : settlementInstitution,
                         accountNumber: settlementChannel === 'CASH_COUNTER' ? 'OTC-CASHIER-PICKUP' : settlementAccountNumber,
                         accountName: settlementAccountName || currentMember.name,
-                      });
-                      setApplicationSubmitted(true);
+                      };
+                      setSubmittedSettlementRecord(settlementRecord);
+
+                      const tenantInfo = resolveTenantCoop();
+                      const newLoanId = `LN-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+                      const initialStatus = requiresCoMaker ? 'PENDING_CO_MAKER_ACCEPTANCE' : 'SUBMITTED';
+
+                      const newLoanApp: any = {
+                        id: newLoanId,
+                        loanNumber: newLoanId,
+                        memberId: currentMember.id,
+                        memberName: currentMember.name,
+                        memberNo: currentMember.memberNumber,
+                        memberClassification: currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member',
+                        productId: selectedProduct.id,
+                        productName: selectedProduct.name,
+                        productCode: selectedProduct.code,
+                        annualRate: annualRate,
+                        interestRateAnnual: annualRate,
+                        termMonths: loanTerm,
+                        principalAmount: loanAmount,
+                        amount: loanAmount,
+                        purpose: selectedProduct.name,
+                        calculationBasis: loanCalculationBasis,
+                        monthlyAmortization: monthlyInstallment,
+                        coMakerId: requiresCoMaker ? coMakerMemberIdInput.trim() : undefined,
+                        coMakerName: requiresCoMaker ? (coMaker || `Member (${coMakerMemberIdInput.trim()})`) : undefined,
+                        coMakerNo: requiresCoMaker ? coMakerMemberIdInput.trim() : undefined,
+                        settlement: settlementRecord,
+                        advanceInterestOption: selectedProduct.advanceInterestOption || 'NONE',
+                        succeedingMethod: selectedProduct.succeedingMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+                        fixedMonthlyInstallment: selectedProduct.fixedMonthlyInstallment !== false,
+                        submissionSource: 'MEMBER_SELF_SERVICE',
+                        submittedBy: `${currentMember.name} (Member Self-Service)`,
+                        submittedAt: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                        status: initialStatus,
+                        coopSlug: tenantInfo.slug,
+                      };
+
+                      setSubmittedLoanId(newLoanId);
+
+                      // 1. Immediately persist to localStorage for cross-portal sharing
+                      try {
+                        const storageKey = `flexcoop_loan_applications_${tenantInfo.slug}`;
+                        const existingRaw = localStorage.getItem(storageKey);
+                        const existingApps = existingRaw ? JSON.parse(existingRaw) : [];
+                        const updatedApps = [newLoanApp, ...(Array.isArray(existingApps) ? existingApps.filter((a: any) => a.id !== newLoanId) : [])];
+                        localStorage.setItem(storageKey, JSON.stringify(updatedApps));
+                        localStorage.setItem(`flexcoop_active_loan_application_${tenantInfo.slug}`, JSON.stringify(newLoanApp));
+                      } catch {}
+
+                      // 2. Submit to backend API & Firestore
+                      try {
+                        await fetch(`${getApiBaseUrl()}/loans/apply?coop=${tenantInfo.slug}`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'x-tenant-slug': tenantInfo.slug,
+                          },
+                          body: JSON.stringify(newLoanApp),
+                        });
+                      } catch (err) {
+                        console.warn('Loan submission API sync warning:', err);
+                      } finally {
+                        setIsSubmittingLoan(false);
+                        setApplicationSubmitted(true);
+                      }
                     }}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 rounded-xl shadow-sm transition-colors"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2"
                   >
-                    Submit Loan Application
+                    {isSubmittingLoan ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Submitting Application...</span>
+                      </>
+                    ) : (
+                      <span>Submit Loan Application</span>
+                    )}
                   </button>
                 </div>
 
