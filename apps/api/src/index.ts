@@ -3408,14 +3408,43 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
     return res.json({ success: true, message: 'Loan rejected by Credit Committee.', loan });
   }
 
+  const anyLoanCom = loan as any;
+  const comPrincipal = Number(anyLoanCom.principalAmount || anyLoanCom.amount || 0);
+  if (comPrincipal > 0 && (!Array.isArray(loan.schedule) || loan.schedule.length === 0 || !loan.schedule[0]?.totalInstallment)) {
+    const scheduleData = AmortizationService.generateSchedule({
+      principalAmount: comPrincipal,
+      annualInterestRate: Number(anyLoanCom.annualRate ?? anyLoanCom.interestRateAnnual ?? 0.12),
+      termMonths: Number(anyLoanCom.termMonths || anyLoanCom.term || 12),
+      termWeeks: anyLoanCom.termWeeks ? Number(anyLoanCom.termWeeks) : undefined,
+      termUnit: anyLoanCom.termUnit || 'MONTHS',
+      weeklyPaymentFrequency: anyLoanCom.weeklyPaymentFrequency || 'EVERY_WEEK',
+      paymentFrequency: anyLoanCom.paymentFrequency || (anyLoanCom.termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
+      method: anyLoanCom.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      firstDueDate: anyLoanCom.firstDueDate,
+      mandatorySharePaymentTreatment: anyLoanCom.mandatorySharePurchaseEnabled ? anyLoanCom.mandatorySharePaymentTreatment : undefined,
+      mandatoryShareAmount: Number(anyLoanCom.mandatoryShareAmount || 0),
+    });
+    loan.schedule = scheduleData.schedule;
+    loan.totalInterestExpected = scheduleData.totalInterest;
+    loan.totalPayable = scheduleData.totalPayable;
+  }
+
   // If loan >= 100,000, requires BOD approval; otherwise approved for disbursement
-  if (loan.principalAmount >= 100000) {
+  if (comPrincipal >= 100000) {
     loan.status = 'BOD_APPROVAL';
   } else {
     loan.status = 'APPROVED';
   }
   loan.updatedAt = new Date().toISOString();
-  try { await fsService.updateLoanStatus(tenantId, loan.id, loan.status, { updatedAt: loan.updatedAt }); } catch {}
+  try {
+    await fsService.updateLoanStatus(tenantId, loan.id, loan.status, {
+      schedule: loan.schedule,
+      totalInterestExpected: loan.totalInterestExpected,
+      totalPayable: loan.totalPayable,
+      updatedAt: loan.updatedAt,
+    });
+    await fsService.saveLoan(tenantId, loan);
+  } catch {}
   const idxCom = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
   if (idxCom >= 0) loans[idxCom] = loan; else loans.unshift(loan);
   dbStore.loans.set(tenantId, loans);
@@ -3456,9 +3485,38 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
     return res.json({ success: true, message: 'Loan rejected by Board of Directors.', loan });
   }
 
+  const anyLoanBod = loan as any;
+  const bodPrincipal = Number(anyLoanBod.principalAmount || anyLoanBod.amount || 0);
+  if (bodPrincipal > 0 && (!Array.isArray(loan.schedule) || loan.schedule.length === 0 || !loan.schedule[0]?.totalInstallment)) {
+    const scheduleData = AmortizationService.generateSchedule({
+      principalAmount: bodPrincipal,
+      annualInterestRate: Number(anyLoanBod.annualRate ?? anyLoanBod.interestRateAnnual ?? 0.12),
+      termMonths: Number(anyLoanBod.termMonths || anyLoanBod.term || 12),
+      termWeeks: anyLoanBod.termWeeks ? Number(anyLoanBod.termWeeks) : undefined,
+      termUnit: anyLoanBod.termUnit || 'MONTHS',
+      weeklyPaymentFrequency: anyLoanBod.weeklyPaymentFrequency || 'EVERY_WEEK',
+      paymentFrequency: anyLoanBod.paymentFrequency || (anyLoanBod.termUnit === 'WEEKS' ? 'WEEKLY' : 'MONTHLY'),
+      method: anyLoanBod.amortizationMethod || 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      firstDueDate: anyLoanBod.firstDueDate,
+      mandatorySharePaymentTreatment: anyLoanBod.mandatorySharePurchaseEnabled ? anyLoanBod.mandatorySharePaymentTreatment : undefined,
+      mandatoryShareAmount: Number(anyLoanBod.mandatoryShareAmount || 0),
+    });
+    loan.schedule = scheduleData.schedule;
+    loan.totalInterestExpected = scheduleData.totalInterest;
+    loan.totalPayable = scheduleData.totalPayable;
+  }
+
   loan.status = 'APPROVED';
   loan.updatedAt = new Date().toISOString();
-  try { await fsService.updateLoanStatus(tenantId, loan.id, 'APPROVED', { updatedAt: loan.updatedAt }); } catch {}
+  try {
+    await fsService.updateLoanStatus(tenantId, loan.id, 'APPROVED', {
+      schedule: loan.schedule,
+      totalInterestExpected: loan.totalInterestExpected,
+      totalPayable: loan.totalPayable,
+      updatedAt: loan.updatedAt,
+    });
+    await fsService.saveLoan(tenantId, loan);
+  } catch {}
   const idxBod = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
   if (idxBod >= 0) loans[idxBod] = loan; else loans.unshift(loan);
   dbStore.loans.set(tenantId, loans);

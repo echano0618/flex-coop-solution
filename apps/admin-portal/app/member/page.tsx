@@ -254,40 +254,106 @@ function getStatusBadgeClass(status: string): string {
   }
 }
 
+function pickNumber(...values: any[]): number {
+  for (const v of values) {
+    if (v === undefined || v === null || v === '') continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+function formatScheduleDate(value: any): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toISOString().slice(0, 10);
+}
+
 function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
-  if (loan?.schedule && Array.isArray(loan.schedule) && loan.schedule.length > 0) {
-    return loan.schedule.map((item: any, idx: number) => ({
-      seq: item.period || item.seq || idx + 1,
-      due: item.dueDate || item.due || item.paymentDate || `2026-${String((idx + 2) % 12 || 12).padStart(2, '0')}-20`,
-      pr: item.principalPayment !== undefined ? item.principalPayment : (item.principal || item.pr || 0),
-      in: item.interestPayment !== undefined ? item.interestPayment : (item.interest || item.in || 0),
-      tot: item.totalPayment !== undefined ? item.totalPayment : (item.monthlyInstallment || item.tot || 0),
-      bal: item.remainingBalance !== undefined ? item.remainingBalance : (item.bal || 0),
-      status: item.status || (idx === 0 ? 'DUE_NOW' : 'UPCOMING'),
-    }));
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  // 1. Use the persisted schedule from the API (AmortizationScheduleItem) when it carries real values
+  if (Array.isArray(loan?.schedule) && loan.schedule.length > 0) {
+    let dueNowAssigned = false;
+    const mapped = loan.schedule.map((item: any, idx: number) => {
+      const pr = pickNumber(item.principalAmount, item.principalPayment, item.principal, item.pr);
+      const inn = pickNumber(item.interestAmount, item.interestPayment, item.interest, item.in);
+      const share = pickNumber(item.mandatoryShareAmount);
+      const tot = pickNumber(item.totalInstallment, item.totalPayment, item.monthlyInstallment, item.tot) || pr + inn + share;
+      const bal = pickNumber(item.endingBalance, item.remainingBalance, item.bal);
+      const isPaid = item.isPaid === true || item.status === 'PAID';
+      let status = isPaid ? 'PAID' : 'UPCOMING';
+      if (!isPaid && !dueNowAssigned) {
+        status = 'DUE_NOW';
+        dueNowAssigned = true;
+      }
+      return {
+        seq: item.installmentNumber || item.period || item.seq || idx + 1,
+        due: formatScheduleDate(item.dueDate || item.due || item.paymentDate),
+        pr: r2(pr),
+        in: r2(inn),
+        tot: r2(tot),
+        bal: r2(bal),
+        status,
+      };
+    });
+    const hasValues = mapped.some((r: any) => r.pr > 0 || r.in > 0 || r.tot > 0);
+    if (hasValues) return mapped;
   }
 
-  const principal = Number(loan?.amount || loan?.principalAmount || currentBalance || 50000);
-  const term = Number(loan?.termMonths || loan?.term || 12);
-  const annualRate = Number(loan?.annualRate || loan?.interestRateAnnual || 0.12);
-  const monthlyRate = annualRate / 12;
-  const monthlyPayment = (principal * (monthlyRate * Math.pow(1 + monthlyRate, term))) / (Math.pow(1 + monthlyRate, term) - 1);
+  // 2. Recompute from the loan terms (supports monthly and weekly products)
+  const principal = pickNumber(loan?.principalAmount, loan?.amount, loan?.requestedAmount, currentBalance) || 50000;
+  const annualRate = pickNumber(loan?.annualRate, loan?.interestRateAnnual, loan?.annualInterestRate) || 0.12;
+  const isWeekly = loan?.termUnit === 'WEEKS' || loan?.paymentFrequency === 'WEEKLY';
+  const everyOtherWeek = loan?.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
+
+  let periods: number;
+  let periodRate: number;
+  let periodDays = 0;
+  if (isWeekly) {
+    const weeks = pickNumber(loan?.termWeeks, loan?.term) || 12;
+    const step = everyOtherWeek ? 2 : 1;
+    periods = Math.max(1, Math.ceil(weeks / step));
+    periodRate = (annualRate / 52) * step;
+    periodDays = 7 * step;
+  } else {
+    periods = Math.max(1, pickNumber(loan?.termMonths, loan?.term) || 12);
+    periodRate = annualRate / 12;
+  }
+
+  const isStraightLine = String(loan?.amortizationMethod || '').startsWith('STRAIGHT');
+  const levelPayment =
+    periodRate > 0
+      ? (principal * periodRate * Math.pow(1 + periodRate, periods)) / (Math.pow(1 + periodRate, periods) - 1)
+      : principal / periods;
+
+  const start = new Date(loan?.firstDueDate || loan?.disbursedAt || loan?.approvedAt || loan?.createdAt || Date.now());
+  const firstDueGiven = Boolean(loan?.firstDueDate);
 
   let remaining = principal;
   const rows = [];
-  for (let i = 1; i <= term; i++) {
-    const interest = remaining * monthlyRate;
-    const pr = i === term ? remaining : monthlyPayment - interest;
+  for (let i = 1; i <= periods; i++) {
+    const interest = isStraightLine ? principal * periodRate : remaining * periodRate;
+    let pr = isStraightLine ? principal / periods : levelPayment - interest;
+    if (i === periods) pr = remaining;
     remaining = Math.max(0, remaining - pr);
-    const m = ((i + 1) % 12) + 1;
-    const y = 2026 + Math.floor((i + 1) / 12);
+
+    const due = new Date(start);
+    const offset = firstDueGiven ? i - 1 : i;
+    if (isWeekly) {
+      due.setDate(due.getDate() + periodDays * offset);
+    } else {
+      due.setMonth(due.getMonth() + offset);
+    }
+
     rows.push({
       seq: i,
-      due: `${y}-${String(m).padStart(2, '0')}-20`,
-      pr: Math.round(pr * 100) / 100,
-      in: Math.round(interest * 100) / 100,
-      tot: Math.round((pr + interest) * 100) / 100,
-      bal: Math.round(remaining * 100) / 100,
+      due: formatScheduleDate(due),
+      pr: r2(pr),
+      in: r2(interest),
+      tot: r2(pr + interest),
+      bal: r2(remaining),
       status: i === 1 ? 'DUE_NOW' : 'UPCOMING',
     });
   }
@@ -1165,11 +1231,18 @@ export default function MemberPortalPage() {
 
     setMemberLoanApplications(filtered);
 
-    // Synchronize loan balance with any active disbursed loans
-    const disbursed = filtered.filter((app: any) => app.status === 'DISBURSED');
-    if (disbursed.length > 0) {
-      const totalBalance = disbursed.reduce((sum: number, loan: any) => {
-        const bal = loan.balanceRemaining !== undefined ? Number(loan.balanceRemaining) : Number(loan.amount || 0);
+    // Synchronize loan balance with any active disbursed or approved loans
+    const activeLoans = filtered.filter((app: any) =>
+      ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'].includes(
+        String(app.status || '').toUpperCase()
+      )
+    );
+    if (activeLoans.length > 0) {
+      const totalBalance = activeLoans.reduce((sum: number, loan: any) => {
+        const bal =
+          loan.balanceRemaining !== undefined && Number(loan.balanceRemaining) > 0
+            ? Number(loan.balanceRemaining)
+            : Number(loan.principalAmount || loan.amount || 0);
         return sum + bal;
       }, 0);
       setLoanBalance(totalBalance);
@@ -2392,7 +2465,10 @@ export default function MemberPortalPage() {
               {passbookSubTab === 'loan' && (
                 <div className="p-6 space-y-6">
                   {(() => {
-                    const activeDisbursedLoan = memberLoanApplications.find((app: any) => app.status === 'DISBURSED');
+                    const ACTIVE_LOAN_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
+                    const activeDisbursedLoan =
+                      memberLoanApplications.find((app: any) => app.status === 'DISBURSED') ||
+                      memberLoanApplications.find((app: any) => ACTIVE_LOAN_STATUSES.includes(String(app.status || '').toUpperCase()));
                     const hasActiveLoan = Boolean(activeDisbursedLoan || loanBalance > 0 || (isTestTenant && currentPersona === 'maria' && loanBalance > 0));
 
                     if (!hasActiveLoan) {
@@ -2417,16 +2493,57 @@ export default function MemberPortalPage() {
                       );
                     }
 
-                    const effectiveBal = loanBalance > 0 ? loanBalance : Number(activeDisbursedLoan?.balanceRemaining ?? activeDisbursedLoan?.amount ?? 50000);
+                    const effectiveBal =
+                      pickNumber(
+                        activeDisbursedLoan?.balanceRemaining,
+                        activeDisbursedLoan?.principalAmount,
+                        activeDisbursedLoan?.amount,
+                        loanBalance
+                      ) || 50000;
                     const loanScheduleRows = getLoanScheduleRows(activeDisbursedLoan, effectiveBal);
                     const defaultMariaLedger = (isTestTenant && currentPersona === 'maria' && !activeDisbursedLoan) ? mariaLoanLedger : [];
                     const loanLedgerRows = getLoanLedgerTransactions(activeDisbursedLoan, effectiveBal, defaultMariaLedger);
-                    const monthlyInstallment = activeDisbursedLoan?.monthlyAmortization || activeDisbursedLoan?.monthlyPayment || (loanScheduleRows[0]?.tot ?? 4442.44);
-                    const loanTitle = `${activeDisbursedLoan?.productName || 'Regular Member Loan'} (${activeDisbursedLoan?.termMonths || activeDisbursedLoan?.term || 12} Mos @ ${activeDisbursedLoan?.interestRateAnnual ? (activeDisbursedLoan.interestRateAnnual * 100).toFixed(1) : '12.0'}% p.a.)`;
+                    const isWeeklyLoan =
+                      activeDisbursedLoan?.termUnit === 'WEEKS' ||
+                      activeDisbursedLoan?.paymentFrequency === 'WEEKLY' ||
+                      activeDisbursedLoan?.paymentFrequency === 'BI_WEEKLY';
+                    const isBiWeeklyLoan =
+                      isWeeklyLoan &&
+                      (activeDisbursedLoan?.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ||
+                        activeDisbursedLoan?.paymentFrequency === 'BI_WEEKLY');
+                    const installmentLabel = isWeeklyLoan
+                      ? isBiWeeklyLoan
+                        ? 'Bi-Weekly Installment'
+                        : 'Weekly Installment'
+                      : 'Monthly Installment';
+                    const monthlyInstallment =
+                      (loanScheduleRows[0]?.tot > 0 ? loanScheduleRows[0].tot : 0) ||
+                      pickNumber(
+                        activeDisbursedLoan?.periodicInstallment,
+                        activeDisbursedLoan?.monthlyAmortization,
+                        activeDisbursedLoan?.monthlyPayment
+                      ) ||
+                      4442.44;
+                    const annualRateVal =
+                      pickNumber(
+                        activeDisbursedLoan?.annualRate,
+                        activeDisbursedLoan?.interestRateAnnual,
+                        activeDisbursedLoan?.annualInterestRate
+                      ) || 0.12;
+                    const termLabel = isWeeklyLoan
+                      ? `${pickNumber(activeDisbursedLoan?.termWeeks, activeDisbursedLoan?.term) || 12} Wks`
+                      : `${pickNumber(activeDisbursedLoan?.termMonths, activeDisbursedLoan?.term) || 12} Mos`;
+                    const loanTitle = `${activeDisbursedLoan?.productName || 'Regular Member Loan'} (${termLabel} @ ${(annualRateVal * 100).toFixed(1)}% p.a.)`;
                     const loanRef = activeDisbursedLoan?.loanNumber || activeDisbursedLoan?.id || 'LN-2026-00001';
-                    const disbDateFormatted = activeDisbursedLoan?.disbursedAt
-                      ? new Date(activeDisbursedLoan.disbursedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-                      : 'Jan 20, 2026';
+                    const rawDisbDate =
+                      activeDisbursedLoan?.disbursedAt ||
+                      activeDisbursedLoan?.approvedAt ||
+                      activeDisbursedLoan?.updatedAt ||
+                      activeDisbursedLoan?.createdAt;
+                    const disbDateFormatted = rawDisbDate
+                      ? new Date(rawDisbDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : 'Oct 19, 2026';
+                    const statusDateLabel = activeDisbursedLoan?.status === 'DISBURSED' ? 'Disbursed' : 'Approved';
 
                     return (
                       <>
@@ -2440,13 +2557,13 @@ export default function MemberPortalPage() {
                               <strong className="text-sm text-slate-900">{loanTitle}</strong>
                             </div>
                             <p className="text-slate-600 mt-1">
-                              Disbursed: {disbDateFormatted} • Diminishing Balance Equal Monthly Installment
+                              {statusDateLabel}: {disbDateFormatted} • Diminishing Balance Equal {installmentLabel}
                             </p>
                           </div>
 
                           <div className="flex items-center gap-4">
                             <div>
-                              <div className="text-[10px] text-slate-500 uppercase font-bold">Monthly Installment</div>
+                              <div className="text-[10px] text-slate-500 uppercase font-bold">{installmentLabel}</div>
                               <div className="text-base font-black text-indigo-900 font-mono">
                                 ₱{Number(monthlyInstallment).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </div>
@@ -2505,7 +2622,7 @@ export default function MemberPortalPage() {
                             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                               Full Diminishing Balance Amortization Schedule
                             </h3>
-                            <span className="text-[11px] text-slate-500 font-medium">Equal Monthly Installment</span>
+                            <span className="text-[11px] text-slate-500 font-medium">Equal {installmentLabel}</span>
                           </div>
                           <div className="overflow-x-auto border border-slate-200 rounded-2xl max-h-80 overflow-y-auto">
                             <table className="w-full text-left text-xs">
