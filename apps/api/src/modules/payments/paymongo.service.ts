@@ -101,7 +101,7 @@ export class PayMongoService {
 
     try {
       const authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
-      const res = await fetch(`${this.getBaseUrl()}/payment_intents?limit=1`, {
+      const res = await fetch(`${this.getBaseUrl()}/webhooks`, {
         method: 'GET',
         headers: {
           Authorization: authHeader,
@@ -122,13 +122,12 @@ export class PayMongoService {
         };
       }
 
-      const sampleItem = data?.data?.[0];
       return {
         success: true,
         statusCode: res.status,
-        livemode: sampleItem ? Boolean(sampleItem.attributes?.livemode) : secretKey.startsWith('sk_live_'),
+        livemode: secretKey.startsWith('sk_live_'),
         responseTimeMs,
-        accountDescriptor: sampleItem?.attributes?.statement_descriptor || 'PayMongo Verified',
+        accountDescriptor: secretKey.startsWith('sk_live_') ? 'PayMongo Live Mode' : 'PayMongo Test Mode',
       };
     } catch (err: any) {
       return {
