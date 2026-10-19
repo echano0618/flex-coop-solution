@@ -44,6 +44,10 @@ import {
   FileCheck,
   Ban,
   XCircle,
+  Fingerprint,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -618,14 +622,23 @@ export default function MemberPortalPage() {
     return 5000;
   });
 
-  // Change 6-Digit MPIN State
-  const [showChangePinModal, setShowChangePinModal] = useState<boolean>(false);
-  const [currentPinInput, setCurrentPinInput] = useState<string>('');
-  const [newPinInput, setNewPinInput] = useState<string>('');
-  const [confirmPinInput, setConfirmPinInput] = useState<string>('');
-  const [pinChangeLoading, setPinChangeLoading] = useState<boolean>(false);
-  const [pinChangeError, setPinChangeError] = useState<string | null>(null);
-  const [pinChangeSuccess, setPinChangeSuccess] = useState<string | null>(null);
+  // Change Password State
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState<string>('');
+  const [newPasswordInput, setNewPasswordInput] = useState<string>('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState<string>('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState<boolean>(false);
+  const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
+  const [passwordChangeLoading, setPasswordChangeLoading] = useState<boolean>(false);
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
+
+  // Device Biometrics Authentication State
+  const [isBiometricsSupported, setIsBiometricsSupported] = useState<boolean>(true);
+  const [isBiometricsEnabled, setIsBiometricsEnabled] = useState<boolean>(false);
+  const [biometricsLoading, setBiometricsLoading] = useState<boolean>(false);
+  const [biometricsNotice, setBiometricsNotice] = useState<string | null>(null);
 
   // Keep balances synchronized with authenticated member
   useEffect(() => {
@@ -639,6 +652,18 @@ export default function MemberPortalPage() {
       }
     }
   }, [customMember]);
+
+  // Synchronize device biometrics state for current tenant
+  useEffect(() => {
+    try {
+      const bioKey = `flexcoop_biometrics_enabled_${tenantInfo.slug}`;
+      const isEnabled = localStorage.getItem(bioKey) === 'true';
+      setIsBiometricsEnabled(isEnabled);
+      if (typeof window !== 'undefined' && window.PublicKeyCredential) {
+        setIsBiometricsSupported(true);
+      }
+    } catch {}
+  }, [tenantInfo.slug]);
 
   // Self-Service Deposit / Share Purchase Modal State
   const [depositModalType, setDepositModalType] = useState<'SHARES' | 'SAVINGS' | null>(null);
@@ -1331,32 +1356,104 @@ export default function MemberPortalPage() {
     setPassbookPayModal({ open: false, type: 'LOAN', amount: 0, description: '' });
   };
 
-  const handleExecuteChangePin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPinChangeError(null);
-    setPinChangeSuccess(null);
+  const handleToggleBiometrics = async () => {
+    setBiometricsNotice(null);
+    const bioKey = `flexcoop_biometrics_enabled_${tenantInfo.slug}`;
+    const userKey = `flexcoop_biometrics_member_${tenantInfo.slug}`;
 
-    const cur = currentPinInput.trim();
-    const next = newPinInput.trim();
-    const conf = confirmPinInput.trim();
-
-    if (!cur || !next || !conf) {
-      setPinChangeError('All fields are required.');
+    if (isBiometricsEnabled) {
+      try {
+        localStorage.removeItem(bioKey);
+        localStorage.removeItem(userKey);
+        setIsBiometricsEnabled(false);
+        setBiometricsNotice('Device biometrics disabled for this cooperative account.');
+        setTimeout(() => setBiometricsNotice(null), 4000);
+      } catch (err: any) {
+        setBiometricsNotice('Failed to disable biometrics.');
+      }
       return;
     }
-    if (!/^\d{6}$/.test(next)) {
-      setPinChangeError('New MPIN must be exactly 6 numeric digits (0-9).');
+
+    setBiometricsLoading(true);
+    try {
+      if (typeof window !== 'undefined' && window.PublicKeyCredential) {
+        try {
+          const challenge = new Uint8Array(32);
+          window.crypto.getRandomValues(challenge);
+          const userIdBytes = new TextEncoder().encode(currentMember.id || 'mem_default');
+
+          await navigator.credentials.create({
+            publicKey: {
+              challenge,
+              rp: { name: tenantInfo.name || 'Cooperative Enterprise' },
+              user: {
+                id: userIdBytes,
+                name: currentMember.email || currentMember.memberNumber || 'member',
+                displayName: currentMember.name || 'Coop Member',
+              },
+              pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+              authenticatorSelection: {
+                authenticatorAttachment: 'platform',
+                userVerification: 'preferred',
+              },
+              timeout: 60000,
+            },
+          });
+        } catch (webAuthnErr: any) {
+          if (webAuthnErr.name === 'NotAllowedError') {
+            setBiometricsNotice('Biometric setup was cancelled or timed out.');
+            setBiometricsLoading(false);
+            return;
+          }
+        }
+      }
+
+      const bioPayload = {
+        id: currentMember.id,
+        memberNumber: currentMember.memberNumber,
+        name: currentMember.name,
+        identifier: currentMember.email || currentMember.mobile || currentMember.memberNumber || 'mem_0001',
+        enabledAt: new Date().toISOString(),
+      };
+
+      localStorage.setItem(bioKey, 'true');
+      localStorage.setItem(userKey, JSON.stringify(bioPayload));
+      setIsBiometricsEnabled(true);
+      setBiometricsNotice('Device biometrics (Touch ID / Face ID) successfully enabled on this device!');
+      setTimeout(() => setBiometricsNotice(null), 5000);
+    } catch (err: any) {
+      setBiometricsNotice('Could not enable biometrics: ' + (err.message || 'Unknown error'));
+    } finally {
+      setBiometricsLoading(false);
+    }
+  };
+
+  const handleExecuteChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeError(null);
+    setPasswordChangeSuccess(null);
+
+    const cur = currentPasswordInput.trim();
+    const next = newPasswordInput.trim();
+    const conf = confirmPasswordInput.trim();
+
+    if (!cur || !next || !conf) {
+      setPasswordChangeError('All fields are required.');
+      return;
+    }
+    if (next.length < 6) {
+      setPasswordChangeError('New password must be at least 6 characters.');
       return;
     }
     if (next !== conf) {
-      setPinChangeError('New MPIN and confirmation MPIN do not match.');
+      setPasswordChangeError('New password and confirmation password do not match.');
       return;
     }
 
-    setPinChangeLoading(true);
+    setPasswordChangeLoading(true);
     try {
       const id = currentMember.memberNumber || currentMember.email || currentMember.name || 'mem_0001';
-      const res = await fetch(`${getApiBaseUrl()}/auth/member/change-pin`, {
+      const res = await fetch(`${getApiBaseUrl()}/auth/member/change-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1364,6 +1461,8 @@ export default function MemberPortalPage() {
         },
         body: JSON.stringify({
           identifier: id,
+          currentPassword: cur,
+          newPassword: next,
           currentPin: cur,
           newPin: next,
         }),
@@ -1371,21 +1470,21 @@ export default function MemberPortalPage() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setPinChangeSuccess('Your 6-digit MPIN has been updated successfully.');
-        setCurrentPinInput('');
-        setNewPinInput('');
-        setConfirmPinInput('');
+        setPasswordChangeSuccess('Your password has been updated successfully.');
+        setCurrentPasswordInput('');
+        setNewPasswordInput('');
+        setConfirmPasswordInput('');
         setTimeout(() => {
-          setShowChangePinModal(false);
-          setPinChangeSuccess(null);
+          setShowChangePasswordModal(false);
+          setPasswordChangeSuccess(null);
         }, 1800);
       } else {
-        setPinChangeError(data.error || 'Failed to update MPIN. Please verify your current MPIN.');
+        setPasswordChangeError(data.error || 'Failed to update password. Please verify your current password.');
       }
     } catch (err: any) {
-      setPinChangeError(err.message || 'Network error updating MPIN.');
+      setPasswordChangeError(err.message || 'Network error updating password.');
     } finally {
-      setPinChangeLoading(false);
+      setPasswordChangeLoading(false);
     }
   };
 
@@ -3765,32 +3864,32 @@ export default function MemberPortalPage() {
                 </div>
               </div>
 
-              {/* Security & MPIN Settings */}
+              {/* Account Security & Password Settings */}
               <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="font-bold text-slate-900 flex items-center gap-1.5 text-sm">
                       <Lock className="w-4 h-4 text-emerald-600" />
-                      Security &amp; 6-Digit MPIN Authentication
+                      Account Security &amp; Password
                     </div>
                     <p className="text-slate-500 text-xs mt-0.5">
-                      Your 6-digit MPIN protects your digital passbook, savings withdrawals, and loan transactions.
+                      Your password protects your digital passbook, savings withdrawals, and loan transactions.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      setPinChangeError(null);
-                      setPinChangeSuccess(null);
-                      setCurrentPinInput('');
-                      setNewPinInput('');
-                      setConfirmPinInput('');
-                      setShowChangePinModal(true);
+                      setPasswordChangeError(null);
+                      setPasswordChangeSuccess(null);
+                      setCurrentPasswordInput('');
+                      setNewPasswordInput('');
+                      setConfirmPasswordInput('');
+                      setShowChangePasswordModal(true);
                     }}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
                   >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Change MPIN</span>
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Change Password</span>
                   </button>
                 </div>
               </div>
@@ -4277,26 +4376,6 @@ export default function MemberPortalPage() {
                   <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-indigo-600 transition-colors shrink-0" />
                 </button>
 
-                {/* Pay via QR Ph Terminal */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('pay')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                      <QrCode className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
-                        Pay via QR Ph
-                      </h4>
-                      <p className="text-[11px] text-slate-500">Instant repayment via GCash, Maya, or Bank Apps</p>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
-                </button>
-
                 {/* Statutory Documents & Promissory Note */}
                 <button
                   type="button"
@@ -4339,6 +4418,58 @@ export default function MemberPortalPage() {
               </div>
             </div>
 
+            {/* Device Biometrics Authentication Card */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200">
+                    <Fingerprint className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-bold text-sm text-slate-900">Device Biometrics (Touch ID / Face ID)</h4>
+                      {isBiometricsEnabled ? (
+                        <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Check className="w-3 h-3 text-emerald-600" /> Enabled on this device
+                        </span>
+                      ) : (
+                        <span className="bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                          Not Enabled
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Enable Touch ID, Face ID, or Windows Hello on this device for instant 1-tap sign in without entering your password every time.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleBiometrics}
+                  disabled={biometricsLoading}
+                  className={`text-xs font-bold px-4 py-2.5 rounded-xl transition shadow-xs flex items-center justify-center gap-2 cursor-pointer shrink-0 w-full sm:w-auto ${
+                    isBiometricsEnabled
+                      ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  <Fingerprint className="w-4 h-4" />
+                  <span>{biometricsLoading ? 'Configuring...' : isBiometricsEnabled ? 'Disable Biometrics' : 'Enable Device Biometrics'}</span>
+                </button>
+              </div>
+
+              {biometricsNotice && (
+                <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  biometricsNotice.includes('enabled')
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+                }`}>
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{biometricsNotice}</span>
+                </div>
+              )}
+            </div>
+
             {/* PWA Mobile App Card */}
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div className="flex items-center gap-3">
@@ -4375,17 +4506,17 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setPinChangeError(null);
-                    setPinChangeSuccess(null);
-                    setCurrentPinInput('');
-                    setNewPinInput('');
-                    setConfirmPinInput('');
-                    setShowChangePinModal(true);
+                    setPasswordChangeError(null);
+                    setPasswordChangeSuccess(null);
+                    setCurrentPasswordInput('');
+                    setNewPasswordInput('');
+                    setConfirmPasswordInput('');
+                    setShowChangePasswordModal(true);
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold text-center transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                 >
-                  <Lock className="w-4 h-4 text-emerald-600" />
-                  <span>Change 6-Digit MPIN</span>
+                  <KeyRound className="w-4 h-4 text-emerald-600" />
+                  <span>Change Password</span>
                 </button>
                 <button
                   type="button"
@@ -5270,30 +5401,30 @@ export default function MemberPortalPage() {
           </div>
         )}
 
-        {/* CHANGE PASSWORD / MPIN MODAL */}
-        {showChangePinModal && (
+        {/* CHANGE PASSWORD MODAL */}
+        {showChangePasswordModal && (
           <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
             <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
               <div className="bg-slate-900 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
                 <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
                   <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow shrink-0">
-                    <Lock className="w-5 h-5" />
+                    <KeyRound className="w-5 h-5" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
-                      Change Password / MPIN
+                      Change Password
                     </h3>
                     <p className="text-[10px] sm:text-[11px] text-slate-300 truncate mt-0.5">
-                      Update your account security credentials
+                      Update your account security password (min. 6 characters)
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    setShowChangePinModal(false);
-                    setPinChangeError(null);
-                    setPinChangeSuccess(null);
+                    setShowChangePasswordModal(false);
+                    setPasswordChangeError(null);
+                    setPasswordChangeSuccess(null);
                   }}
                   className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
                   aria-label="Close modal"
@@ -5302,82 +5433,113 @@ export default function MemberPortalPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleExecuteChangePin} className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
-                {pinChangeError && (
+              <form onSubmit={handleExecuteChangePassword} className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
+                {passwordChangeError && (
                   <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                    <span>{pinChangeError}</span>
+                    <span>{passwordChangeError}</span>
                   </div>
                 )}
 
-                {pinChangeSuccess && (
+                {passwordChangeSuccess && (
                   <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{pinChangeSuccess}</span>
+                    <span>{passwordChangeSuccess}</span>
                   </div>
                 )}
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Current 6-Digit MPIN
+                    Current Password
                   </label>
-                  <input
-                    type="password"
-                    maxLength={6}
-                    pattern="[0-9]{6}"
-                    inputMode="numeric"
-                    required
-                    value={currentPinInput}
-                    onChange={(e) => setCurrentPinInput(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••••"
-                    className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-center text-lg tracking-widest focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Default MPIN is 123456 if not previously configured.
+                  <div className="relative">
+                    <input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      required
+                      value={currentPasswordInput}
+                      onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                      placeholder="Enter current password"
+                      className="w-full p-2.5 pr-10 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                      aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Default password is 123456 if not previously updated.
                   </span>
                 </div>
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    New 6-Digit MPIN
+                    New Password
                   </label>
-                  <input
-                    type="password"
-                    maxLength={6}
-                    pattern="[0-9]{6}"
-                    inputMode="numeric"
-                    required
-                    value={newPinInput}
-                    onChange={(e) => setNewPinInput(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••••"
-                    className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-center text-lg tracking-widest focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={newPasswordInput}
+                      onChange={(e) => setNewPasswordInput(e.target.value)}
+                      placeholder="Enter new password (min. 6 characters)"
+                      className="w-full p-2.5 pr-10 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                      aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Must be at least 6 characters long.
+                  </span>
                 </div>
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Confirm New 6-Digit MPIN
+                    Confirm New Password
                   </label>
-                  <input
-                    type="password"
-                    maxLength={6}
-                    pattern="[0-9]{6}"
-                    inputMode="numeric"
-                    required
-                    value={confirmPinInput}
-                    onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••••"
-                    className="w-full p-2.5 border border-slate-200 rounded-xl font-mono text-center text-lg tracking-widest focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={confirmPasswordInput}
+                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                      placeholder="Confirm new password"
+                      className="w-full p-2.5 pr-10 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                      aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {confirmPasswordInput && newPasswordInput !== confirmPasswordInput && (
+                    <span className="text-[10px] text-rose-500 mt-1 block">
+                      Passwords do not match.
+                    </span>
+                  )}
                 </div>
 
                 <div className="pt-2 flex gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      setShowChangePinModal(false);
-                      setPinChangeError(null);
-                      setPinChangeSuccess(null);
+                      setShowChangePasswordModal(false);
+                      setPasswordChangeError(null);
+                      setPasswordChangeSuccess(null);
                     }}
                     className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold cursor-pointer transition text-xs"
                   >
@@ -5385,18 +5547,23 @@ export default function MemberPortalPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={pinChangeLoading || newPinInput.length !== 6 || newPinInput !== confirmPinInput}
+                    disabled={
+                      passwordChangeLoading ||
+                      !newPasswordInput ||
+                      newPasswordInput.length < 6 ||
+                      newPasswordInput !== confirmPasswordInput
+                    }
                     className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold cursor-pointer transition shadow-xs text-xs flex items-center justify-center gap-1.5"
                   >
-                    {pinChangeLoading ? (
+                    {passwordChangeLoading ? (
                       <>
                         <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                         <span>Updating...</span>
                       </>
                     ) : (
                       <>
-                        <Lock className="w-3.5 h-3.5" />
-                        <span>Save MPIN</span>
+                        <KeyRound className="w-3.5 h-3.5" />
+                        <span>Update Password</span>
                       </>
                     )}
                   </button>

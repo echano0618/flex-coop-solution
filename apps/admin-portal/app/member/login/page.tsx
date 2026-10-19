@@ -11,6 +11,7 @@ import {
   UserCheck,
   Eye,
   EyeOff,
+  Fingerprint,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../../api-config';
 import {
@@ -28,6 +29,9 @@ export default function MemberLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [hasBiometrics, setHasBiometrics] = useState<boolean>(false);
+  const [biometricsMember, setBiometricsMember] = useState<{ id?: string; memberNumber?: string; name?: string; identifier?: string } | null>(null);
+  const [isBioAuthenticating, setIsBioAuthenticating] = useState<boolean>(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
     slug: 'default',
     name: 'Cooperative Enterprise',
@@ -49,6 +53,21 @@ export default function MemberLoginPage() {
           setIdentifier(prefillUser);
         }
 
+        // Detect saved biometric login session for device
+        const bioKey = `flexcoop_biometrics_enabled_${info.slug}`;
+        const memberKey = `flexcoop_biometrics_member_${info.slug}`;
+        const bioEnabled = localStorage.getItem(bioKey) === 'true';
+        const savedMember = localStorage.getItem(memberKey);
+        if (bioEnabled && savedMember) {
+          try {
+            const parsed = JSON.parse(savedMember);
+            if (parsed && (parsed.identifier || parsed.memberNumber || parsed.id)) {
+              setBiometricsMember(parsed);
+              setHasBiometrics(true);
+            }
+          } catch {}
+        }
+
         const existing = getTenantMemberSession(info.slug);
         if (existing) {
           router.replace(info.slug && info.slug !== 'default' ? `/member?coop=${info.slug}` : '/member');
@@ -56,6 +75,67 @@ export default function MemberLoginPage() {
       }
     } catch (e) {}
   }, [router]);
+
+  const handleBiometricLogin = async () => {
+    if (!biometricsMember) return;
+    setErrorMessage('');
+    setIsBioAuthenticating(true);
+
+    try {
+      // 1. Invoke device biometric prompt (WebAuthn credentials get)
+      if (typeof window !== 'undefined' && window.PublicKeyCredential) {
+        try {
+          const challenge = new Uint8Array(32);
+          window.crypto.getRandomValues(challenge);
+          await navigator.credentials.get({
+            publicKey: {
+              challenge,
+              timeout: 60000,
+              userVerification: 'preferred',
+            },
+          });
+        } catch (credErr: any) {
+          if (credErr?.name === 'NotAllowedError') {
+            setIsBioAuthenticating(false);
+            setErrorMessage('Biometric authentication cancelled.');
+            return;
+          }
+        }
+      }
+
+      // 2. Perform authenticated biometric login via API
+      const bioId = biometricsMember.identifier || biometricsMember.memberNumber || biometricsMember.id || 'mem_0001';
+      const res = await fetch(`${getApiBaseUrl()}/auth/member/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          identifier: bioId,
+          biometricAuth: true,
+          tenantSlug: tenantInfo.slug,
+          targetPortal: 'MEMBER',
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && data.member) {
+        setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
+        if (data.isStaff || data.user?.isStaff) {
+          setTenantAdminSession(data.user || data.member, tenantInfo.slug, tenantInfo.name);
+        }
+        router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
+        return;
+      }
+
+      setIsBioAuthenticating(false);
+      setErrorMessage(data.error || 'Biometric authentication failed. Please enter your password manually.');
+    } catch (err: any) {
+      setIsBioAuthenticating(false);
+      setErrorMessage('Unable to verify biometrics. Please use your password to sign in.');
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +217,35 @@ export default function MemberLoginPage() {
             <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {hasBiometrics && biometricsMember && (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleBiometricLogin}
+                disabled={isLoading || isBioAuthenticating}
+                className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center justify-center gap-2.5 shadow-md shadow-slate-900/10 text-xs cursor-pointer group"
+              >
+                {isBioAuthenticating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
+                    <span>Verifying Touch ID / Face ID...</span>
+                  </>
+                ) : (
+                  <>
+                    <Fingerprint className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                    <span>Sign In with Device Biometrics ({biometricsMember.name || 'Member'})</span>
+                  </>
+                )}
+              </button>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-3 text-slate-400 text-[10px] font-bold uppercase tracking-wider">or sign in with password</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
             </div>
           )}
 

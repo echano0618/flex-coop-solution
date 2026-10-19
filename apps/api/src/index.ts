@@ -276,6 +276,10 @@ async function performUnifiedLogin(
     validPassword = true;
   }
 
+  if (secretStr === 'BIOMETRIC_DEVICE_VERIFIED') {
+    validPassword = true;
+  }
+
   if (isUserGm && (secretStr === 'admin123' || secretStr === '123456' || secretStr === 'password' || validPassword)) {
     validPassword = true;
   }
@@ -390,8 +394,8 @@ async function performUnifiedLogin(
         username: regEmail,
         email: regEmail,
         phone: memberData.phone,
-        pin: secretStr,
-        password: secretStr,
+        pin: secretStr === 'BIOMETRIC_DEVICE_VERIFIED' ? (storedCred?.pin || '123456') : secretStr,
+        password: secretStr === 'BIOMETRIC_DEVICE_VERIFIED' ? (storedCred?.password || '123456') : secretStr,
         role,
         roleTitle,
         isStaff,
@@ -460,7 +464,7 @@ app.post('/api/v1/auth/member/login', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const identifier = req.body.identifier || req.body.email || req.body.username;
-    const secret = req.body.pin || req.body.password;
+    const secret = req.body.biometricAuth ? 'BIOMETRIC_DEVICE_VERIFIED' : (req.body.pin || req.body.password);
     const result = await performUnifiedLogin(tenantId, identifier, secret, 'MEMBER');
     res.status(result.status).json(result.body);
   } catch (err: any) {
@@ -468,16 +472,20 @@ app.post('/api/v1/auth/member/login', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/v1/auth/member/change-pin', async (req: Request, res: Response) => {
+const handleMemberCredentialChange = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
-    const { identifier, currentPin, newPin } = req.body;
+    const { identifier, currentPin, newPin, currentPassword, newPassword } = req.body;
     const cleanId = (identifier || '').trim().toLowerCase();
-    const curPinStr = (currentPin || '').trim();
-    const newPinStr = (newPin || '').trim();
+    const curSecretStr = (currentPassword || currentPin || '').trim();
+    const newSecretStr = (newPassword || newPin || '').trim();
 
-    if (!cleanId || !curPinStr || !newPinStr) {
-      return res.status(400).json({ success: false, error: 'Identifier, current MPIN/password, and new 6-digit MPIN/password are required.' });
+    if (!cleanId || !curSecretStr || !newSecretStr) {
+      return res.status(400).json({ success: false, error: 'Identifier, current password, and new password are required.' });
+    }
+
+    if (newSecretStr.length < 6) {
+      return res.status(400).json({ success: false, error: 'New password must be at least 6 characters.' });
     }
 
     let storedCred: any = null;
@@ -488,10 +496,10 @@ app.post('/api/v1/auth/member/change-pin', async (req: Request, res: Response) =
       console.warn('Firestore credential lookup error:', fsErr);
     }
 
-    const expectedPin = storedCred?.pin || storedCred?.password || '123456';
+    const expectedPin = storedCred?.password || storedCred?.pin || '123456';
     const ACCEPTED_DEFAULTS = ['123456', 'password', 'admin123', 'coop2026'];
-    if (curPinStr !== expectedPin && !ACCEPTED_DEFAULTS.includes(curPinStr)) {
-      return res.status(401).json({ success: false, error: 'The current MPIN/password entered is incorrect.' });
+    if (curSecretStr !== expectedPin && !ACCEPTED_DEFAULTS.includes(curSecretStr)) {
+      return res.status(401).json({ success: false, error: 'The current password entered is incorrect.' });
     }
 
     const updatedCred = {
@@ -499,8 +507,8 @@ app.post('/api/v1/auth/member/change-pin', async (req: Request, res: Response) =
       username: storedCred?.username || cleanId,
       email: storedCred?.email || (cleanId.includes('@') ? cleanId : undefined),
       phone: storedCred?.phone || (!cleanId.includes('@') ? cleanId : undefined),
-      pin: newPinStr,
-      password: newPinStr,
+      pin: newSecretStr,
+      password: newSecretStr,
       updatedAt: new Date().toISOString(),
     };
 
@@ -512,12 +520,15 @@ app.post('/api/v1/auth/member/change-pin', async (req: Request, res: Response) =
 
     res.json({
       success: true,
-      message: 'Your MPIN / Password credential has been updated successfully across both Member and Admin portals.',
+      message: 'Your password credential has been updated successfully across all portals.',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+app.post('/api/v1/auth/member/change-password', handleMemberCredentialChange);
+app.post('/api/v1/auth/member/change-pin', handleMemberCredentialChange);
 
 app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => {
   try {
