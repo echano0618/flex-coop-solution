@@ -155,6 +155,7 @@ export interface PayMongoConfig {
   webhookSecret?: string;
   environment: 'test' | 'live';
   isEnabled: boolean;
+  feeEnabled?: boolean;
   feeTreatment?: 'PASS_THROUGH' | 'OPEX';
   updatedAt: string;
   updatedBy: string;

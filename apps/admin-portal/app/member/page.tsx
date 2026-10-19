@@ -1159,12 +1159,32 @@ export default function MemberPortalPage() {
 
   // Technology Fee Treatment (Online Single Database Config: Pass-Through vs OPEX)
   const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
-  // PayMongo Gateway Fee Treatment (PASS_THROUGH vs OPEX, no ₱15 minimum floor)
+  // PayMongo Gateway Fee Enabled & Treatment (PASS_THROUGH vs OPEX, no ₱15 minimum floor)
+  const [paymongoFeeEnabled, setPaymongoFeeEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached =
+          localStorage.getItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`) ??
+          localStorage.getItem('flexcoop_paymongo_fee_enabled_global');
+        if (cached !== null) {
+          return cached !== 'false';
+        }
+      } catch {}
+    }
+    return true;
+  });
   const [paymongoFeeTreatment, setPaymongoFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>(() => {
     if (typeof window !== 'undefined') {
       try {
         const tenant = resolveTenantCoop();
-        const cached = localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`);
+        const cachedEnabled =
+          localStorage.getItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`) ??
+          localStorage.getItem('flexcoop_paymongo_fee_enabled_global');
+        if (cachedEnabled === 'false') return 'OPEX';
+        const cached =
+          localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`) ||
+          localStorage.getItem('flexcoop_paymongo_fee_treatment_global');
         if (cached === 'OPEX' || cached === 'PASS_THROUGH') {
           return cached;
         }
@@ -1188,37 +1208,74 @@ export default function MemberPortalPage() {
   });
 
   useEffect(() => {
-    fetch(`${getApiBaseUrl()}/system-config?coop=${tenantInfo.slug}`)
+    const resolvedSlug =
+      tenantInfo.slug && tenantInfo.slug !== 'default'
+        ? tenantInfo.slug
+        : resolveTenantCoop().slug || 'family-coop';
+    const targetTenantId = `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+
+    fetch(`${getApiBaseUrl()}/system-config?coop=${resolvedSlug}`, {
+      headers: {
+        'x-tenant-slug': resolvedSlug,
+        'x-tenant-id': targetTenantId,
+      },
+    })
       .then((r) => r.json())
       .then((res) => {
         if (res && res.success && res.data) {
           if (res.data.techFeeTreatment) setTechFeeTreatment(res.data.techFeeTreatment);
           if (res.data.coopFilingFeeEnabled !== undefined) setCoopFilingFeeEnabled(Boolean(res.data.coopFilingFeeEnabled));
           if (res.data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(res.data.coopFilingFeeRatePercent));
+          if (res.data.paymongoFeeEnabled !== undefined) {
+            const feeEn = Boolean(res.data.paymongoFeeEnabled);
+            setPaymongoFeeEnabled(feeEn);
+            try {
+              localStorage.setItem(`flexcoop_paymongo_fee_enabled_${resolvedSlug}`, String(feeEn));
+              localStorage.setItem('flexcoop_paymongo_fee_enabled_global', String(feeEn));
+            } catch {}
+          }
+          if (res.data.paymongoFeeTreatment === 'OPEX' || res.data.paymongoFeeTreatment === 'PASS_THROUGH') {
+            setPaymongoFeeTreatment(res.data.paymongoFeeTreatment);
+            try {
+              localStorage.setItem(`flexcoop_paymongo_fee_treatment_${resolvedSlug}`, res.data.paymongoFeeTreatment);
+              localStorage.setItem('flexcoop_paymongo_fee_treatment_global', res.data.paymongoFeeTreatment);
+            } catch {}
+          }
           if (res.data.savingsDepositEnabled !== undefined) {
             const enabled = Boolean(res.data.savingsDepositEnabled);
             setSavingsDepositEnabled(enabled);
             try {
-              localStorage.setItem(`flexcoop_savings_deposit_enabled_${tenantInfo.slug}`, String(enabled));
+              localStorage.setItem(`flexcoop_savings_deposit_enabled_${resolvedSlug}`, String(enabled));
             } catch {}
           }
         }
       })
       .catch(() => {});
 
-    const targetTenantId = `tenant_${(tenantInfo.slug || 'family-coop').replace(/[-_]coop$/, '')}`;
-    fetch(`${getApiBaseUrl()}/tenant/paymongo-public-config?coop=${tenantInfo.slug}`, {
+    fetch(`${getApiBaseUrl()}/tenant/paymongo-public-config?coop=${resolvedSlug}`, {
       headers: {
-        'x-tenant-slug': tenantInfo.slug,
+        'x-tenant-slug': resolvedSlug,
         'x-tenant-id': targetTenantId,
       },
     })
       .then((r) => r.json())
       .then((res) => {
-        if (res && res.success && res.data && (res.data.feeTreatment === 'OPEX' || res.data.feeTreatment === 'PASS_THROUGH')) {
-          setPaymongoFeeTreatment(res.data.feeTreatment);
+        if (res && res.success && res.data) {
+          const isFeeEnabled =
+            res.data.feeEnabled !== undefined
+              ? Boolean(res.data.feeEnabled)
+              : res.data.isEnabled !== undefined
+              ? Boolean(res.data.isEnabled)
+              : true;
+          const treatment =
+            !isFeeEnabled || res.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+          setPaymongoFeeEnabled(isFeeEnabled);
+          setPaymongoFeeTreatment(treatment);
           try {
-            localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenantInfo.slug}`, res.data.feeTreatment);
+            localStorage.setItem(`flexcoop_paymongo_fee_enabled_${resolvedSlug}`, String(isFeeEnabled));
+            localStorage.setItem('flexcoop_paymongo_fee_enabled_global', String(isFeeEnabled));
+            localStorage.setItem(`flexcoop_paymongo_fee_treatment_${resolvedSlug}`, treatment);
+            localStorage.setItem('flexcoop_paymongo_fee_treatment_global', treatment);
           } catch {}
         }
       })
@@ -1229,6 +1286,11 @@ export default function MemberPortalPage() {
       if (e.key && e.key.includes('flexcoop_savings_deposit_enabled')) {
         const val = e.newValue === 'true';
         setSavingsDepositEnabled(val);
+      }
+      if (e.key && e.key.includes('flexcoop_paymongo_fee_enabled')) {
+        const enabledVal = e.newValue !== 'false';
+        setPaymongoFeeEnabled(enabledVal);
+        if (!enabledVal) setPaymongoFeeTreatment('OPEX');
       }
       if (e.key && e.key.includes('flexcoop_paymongo_fee_treatment')) {
         if (e.newValue === 'OPEX' || e.newValue === 'PASS_THROUGH') {
@@ -1437,7 +1499,12 @@ export default function MemberPortalPage() {
     interestPortion?: number;
     qrImageUrl?: string;
     paymentIntentId?: string;
+    checkoutUrl?: string;
+    checkoutLinkId?: string;
+    convenienceFeeOverride?: number;
     isGeneratingQr?: boolean;
+    isVerifyingPayment?: boolean;
+    verificationError?: string | null;
   }>({
     open: false,
     type: 'LOAN',
@@ -1620,10 +1687,100 @@ export default function MemberPortalPage() {
         },
       ] : []);
 
-  // Convenience Fee Calculator for PayMongo QR Ph (1.5%, NO minimum ₱15 floor; 0 when OPEX)
+  // Convenience Fee Calculator for PayMongo QR Ph (1.5%, NO minimum ₱15 floor; 0 when OPEX or Gateway Fee disabled)
   const calculateConvenienceFee = (amount: number) => {
-    if (paymongoFeeTreatment === 'OPEX') return 0.0;
+    if (!paymongoFeeEnabled || paymongoFeeTreatment === 'OPEX') return 0.0;
+    if (passbookPayModal.convenienceFeeOverride !== undefined) {
+      return passbookPayModal.convenienceFeeOverride;
+    }
     return Math.round(amount * 0.015 * 100) / 100;
+  };
+
+  const generatePassbookQrPhIntent = async (params: {
+    loanId: string;
+    installmentNumber: number;
+    dueDate: string;
+    dueAmount: number;
+    principalAmount?: number;
+    interestAmount?: number;
+  }) => {
+    const resolvedSlug =
+      tenantInfo.slug && tenantInfo.slug !== 'default'
+        ? tenantInfo.slug
+        : resolveTenantCoop().slug || 'family-coop';
+    const targetTenantId =
+      (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+        ? (currentMember as any)?.tenantId
+        : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+
+    // Refresh latest PayMongo public config before generating intent
+    let currentFeeEnabled = paymongoFeeEnabled;
+    let currentFeeTreatment = paymongoFeeTreatment;
+    try {
+      const cfgRes = await fetch(`${getApiBaseUrl()}/tenant/paymongo-public-config?coop=${resolvedSlug}`, {
+        headers: {
+          'x-tenant-slug': resolvedSlug,
+          'x-tenant-id': targetTenantId,
+        },
+      });
+      const cfgJson = await cfgRes.json();
+      if (cfgRes.ok && cfgJson.success && cfgJson.data) {
+        currentFeeEnabled =
+          cfgJson.data.feeEnabled !== undefined
+            ? Boolean(cfgJson.data.feeEnabled)
+            : cfgJson.data.isEnabled !== undefined
+            ? Boolean(cfgJson.data.isEnabled)
+            : true;
+        currentFeeTreatment =
+          !currentFeeEnabled || cfgJson.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+        setPaymongoFeeEnabled(currentFeeEnabled);
+        setPaymongoFeeTreatment(currentFeeTreatment);
+      }
+    } catch {}
+
+    const res = await fetch(
+      `${getApiBaseUrl()}/loans/${encodeURIComponent(params.loanId)}/paymongo/create-intent?coop=${resolvedSlug}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': resolvedSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          memberId: currentMember.id,
+          installmentNumber: params.installmentNumber,
+          dueDate: params.dueDate,
+          amount: params.dueAmount,
+          dueAmount: params.dueAmount,
+          principalAmount: params.principalAmount,
+          interestAmount: params.interestAmount,
+          feeTreatment: currentFeeTreatment,
+          feeEnabled: currentFeeEnabled,
+        }),
+      }
+    );
+    const json = await res.json();
+    if (res.ok && json.success && json.data) {
+      const respFeeEnabled = json.data.feeEnabled !== undefined ? Boolean(json.data.feeEnabled) : currentFeeEnabled;
+      const respTreatment =
+        !respFeeEnabled || json.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+      setPaymongoFeeEnabled(respFeeEnabled);
+      setPaymongoFeeTreatment(respTreatment);
+      setPassbookPayModal((prev) => ({
+        ...prev,
+        qrImageUrl: json.data.qrImageUrl || '',
+        paymentIntentId: json.data.paymentIntentId || '',
+        checkoutUrl: json.data.checkoutUrl || '',
+        checkoutLinkId: json.data.checkoutLinkId || '',
+        convenienceFeeOverride:
+          json.data.convenienceFee !== undefined ? Number(json.data.convenienceFee) : undefined,
+        isGeneratingQr: false,
+        verificationError: null,
+      }));
+      return true;
+    }
+    return false;
   };
 
   const handleOpenLoanPayNow = async (loan: any, dueRow: any) => {
@@ -1649,42 +1806,170 @@ export default function MemberPortalPage() {
       principalPortion: prAmt,
       interestPortion: inAmt,
       isGeneratingQr: true,
+      isVerifyingPayment: false,
+      verificationError: null,
     });
 
     try {
-      const targetTenantSlug = tenantInfo.slug || 'family-coop';
-      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
-      const res = await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(targetLoanId)}/paymongo/create-intent?coop=${targetTenantSlug}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-slug': targetTenantSlug,
-          'x-tenant-id': targetTenantId,
-        },
-        body: JSON.stringify({
-          memberId: currentMember.id,
-          installmentNumber: instNum,
-          dueDate: dueStr,
-          dueAmount: dueAmt,
-          principalAmount: prAmt,
-          interestAmount: inAmt,
-        }),
+      const ok = await generatePassbookQrPhIntent({
+        loanId: targetLoanId,
+        installmentNumber: instNum,
+        dueDate: dueStr,
+        dueAmount: dueAmt,
+        principalAmount: prAmt,
+        interestAmount: inAmt,
       });
-      const json = await res.json();
-      if (res.ok && json.success && json.data) {
-        if (json.data.feeTreatment === 'OPEX' || json.data.feeTreatment === 'PASS_THROUGH') {
-          setPaymongoFeeTreatment(json.data.feeTreatment);
+      if (ok) return;
+    } catch {}
+    setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: false }));
+  };
+
+  // Ensure a real PayMongo QR Ph image is generated if passbookPayModal is opened from Passbook tab without one
+  useEffect(() => {
+    if (
+      passbookPayModal.open &&
+      !passbookPayModal.isGeneratingQr &&
+      !passbookPayModal.qrImageUrl &&
+      !passbookPayModal.paymentIntentId &&
+      passbookPayModal.amount > 0
+    ) {
+      setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: true, verificationError: null }));
+      generatePassbookQrPhIntent({
+        loanId: passbookPayModal.loanId || `PB-${passbookPayModal.type}`,
+        installmentNumber: passbookPayModal.installmentNumber || 1,
+        dueDate: passbookPayModal.dueDate || new Date().toISOString().slice(0, 10),
+        dueAmount: passbookPayModal.amount,
+        principalAmount: passbookPayModal.principalPortion,
+        interestAmount: passbookPayModal.interestPortion,
+      })
+        .catch(() => {})
+        .finally(() => {
+          setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: false }));
+        });
+    }
+  }, [passbookPayModal.open, passbookPayModal.type, passbookPayModal.amount]);
+
+  // Automatic background polling of PayMongo QR Ph payment status while passbookPayModal is open
+  useEffect(() => {
+    if (!passbookPayModal.open || !passbookPayModal.paymentIntentId) return;
+    const intentId = passbookPayModal.paymentIntentId;
+    if (!intentId.startsWith('pi_') || intentId.startsWith('pi_qrph_')) return;
+
+    const resolvedSlug =
+      tenantInfo.slug && tenantInfo.slug !== 'default'
+        ? tenantInfo.slug
+        : resolveTenantCoop().slug || 'family-coop';
+    const targetTenantId =
+      (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+        ? (currentMember as any)?.tenantId
+        : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+
+    let isCancelled = false;
+    const interval = setInterval(async () => {
+      if (isCancelled) return;
+      try {
+        const linkQuery = passbookPayModal.checkoutLinkId
+          ? `&linkId=${encodeURIComponent(passbookPayModal.checkoutLinkId)}`
+          : '';
+        const res = await fetch(
+          `${getApiBaseUrl()}/shares/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}`,
+          {
+            headers: {
+              'x-tenant-slug': resolvedSlug,
+              'x-tenant-id': targetTenantId,
+            },
+          }
+        );
+        const json = await res.json();
+        if (!isCancelled && res.ok && json.success && json.data?.isPaid === true) {
+          clearInterval(interval);
+          const payType = passbookPayModal.type;
+          const payAmt = passbookPayModal.amount;
+          setPassbookPayModal((prev) => ({
+            ...prev,
+            open: false,
+            isVerifyingPayment: false,
+            verificationError: null,
+          }));
+          handleExecutePassbookPayment(payType, payAmt);
         }
+      } catch {}
+    }, 4000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [passbookPayModal.open, passbookPayModal.paymentIntentId, passbookPayModal.checkoutLinkId]);
+
+  const handleVerifyAndCompletePassbookPayment = async () => {
+    const intentId = passbookPayModal.paymentIntentId;
+    const linkId = passbookPayModal.checkoutLinkId;
+
+    if (!intentId || !intentId.startsWith('pi_') || intentId.startsWith('pi_qrph_')) {
+      setPassbookPayModal((prev) => ({
+        ...prev,
+        verificationError:
+          'PayMongo QR Ph payment session is still initializing or has not been paid yet. Please scan the PayMongo QR Ph code and complete your payment first.',
+      }));
+      return;
+    }
+
+    setPassbookPayModal((prev) => ({
+      ...prev,
+      isVerifyingPayment: true,
+      verificationError: null,
+    }));
+
+    try {
+      const resolvedSlug =
+        tenantInfo.slug && tenantInfo.slug !== 'default'
+          ? tenantInfo.slug
+          : resolveTenantCoop().slug || 'family-coop';
+      const targetTenantId =
+        (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+          ? (currentMember as any)?.tenantId
+          : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+
+      const linkQuery = linkId ? `&linkId=${encodeURIComponent(linkId)}` : '';
+      const res = await fetch(
+        `${getApiBaseUrl()}/shares/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}`,
+        {
+          headers: {
+            'x-tenant-slug': resolvedSlug,
+            'x-tenant-id': targetTenantId,
+          },
+        }
+      );
+      const json = await res.json();
+
+      if (!res.ok || !json.success || json.data?.isPaid !== true) {
+        const statusStr = json?.data?.status || 'awaiting_payment';
         setPassbookPayModal((prev) => ({
           ...prev,
-          qrImageUrl: json.data.qrImageUrl || '',
-          paymentIntentId: json.data.paymentIntentId || '',
-          isGeneratingQr: false,
+          isVerifyingPayment: false,
+          verificationError: `PayMongo payment has not been confirmed yet (Status: ${statusStr}). Please scan the QR Ph code above and complete the payment in your banking or e-wallet app before clicking Complete.`,
         }));
         return;
       }
-    } catch {}
-    setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: false }));
+
+      const payType = passbookPayModal.type;
+      const payAmt = passbookPayModal.amount;
+      setPassbookPayModal((prev) => ({
+        ...prev,
+        open: false,
+        isVerifyingPayment: false,
+        verificationError: null,
+      }));
+      await handleExecutePassbookPayment(payType, payAmt);
+    } catch (err: any) {
+      setPassbookPayModal((prev) => ({
+        ...prev,
+        isVerifyingPayment: false,
+        verificationError:
+          err?.message || 'Unable to verify PayMongo payment status. Please ensure payment is completed and try again.',
+      }));
+    }
   };
 
   const handleExecutePassbookPayment = async (type: 'LOAN' | 'SAVINGS' | 'SHARES', amount: number) => {
@@ -1801,8 +2086,14 @@ export default function MemberPortalPage() {
 
       // Persist repayment to Backend API (updates Firestore loan schedule, balanceRemaining, borrower loanBalance, and CDA GL)
       try {
-        const targetTenantSlug = tenantInfo.slug || 'family-coop';
-        const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+        const targetTenantSlug =
+          tenantInfo.slug && tenantInfo.slug !== 'default'
+            ? tenantInfo.slug
+            : resolveTenantCoop().slug || 'family-coop';
+        const targetTenantId =
+          (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+            ? (currentMember as any)?.tenantId
+            : `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
         fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(targetLoan?.id || loanRef)}/repay?coop=${targetTenantSlug}`, {
           method: 'POST',
           headers: {
@@ -1817,8 +2108,9 @@ export default function MemberPortalPage() {
             principalAmount: principalPart,
             interestAmount: interestPart,
             convenienceFee: fee,
-            feeTreatment: paymongoFeeTreatment,
-            paymentIntentId: passbookPayModal.paymentIntentId || `pi_qrph_${Date.now()}`,
+            feeTreatment: !paymongoFeeEnabled || paymongoFeeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
+            paymentIntentId: passbookPayModal.paymentIntentId,
+            checkoutLinkId: passbookPayModal.checkoutLinkId,
             orNumber: orNum,
           }),
         }).catch(() => {});
@@ -6069,15 +6361,17 @@ export default function MemberPortalPage() {
                           ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
-                      <div className="flex justify-between text-amber-800">
-                        <span className="flex items-center gap-1 flex-wrap">
-                          <span>PayMongo QR Ph Gateway Fee (1.5%):</span>
-                          <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-bold">
-                            {paymongoFeeTreatment === 'OPEX' ? 'Coop OPEX (₱0 Fee)' : 'Pass-Through'}
+                      {fee > 0 && paymongoFeeEnabled && paymongoFeeTreatment === 'PASS_THROUGH' && (
+                        <div className="flex justify-between text-amber-800">
+                          <span className="flex items-center gap-1 flex-wrap">
+                            <span>PayMongo QR Ph Gateway Fee (1.5%):</span>
+                            <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-bold">
+                              Pass-Through
+                            </span>
                           </span>
-                        </span>
-                        <span className="font-mono font-bold">+ ₱{fee.toFixed(2)}</span>
-                      </div>
+                          <span className="font-mono font-bold">+ ₱{fee.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="border-t border-slate-200 pt-2 flex justify-between items-center text-sm font-black text-slate-900">
                         <span>Total to Scan &amp; Pay:</span>
                         <span className="font-mono text-emerald-700 text-base">
@@ -6090,47 +6384,95 @@ export default function MemberPortalPage() {
 
                 {/* QR Graphic and Payload */}
                 <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50/50 flex flex-col items-center justify-center text-center">
-                  <div className="w-44 h-44 bg-white border-2 border-emerald-600 rounded-2xl p-3 shadow-md flex flex-col items-center justify-center">
+                  <div className="w-52 h-52 bg-white border-2 border-emerald-600 rounded-2xl p-3 shadow-md flex flex-col items-center justify-center">
                     {passbookPayModal.isGeneratingQr ? (
                       <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
                         <RefreshCw className="w-6 h-6 animate-spin text-emerald-600" />
-                        <span className="text-[10px] font-bold">Generating PayMongo QR Ph...</span>
+                        <span className="text-[10px] font-bold">Generating Live PayMongo QR Ph...</span>
                       </div>
-                    ) : passbookPayModal.qrImageUrl && passbookPayModal.qrImageUrl.startsWith('data:image') ? (
+                    ) : passbookPayModal.qrImageUrl ? (
                       <img
                         src={passbookPayModal.qrImageUrl}
                         alt="PayMongo QR Ph Code"
-                        className="w-36 h-36 object-contain"
+                        className="w-44 h-44 object-contain"
                       />
                     ) : (
-                      <div className="w-36 h-36 bg-slate-950 rounded-xl flex flex-col items-center justify-center text-white text-[10px] font-mono p-2 text-center gap-1">
-                        <QrCode className="w-10 h-10 text-emerald-400" />
-                        <span className="font-bold text-emerald-300">[PayMongo QR Ph]</span>
-                        <span className="font-bold text-xs">
-                          ₱{(passbookPayModal.amount + calculateConvenienceFee(passbookPayModal.amount)).toFixed(2)}
-                        </span>
-                        <span className="text-[9px] text-slate-300">InstaPay / GCash / Maya</span>
+                      <div className="flex flex-col items-center justify-center gap-2 p-2 text-center">
+                        <QrCode className="w-10 h-10 text-emerald-600" />
+                        <span className="text-[11px] font-bold text-slate-700">Live PayMongo QR Ph</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: true, verificationError: null }));
+                            generatePassbookQrPhIntent({
+                              loanId: passbookPayModal.loanId || 'LN-2026-00001',
+                              installmentNumber: passbookPayModal.installmentNumber || 1,
+                              dueDate: passbookPayModal.dueDate || new Date().toISOString().slice(0, 10),
+                              dueAmount: passbookPayModal.amount,
+                              principalAmount: passbookPayModal.principalPortion,
+                              interestAmount: passbookPayModal.interestPortion,
+                            }).finally(() => {
+                              setPassbookPayModal((prev) => ({ ...prev, isGeneratingQr: false }));
+                            });
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Generate PayMongo QR Ph</span>
+                        </button>
                       </div>
                     )}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-2">
                     Scan with GCash, Maya, BDO, BPI, UnionBank, or any InstaPay-enabled mobile banking app.
                   </div>
+                  {passbookPayModal.paymentIntentId && (
+                    <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[10px] font-semibold text-emerald-700">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Listening for real-time PayMongo payment confirmation...</span>
+                    </div>
+                  )}
+                  {passbookPayModal.checkoutUrl && (
+                    <a
+                      href={passbookPayModal.checkoutUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline"
+                    >
+                      <span>Or open PayMongo Hosted Checkout Page (GCash / Maya / QR Ph)</span>
+                    </a>
+                  )}
                 </div>
+
+                {passbookPayModal.verificationError && (
+                  <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-[11px] font-semibold flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{passbookPayModal.verificationError}</span>
+                  </div>
+                )}
 
                 <div className="pt-1">
                   <button
                     type="button"
-                    onClick={() => {
-                      const payType = passbookPayModal.type;
-                      const payAmt = passbookPayModal.amount;
-                      setPassbookPayModal((prev) => ({ ...prev, open: false }));
-                      handleExecutePassbookPayment(payType, payAmt);
-                    }}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={Boolean(passbookPayModal.isGeneratingQr || passbookPayModal.isVerifyingPayment)}
+                    onClick={handleVerifyAndCompletePassbookPayment}
+                    className={`w-full font-black text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2 ${
+                      passbookPayModal.isGeneratingQr || passbookPayModal.isVerifyingPayment
+                        ? 'bg-slate-400 text-white cursor-not-allowed'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                    }`}
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Complete &amp; Record PayMongo QR Ph Payment</span>
+                    {passbookPayModal.isVerifyingPayment ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Verifying Payment with PayMongo...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Complete &amp; Record PayMongo QR Ph Payment</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -6198,10 +6540,12 @@ export default function MemberPortalPage() {
                     <span>Base Amount:</span>
                     <span>₱{passbookReceipt.baseAmount.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-amber-800">
-                    <span>Convenience Fee (1.5%):</span>
-                    <span>₱{passbookReceipt.convenienceFee.toFixed(2)}</span>
-                  </div>
+                  {passbookReceipt.convenienceFee > 0 && (
+                    <div className="flex justify-between text-amber-800">
+                      <span>Convenience Fee (1.5%):</span>
+                      <span>₱{passbookReceipt.convenienceFee.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="border-t border-slate-200 pt-1.5 flex justify-between font-black text-sm text-slate-900">
                     <span>Total Amount Paid:</span>
                     <span className="text-emerald-700">₱{passbookReceipt.totalAmount.toFixed(2)}</span>

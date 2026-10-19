@@ -77,23 +77,23 @@ export function resolveTenantFromHost(hostHeader?: string): string | null {
 export function resolveTenantId(req: Request): string {
   // 1. Explicit headers (ID or slug)
   const headerTenantId = (req.headers['x-tenant-id'] as string || '').trim();
-  if (headerTenantId) {
+  if (headerTenantId && headerTenantId !== 'default' && headerTenantId !== 'tenant_default') {
     if (headerTenantId.startsWith('tenant_')) return headerTenantId;
     const clean = headerTenantId.replace(/[-_]coop$/, '');
-    return `tenant_${clean}`;
+    if (clean && clean !== 'default') return `tenant_${clean}`;
   }
 
   const headerTenantSlug = (req.headers['x-tenant-slug'] as string || '').trim().toLowerCase();
-  if (headerTenantSlug) {
+  if (headerTenantSlug && headerTenantSlug !== 'default' && headerTenantSlug !== 'default-coop') {
     const clean = headerTenantSlug.replace(/[-_]coop$/, '');
-    return `tenant_${clean}`;
+    if (clean && clean !== 'default') return `tenant_${clean}`;
   }
 
   // 2. Query param ?coop= or ?tenant=
   const queryCoop = ((req.query.coop as string) || (req.query.tenant as string) || '').trim().toLowerCase();
-  if (queryCoop) {
+  if (queryCoop && queryCoop !== 'default' && queryCoop !== 'default-coop') {
     const clean = queryCoop.replace(/[-_]coop$/, '');
-    return `tenant_${clean}`;
+    if (clean && clean !== 'default') return `tenant_${clean}`;
   }
 
   // 3. Subdomain resolution: <tenantname>-coop.tuntongtech.com
@@ -1239,7 +1239,13 @@ app.get('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) =>
 app.post('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
-    const { secretKey, publicKey, webhookSecret, environment, isEnabled, feeTreatment, updatedBy } = req.body;
+    const { secretKey, publicKey, webhookSecret, environment, isEnabled, feeEnabled, feeTreatment, updatedBy } = req.body;
+    const effectiveIsEnabled = isEnabled !== undefined ? Boolean(isEnabled) : true;
+    const effectiveFeeEnabled =
+      feeEnabled !== undefined ? Boolean(feeEnabled) : effectiveIsEnabled;
+    const effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' =
+      feeTreatment === 'OPEX' || !effectiveIsEnabled || !effectiveFeeEnabled ? 'OPEX' : 'PASS_THROUGH';
+
     const saved = await PayMongoService.saveTenantConfig(
       tenantId,
       {
@@ -1247,11 +1253,33 @@ app.post('/api/v1/tenant/paymongo-config', async (req: Request, res: Response) =
         publicKey,
         webhookSecret,
         environment,
-        isEnabled,
-        feeTreatment: feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
+        isEnabled: effectiveIsEnabled,
+        feeEnabled: effectiveFeeEnabled,
+        feeTreatment: effectiveFeeTreatment,
       },
       updatedBy || 'Cooperative Admin'
     );
+
+    // Also synchronize into tenant systemConfigs so /api/v1/system-config and /api/v1/loans/:id/paymongo/create-intent always match
+    try {
+      const existingSys = dbStore.systemConfigs.get(tenantId) || {};
+      const updatedSys = {
+        ...existingSys,
+        paymongoFeeTreatment: saved.feeTreatment,
+        paymongoFeeEnabled: saved.feeEnabled !== false && saved.isEnabled !== false,
+        updatedAt: new Date().toISOString(),
+      };
+      dbStore.systemConfigs.set(tenantId, updatedSys);
+      dbStore.systemConfigs.set('tenant_family', {
+        ...(dbStore.systemConfigs.get('tenant_family') || {}),
+        paymongoFeeTreatment: saved.feeTreatment,
+        paymongoFeeEnabled: saved.feeEnabled !== false && saved.isEnabled !== false,
+        updatedAt: new Date().toISOString(),
+      });
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveSystemConfig(tenantId, updatedSys);
+    } catch {}
+
     res.json({
       success: true,
       message: 'Cooperative PayMongo gateway configuration updated and saved to Cloud Firestore.',
@@ -1276,14 +1304,26 @@ app.get('/api/v1/tenant/paymongo-public-config', async (req: Request, res: Respo
   try {
     const tenantId = resolveTenantId(req);
     const config = await PayMongoService.getTenantConfig(tenantId);
+    const sysCfg = dbStore.systemConfigs.get(tenantId) || dbStore.systemConfigs.get('tenant_family');
+    const feeEnabled =
+      config.feeEnabled !== false &&
+      config.isEnabled !== false &&
+      sysCfg?.paymongoFeeEnabled !== false;
+    const effectiveFeeTreatment =
+      config.feeTreatment === 'OPEX' ||
+      !feeEnabled ||
+      sysCfg?.paymongoFeeTreatment === 'OPEX'
+        ? 'OPEX'
+        : 'PASS_THROUGH';
     res.json({
       success: true,
       tenantId,
       data: {
         publicKey: config.publicKey,
         isEnabled: config.isEnabled,
+        feeEnabled,
         environment: config.environment,
-        feeTreatment: config.feeTreatment || 'PASS_THROUGH',
+        feeTreatment: effectiveFeeTreatment,
       },
     });
   } catch (err: any) {
@@ -2110,11 +2150,31 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
       config = dbStore.systemConfigs.get(tenantId) || null;
     }
 
+    let paymongoCfg: any = null;
+    try {
+      paymongoCfg = await PayMongoService.getTenantConfig(tenantId);
+    } catch {}
+
+    const paymongoFeeEnabled =
+      paymongoCfg
+        ? paymongoCfg.feeEnabled !== false && paymongoCfg.isEnabled !== false
+        : config?.paymongoFeeEnabled !== undefined
+        ? Boolean(config.paymongoFeeEnabled)
+        : true;
+    const paymongoFeeTreatment =
+      paymongoCfg?.feeTreatment === 'OPEX' ||
+      !paymongoFeeEnabled ||
+      config?.paymongoFeeTreatment === 'OPEX'
+        ? 'OPEX'
+        : 'PASS_THROUGH';
+
     const effectiveConfig = config
       ? {
           ...config,
           savingsDepositEnabled:
             config.savingsDepositEnabled !== undefined ? Boolean(config.savingsDepositEnabled) : true,
+          paymongoFeeEnabled,
+          paymongoFeeTreatment,
         }
       : {
           techFeeTreatment: 'PASS_THROUGH',
@@ -2125,6 +2185,8 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
           coopFilingFeeEnabled: true,
           coopFilingFeeRatePercent: 1.5,
           savingsDepositEnabled: true,
+          paymongoFeeEnabled,
+          paymongoFeeTreatment,
         };
 
     res.json({
@@ -2143,6 +2205,24 @@ app.post('/api/v1/system-config', async (req: Request, res: Response) => {
     const existing = dbStore.systemConfigs.get(tenantId) || {};
     const merged = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
     dbStore.systemConfigs.set(tenantId, merged);
+
+    if (req.body.paymongoFeeTreatment !== undefined || req.body.paymongoFeeEnabled !== undefined) {
+      try {
+        const feeEnabledVal =
+          req.body.paymongoFeeEnabled !== undefined ? Boolean(req.body.paymongoFeeEnabled) : true;
+        const feeTreatmentVal =
+          req.body.paymongoFeeTreatment === 'OPEX' || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+        await PayMongoService.saveTenantConfig(
+          tenantId,
+          {
+            isEnabled: feeEnabledVal,
+            feeEnabled: feeEnabledVal,
+            feeTreatment: feeTreatmentVal,
+          },
+          'Cooperative Admin'
+        );
+      } catch {}
+    }
 
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -4167,22 +4247,39 @@ app.post('/api/v1/payments/qrph/generate', async (req: Request, res: Response) =
 app.post('/api/v1/loans/:id/paymongo/create-intent', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { memberId, installmentNumber, amount, feeTreatment } = req.body;
+  const { memberId, installmentNumber, amount, dueAmount, feeTreatment, feeEnabled } = req.body;
+  const rawAmount = amount ?? dueAmount;
 
-  if (!amount || Number(amount) <= 0) {
+  if (!rawAmount || Number(rawAmount) <= 0) {
     return res.status(400).json({ success: false, error: 'Valid due amount is required.' });
   }
 
-  let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
-  if (!feeTreatment) {
-    try {
-      const cfg = await PayMongoService.getTenantConfig(tenantId);
-      if (cfg.feeTreatment === 'OPEX') effectiveFeeTreatment = 'OPEX';
-    } catch {}
-  }
+  let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' =
+    feeTreatment === 'OPEX' || feeEnabled === false ? 'OPEX' : 'PASS_THROUGH';
+  let effectiveFeeEnabled = feeEnabled !== false;
 
-  const baseAmount = Math.round(Number(amount) * 100) / 100;
-  const convenienceFee = PaymentService.calculatePassOnFee(baseAmount, 'PAYMONGO_QRPH', effectiveFeeTreatment);
+  try {
+    const cfg = await PayMongoService.getTenantConfig(tenantId);
+    const sysCfg = dbStore.systemConfigs.get(tenantId) || dbStore.systemConfigs.get('tenant_family');
+    if (
+      cfg.feeTreatment === 'OPEX' ||
+      cfg.feeEnabled === false ||
+      cfg.isEnabled === false ||
+      sysCfg?.paymongoFeeTreatment === 'OPEX' ||
+      sysCfg?.paymongoFeeEnabled === false
+    ) {
+      effectiveFeeTreatment = 'OPEX';
+      effectiveFeeEnabled = false;
+    } else if (feeTreatment === 'OPEX') {
+      effectiveFeeTreatment = 'OPEX';
+    }
+  } catch {}
+
+  const baseAmount = Math.round(Number(rawAmount) * 100) / 100;
+  const convenienceFee =
+    effectiveFeeTreatment === 'OPEX' || !effectiveFeeEnabled
+      ? 0
+      : PaymentService.calculatePassOnFee(baseAmount, 'PAYMONGO_QRPH', effectiveFeeTreatment);
   const totalAmount = Math.round((baseAmount + convenienceFee) * 100) / 100;
 
   try {
@@ -4233,6 +4330,7 @@ app.post('/api/v1/loans/:id/paymongo/create-intent', async (req: Request, res: R
         convenienceFee,
         totalAmount,
         feeTreatment: effectiveFeeTreatment,
+        feeEnabled: effectiveFeeEnabled,
       },
     });
   } catch (err: any) {
@@ -4257,6 +4355,7 @@ app.post('/api/v1/loans/:id/paymongo/create-intent', async (req: Request, res: R
         convenienceFee: fallback.passOnFee,
         totalAmount: fallback.totalAmountToPay,
         feeTreatment: effectiveFeeTreatment,
+        feeEnabled: effectiveFeeEnabled,
       },
     });
   }
@@ -4272,12 +4371,60 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       memberNo: reqMemberNo,
       installmentNumber,
       amountPaid,
+      dueAmount: reqDueAmount,
       principalPortion: reqPrincipalPortion,
+      principalAmount: reqPrincipalAmount,
       interestPortion: reqInterestPortion,
+      interestAmount: reqInterestAmount,
       channel,
       feeTreatment,
       receiptNumber: reqReceiptNumber,
+      orNumber: reqOrNumber,
+      paymentIntentId,
+      checkoutLinkId,
+      skipPaymongoVerification,
     } = req.body;
+
+    const paymentChannel: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' =
+      channel === 'IN_PERSON_CASHIER' ? 'IN_PERSON_CASHIER' : 'PAYMONGO_QRPH';
+
+    // Validate PayMongo QR Ph payment status with PayMongo API before recording repayment
+    let verifiedPaymongoPaymentId: string | undefined;
+    if (paymentChannel === 'PAYMONGO_QRPH' && !skipPaymongoVerification) {
+      let isPaid = false;
+      let paymentStatus = 'awaiting_payment_method';
+
+      if (paymentIntentId && String(paymentIntentId).startsWith('pi_') && !String(paymentIntentId).startsWith('pi_qrph_')) {
+        try {
+          const check = await PayMongoService.checkPaymentIntentStatus(String(paymentIntentId), tenantId);
+          isPaid = check.isPaid;
+          paymentStatus = check.status;
+          verifiedPaymongoPaymentId = check.paymentId;
+        } catch (err: any) {
+          console.warn('[PAYMONGO LOAN VERIFY] Intent check error:', err?.message);
+        }
+      }
+
+      if (!isPaid && checkoutLinkId) {
+        try {
+          const linkCheck = await PayMongoService.checkCheckoutLinkStatus(String(checkoutLinkId), tenantId);
+          isPaid = linkCheck.isPaid;
+          paymentStatus = linkCheck.status;
+          verifiedPaymongoPaymentId = linkCheck.paymentId;
+        } catch (err: any) {
+          console.warn('[PAYMONGO LOAN VERIFY] Link check error:', err?.message);
+        }
+      }
+
+      if (!isPaid) {
+        return res.status(400).json({
+          success: false,
+          isPaid: false,
+          status: paymentStatus,
+          error: `PayMongo QR Ph payment has not been confirmed yet (status: ${paymentStatus}). Please scan the QR Ph code and complete the payment in your banking or e-wallet app first.`,
+        });
+      }
+    }
 
     const fsService = FirestoreCoopService.getInstance();
     let loans = dbStore.loans.get(tenantId) || [];
@@ -4326,25 +4473,34 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       loan.schedule.find((s: any) => !s.isPaid && s.status !== 'PAID') ||
       loan.schedule[0];
 
-    const dueAmount = Math.round(Number(amountPaid || targetItem?.totalInstallment || 0) * 100) / 100;
+    const effectivePaidInput = amountPaid ?? reqDueAmount;
+    const dueAmount = Math.round(Number(effectivePaidInput || targetItem?.totalInstallment || 0) * 100) / 100;
+    const rawInterestInput = reqInterestPortion !== undefined ? reqInterestPortion : reqInterestAmount;
     const interestPortion =
-      reqInterestPortion !== undefined
-        ? Math.round(Number(reqInterestPortion) * 100) / 100
+      rawInterestInput !== undefined
+        ? Math.round(Number(rawInterestInput) * 100) / 100
         : Math.round(Number(targetItem?.interestAmount || 0) * 100) / 100;
+    const rawPrincipalInput = reqPrincipalPortion !== undefined ? reqPrincipalPortion : reqPrincipalAmount;
     const principalPortion =
-      reqPrincipalPortion !== undefined
-        ? Math.round(Number(reqPrincipalPortion) * 100) / 100
+      rawPrincipalInput !== undefined
+        ? Math.round(Number(rawPrincipalInput) * 100) / 100
         : Math.round(Number(targetItem?.principalAmount || Math.max(0, dueAmount - interestPortion)) * 100) / 100;
 
     let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
-    if (!feeTreatment) {
-      try {
-        const cfg = await PayMongoService.getTenantConfig(tenantId);
-        if (cfg.feeTreatment === 'OPEX') effectiveFeeTreatment = 'OPEX';
-      } catch {}
-    }
+    try {
+      const cfg = await PayMongoService.getTenantConfig(tenantId);
+      const sysCfg = dbStore.systemConfigs.get(tenantId) || dbStore.systemConfigs.get('tenant_family');
+      if (
+        cfg.feeTreatment === 'OPEX' ||
+        cfg.feeEnabled === false ||
+        cfg.isEnabled === false ||
+        sysCfg?.paymongoFeeTreatment === 'OPEX' ||
+        sysCfg?.paymongoFeeEnabled === false
+      ) {
+        effectiveFeeTreatment = 'OPEX';
+      }
+    } catch {}
 
-    const paymentChannel: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' = channel === 'IN_PERSON_CASHIER' ? 'IN_PERSON_CASHIER' : 'PAYMONGO_QRPH';
     const passOnFee =
       paymentChannel === 'PAYMONGO_QRPH'
         ? PaymentService.calculatePassOnFee(dueAmount, 'PAYMONGO_QRPH', effectiveFeeTreatment)
@@ -4371,7 +4527,10 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
     loan.balanceRemaining = newRemaining;
     loan.updatedAt = nowIso;
 
-    const receiptNo = reqReceiptNumber || `OR-${new Date().getFullYear()}-QR${Math.floor(10000 + Math.random() * 90000)}`;
+    const receiptNo =
+      reqReceiptNumber ||
+      reqOrNumber ||
+      `OR-${new Date().getFullYear()}-QR${Math.floor(10000 + Math.random() * 90000)}`;
     const dateFormatted = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
     const instNum = targetItem?.installmentNumber || installmentNumber || 1;
 

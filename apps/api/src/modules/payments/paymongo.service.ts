@@ -7,6 +7,7 @@ const DEFAULT_PAYMONGO_CONFIG: PayMongoConfig = {
   webhookSecret: process.env.PAYMONGO_WEBHOOK_SECRET || 'whsec_test_secret_key_12345',
   environment: 'test',
   isEnabled: true,
+  feeEnabled: true,
   feeTreatment: 'PASS_THROUGH',
   updatedAt: new Date().toISOString(),
   updatedBy: 'System Initializer',
@@ -16,7 +17,7 @@ export class PayMongoService {
   private static cachedPlatformConfig: PayMongoConfig | null = null;
   private static lastPlatformFetchTime = 0;
   private static cachedTenantConfigs = new Map<string, { config: PayMongoConfig; lastFetchTime: number }>();
-  private static CACHE_TTL_MS = 30000; // 30 seconds cache
+  private static CACHE_TTL_MS = 10000; // 10 seconds cache
 
   private static getBaseUrl(): string {
     return 'https://api.paymongo.com/v1';
@@ -34,14 +35,19 @@ export class PayMongoService {
     try {
       const fs = FirestoreCoopService.getInstance();
       const doc = await fs.getPlatformConfig('paymongo');
-      if (doc && doc.secretKey) {
+      if (doc) {
+        const isEnabledVal = doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : DEFAULT_PAYMONGO_CONFIG.isEnabled;
+        const feeEnabledVal = doc.feeEnabled !== undefined ? Boolean(doc.feeEnabled) : isEnabledVal;
+        const feeTreatmentVal =
+          doc.feeTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
         this.cachedPlatformConfig = {
-          secretKey: doc.secretKey,
+          secretKey: doc.secretKey || DEFAULT_PAYMONGO_CONFIG.secretKey,
           publicKey: doc.publicKey || DEFAULT_PAYMONGO_CONFIG.publicKey,
           webhookSecret: doc.webhookSecret || DEFAULT_PAYMONGO_CONFIG.webhookSecret,
           environment: doc.environment || 'test',
-          isEnabled: doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : true,
-          feeTreatment: doc.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
+          isEnabled: isEnabledVal,
+          feeEnabled: feeEnabledVal,
+          feeTreatment: feeTreatmentVal,
           updatedAt: doc.updatedAt || new Date().toISOString(),
           updatedBy: doc.updatedBy || 'Platform Operator',
         };
@@ -73,13 +79,18 @@ export class PayMongoService {
       const fs = FirestoreCoopService.getInstance();
       const doc = await fs.getTenantPaymongoConfig(tenantId);
       if (doc) {
+        const isEnabledVal = doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : platformConfig.isEnabled;
+        const feeEnabledVal = doc.feeEnabled !== undefined ? Boolean(doc.feeEnabled) : isEnabledVal;
+        const feeTreatmentVal =
+          doc.feeTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
         const tenantCfg: PayMongoConfig = {
           secretKey: doc.secretKey || platformConfig.secretKey,
           publicKey: doc.publicKey || platformConfig.publicKey,
           webhookSecret: doc.webhookSecret || platformConfig.webhookSecret,
           environment: doc.environment || platformConfig.environment || 'test',
-          isEnabled: doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : true,
-          feeTreatment: doc.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
+          isEnabled: isEnabledVal,
+          feeEnabled: feeEnabledVal,
+          feeTreatment: feeTreatmentVal,
           updatedAt: doc.updatedAt || new Date().toISOString(),
           updatedBy: doc.updatedBy || 'Cooperative Admin',
         };
@@ -113,16 +124,27 @@ export class PayMongoService {
     updatedBy: string
   ): Promise<PayMongoConfig> {
     const current = await this.getPlatformConfig();
+    const isEnabledVal = updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled;
+    const feeEnabledVal =
+      updated.feeEnabled !== undefined ? Boolean(updated.feeEnabled) : (updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : (current.feeEnabled ?? isEnabledVal));
+    const rawTreatment = updated.feeTreatment || current.feeTreatment || 'PASS_THROUGH';
+    const effectiveFeeTreatment = rawTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+
     const newConfig: PayMongoConfig = {
       secretKey: updated.secretKey ? updated.secretKey.trim() : current.secretKey,
       publicKey: updated.publicKey ? updated.publicKey.trim() : current.publicKey,
       webhookSecret: updated.webhookSecret ? updated.webhookSecret.trim() : current.webhookSecret,
       environment: updated.environment || current.environment,
-      isEnabled: updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled,
-      feeTreatment: updated.feeTreatment || current.feeTreatment || 'PASS_THROUGH',
+      isEnabled: isEnabledVal,
+      feeEnabled: feeEnabledVal,
+      feeTreatment: effectiveFeeTreatment,
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy || 'Platform Operator',
     };
+
+    DEFAULT_PAYMONGO_CONFIG.isEnabled = newConfig.isEnabled;
+    DEFAULT_PAYMONGO_CONFIG.feeEnabled = newConfig.feeEnabled;
+    DEFAULT_PAYMONGO_CONFIG.feeTreatment = newConfig.feeTreatment;
 
     try {
       const fs = FirestoreCoopService.getInstance();
@@ -133,6 +155,7 @@ export class PayMongoService {
 
     this.cachedPlatformConfig = newConfig;
     this.lastPlatformFetchTime = Date.now();
+    this.cachedTenantConfigs.clear();
     return newConfig;
   }
 
@@ -155,25 +178,61 @@ export class PayMongoService {
     updatedBy: string
   ): Promise<PayMongoConfig> {
     const current = await this.getTenantConfig(tenantId);
+    const isEnabledVal = updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled;
+    const feeEnabledVal =
+      updated.feeEnabled !== undefined
+        ? Boolean(updated.feeEnabled)
+        : updated.isEnabled !== undefined
+        ? Boolean(updated.isEnabled)
+        : (current.feeEnabled ?? isEnabledVal);
+    const rawTreatment =
+      updated.feeTreatment === 'OPEX'
+        ? 'OPEX'
+        : updated.feeTreatment === 'PASS_THROUGH'
+        ? 'PASS_THROUGH'
+        : current.feeTreatment || 'PASS_THROUGH';
+    const effectiveFeeTreatment = rawTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+
     const newConfig: PayMongoConfig = {
       secretKey: updated.secretKey && updated.secretKey.trim() ? updated.secretKey.trim() : current.secretKey,
       publicKey: updated.publicKey && updated.publicKey.trim() ? updated.publicKey.trim() : current.publicKey,
       webhookSecret: updated.webhookSecret && updated.webhookSecret.trim() ? updated.webhookSecret.trim() : current.webhookSecret,
       environment: updated.environment || current.environment,
-      isEnabled: updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : current.isEnabled,
-      feeTreatment: updated.feeTreatment === 'OPEX' ? 'OPEX' : (updated.feeTreatment === 'PASS_THROUGH' ? 'PASS_THROUGH' : (current.feeTreatment || 'PASS_THROUGH')),
+      isEnabled: isEnabledVal,
+      feeEnabled: feeEnabledVal,
+      feeTreatment: effectiveFeeTreatment,
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy || 'Cooperative Admin',
     };
 
+    // Update default & platform fallback so any tenant alias (e.g. tenant_default vs tenant_family) stays in sync
+    DEFAULT_PAYMONGO_CONFIG.isEnabled = newConfig.isEnabled;
+    DEFAULT_PAYMONGO_CONFIG.feeEnabled = newConfig.feeEnabled;
+    DEFAULT_PAYMONGO_CONFIG.feeTreatment = newConfig.feeTreatment;
+    this.cachedPlatformConfig = {
+      ...(this.cachedPlatformConfig || DEFAULT_PAYMONGO_CONFIG),
+      isEnabled: newConfig.isEnabled,
+      feeEnabled: newConfig.feeEnabled,
+      feeTreatment: newConfig.feeTreatment,
+      updatedAt: newConfig.updatedAt,
+      updatedBy: newConfig.updatedBy,
+    };
+    this.lastPlatformFetchTime = Date.now();
+    this.cachedTenantConfigs.clear();
+
     try {
       const fs = FirestoreCoopService.getInstance();
       await fs.saveTenantPaymongoConfig(tenantId, newConfig);
+      await fs.savePlatformConfig('paymongo', this.cachedPlatformConfig);
+      if (tenantId !== 'tenant_family') {
+        await fs.saveTenantPaymongoConfig('tenant_family', newConfig);
+      }
     } catch (err) {
       console.warn(`[PAYMONGO] Warning saving tenant config for ${tenantId}:`, err);
     }
 
     this.cachedTenantConfigs.set(tenantId, { config: newConfig, lastFetchTime: Date.now() });
+    this.cachedTenantConfigs.set('tenant_family', { config: newConfig, lastFetchTime: Date.now() });
     return newConfig;
   }
 
@@ -251,11 +310,7 @@ export class PayMongoService {
     totalAmount: number;
   }> {
     const config = await this.getConfig(tenantId);
-    if (!config.isEnabled) {
-      throw new Error('PayMongo integration is currently disabled by Cooperative Administration.');
-    }
-
-    const secretKey = config.secretKey;
+    const secretKey = (config.secretKey || DEFAULT_PAYMONGO_CONFIG.secretKey).trim();
     const authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
     const amountInCentavos = Math.round(params.amount * 100);
 
@@ -378,11 +433,7 @@ export class PayMongoService {
     amount: number;
   }> {
     const config = await this.getConfig(tenantId);
-    if (!config.isEnabled) {
-      throw new Error('PayMongo integration is currently disabled by Cooperative Administration.');
-    }
-
-    const secretKey = config.secretKey;
+    const secretKey = (config.secretKey || DEFAULT_PAYMONGO_CONFIG.secretKey).trim();
     const authHeader = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
     const amountInCentavos = Math.round(params.amount * 100);
 

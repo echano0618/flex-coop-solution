@@ -1222,12 +1222,21 @@ export default function AdminDashboard() {
     updatedBy?: string;
   }>(() => {
     let initialFeeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH';
+    let initialIsEnabled = true;
     if (typeof window !== 'undefined') {
       try {
         const tenant = resolveTenantCoop();
-        const cached = localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`);
+        const cached =
+          localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`) ||
+          localStorage.getItem('flexcoop_paymongo_fee_treatment_global');
         if (cached === 'OPEX' || cached === 'PASS_THROUGH') {
           initialFeeTreatment = cached;
+        }
+        const cachedEnabled =
+          localStorage.getItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`) ??
+          localStorage.getItem('flexcoop_paymongo_fee_enabled_global');
+        if (cachedEnabled !== null) {
+          initialIsEnabled = cachedEnabled !== 'false';
         }
       } catch {}
     }
@@ -1236,8 +1245,8 @@ export default function AdminDashboard() {
       publicKey: '',
       webhookSecret: '',
       environment: 'test',
-      isEnabled: true,
-      feeTreatment: initialFeeTreatment,
+      isEnabled: initialIsEnabled,
+      feeTreatment: initialIsEnabled ? initialFeeTreatment : 'OPEX',
     };
   });
   const [showPaymongoSecretKey, setShowPaymongoSecretKey] = useState<boolean>(false);
@@ -1262,19 +1271,24 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success && data.data) {
-        const resolvedFeeTreatment = data.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+        const resolvedIsEnabled = data.data.isEnabled !== undefined ? Boolean(data.data.isEnabled) : true;
+        const resolvedFeeTreatment =
+          data.data.feeTreatment === 'OPEX' || !resolvedIsEnabled ? 'OPEX' : 'PASS_THROUGH';
         setTenantPaymongoConfig({
           secretKey: data.data.secretKey || '',
           publicKey: data.data.publicKey || '',
           webhookSecret: data.data.webhookSecret || '',
           environment: data.data.environment || 'test',
-          isEnabled: data.data.isEnabled !== undefined ? Boolean(data.data.isEnabled) : true,
+          isEnabled: resolvedIsEnabled,
           feeTreatment: resolvedFeeTreatment,
           updatedAt: data.data.updatedAt,
           updatedBy: data.data.updatedBy,
         });
         try {
           localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`, resolvedFeeTreatment);
+          localStorage.setItem('flexcoop_paymongo_fee_treatment_global', resolvedFeeTreatment);
+          localStorage.setItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`, String(resolvedIsEnabled));
+          localStorage.setItem('flexcoop_paymongo_fee_enabled_global', String(resolvedIsEnabled));
         } catch {}
       }
     } catch (err) {
@@ -1282,32 +1296,63 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSaveTenantPaymongoConfig = async (overrideFeeTreatment?: 'PASS_THROUGH' | 'OPEX') => {
-    const effectiveFeeTreatment = overrideFeeTreatment || tenantPaymongoConfig.feeTreatment || 'PASS_THROUGH';
+  const handleSaveTenantPaymongoConfig = async (
+    overrideFeeTreatment?: 'PASS_THROUGH' | 'OPEX',
+    overrideIsEnabled?: boolean
+  ) => {
+    const effectiveIsEnabled =
+      overrideIsEnabled !== undefined ? overrideIsEnabled : tenantPaymongoConfig.isEnabled;
+    const rawTreatment = overrideFeeTreatment || tenantPaymongoConfig.feeTreatment || 'PASS_THROUGH';
+    const effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' =
+      !effectiveIsEnabled || rawTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+
     setTenantPaymongoSaving(true);
     setTenantPaymongoNotification(null);
     try {
       const tenant = resolveTenantCoop();
       try {
         localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`, effectiveFeeTreatment);
+        localStorage.setItem('flexcoop_paymongo_fee_treatment_global', effectiveFeeTreatment);
+        localStorage.setItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`, String(effectiveIsEnabled));
+        localStorage.setItem('flexcoop_paymongo_fee_enabled_global', String(effectiveIsEnabled));
       } catch {}
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-tenant-slug': tenant.slug || 'family-coop',
+        'x-tenant-id': `tenant_${(tenant.slug || 'family').replace(/[-_]coop$/, '')}`,
+      };
+
       const res = await fetch(`${getApiBaseUrl()}/tenant/paymongo-config`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-slug': tenant.slug || 'family-coop',
-          'x-tenant-id': `tenant_${(tenant.slug || 'family').replace(/[-_]coop$/, '')}`,
-        },
+        headers,
         body: JSON.stringify({
           ...tenantPaymongoConfig,
+          isEnabled: effectiveIsEnabled,
+          feeEnabled: effectiveIsEnabled && effectiveFeeTreatment === 'PASS_THROUGH',
           feeTreatment: effectiveFeeTreatment,
           updatedBy: currentStaff.name || 'Cooperative Admin',
         }),
       });
       const data = await res.json();
+
+      // Also sync with /system-config so Member Portal always sees the updated fee setting immediately
+      fetch(`${getApiBaseUrl()}/system-config`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          paymongoFeeTreatment: effectiveFeeTreatment,
+          paymongoFeeEnabled: effectiveIsEnabled && effectiveFeeTreatment === 'PASS_THROUGH',
+        }),
+      }).catch(() => {});
+
       if (res.ok && data.success) {
         setTenantPaymongoNotification(
-          `PayMongo gateway configuration & fee policy (${effectiveFeeTreatment === 'OPEX' ? 'Coop OPEX — ₱0.00 Member Fee' : '1.5% Pass-Through — No Minimum Floor'}) saved successfully!`
+          `PayMongo gateway configuration & fee policy (${
+            !effectiveIsEnabled || effectiveFeeTreatment === 'OPEX'
+              ? 'Gateway Fee Disabled / Coop OPEX — ₱0.00 Member Fee'
+              : '1.5% Pass-Through — No Minimum Floor'
+          }) saved successfully!`
         );
         setTimeout(() => setTenantPaymongoNotification(null), 5000);
       } else {
@@ -13346,22 +13391,26 @@ export default function AdminDashboard() {
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 block">Integration Switch</label>
+                        <label className="text-xs font-bold text-slate-700 block">Integration / Gateway Fee Switch</label>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            const nextEnabled = !tenantPaymongoConfig.isEnabled;
+                            const nextTreatment = nextEnabled ? tenantPaymongoConfig.feeTreatment : 'OPEX';
                             setTenantPaymongoConfig((prev) => ({
                               ...prev,
-                              isEnabled: !prev.isEnabled,
-                            }))
-                          }
-                          className={`w-full py-2.5 rounded-xl font-bold text-xs border transition ${
+                              isEnabled: nextEnabled,
+                              feeTreatment: nextTreatment,
+                            }));
+                            handleSaveTenantPaymongoConfig(nextTreatment, nextEnabled);
+                          }}
+                          className={`w-full py-2.5 rounded-xl font-bold text-xs border transition cursor-pointer ${
                             tenantPaymongoConfig.isEnabled
                               ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
                               : 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100'
                           }`}
                         >
-                          {tenantPaymongoConfig.isEnabled ? 'Enabled (Active)' : 'Disabled'}
+                          {tenantPaymongoConfig.isEnabled ? 'Enabled (Active)' : 'Disabled (₱0 Member Fee)'}
                         </button>
                       </div>
                     </div>
@@ -13380,12 +13429,12 @@ export default function AdminDashboard() {
                         </div>
                         <span
                           className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 border ${
-                            tenantPaymongoConfig.feeTreatment === 'OPEX'
+                            tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
                               ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
                               : 'bg-amber-100 text-amber-900 border-amber-300'
                           }`}
                         >
-                          {tenantPaymongoConfig.feeTreatment === 'OPEX'
+                          {tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
                             ? 'Active: Cooperative OPEX (₱0 Member Fee)'
                             : 'Active: Member Pass-Through (1.5% Exact)'}
                         </span>
@@ -13397,19 +13446,20 @@ export default function AdminDashboard() {
                           onClick={() => {
                             setTenantPaymongoConfig((prev) => ({
                               ...prev,
+                              isEnabled: true,
                               feeTreatment: 'PASS_THROUGH',
                             }));
-                            handleSaveTenantPaymongoConfig('PASS_THROUGH');
+                            handleSaveTenantPaymongoConfig('PASS_THROUGH', true);
                           }}
                           className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                            tenantPaymongoConfig.feeTreatment !== 'OPEX'
+                            tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled
                               ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
                               : 'border-slate-200 bg-white/70 hover:bg-white'
                           }`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-slate-900">Pass-Through to Member (1.5%)</span>
-                            {tenantPaymongoConfig.feeTreatment !== 'OPEX' && (
+                            {tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled && (
                               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                             )}
                           </div>
@@ -13425,17 +13475,17 @@ export default function AdminDashboard() {
                               ...prev,
                               feeTreatment: 'OPEX',
                             }));
-                            handleSaveTenantPaymongoConfig('OPEX');
+                            handleSaveTenantPaymongoConfig('OPEX', tenantPaymongoConfig.isEnabled);
                           }}
                           className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                            tenantPaymongoConfig.feeTreatment === 'OPEX'
+                            tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
                               ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
                               : 'border-slate-200 bg-white/70 hover:bg-white'
                           }`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-slate-900">Cooperative OPEX (Absorbed)</span>
-                            {tenantPaymongoConfig.feeTreatment === 'OPEX' && (
+                            {(tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled) && (
                               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                             )}
                           </div>
