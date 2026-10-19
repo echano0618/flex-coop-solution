@@ -997,12 +997,25 @@ export default function MemberPortalPage() {
   const periodicRate = annualRate / periodsPerYear;
 
   // Helper functions for Principal vs Periodic Amortization calculation
-  const computePrincipalFromAmortization = (amort: number, periods: number, pRate: number): number => {
-    if (pRate === 0) return Math.round(amort * periods);
+  const computePrincipalFromAmortization = (
+    totalAmort: number,
+    periods: number,
+    pRate: number,
+    shareAmort = 0
+  ): number => {
+    const netAmort = Math.max(0, totalAmort - shareAmort);
+    if (pRate === 0) return Math.round(netAmort * periods * 100) / 100;
     const f = Math.pow(1.0 + pRate, periods);
-    if (f <= 1.0) return Math.round(amort * periods);
-    const rawPrincipal = amort * ((f - 1.0) / (pRate * f));
-    return Math.round(rawPrincipal / 100) * 100;
+    if (f <= 1.0) return Math.round(netAmort * periods * 100) / 100;
+    const factor = (pRate * f) / (f - 1.0);
+    let p = netAmort / factor;
+    let pRounded = Math.round(p * 100) / 100;
+    let derived = Math.round(pRounded * factor * 100) / 100;
+    let diff = Math.round((netAmort - derived) * 100) / 100;
+    if (diff !== 0) {
+      pRounded = Math.round((pRounded + (diff / factor)) * 100) / 100;
+    }
+    return pRounded;
   };
 
   const computeAmortizationFromPrincipal = (principal: number, periods: number, pRate: number): number => {
@@ -1200,9 +1213,16 @@ export default function MemberPortalPage() {
 
   // Periodic annuity installment
   const periodicFactor = Math.pow(1.0 + periodicRate, effectiveTermPeriods);
-  const basePeriodicInstallment = Math.round(((loanAmount * (periodicRate * periodicFactor)) / (periodicFactor - 1.0)) * 100) / 100;
-  const monthlyInstallment = basePeriodicInstallment + shareAmortizationPerPeriod;
-  const totalInterest = Math.round(((basePeriodicInstallment * effectiveTermPeriods) - loanAmount) * 100) / 100;
+  const calculatedBaseInstallment = Math.round(((loanAmount * (periodicRate * periodicFactor)) / (periodicFactor - 1.0)) * 100) / 100;
+  const isAmortizationMode = loanCalculationBasis === 'AMORTIZATION';
+  const targetBaseInstallment = isInstallmentSharePayment ? Math.max(0, desiredAmortization - shareAmortizationPerPeriod) : desiredAmortization;
+  const basePeriodicInstallment = isAmortizationMode
+    ? targetBaseInstallment
+    : calculatedBaseInstallment;
+  const monthlyInstallment = isAmortizationMode
+    ? desiredAmortization
+    : (basePeriodicInstallment + shareAmortizationPerPeriod);
+  const totalInterest = Math.max(0, Math.round(((basePeriodicInstallment * effectiveTermPeriods) - loanAmount) * 100) / 100);
   const totalDeductions = memberTechFeeDeduction + coopServiceFee + advanceInterest + optionalFeesTotal + upfrontShareDeductionAmount;
   // Actual EIR based on the loan tenure (not annualized / not p.a.)
   const eirTenure = Math.round(((totalInterest + totalDeductions) / Math.max(1, netProceeds)) * 10000) / 100;
@@ -2672,15 +2692,18 @@ export default function MemberPortalPage() {
                                 if (loanCalculationBasis === 'AMORTIZATION') {
                                   let targetAmort = desiredAmortization;
                                   if (pIsWeeks && targetAmort > 3500) {
-                                    targetAmort = 1200;
-                                    setDesiredAmortization(1200);
+                                    targetAmort = 1000;
+                                    setDesiredAmortization(1000);
                                   } else if (!pIsWeeks && targetAmort < 1500) {
                                     targetAmort = 4442;
                                     setDesiredAmortization(4442);
                                   }
-                                  const computed = computePrincipalFromAmortization(targetAmort, pTermPeriods, pPeriodicRate);
-                                  const clamped = Math.min(pMax, Math.max(pMin, computed));
-                                  setLoanAmount(clamped);
+                                  const pMandatoryShareQty = p.mandatoryShareQuantity || 10;
+                                  const pMandatoryShareTotal = p.mandatorySharePurchaseEnabled ? (pMandatoryShareQty * 100) : 0;
+                                  const pIsInstallmentShare = Boolean(p.mandatorySharePurchaseEnabled) && p.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT';
+                                  const pShareAmort = pIsInstallmentShare ? Math.round((pMandatoryShareTotal / pTermPeriods) * 100) / 100 : 0;
+                                  const computed = computePrincipalFromAmortization(targetAmort, pTermPeriods, pPeriodicRate, pShareAmort);
+                                  setLoanAmount(computed);
                                 } else {
                                   if (loanAmount > pMax) setLoanAmount(pMax);
                                   if (loanAmount < pMin) setLoanAmount(pMin);
@@ -2750,12 +2773,10 @@ export default function MemberPortalPage() {
                         type="button"
                         onClick={() => {
                           setLoanCalculationBasis('AMORTIZATION');
-                          const currentAmort = Math.round(monthlyInstallment);
-                          const initialAmort = currentAmort > 0 ? currentAmort : (isWeeks ? 1200 : 4442);
+                          const initialAmort = isWeeks ? 1000 : 4442;
                           setDesiredAmortization(initialAmort);
-                          const computed = computePrincipalFromAmortization(initialAmort, effectiveTermPeriods, periodicRate);
-                          const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
-                          setLoanAmount(clamped);
+                          const computed = computePrincipalFromAmortization(initialAmort, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
+                          setLoanAmount(computed);
                         }}
                         className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                           loanCalculationBasis === 'AMORTIZATION'
@@ -2818,16 +2839,15 @@ export default function MemberPortalPage() {
 
                         <input
                           type="range"
-                          min={Math.max(isWeeks ? 200 : 500, Math.floor(computeAmortizationFromPrincipal(minPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50)}
-                          max={Math.ceil(computeAmortizationFromPrincipal(maxPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50}
+                          min={isWeeks ? 200 : 500}
+                          max={Math.max(isWeeks ? 5000 : 25000, Math.ceil(computeAmortizationFromPrincipal(maxPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50)}
                           step={isWeeks ? 50 : 100}
                           value={desiredAmortization}
                           onChange={(e) => {
                             const newAmort = Number(e.target.value);
                             setDesiredAmortization(newAmort);
-                            const computed = computePrincipalFromAmortization(newAmort, effectiveTermPeriods, periodicRate);
-                            const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
-                            setLoanAmount(clamped);
+                            const computed = computePrincipalFromAmortization(newAmort, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
+                            setLoanAmount(computed);
                           }}
                           className="w-full accent-emerald-600"
                         />
@@ -2843,9 +2863,8 @@ export default function MemberPortalPage() {
                               type="button"
                               onClick={() => {
                                 setDesiredAmortization(amt);
-                                const computed = computePrincipalFromAmortization(amt, effectiveTermPeriods, periodicRate);
-                                const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
-                                setLoanAmount(clamped);
+                                const computed = computePrincipalFromAmortization(amt, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
+                                setLoanAmount(computed);
                               }}
                               className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition ${
                                 desiredAmortization === amt
@@ -2902,9 +2921,9 @@ export default function MemberPortalPage() {
                               setLoanTermWeeks(w);
                               if (loanCalculationBasis === 'AMORTIZATION') {
                                 const periods = isBiWeekly ? Math.max(1, Math.ceil(w / 2)) : Math.max(1, w);
-                                const computed = computePrincipalFromAmortization(desiredAmortization, periods, periodicRate);
-                                const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
-                                setLoanAmount(clamped);
+                                const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / periods) * 100) / 100 : 0;
+                                const computed = computePrincipalFromAmortization(desiredAmortization, periods, periodicRate, shareAmort);
+                                setLoanAmount(computed);
                               }
                             }}
                             className={`flex-1 min-w-[65px] py-2 rounded-lg border text-xs font-bold transition-colors ${
@@ -2926,9 +2945,9 @@ export default function MemberPortalPage() {
                             onClick={() => {
                               setLoanTerm(t);
                               if (loanCalculationBasis === 'AMORTIZATION') {
-                                const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate / 12.0);
-                                const clamped = Math.min(maxPrincipal, Math.max(minPrincipal, computed));
-                                setLoanAmount(clamped);
+                                const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / t) * 100) / 100 : 0;
+                                const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate / 12.0, shareAmort);
+                                setLoanAmount(computed);
                               }
                             }}
                             className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-colors ${
