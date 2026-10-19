@@ -2234,6 +2234,52 @@ app.post('/api/v1/shares/paymongo/create-intent', async (req: Request, res: Resp
   }
 });
 
+app.get('/api/v1/shares/paymongo/status/:intentId', async (req: Request, res: Response) => {
+  const { intentId } = req.params;
+  const linkId = req.query.linkId as string | undefined;
+
+  try {
+    let isPaid = false;
+    let paymentStatus = 'pending';
+    let paymentId: string | undefined;
+
+    if (intentId) {
+      try {
+        const intentStatus = await PayMongoService.checkPaymentIntentStatus(intentId);
+        paymentStatus = intentStatus.status;
+        if (intentStatus.isPaid) {
+          isPaid = true;
+          paymentId = intentStatus.paymentId;
+        }
+      } catch (e: any) {
+        console.warn(`[PAYMONGO] Intent check error:`, e.message);
+      }
+    }
+
+    if (!isPaid && linkId) {
+      try {
+        const linkStatus = await PayMongoService.checkCheckoutLinkStatus(linkId);
+        if (linkStatus.isPaid) {
+          isPaid = true;
+          paymentStatus = 'paid';
+          paymentId = linkStatus.paymentId;
+        }
+      } catch (e: any) {
+        console.warn(`[PAYMONGO] Link check error:`, e.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      isPaid,
+      status: paymentStatus,
+      paymentId,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Failed to check PayMongo status.' });
+  }
+});
+
 app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const { memberId, sharesCount, amount, paymentIntentId, checkoutLinkId } = req.body;

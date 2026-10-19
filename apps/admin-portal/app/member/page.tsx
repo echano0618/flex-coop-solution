@@ -604,14 +604,25 @@ export default function MemberPortalPage() {
       });
       const json = await res.json();
       if (res.ok && json.success) {
-        setPaidUpCapital((prev) => prev + paymongoActivePayment.principalAmount);
-        setSharesCount((prev) => prev + paymongoActivePayment.sharesCount);
+        const addedAmount = paymongoActivePayment.principalAmount;
+        const addedShares = paymongoActivePayment.sharesCount;
+        setPaidUpCapital((prev) => prev + addedAmount);
+        setSharesCount((prev) => prev + addedShares);
+        setCustomMember((prev: any) =>
+          prev
+            ? {
+                ...prev,
+                paidUpCapital: (prev.paidUpCapital || 0) + addedAmount,
+                sharesCount: (prev.sharesCount || 0) + addedShares,
+              }
+            : prev
+        );
         setDepositSuccessResult({
           type: 'Share Capital Purchase',
-          amount: paymongoActivePayment.principalAmount,
+          amount: addedAmount,
           reference: json.receiptNumber || `OR-SHR-${Date.now().toString(36).toUpperCase()}`,
           channel: 'PayMongo QR Ph / Online Gateway',
-          sharesAdded: paymongoActivePayment.sharesCount,
+          sharesAdded: addedShares,
         });
         setPaymongoActivePayment(null);
       } else {
@@ -623,6 +634,38 @@ export default function MemberPortalPage() {
       setIsVerifyingPaymongo(false);
     }
   };
+
+  // Real-time automatic background payment status polling for QR Ph & Checkout Link
+  useEffect(() => {
+    if (!paymongoActivePayment?.paymentIntentId) return;
+
+    let isDisposed = false;
+    const interval = setInterval(async () => {
+      try {
+        const linkQuery = paymongoActivePayment.checkoutLinkId ? `?linkId=${paymongoActivePayment.checkoutLinkId}` : '';
+        const res = await fetch(
+          `${getApiBaseUrl()}/shares/paymongo/status/${paymongoActivePayment.paymentIntentId}${linkQuery}`,
+          {
+            headers: {
+              'x-tenant-slug': tenantInfo.slug,
+            },
+          }
+        );
+        const data = await res.json();
+        if (!isDisposed && data.success && data.isPaid) {
+          clearInterval(interval);
+          handleVerifyAndCompletePaymongoShares();
+        }
+      } catch (err) {
+        // Polling retry
+      }
+    }, 2500);
+
+    return () => {
+      isDisposed = true;
+      clearInterval(interval);
+    };
+  }, [paymongoActivePayment, tenantInfo.slug]);
 
   // Dynamic Calculations for Loan Application
   const annualRate = selectedProduct.annualInterestRate || 0.12;
@@ -3419,10 +3462,23 @@ export default function MemberPortalPage() {
 
         {/* SELF-SERVICE DEPOSIT & SHARE PURCHASE MODAL */}
         {depositModalType && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-              {/* Modal Header */}
-              <div className="bg-slate-900 text-white p-6 relative">
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Sticky Modal Header with Prominent Close Button */}
+              <div className="bg-slate-900 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-lg sm:text-xl shadow shrink-0">
+                    {tenantInfo.logoLetter || 'C'}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
+                      {depositModalType === 'SHARES' ? 'Purchase Cooperative Shares' : 'Deposit to Savings'}
+                    </h3>
+                    <div className="text-[10px] sm:text-[11px] text-slate-300 truncate">
+                      Cooperative Member Services • <strong>{currentMember.name}</strong>
+                    </div>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -3430,28 +3486,16 @@ export default function MemberPortalPage() {
                     setPaymongoActivePayment(null);
                     setDepositSuccessResult(null);
                   }}
-                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
+                  className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
+                  aria-label="Close modal"
                 >
                   <X className="w-5 h-5" />
                 </button>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow">
-                    F
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base tracking-tight leading-tight">
-                      {depositModalType === 'SHARES' ? 'Purchase Cooperative Shares' : 'Deposit to Savings'}
-                    </h3>
-                    <div className="text-[11px] text-slate-300">
-                      Cooperative Member Services • Member: <strong>{currentMember.name}</strong>
-                    </div>
-                  </div>
-                </div>
               </div>
 
               {!depositSuccessResult ? (
                 depositModalType === 'SAVINGS' && !savingsDepositEnabled ? (
-                  <div className="p-8 text-center space-y-4">
+                  <div className="p-8 text-center space-y-4 overflow-y-auto flex-1">
                     <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
                       <AlertCircle className="w-6 h-6" />
                     </div>
@@ -3468,7 +3512,7 @@ export default function MemberPortalPage() {
                     </button>
                   </div>
                 ) : (
-                  <div className="p-6 space-y-5 text-xs">
+                  <div className="p-4 sm:p-6 space-y-5 text-xs overflow-y-auto flex-1">
                   {depositModalType === 'SHARES' ? (
                     /* Share Purchase Controls */
                     <div className="space-y-3">
@@ -3570,6 +3614,11 @@ export default function MemberPortalPage() {
                           <span>Official PayMongo QR Ph Terminal</span>
                         </div>
 
+                        <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-full border border-emerald-300">
+                          <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping"></span>
+                          <span>Auto-detecting payment in real time...</span>
+                        </div>
+
                         {/* Real PayMongo QR Image */}
                         <div className="w-52 h-52 bg-white border-4 border-emerald-600 rounded-2xl p-2 shadow-lg flex items-center justify-center">
                           {paymongoActivePayment.qrImageUrl ? (
@@ -3647,7 +3696,7 @@ export default function MemberPortalPage() {
                           ) : (
                             <CheckCircle2 className="w-4 h-4" />
                           )}
-                          <span>{isVerifyingPaymongo ? 'Confirming Payment...' : 'Verify & Confirm Payment'}</span>
+                          <span>{isVerifyingPaymongo ? 'Checking Settlement...' : 'I Have Paid / Check Status'}</span>
                         </button>
                       </div>
                     </div>
@@ -3843,9 +3892,9 @@ export default function MemberPortalPage() {
                         setDepositModalType(null);
                         setDepositSuccessResult(null);
                       }}
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition"
+                      className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition shadow-md shadow-emerald-700/20 cursor-pointer"
                     >
-                      Done
+                      Done / Close Modal
                     </button>
                   </div>
                 </div>
@@ -3856,32 +3905,33 @@ export default function MemberPortalPage() {
 
         {/* MODAL 1: PASSBOOK DYNAMIC QR PH PAYMENT MODAL */}
         {passbookPayModal.open && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-              <div className="bg-slate-900 text-white p-6 relative">
-                <button
-                  type="button"
-                  onClick={() => setPassbookPayModal({ open: false, type: 'LOAN', amount: 0, description: '' })}
-                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow">
-                    F
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="bg-slate-900 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-lg sm:text-xl shadow shrink-0">
+                    {tenantInfo.logoLetter || 'C'}
                   </div>
-                  <div>
-                    <h3 className="font-bold text-base tracking-tight leading-tight">
-                      PayMongo QR Ph Repayment & Deposit Terminal
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
+                      PayMongo QR Ph Repayment &amp; Deposit
                     </h3>
-                    <div className="text-[11px] text-slate-300">
-                      Cooperative Payment Terminal • Member: <strong>{currentMember.name}</strong>
+                    <div className="text-[10px] sm:text-[11px] text-slate-300 truncate">
+                      Cooperative Payment Terminal • <strong>{currentMember.name}</strong>
                     </div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setPassbookPayModal({ open: false, type: 'LOAN', amount: 0, description: '' })}
+                  className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
+                  aria-label="Close modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <div className="p-6 space-y-5 text-xs">
+              <div className="p-4 sm:p-6 space-y-5 text-xs overflow-y-auto flex-1">
                 {/* Account Selection */}
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
@@ -4031,24 +4081,32 @@ export default function MemberPortalPage() {
 
         {/* MODAL 2: OFFICIAL CDA & BIR ELECTRONIC RECEIPT */}
         {passbookReceipt && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-              {/* Receipt Header */}
-              <div className="bg-emerald-800 text-white p-6 text-center space-y-1">
-                <div className="w-12 h-12 bg-white/20 text-white rounded-full flex items-center justify-center mx-auto mb-2">
-                  <CheckCircle2 className="w-7 h-7" />
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Receipt Header with Close Button */}
+              <div className="bg-emerald-800 text-white p-4 sm:p-5 px-5 sm:px-6 relative text-center shrink-0 border-b border-emerald-900">
+                <button
+                  type="button"
+                  onClick={() => setPassbookReceipt(null)}
+                  className="absolute top-3.5 right-3.5 p-2 rounded-full bg-emerald-900/80 hover:bg-emerald-950 text-emerald-100 hover:text-white transition flex items-center justify-center cursor-pointer shadow-sm"
+                  aria-label="Close receipt"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <div className="w-10 h-10 bg-white/20 text-white rounded-full flex items-center justify-center mx-auto mb-1.5">
+                  <CheckCircle2 className="w-6 h-6" />
                 </div>
                 <div className="text-[10px] uppercase font-bold tracking-widest text-emerald-200">
                   Republic of the Philippines • CDA Registered
                 </div>
-                <h3 className="font-black text-lg">Official Electronic Receipt</h3>
-                <div className="text-xs text-emerald-100 font-mono">
+                <h3 className="font-black text-base sm:text-lg">Official Electronic Receipt</h3>
+                <div className="text-[11px] text-emerald-100 font-mono">
                   Cooperative Electronic Receipt • Official Transaction
                 </div>
               </div>
 
               {/* Receipt Content */}
-              <div className="p-6 space-y-4 text-xs">
+              <div className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-2">
                   <span className="text-slate-500">Official Receipt No:</span>
                   <span className="font-mono font-black text-slate-900 text-sm">{passbookReceipt.orNumber}</span>
@@ -4127,26 +4185,27 @@ export default function MemberPortalPage() {
 
         {/* MODAL 3: CERTIFIED CDA MEMBER STATEMENT OF ACCOUNT (SOA) */}
         {showPassbookStatementModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
               {/* Statement Toolbar */}
-              <div className="bg-slate-900 text-white p-4 px-6 flex justify-between items-center sticky top-0 z-20">
-                <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-emerald-400" />
-                  <span className="font-bold text-xs uppercase tracking-wider">Certified Member Statement of Account</span>
+              <div className="bg-slate-900 text-white p-3.5 sm:p-4 px-4 sm:px-6 flex justify-between items-center sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                <div className="flex items-center gap-2 min-w-0 pr-2">
+                  <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="font-bold text-xs uppercase tracking-wider truncate">Certified Member SOA</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => window.print()}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer"
                   >
-                    <Printer className="w-3.5 h-3.5" /> Print
+                    <Printer className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Print</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowPassbookStatementModal(false)}
-                    className="text-slate-400 hover:text-white p-1 rounded-lg"
+                    className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 cursor-pointer"
+                    aria-label="Close statement"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -4154,7 +4213,7 @@ export default function MemberPortalPage() {
               </div>
 
               {/* Printable Certificate Sheet */}
-              <div className="p-8 sm:p-10 space-y-6 text-slate-800 text-xs">
+              <div className="p-4 sm:p-8 space-y-6 text-slate-800 text-xs overflow-y-auto flex-1">
                 {/* Official Letterhead */}
                 <div className="text-center border-b border-slate-300 pb-6 space-y-1">
                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
@@ -4268,11 +4327,24 @@ export default function MemberPortalPage() {
           </div>
         )}
 
-        {/* CHANGE 6-DIGIT MPIN MODAL */}
+        {/* CHANGE PASSWORD / MPIN MODAL */}
         {showChangePinModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-              <div className="bg-slate-900 text-white p-5 relative">
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="bg-slate-900 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow shrink-0">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
+                      Change Password / MPIN
+                    </h3>
+                    <p className="text-[10px] sm:text-[11px] text-slate-300 truncate mt-0.5">
+                      Update your account security credentials
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -4280,26 +4352,14 @@ export default function MemberPortalPage() {
                     setPinChangeError(null);
                     setPinChangeSuccess(null);
                   }}
-                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition cursor-pointer"
+                  className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
+                  aria-label="Close modal"
                 >
                   <X className="w-5 h-5" />
                 </button>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow">
-                    <Lock className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base tracking-tight leading-tight">
-                      Change 6-Digit MPIN
-                    </h3>
-                    <p className="text-[11px] text-slate-300 mt-0.5">
-                      Update your Mobile Personal Identification Number
-                    </p>
-                  </div>
-                </div>
               </div>
 
-              <form onSubmit={handleExecuteChangePin} className="p-6 space-y-4 text-xs">
+              <form onSubmit={handleExecuteChangePin} className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
                 {pinChangeError && (
                   <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
