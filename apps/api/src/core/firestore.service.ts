@@ -401,8 +401,67 @@ export class FirestoreCoopService {
   }
 
   public async listJournalEntries(tenantId: string): Promise<JournalEntry[]> {
-    const snapshot = await this.journalEntriesCol(tenantId).orderBy('date', 'desc').get();
-    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as JournalEntry);
+    const snapshot = await this.journalEntriesCol(tenantId).get();
+    const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as JournalEntry);
+    return list.sort(
+      (a: any, b: any) =>
+        new Date(b.postedAt || b.postingDate || b.date || 0).getTime() -
+        new Date(a.postedAt || a.postingDate || a.date || 0).getTime()
+    );
+  }
+
+  public async deleteLoan(tenantId: string, loanId: string): Promise<void> {
+    try {
+      await this.loansCol(tenantId).doc(loanId).delete();
+    } catch {}
+    try {
+      const q = await this.loansCol(tenantId).where('loanNumber', '==', loanId).get();
+      for (const doc of q.docs) {
+        await doc.ref.delete();
+      }
+    } catch {}
+    try {
+      const q2 = await this.loansCol(tenantId).where('id', '==', loanId).get();
+      for (const doc of q2.docs) {
+        await doc.ref.delete();
+      }
+    } catch {}
+  }
+
+  public async deleteJournalEntry(tenantId: string, entryId: string): Promise<void> {
+    await this.journalEntriesCol(tenantId).doc(entryId).delete();
+  }
+
+  public async rebuildChartOfAccounts(tenantId: string, entries: JournalEntry[]): Promise<void> {
+    const accountsSnap = await this.coaCol(tenantId).get();
+    if (accountsSnap.empty) return;
+
+    const totalsMap = new Map<string, { debit: number; credit: number }>();
+    for (const entry of entries) {
+      for (const line of entry.lines || []) {
+        const cur = totalsMap.get(line.accountCode) || { debit: 0, credit: 0 };
+        cur.debit = Math.round((cur.debit + Number(line.debit || 0)) * 100) / 100;
+        cur.credit = Math.round((cur.credit + Number(line.credit || 0)) * 100) / 100;
+        totalsMap.set(line.accountCode, cur);
+      }
+    }
+
+    const batch = this.db.batch();
+    const nowIso = new Date().toISOString();
+    accountsSnap.docs.forEach((doc: QueryDocumentSnapshot) => {
+      const data = doc.data();
+      const code = data.code || doc.id;
+      const totals = totalsMap.get(code) || { debit: 0, credit: 0 };
+      const isDebitNormal = data.normalBalance === 'DEBIT';
+      const netBalance = Math.round((isDebitNormal ? totals.debit - totals.credit : totals.credit - totals.debit) * 100) / 100;
+      batch.update(doc.ref, {
+        currentDebit: totals.debit,
+        currentCredit: totals.credit,
+        netBalance,
+        updatedAt: nowIso,
+      });
+    });
+    await batch.commit();
   }
 
   // --------------------------------------------------------------------------

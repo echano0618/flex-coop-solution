@@ -53,10 +53,44 @@ export function purgeTenantDummyRecords(slug: string) {
     }
   } catch {}
 
-  // 2. Remove any dummy test loans or fake transactions stored under this production tenant
+  // 2. Remove any dummy test loans or deleted loans stored under this production tenant
   try {
     localStorage.removeItem(`flexcoop_loans_${targetSlug}`);
     localStorage.removeItem(`flexcoop_test_records_${targetSlug}`);
+
+    const deletedLoanIds = new Set(['LN-2026-23610', 'LN-2026-87935', 'loan_maria_001', 'LN-2026-00001']);
+    const normSlug = normalizeCoopSlug(targetSlug);
+    const appKeys = Array.from(new Set([`flexcoop_loan_applications_${targetSlug}`, `flexcoop_loan_applications_${normSlug}`]));
+    for (const k of appKeys) {
+      const rawApps = localStorage.getItem(k);
+      if (rawApps) {
+        const parsedApps = JSON.parse(rawApps);
+        if (Array.isArray(parsedApps)) {
+          const filteredApps = parsedApps.filter(
+            (a: any) => !deletedLoanIds.has(a.id) && !deletedLoanIds.has(a.loanNumber) && !deletedLoanIds.has(a.rawId)
+          );
+          if (filteredApps.length !== parsedApps.length) {
+            localStorage.setItem(k, JSON.stringify(filteredApps));
+          }
+        }
+      }
+    }
+
+    const repKeys = Array.from(new Set([`flexcoop_loan_repayments_${targetSlug}`, `flexcoop_loan_repayments_${normSlug}`]));
+    for (const rk of repKeys) {
+      const rawReps = localStorage.getItem(rk);
+      if (rawReps) {
+        const parsedReps = JSON.parse(rawReps);
+        if (Array.isArray(parsedReps)) {
+          const filteredReps = parsedReps.filter(
+            (r: any) => r.ref !== 'OR-2026-QR17624' && r.id !== 'rep_1792418826565' && !deletedLoanIds.has(r.loanId)
+          );
+          if (filteredReps.length !== parsedReps.length) {
+            localStorage.setItem(rk, JSON.stringify(filteredReps));
+          }
+        }
+      }
+    }
   } catch {}
 }
 

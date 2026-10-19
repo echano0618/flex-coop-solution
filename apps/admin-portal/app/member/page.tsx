@@ -54,6 +54,7 @@ import { getApiBaseUrl } from '../api-config';
 import {
   resolveTenantCoop,
   getTenantMemberSession,
+  setTenantMemberSession,
   getTenantAdminSession,
   clearTenantMemberSession,
   clearTenantAdminSession,
@@ -673,9 +674,25 @@ export default function MemberPortalPage() {
                   paidUpCapital: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : (isTestTenant ? 10000 : 0),
                   sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : (isTestTenant ? 100 : 0),
                   savingsBalance: resolvedSavings,
-                  loanBalance: prev?.loanBalance ?? 0,
+                  loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
                 }));
+                setSavingsBalance(resolvedSavings);
+                if (matched.loanBalance !== undefined) {
+                  setLoanBalance(Number(matched.loanBalance));
+                }
+                if (auth) {
+                  try {
+                    const updatedAuth = {
+                      ...auth,
+                      savingsBalance: resolvedSavings,
+                      loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
+                      paidUpShares: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : auth.paidUpShares,
+                      sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : auth.sharesCount,
+                    };
+                    setTenantMemberSession(updatedAuth, info.slug, info.name);
+                  } catch {}
+                }
               }
             }
           })
@@ -1362,28 +1379,23 @@ export default function MemberPortalPage() {
       }
     } catch {}
 
-    // 2. Fetch from Backend API
+    // 2. Fetch from Backend API (Authoritative)
     try {
       const res = await fetch(`${getApiBaseUrl()}/loans?coop=${tenant.slug}`);
       if (res.ok) {
         const resJson = await res.json();
-        const apiLoans = Array.isArray(resJson) ? resJson : Array.isArray(resJson?.data) ? resJson.data : [];
-        if (apiLoans.length > 0) {
-          const map = new Map<string, any>();
+        const apiLoans = Array.isArray(resJson) ? resJson : Array.isArray(resJson?.data) ? resJson.data : null;
+        if (apiLoans !== null) {
+          const existingMap = new Map<string, any>();
           apps.forEach((a) => {
             const key = a.loanNumber || a.id;
-            if (key) map.set(key, a);
+            if (key) existingMap.set(key, a);
           });
-          apiLoans.forEach((a: any) => {
+          apps = apiLoans.map((a: any) => {
             const key = a.loanNumber || a.id;
-            if (key) {
-              const existing = map.get(key) || {};
-              map.set(key, { ...existing, ...a });
-            } else if (a.id) {
-              map.set(a.id, a);
-            }
+            const existing = key ? existingMap.get(key) || {} : {};
+            return { ...existing, ...a };
           });
-          apps = Array.from(map.values());
           try {
             localStorage.setItem(storageKey, JSON.stringify(apps));
           } catch {}

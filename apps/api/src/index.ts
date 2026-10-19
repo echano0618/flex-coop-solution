@@ -388,9 +388,9 @@ async function performUnifiedLogin(
     classification: 'REGULAR',
     status: 'ACTIVE',
     kycStatus: 'VERIFIED',
-    shares: (member as any)?.sharesCount || (member as any)?.subscribedShares || 100,
-    paidUpShares: (member as any)?.paidUpShares || 20000,
-    savingsBalance: (member as any)?.savingsBalance || 15000,
+    shares: (member as any)?.sharesCount ?? (member as any)?.subscribedShares ?? 0,
+    paidUpShares: (member as any)?.paidUpShares ?? 0,
+    savingsBalance: (member as any)?.savingsBalance ?? 0,
   };
 
   // Keep strictly 1 single credential synced in Firestore by registered email address
@@ -3821,7 +3821,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       } catch {}
       if (!loans || loans.length === 0) loans = dbStore.loans.get(tenantId) || [];
     }
-    if (!loans || loans.length === 0) return;
+    loans = loans || [];
 
     let members: any[] = [];
     try {
@@ -4027,29 +4027,340 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       }
     }
 
-    // 3. Heal any member whose loanBalance was previously polluted by surname-matching when they have no active disbursed loan
-    if (loans.length > 0) {
+    // 3. Heal any member whose loanBalance or activeLoanId is stale when they have no active disbursed/approved loan
+    if (members.length > 0) {
+      const approvedBorrowerIds = new Set<string>();
+      for (const rawLoan of approvedLoans) {
+        const b: any = resolveBorrower(rawLoan);
+        if (b?.id) approvedBorrowerIds.add(b.id);
+      }
+
       for (const m of members as any[]) {
-        if (!trueBorrowerBalances.has(m.id) && Number(m.loanBalance || 0) > 0) {
-          m.loanBalance = 0;
-          delete m.activeLoanId;
-          delete m.activeLoanNumber;
-          try {
-            await fsService.updateMember(tenantId, m.id, {
-              loanBalance: 0,
-              activeLoanId: '',
-              activeLoanNumber: '',
-              updatedAt: new Date().toISOString(),
-            });
-          } catch {}
+        if (!trueBorrowerBalances.has(m.id)) {
+          const hasStaleBal = Number(m.loanBalance || 0) > 0;
+          const hasStaleActiveLoan = !approvedBorrowerIds.has(m.id) && Boolean(m.activeLoanId || m.activeLoanNumber);
+          if (hasStaleBal || hasStaleActiveLoan) {
+            m.loanBalance = 0;
+            if (!approvedBorrowerIds.has(m.id)) {
+              m.activeLoanId = '';
+              m.activeLoanNumber = '';
+            }
+            try {
+              await fsService.updateMember(tenantId, m.id, {
+                loanBalance: 0,
+                ...(!approvedBorrowerIds.has(m.id) ? { activeLoanId: '', activeLoanNumber: '' } : {}),
+                updatedAt: new Date().toISOString(),
+              });
+            } catch {}
+          }
         }
       }
       dbStore.members.set(tenantId, members);
+    }
+
+    // 4. Synchronize SHARE_CAPITAL_DEPOSIT journal entries for ACTIVE members with paidUpShares > 0
+    for (const m of members as any[]) {
+      if (m.status !== 'ACTIVE') continue;
+      const paidUp = Number(m.paidUpShares || 0);
+      if (paidUp <= 0) continue;
+
+      const memNo = m.memberNumber || m.memberNo || m.id;
+      const normMNo = normalizeMemberCode(memNo);
+      const hasShareJe = entries.some((e: any) =>
+        (e.referenceType === 'SHARE_CAPITAL_DEPOSIT' &&
+          (e.referenceId === m.id || normalizeMemberCode(e.referenceId) === normMNo)) ||
+        (Array.isArray(e.lines) &&
+          e.lines.some(
+            (l: any) =>
+              l.accountCode === '3-01-03' &&
+              (l.memberId === m.id || normalizeMemberCode(l.memberNumber) === normMNo)
+          ))
+      );
+
+      if (!hasShareJe) {
+        const mName = m.name || [m.firstName, m.middleName, m.lastName].filter(Boolean).join(' ').trim() || 'Cooperative Member';
+        const jeData = GeneralLedgerService.buildShareDepositEntry({
+          memberId: m.id,
+          memberNumber: memNo,
+          memberName: mName,
+          amount: paidUp,
+          channel: 'IN_PERSON_CASHIER',
+          userId: 'usr_admin',
+        });
+        const newJe = {
+          id: `je_shr_${m.id}_${Date.now().toString(36)}`,
+          ...jeData,
+          postingDate: (m.joinedAt || m.createdAt || new Date().toISOString()).split('T')[0],
+          postedAt: m.joinedAt || m.createdAt || new Date().toISOString(),
+        };
+        entries.push(newJe);
+        const memEntries = dbStore.journalEntries.get(tenantId) || [];
+        memEntries.push(newJe);
+        dbStore.journalEntries.set(tenantId, memEntries);
+        try {
+          await fsService.postJournalEntry(tenantId, newJe);
+        } catch {}
+      }
     }
   } catch (err) {
     console.warn('synchronizeDisbursedLoans error:', err);
   }
 }
+
+async function cleanMemberSavingsAndLoans(
+  tenantId: string,
+  memberIdentifier: string,
+  options?: { onlySpecificLoanIds?: string[] }
+) {
+  const fsService = FirestoreCoopService.getInstance();
+  const normTarget = String(memberIdentifier || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[-_ ]/g, '')
+    .replace(/^(MEM\d{0,4})0+/, '$1');
+
+  const isTargetId = (val: any) => {
+    if (!val) return false;
+    const s = String(val).trim();
+    if (s.toUpperCase() === String(memberIdentifier).trim().toUpperCase()) return true;
+    if (normTarget === 'MEM20261' && s.toLowerCase() === 'mem_gm_0001') return true;
+    const normVal = s.toUpperCase().replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+    return Boolean(normVal && normVal === normTarget);
+  };
+
+  const deletedLoanIds = new Set<string>();
+  const deletedJournalIds: string[] = [];
+
+  // 1. Delete matching loans from Firestore and dbStore
+  try {
+    const loansSnap = await fsService.loansCol(tenantId).get();
+    for (const doc of loansSnap.docs) {
+      const l = doc.data() as any;
+      const loanKey = l.loanNumber || l.id || doc.id;
+      const matchesLoanFilter = options?.onlySpecificLoanIds
+        ? options.onlySpecificLoanIds.includes(doc.id) ||
+          options.onlySpecificLoanIds.includes(l.id) ||
+          options.onlySpecificLoanIds.includes(l.loanNumber)
+        : isTargetId(l.memberId) || isTargetId(l.memberNo) || isTargetId(l.memberNumber);
+
+      if (matchesLoanFilter) {
+        deletedLoanIds.add(doc.id);
+        if (l.id) deletedLoanIds.add(l.id);
+        if (l.loanNumber) deletedLoanIds.add(l.loanNumber);
+        await doc.ref.delete();
+      }
+    }
+  } catch (err) {
+    console.warn('cleanMemberSavingsAndLoans loans delete warning:', err);
+  }
+
+  if (options?.onlySpecificLoanIds) {
+    options.onlySpecificLoanIds.forEach((id) => deletedLoanIds.add(id));
+  }
+
+  const memLoans = dbStore.loans.get(tenantId) || [];
+  const remainingLoans = memLoans.filter((l: any) => {
+    if (deletedLoanIds.has(l.id) || deletedLoanIds.has(l.loanNumber)) return false;
+    if (!options?.onlySpecificLoanIds && (isTargetId(l.memberId) || isTargetId((l as any).memberNo) || isTargetId((l as any).memberNumber))) {
+      deletedLoanIds.add(l.id);
+      if (l.loanNumber) deletedLoanIds.add(l.loanNumber);
+      return false;
+    }
+    return true;
+  });
+  dbStore.loans.set(tenantId, remainingLoans);
+
+  // 2. Reset member's savingsBalance and loanBalance in Firestore and dbStore
+  let updatedMemberRecord: any = null;
+  try {
+    const membersSnap = await fsService.membersCol(tenantId).get();
+    for (const doc of membersSnap.docs) {
+      const m = doc.data() as any;
+      if (isTargetId(doc.id) || isTargetId(m.id) || isTargetId(m.memberNumber) || isTargetId(m.memberNo)) {
+        const updates = {
+          savingsBalance: 0,
+          loanBalance: 0,
+          activeLoanId: '',
+          activeLoanNumber: '',
+          updatedAt: new Date().toISOString(),
+        };
+        await doc.ref.set(updates, { merge: true });
+        updatedMemberRecord = { ...m, ...updates };
+      }
+    }
+  } catch (err) {
+    console.warn('cleanMemberSavingsAndLoans member update warning:', err);
+  }
+
+  const memMembers = dbStore.members.get(tenantId) || [];
+  for (const m of memMembers as any[]) {
+    if (isTargetId(m.id) || isTargetId(m.memberNumber) || isTargetId(m.memberNo)) {
+      m.savingsBalance = 0;
+      m.loanBalance = 0;
+      m.activeLoanId = '';
+      m.activeLoanNumber = '';
+      updatedMemberRecord = m;
+    }
+  }
+  dbStore.members.set(tenantId, memMembers);
+
+  // Remove any savingsAccounts in dbStore for this member
+  const savAccs = dbStore.savingsAccounts.get(tenantId) || [];
+  dbStore.savingsAccounts.set(
+    tenantId,
+    savAccs.filter((s: any) => !isTargetId(s.memberId) && !isTargetId(s.memberNumber))
+  );
+
+  // 3. Delete related payments, invoices, and AMLC alerts in Firestore and dbStore
+  try {
+    const paySnap = await fsService.paymentsCol(tenantId).get();
+    for (const doc of paySnap.docs) {
+      const p = doc.data() as any;
+      if (deletedLoanIds.has(p.loanId) || isTargetId(p.memberId)) {
+        await doc.ref.delete();
+      }
+    }
+  } catch {}
+
+  try {
+    const invSnap = await fsService.invoicesCol(tenantId).get();
+    for (const doc of invSnap.docs) {
+      const inv = doc.data() as any;
+      if (deletedLoanIds.has(inv.loanId)) {
+        await doc.ref.delete();
+      }
+    }
+  } catch {}
+  dbStore.platformInvoices = dbStore.platformInvoices.filter(
+    (inv) => !(inv.tenantId === tenantId && deletedLoanIds.has(inv.loanId))
+  );
+
+  try {
+    const amlcSnap = await fsService.amlcAlertsCol(tenantId).get();
+    for (const doc of amlcSnap.docs) {
+      const a = doc.data() as any;
+      if (isTargetId(a.memberId)) {
+        await doc.ref.delete();
+      }
+    }
+  } catch {}
+
+  // 4. Delete all loan & savings journal entries for this member (or deleted loans)
+  const isEntryToDelete = (e: any) => {
+    if (!e) return false;
+    if (e.referenceId && deletedLoanIds.has(String(e.referenceId))) return true;
+    const desc = String(e.description || '');
+    for (const lid of deletedLoanIds) {
+      if (lid && desc.includes(lid)) return true;
+    }
+    const refType = String(e.referenceType || '').toUpperCase();
+    const isLoanOrSavingsEntry = [
+      'LOAN_APPROVAL',
+      'LOAN_DISBURSEMENT',
+      'LOAN_REPAYMENT',
+      'SAVINGS_DEPOSIT',
+      'SAVINGS_WITHDRAWAL',
+    ].includes(refType);
+
+    if (isLoanOrSavingsEntry) {
+      if (isTargetId(e.referenceId)) return true;
+      if (
+        Array.isArray(e.lines) &&
+        e.lines.some((l: any) => isTargetId(l.memberId) || isTargetId(l.memberNumber))
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      Array.isArray(e.lines) &&
+      e.lines.some(
+        (l: any) =>
+          (isTargetId(l.memberId) || isTargetId(l.memberNumber)) &&
+          (l.subledgerType === 'LOAN' ||
+            l.subledgerType === 'SAVINGS' ||
+            String(l.accountCode || '').startsWith('1-02-') ||
+            String(l.accountCode || '').startsWith('2-01-'))
+      )
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  try {
+    const jeSnap = await fsService.journalEntriesCol(tenantId).get();
+    for (const doc of jeSnap.docs) {
+      const e = doc.data() as any;
+      if (isEntryToDelete(e)) {
+        deletedJournalIds.push(doc.id);
+        await doc.ref.delete();
+      }
+    }
+  } catch (err) {
+    console.warn('cleanMemberSavingsAndLoans journal_entries delete warning:', err);
+  }
+
+  const memEntries = dbStore.journalEntries.get(tenantId) || [];
+  dbStore.journalEntries.set(
+    tenantId,
+    memEntries.filter((e: any) => !isEntryToDelete(e) && !deletedJournalIds.includes(e.id))
+  );
+
+  // 5. Re-run synchronizeDisbursedLoans to ensure active members' share capital entries exist and rebuild COA
+  await synchronizeDisbursedLoans(tenantId);
+
+  let finalEntries: JournalEntry[] = [];
+  try {
+    finalEntries = await fsService.listJournalEntries(tenantId);
+    dbStore.journalEntries.set(tenantId, finalEntries);
+    await fsService.rebuildChartOfAccounts(tenantId, finalEntries);
+  } catch (err) {
+    console.warn('cleanMemberSavingsAndLoans rebuildChartOfAccounts warning:', err);
+  }
+
+  return {
+    tenantId,
+    memberIdentifier,
+    deletedLoans: Array.from(deletedLoanIds),
+    deletedJournalEntries: deletedJournalIds,
+    updatedMember: updatedMemberRecord,
+    remainingLoansCount: remainingLoans.length,
+    remainingJournalEntriesCount: finalEntries.length,
+  };
+}
+
+app.post('/api/v1/admin/clean-member-records', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberIdentifier = req.body?.memberId || req.body?.memberNumber || (req.query.memberId as string) || 'MEM-2026-0001';
+    const result = await cleanMemberSavingsAndLoans(tenantId, memberIdentifier);
+    res.json({
+      success: true,
+      message: `Cleaned savings, loan, and related ledger records for ${memberIdentifier} in ${tenantId}.`,
+      data: result,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/v1/loans/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const loanId = req.params.id;
+    const fsService = FirestoreCoopService.getInstance();
+    await fsService.deleteLoan(tenantId, loanId);
+    const loans = (dbStore.loans.get(tenantId) || []).filter(
+      (l: any) => l.id !== loanId && l.loanNumber !== loanId
+    );
+    dbStore.loans.set(tenantId, loans);
+    await synchronizeDisbursedLoans(tenantId);
+    res.json({ success: true, message: `Loan ${loanId} deleted from ${tenantId}.` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);

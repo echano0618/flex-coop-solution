@@ -1835,26 +1835,11 @@ export default function AdminDashboard() {
             mandatorySharePaymentTreatment: l.mandatorySharePaymentTreatment,
           }));
 
-          // Merge local cache if any pending submission not yet on server
+          setLoanApplications(formatted);
           try {
-            const cached = localStorage.getItem(storageKey);
-            if (cached) {
-              const parsed = JSON.parse(cached);
-              if (Array.isArray(parsed)) {
-                for (const item of parsed) {
-                  if (!formatted.some((f: any) => f.id === item.id)) {
-                    formatted.push(item);
-                  }
-                }
-              }
-            }
+            localStorage.setItem(storageKey, JSON.stringify(formatted));
           } catch {}
-
           if (formatted.length > 0) {
-            setLoanApplications(formatted);
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(formatted));
-            } catch {}
             setActiveLoanApplication((prev) => {
               if (prev) {
                 const refreshed = formatted.find((f: any) => f.id === prev.id);
@@ -1863,12 +1848,13 @@ export default function AdminDashboard() {
                   if (refreshed.firstDueDate) setLosFirstDueDate(refreshed.firstDueDate);
                   return refreshed;
                 }
-                return prev;
               }
               setLoanStatus(formatted[0].status);
               if (formatted[0].firstDueDate) setLosFirstDueDate(formatted[0].firstDueDate);
               return formatted[0];
             });
+          } else {
+            setActiveLoanApplication(null);
           }
         }
       })

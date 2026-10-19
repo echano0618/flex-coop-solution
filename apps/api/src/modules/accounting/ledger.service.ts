@@ -654,13 +654,15 @@ export class GeneralLedgerService {
           (member as any).name || `${member.firstName || ''} ${member.lastName || ''}`
         )
           .toLowerCase()
+          .replace(/\s+/g, ' ')
           .trim();
+        const lineFullName = (line.memberName || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const hasLineIdentifier = Boolean(line.memberId || lineMemNo);
         const isNameMatch = Boolean(
-          line.memberName &&
+          !hasLineIdentifier &&
+            lineFullName &&
             memberFullName &&
-            (line.memberName.toLowerCase().trim() === memberFullName ||
-              line.memberName.toLowerCase().trim().includes(memberFullName) ||
-              memberFullName.includes(line.memberName.toLowerCase().trim()))
+            lineFullName === memberFullName
         );
 
         const isTargetMember =
