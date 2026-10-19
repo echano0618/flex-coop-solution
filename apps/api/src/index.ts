@@ -4058,7 +4058,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       dbStore.members.set(tenantId, members);
     }
 
-    // 4. Synchronize SHARE_CAPITAL_DEPOSIT journal entries for ACTIVE members with paidUpShares > 0
+    // 4. Synchronize SHARE_CAPITAL_DEPOSIT journal entries for ACTIVE members with paidUpShares > 0 & deduplicate
     for (const m of members as any[]) {
       if (m.status !== 'ACTIVE') continue;
       const paidUp = Number(m.paidUpShares || 0);
@@ -4066,7 +4066,9 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
 
       const memNo = m.memberNumber || m.memberNo || m.id;
       const normMNo = normalizeMemberCode(memNo);
-      const hasShareJe = entries.some((e: any) =>
+
+      // Find all existing share capital entries for this member
+      const matchingShareEntries = entries.filter((e: any) =>
         (e.referenceType === 'SHARE_CAPITAL_DEPOSIT' &&
           (e.referenceId === m.id || normalizeMemberCode(e.referenceId) === normMNo)) ||
         (Array.isArray(e.lines) &&
@@ -4077,7 +4079,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
           ))
       );
 
-      if (!hasShareJe) {
+      if (matchingShareEntries.length === 0) {
         const mName = m.name || [m.firstName, m.middleName, m.lastName].filter(Boolean).join(' ').trim() || 'Cooperative Member';
         const jeData = GeneralLedgerService.buildShareDepositEntry({
           memberId: m.id,
@@ -4088,7 +4090,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
           userId: 'usr_admin',
         });
         const newJe = {
-          id: `je_shr_${m.id}_${Date.now().toString(36)}`,
+          id: `je_shr_${m.id}`,
           ...jeData,
           postingDate: (m.joinedAt || m.createdAt || new Date().toISOString()).split('T')[0],
           postedAt: m.joinedAt || m.createdAt || new Date().toISOString(),
@@ -4100,6 +4102,38 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
         try {
           await fsService.postJournalEntry(tenantId, newJe);
         } catch {}
+      } else if (matchingShareEntries.length > 1) {
+        // Deduplicate: keep only the first entry and delete duplicate entries
+        const toKeep = matchingShareEntries[0];
+        const toDelete = matchingShareEntries.slice(1);
+        for (const dup of toDelete) {
+          try {
+            await fsService.deleteJournalEntry(tenantId, dup.id);
+          } catch {}
+          const idx = entries.findIndex((e: any) => e.id === dup.id);
+          if (idx >= 0) entries.splice(idx, 1);
+        }
+        dbStore.journalEntries.set(tenantId, entries);
+      }
+    }
+
+    // 5. Heal any existing LOAN_APPROVAL journal entries that erroneously booked to 2-01-01 instead of 2-02-01
+    for (const entry of entries) {
+      if (entry.referenceType === 'LOAN_APPROVAL' && Array.isArray(entry.lines)) {
+        let changed = false;
+        for (const line of entry.lines) {
+          if (line.accountCode === '2-01-01' && line.credit > 0) {
+            line.accountCode = '2-02-01';
+            line.accountName = 'Accounts Payable - Others';
+            line.memo = line.memo?.replace('2-01-01', '2-02-01') || line.memo;
+            changed = true;
+          }
+        }
+        if (changed) {
+          try {
+            await fsService.postJournalEntry(tenantId, entry);
+          } catch {}
+        }
       }
     }
   } catch (err) {

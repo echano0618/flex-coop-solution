@@ -73,7 +73,7 @@ export class GeneralLedgerService {
     memberName?: string;
   }): Omit<JournalEntry, 'id'> {
     const loanAccount = CDACoAManager.findByCode('1-02-01')!; // Loans Receivable - Regular
-    const payableAccount = CDACoAManager.findByCode('2-01-01')!; // Accounts Payable - Others / Loans for Release
+    const payableAccount = CDACoAManager.findByCode('2-02-01')!; // Accounts Payable - Others / Loans for Release
 
     const lines: JournalEntryLine[] = [
       {
@@ -143,7 +143,7 @@ export class GeneralLedgerService {
 
     const cashAccount = CDACoAManager.findByCode(cashAccountCode)!;
     const debitAccount = params.clearsApprovalPayable
-      ? CDACoAManager.findByCode('2-01-01')!
+      ? CDACoAManager.findByCode('2-02-01')!
       : CDACoAManager.findByCode('1-02-01')!;
     const feePayableAccount = CDACoAManager.findByCode('2-02-02')!; // Platform Fee Payable
     const coopIncomeAccount = CDACoAManager.findByCode('4-01-02')!; // Service Fee Income
