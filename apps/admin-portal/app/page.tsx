@@ -73,6 +73,7 @@ import {
   Briefcase,
   Save,
   Loader2,
+  PiggyBank,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -510,7 +511,7 @@ export default function AdminDashboard() {
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
 
   // System Configuration Sub-Section State
-  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee'>('membership_registration');
+  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee' | 'savings_deposit'>('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -1030,6 +1031,38 @@ export default function AdminDashboard() {
 
   const handleResetCoopFilingFeeConfig = () => {
     handleSaveCoopFilingFeeConfig(true, 1.5);
+  };
+
+  // Deposit Savings Feature Configuration (Cooperative Administration: Enable / Disable)
+  const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(true);
+  const [savingsDepositNotification, setSavingsDepositNotification] = useState<string | null>(null);
+
+  const handleSaveSavingsDepositConfig = (enabled: boolean) => {
+    const tenant = resolveTenantCoop();
+    setSavingsDepositEnabled(enabled);
+
+    // Sync online directly to Cloud Firestore
+    fetch(`${getApiBaseUrl()}/system-config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-slug': tenant.slug,
+      },
+      body: JSON.stringify({
+        savingsDepositEnabled: enabled,
+      }),
+    }).catch((e) => console.warn('Failed to save savings deposit config online:', e));
+
+    setSavingsDepositNotification(
+      enabled
+        ? 'Deposit Savings feature is now ENABLED across the cooperative. Members can make self-service deposits in the Members Portal.'
+        : 'Deposit Savings feature is now DISABLED across the cooperative. Deposit Savings has been removed from the Members Portal.'
+    );
+    setTimeout(() => setSavingsDepositNotification(null), 4000);
+  };
+
+  const handleResetSavingsDepositConfig = () => {
+    handleSaveSavingsDepositConfig(true);
   };
 
   // Platform Escrow & Usage State
@@ -10103,6 +10136,19 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               )}
+
+              {systemConfigSection === 'savings_deposit' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetSavingsDepositConfig}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Savings Defaults</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Sub-Section Navigation / Module Selector */}
@@ -10176,6 +10222,24 @@ export default function AdminDashboard() {
                   systemConfigSection === 'coop_filing_fee' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
                 }`}>
                   {coopFilingFeeEnabled ? `${coopFilingFeeRatePercent}% Active` : 'Disabled'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSystemConfigSection('savings_deposit')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  systemConfigSection === 'savings_deposit'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <PiggyBank className="w-3.5 h-3.5" />
+                <span>Savings Deposit Feature</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  systemConfigSection === 'savings_deposit' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {savingsDepositEnabled ? 'Enabled' : 'Disabled'}
                 </span>
               </button>
 
@@ -11245,6 +11309,180 @@ export default function AdminDashboard() {
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Save Filing Fee Policy</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-SECTION 6: DEPOSIT SAVINGS FEATURE CONFIGURATION */}
+            {systemConfigSection === 'savings_deposit' && (
+              <div className="space-y-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
+                  {/* Card Header */}
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+                          <PiggyBank className="w-3 h-3 text-amber-600" />
+                          <span>Savings Deposit Management</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">Cloud Firestore: /tenants/tenant_family/system_config/general</span>
+                      </div>
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">Deposit Savings Feature Switch</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Enable or disable the self-service Deposit Savings feature. When disabled, the Deposit Savings button is completely removed from the Members Portal, and incoming online deposit requests are blocked by the API.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={handleResetSavingsDepositConfig}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset Defaults</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notification Banner */}
+                  {savingsDepositNotification && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{savingsDepositNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSavingsDepositNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Status & Policy Selection Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* OPTION 1: ENABLED */}
+                    <div
+                      onClick={() => setSavingsDepositEnabled(true)}
+                      className={`p-6 rounded-2xl border-2 cursor-pointer transition-all space-y-4 ${
+                        savingsDepositEnabled
+                          ? 'border-emerald-500 bg-emerald-50/30 ring-4 ring-emerald-500/10'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Feature Active</span>
+                        </span>
+                        <div
+                          className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                            savingsDepositEnabled
+                              ? 'border-emerald-600 bg-emerald-600 text-white'
+                              : 'border-slate-300'
+                          }`}
+                        >
+                          {savingsDepositEnabled && <Check className="w-3 h-3 stroke-[3]" />}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900">Enable Deposit Savings</h4>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                          Members can view and access the <strong>&ldquo;Deposit Savings&rdquo;</strong> button in Quick Actions, fund their savings accounts via QR Ph, and generate instant Official Receipts in the Digital Passbook.
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-200/60 text-[11px] text-slate-600 space-y-1">
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Visible in Members Portal dashboard &amp; Quick Actions</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Instant QR Ph payment rail &amp; passbook credit allowed</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* OPTION 2: DISABLED */}
+                    <div
+                      onClick={() => setSavingsDepositEnabled(false)}
+                      className={`p-6 rounded-2xl border-2 cursor-pointer transition-all space-y-4 ${
+                        !savingsDepositEnabled
+                          ? 'border-rose-500 bg-rose-50/30 ring-4 ring-rose-500/10'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1.5">
+                          <Ban className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Feature Disabled</span>
+                        </span>
+                        <div
+                          className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                            !savingsDepositEnabled
+                              ? 'border-rose-600 bg-rose-600 text-white'
+                              : 'border-slate-300'
+                          }`}
+                        >
+                          {!savingsDepositEnabled && <Check className="w-3 h-3 stroke-[3]" />}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900">Disable Deposit Savings</h4>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                          Deposit Savings is removed from the Members Portal Quick Actions and Digital Passbook. The backend API also rejects any incoming deposit requests with HTTP 403 Forbidden.
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-200/60 text-[11px] text-slate-600 space-y-1">
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <X className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Quick Actions button hidden in Members Portal</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <X className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Backend endpoint rejects all self-service deposit attempts</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Informational Guidance Box */}
+                  <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                      <ShieldCheck className="w-4 h-4 text-amber-400" />
+                      <span className="uppercase tracking-wider">Operational Governance &amp; Liquidity Policy</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Cooperative management can temporarily disable self-service digital savings deposits during institutional accounting audits, year-end financial reconciliation, or liquidity adjustments. When disabled, members will not see the Deposit Savings action in their self-service portal, preventing accidental or unverified float inflows.
+                    </p>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={handleResetSavingsDepositConfig}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                    >
+                      Reset Default (Enabled)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveSavingsDepositConfig(savingsDepositEnabled)}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Save Savings Deposit Policy</span>
                     </button>
                   </div>
                 </div>

@@ -1948,18 +1948,27 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
       config = dbStore.systemConfigs.get(tenantId) || null;
     }
 
+    const effectiveConfig = config
+      ? {
+          ...config,
+          savingsDepositEnabled:
+            config.savingsDepositEnabled !== undefined ? Boolean(config.savingsDepositEnabled) : true,
+        }
+      : {
+          techFeeTreatment: 'PASS_THROUGH',
+          techFeeRatePercent: 1,
+          stockParValue: 100,
+          minSubscribedShares: 50,
+          minPaidUpAmount: 1000,
+          coopFilingFeeEnabled: true,
+          coopFilingFeeRatePercent: 1.5,
+          savingsDepositEnabled: true,
+        };
+
     res.json({
       success: true,
       tenantId,
-      data: config || {
-        techFeeTreatment: 'PASS_THROUGH',
-        techFeeRatePercent: 1,
-        stockParValue: 100,
-        minSubscribedShares: 50,
-        minPaidUpAmount: 1000,
-        coopFilingFeeEnabled: true,
-        coopFilingFeeRatePercent: 1.5,
-      },
+      data: effectiveConfig,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1975,7 +1984,7 @@ app.post('/api/v1/system-config', async (req: Request, res: Response) => {
 
     try {
       const fsService = FirestoreCoopService.getInstance();
-      await fsService.saveSystemConfig(tenantId, req.body);
+      await fsService.saveSystemConfig(tenantId, merged);
     } catch (fsErr) {
       console.warn('Firestore saveSystemConfig fallback:', fsErr);
     }
@@ -2107,6 +2116,14 @@ app.get('/api/v1/savings', (req: Request, res: Response) => {
 app.post('/api/v1/savings/deposit', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const { memberId, amount, channel, savingsType, cashierUserId, passOnFee } = req.body;
+
+  const sysConfig = dbStore.systemConfigs.get(tenantId);
+  if (sysConfig && sysConfig.savingsDepositEnabled === false) {
+    return res.status(403).json({
+      success: false,
+      error: 'Deposit Savings feature is currently disabled by cooperative administration.',
+    });
+  }
 
   if (!memberId || !amount || Number(amount) <= 0) {
     return res.status(400).json({ success: false, error: 'Valid memberId and deposit amount required.' });

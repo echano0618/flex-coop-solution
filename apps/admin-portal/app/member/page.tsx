@@ -550,6 +550,7 @@ export default function MemberPortalPage() {
   const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
   const [coopFilingFeeEnabled, setCoopFilingFeeEnabled] = useState<boolean>(true);
   const [coopFilingFeeRatePercent, setCoopFilingFeeRatePercent] = useState<number>(1.5);
+  const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(true);
 
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/system-config?coop=${tenantInfo.slug}`)
@@ -559,6 +560,7 @@ export default function MemberPortalPage() {
           if (res.data.techFeeTreatment) setTechFeeTreatment(res.data.techFeeTreatment);
           if (res.data.coopFilingFeeEnabled !== undefined) setCoopFilingFeeEnabled(Boolean(res.data.coopFilingFeeEnabled));
           if (res.data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(res.data.coopFilingFeeRatePercent));
+          if (res.data.savingsDepositEnabled !== undefined) setSavingsDepositEnabled(Boolean(res.data.savingsDepositEnabled));
         }
       })
       .catch(() => {});
@@ -1175,24 +1177,26 @@ export default function MemberPortalPage() {
                 <span className="text-[11px] text-emerald-700 font-semibold">Self-Service</span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-                {/* Deposit Savings */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDepositModalType('SAVINGS');
-                    setDepositSuccessResult(null);
-                  }}
-                  className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 bg-slate-50/70 transition-all text-center group"
-                >
-                  <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-xs">
-                    <PiggyBank className="w-5 h-5" />
-                  </div>
-                  <span className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-tight">
-                    Deposit Savings
-                  </span>
-                  <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">3% p.a. Compounded</span>
-                </button>
+              <div className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2.5 sm:gap-3`}>
+                {/* Deposit Savings (Removes completely when disabled) */}
+                {savingsDepositEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDepositModalType('SAVINGS');
+                      setDepositSuccessResult(null);
+                    }}
+                    className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 bg-slate-50/70 transition-all text-center group"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-xs">
+                      <PiggyBank className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-tight">
+                      Deposit Savings
+                    </span>
+                    <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">3% p.a. Compounded</span>
+                  </button>
+                )}
 
                 {/* Purchase Share */}
                 <button
@@ -1464,43 +1468,50 @@ export default function MemberPortalPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (passbookSubTab === 'loan') {
-                        setPassbookPayModal({
-                          open: true,
-                          type: 'LOAN',
-                          amount: 4442.44,
-                          description: 'Monthly Loan Amortization Installment #2',
-                        });
-                      } else if (passbookSubTab === 'savings') {
-                        setPassbookPayModal({
-                          open: true,
-                          type: 'SAVINGS',
-                          amount: 1000,
-                          description: 'Voluntary Savings Deposit',
-                        });
-                      } else {
-                        setPassbookPayModal({
-                          open: true,
-                          type: 'SHARES',
-                          amount: 1000,
-                          description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
-                        });
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>
-                      {passbookSubTab === 'shares'
-                        ? 'Purchase Shares (+QR Ph)'
-                        : passbookSubTab === 'savings'
-                        ? 'Deposit Savings (+QR Ph)'
-                        : 'Pay Installment (+QR Ph)'}
+                  {passbookSubTab === 'savings' && !savingsDepositEnabled ? (
+                    <span className="px-3 py-1.5 bg-slate-100 text-slate-500 text-xs font-semibold rounded-lg border border-slate-200">
+                      Savings Deposits Disabled
                     </span>
-                  </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (passbookSubTab === 'loan') {
+                          setPassbookPayModal({
+                            open: true,
+                            type: 'LOAN',
+                            amount: 4442.44,
+                            description: 'Monthly Loan Amortization Installment #2',
+                          });
+                        } else if (passbookSubTab === 'savings') {
+                          if (!savingsDepositEnabled) return;
+                          setPassbookPayModal({
+                            open: true,
+                            type: 'SAVINGS',
+                            amount: 1000,
+                            description: 'Voluntary Savings Deposit',
+                          });
+                        } else {
+                          setPassbookPayModal({
+                            open: true,
+                            type: 'SHARES',
+                            amount: 1000,
+                            description: 'Capital Build-Up (10 Shares @ ₱100 Par)',
+                          });
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>
+                        {passbookSubTab === 'shares'
+                          ? 'Purchase Shares (+QR Ph)'
+                          : passbookSubTab === 'savings'
+                          ? 'Deposit Savings (+QR Ph)'
+                          : 'Pay Installment (+QR Ph)'}
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3351,7 +3362,25 @@ export default function MemberPortalPage() {
               </div>
 
               {!depositSuccessResult ? (
-                <div className="p-6 space-y-5 text-xs">
+                depositModalType === 'SAVINGS' && !savingsDepositEnabled ? (
+                  <div className="p-8 text-center space-y-4">
+                    <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <h4 className="font-bold text-slate-800 text-sm">Deposit Savings Feature Disabled</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      Cooperative administration has currently disabled new savings deposits. Please contact cooperative management for inquiries.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setDepositModalType(null)}
+                      className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs transition"
+                    >
+                      Close Window
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-6 space-y-5 text-xs">
                   {depositModalType === 'SHARES' ? (
                     /* Share Purchase Controls */
                     <div className="space-y-3">
@@ -3564,7 +3593,7 @@ export default function MemberPortalPage() {
                     );
                   })()}
                 </div>
-              ) : (
+              )) : (
                 /* Success / Receipt Screen */
                 <div className="p-6 text-center space-y-4">
                   <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
