@@ -85,6 +85,8 @@ import {
   getTenantAdminSession,
   setTenantAdminSession,
   clearTenantAdminSession,
+  getTenantMemberSession,
+  setTenantMemberSession,
   GeneralManagerInfo,
   isTestCoopTenant,
   purgeTenantDummyRecords,
@@ -388,7 +390,53 @@ export default function AdminDashboard() {
 
     try {
       if (typeof window !== 'undefined') {
-        const stored = getTenantAdminSession(tenantInfo.slug);
+        let stored = getTenantAdminSession(tenantInfo.slug);
+
+        // Single Sign-On Bridge: If logged in on Member Portal with Staff privileges, seamlessly hydrate Admin session
+        if (!stored) {
+          const memberSess = getTenantMemberSession(tenantInfo.slug);
+          if (
+            memberSess &&
+            (memberSess.isStaff ||
+              memberSess.role === 'GENERAL_MANAGER' ||
+              memberSess.roleTitle?.toLowerCase().includes('general manager') ||
+              memberSess.position?.toLowerCase().includes('general manager') ||
+              memberSess.position?.toLowerCase().includes('loan') ||
+              memberSess.position?.toLowerCase().includes('cashier') ||
+              memberSess.position?.toLowerCase().includes('accountant') ||
+              memberSess.id === 'mem_gm_0001' ||
+              memberSess.memberNumber === 'MEM-2026-0001')
+          ) {
+            let derivedRole: StaffRole = 'GENERAL_MANAGER';
+            let derivedRoleTitle = 'General Manager / Superadmin';
+            if (memberSess.role && memberSess.role !== 'MEMBER') {
+              derivedRole = memberSess.role;
+              derivedRoleTitle = memberSess.roleTitle || 'Staff Officer';
+            } else if (memberSess.position?.toLowerCase().includes('loan')) {
+              derivedRole = 'LOAN_OFFICER';
+              derivedRoleTitle = 'Senior Loan Officer';
+            } else if (memberSess.position?.toLowerCase().includes('cashier') || memberSess.position?.toLowerCase().includes('teller')) {
+              derivedRole = 'CASHIER';
+              derivedRoleTitle = 'Branch Head Cashier & Teller';
+            } else if (memberSess.position?.toLowerCase().includes('accountant')) {
+              derivedRole = 'ACCOUNTANT';
+              derivedRoleTitle = 'Chief Bookkeeper & Accountant';
+            }
+
+            stored = {
+              id: memberSess.id,
+              name: memberSess.name || `${memberSess.firstName || ''} ${memberSess.lastName || ''}`.trim(),
+              email: memberSess.email,
+              role: derivedRole,
+              roleTitle: derivedRoleTitle,
+              coopName: tenantInfo.name,
+              coopSlug: tenantInfo.slug,
+              token: memberSess.token || `adm_${Date.now()}`,
+            };
+            setTenantAdminSession(stored, tenantInfo.slug, tenantInfo.name);
+          }
+        }
+
         if (stored) {
           const parsed = stored;
           if (parsed && (parsed.token || parsed.role || parsed.email)) {
@@ -3298,7 +3346,14 @@ export default function AdminDashboard() {
                       </p>
                     </div>
 
-                    <div className="pt-1 border-t border-slate-100">
+                    <div className="pt-1 border-t border-slate-100 space-y-1">
+                      <Link
+                        href={`/member?coop=${tenantSlug}`}
+                        className="w-full text-left p-2 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 flex items-center gap-2 transition"
+                      >
+                        <Users className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>My Member Passbook & Portal</span>
+                      </Link>
                       <button
                         type="button"
                         onClick={handleAdminSignOut}
@@ -3311,6 +3366,16 @@ export default function AdminDashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Direct Switch to Member Portal (Single Sign-On) */}
+              <Link
+                href={`/member?coop=${tenantSlug}`}
+                title="Switch to your personal Member Passbook & Portal"
+                className="hidden sm:flex items-center space-x-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors shadow-xs"
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Member Portal</span>
+              </Link>
 
               {/* Header Sign Out Button */}
               <button

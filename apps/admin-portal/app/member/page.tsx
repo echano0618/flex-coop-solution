@@ -43,6 +43,7 @@ import {
   getTenantMemberSession,
   getTenantAdminSession,
   clearTenantMemberSession,
+  clearTenantAdminSession,
   resolveGeneralManager,
   isTestCoopTenant,
   purgeTenantDummyRecords,
@@ -169,6 +170,7 @@ export default function MemberPortalPage() {
 
   const handleMemberSignOut = () => {
     clearTenantMemberSession(tenantInfo.slug);
+    clearTenantAdminSession(tenantInfo.slug);
     router.replace(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login');
   };
 
@@ -1056,6 +1058,24 @@ export default function MemberPortalPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Direct Switch to Staff / Admin Portal for Dual-Access Staff */}
+            {(currentMember?.isStaff ||
+              currentMember?.role === 'GENERAL_MANAGER' ||
+              currentMember?.position?.toLowerCase().includes('manager') ||
+              currentMember?.position?.toLowerCase().includes('officer') ||
+              currentMember?.position?.toLowerCase().includes('cashier') ||
+              currentMember?.position?.toLowerCase().includes('accountant') ||
+              getTenantAdminSession(tenantInfo.slug)) && (
+              <Link
+                href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/'}
+                title="Access Cooperative Staff / Admin Portal"
+                className="text-xs font-semibold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Admin Portal</span>
+              </Link>
+            )}
+
             <button
               type="button"
               onClick={handleMemberSignOut}

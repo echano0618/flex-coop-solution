@@ -20,6 +20,7 @@ import {
   resolveTenantCoop,
   setTenantAdminSession,
   getTenantAdminSession,
+  setTenantMemberSession,
   resolveGeneralManager,
   TenantInfo,
 } from '../tenant-utils';
@@ -56,7 +57,7 @@ export default function AdminLoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
-      setErrorMessage('Please enter your cooperative staff email and password.');
+      setErrorMessage('Please enter your cooperative staff username/email and password/MPIN.');
       return;
     }
 
@@ -64,71 +65,51 @@ export default function AdminLoginPage() {
     setIsLoading(true);
 
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      let role = 'GENERAL_MANAGER';
-      let roleTitle = 'General Manager / Superadmin';
-      let staffName = email.split('@')[0].replace(/[._]/g, ' ').toUpperCase();
+      const res = await fetch(`${getApiBaseUrl()}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          identifier: email.trim(),
+          password: password.trim(),
+          tenantSlug: tenantInfo.slug,
+          targetPortal: 'ADMIN',
+        }),
+      });
 
-      if (cleanEmail.includes('sysadmin') || cleanEmail.includes('mercer')) {
-        role = 'SYSTEM_ADMIN';
-        roleTitle = 'Platform System Admin';
-        staffName = 'Engr. Alex V. Mercer';
-      } else if (cleanEmail.includes('lo') || cleanEmail.includes('loan')) {
-        role = 'LOAN_OFFICER';
-        roleTitle = 'Senior Loan Officer';
-      } else if (cleanEmail.includes('cashier') || cleanEmail.includes('teller')) {
-        role = 'CASHIER';
-        roleTitle = 'Branch Head Cashier & Teller';
-      } else if (cleanEmail.includes('acct') || cleanEmail.includes('accountant')) {
-        role = 'ACCOUNTANT';
-        roleTitle = 'Chief Bookkeeper & Accountant';
-      } else if (cleanEmail.includes('compliance') || cleanEmail.includes('dpo')) {
-        role = 'COMPLIANCE_OFFICER';
-        roleTitle = 'Compliance Officer & DPO';
-      } else {
-        // Resolve registered General Manager / Staff Full Name from online database or tenant info
-        const gm = resolveGeneralManager(tenantInfo.slug);
-        if (gm && gm.name && gm.name !== 'General Manager') {
-          staffName = gm.name;
-        }
-        try {
-          const mRes = await fetch(`${getApiBaseUrl()}/members?coop=${tenantInfo.slug}`);
-          const mData = await mRes.json();
-          if (mData.success && Array.isArray(mData.data) && mData.data.length > 0) {
-            const matchedMem = mData.data.find(
-              (m: any) =>
-                m.email?.toLowerCase().trim() === cleanEmail ||
-                m.position === 'General Manager' ||
-                m.id === 'MEM-2026-0001'
-            ) || mData.data[0];
-            if (matchedMem && (matchedMem.name || matchedMem.firstName)) {
-              staffName = matchedMem.name || `${matchedMem.firstName} ${matchedMem.lastName || ''}`.trim();
-            }
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        if (data.isStaff) {
+          // Establish Staff Admin Session
+          setTenantAdminSession(data.user, tenantInfo.slug, tenantInfo.name);
+          // Simultaneous Single Sign-On for Member Portal
+          if (data.member) {
+            setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
           }
-        } catch {}
+          router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/');
+          return;
+        } else {
+          // User is authenticated as a Member but does not hold Staff/Admin role
+          if (data.member) {
+            setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
+          }
+          setErrorMessage('Authenticated as Member! You do not have Staff/Admin rights for this cooperative. Redirecting to your Member Portal...');
+          setTimeout(() => {
+            router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
+          }, 1500);
+          return;
+        }
       }
 
-      const sessionData = {
-        id: `usr_${Date.now()}`,
-        name: staffName,
-        email: email.trim(),
-        role,
-        roleTitle,
-        coopName: tenantInfo.name,
-        coopSlug: tenantInfo.slug,
-        token: `adm_sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        loginAt: new Date().toISOString(),
-      };
-
-      // Set tenant-scoped session
-      setTenantAdminSession(sessionData, tenantInfo.slug, tenantInfo.name);
-
-      router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/');
+      setIsLoading(false);
+      setErrorMessage(data.error || 'Authentication failed. Please verify your credentials.');
     } catch (err) {
       console.error(err);
-      setErrorMessage('An unexpected error occurred during login. Please try again.');
-    } finally {
       setIsLoading(false);
+      setErrorMessage('Unable to connect to the cooperative authentication service. Please check your internet connection.');
     }
   };
 
@@ -246,15 +227,15 @@ export default function AdminLoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Staff Email Address
+                Staff Email, Username, or Member ID
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. admin@coop.tuntongtech.com"
+                  placeholder="e.g. admin@familycoop.ph, echano0618, or MEM-2026-0001"
                   required
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                 />
@@ -264,10 +245,10 @@ export default function AdminLoginPage() {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-medium text-slate-300">
-                  Password
+                  Password or 6-Digit MPIN
                 </label>
                 <span className="text-[11px] text-indigo-400 cursor-pointer hover:underline">
-                  Forgot Password?
+                  Single Credential
                 </span>
               </div>
               <div className="relative">
@@ -276,7 +257,7 @@ export default function AdminLoginPage() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="Enter Password or 6-Digit MPIN"
                   required
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                 />

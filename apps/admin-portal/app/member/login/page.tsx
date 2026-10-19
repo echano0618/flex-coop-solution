@@ -21,6 +21,7 @@ import {
   resolveTenantCoop,
   setTenantMemberSession,
   getTenantMemberSession,
+  setTenantAdminSession,
   isTestCoopTenant,
   resolveGeneralManager,
   TenantInfo,
@@ -80,11 +81,15 @@ export default function MemberLoginPage() {
           'Content-Type': 'application/json',
           'x-tenant-slug': tenantInfo.slug,
         },
-        body: JSON.stringify({ identifier: idInput, pin: pinInput, tenantSlug: tenantInfo.slug }),
+        body: JSON.stringify({ identifier: idInput, pin: pinInput, tenantSlug: tenantInfo.slug, targetPortal: 'MEMBER' }),
       });
       const data = await res.json();
       if (res.ok && data.success && data.member) {
         setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
+        // Single Sign-On: If this account has staff/admin privileges, simultaneously set admin session
+        if (data.isStaff || data.user?.isStaff) {
+          setTenantAdminSession(data.user || data.member, tenantInfo.slug, tenantInfo.name);
+        }
         router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
         return;
       }
