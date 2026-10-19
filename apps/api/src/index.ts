@@ -3207,12 +3207,18 @@ app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
     loan.status = 'REJECTED';
     loan.updatedAt = new Date().toISOString();
     try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
+    const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+    if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
+    dbStore.loans.set(tenantId, loans);
     return res.json({ success: true, message: 'Loan rejected by Loan Officer.', loan });
   }
 
   loan.status = 'UNDER_CREDIT_REVIEW';
   loan.updatedAt = new Date().toISOString();
   try { await fsService.updateLoanStatus(tenantId, loan.id, 'UNDER_CREDIT_REVIEW', { updatedAt: loan.updatedAt }); } catch {}
+  const idxReview = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+  if (idxReview >= 0) loans[idxReview] = loan; else loans.unshift(loan);
+  dbStore.loans.set(tenantId, loans);
 
   res.json({
     success: true,
@@ -3241,6 +3247,9 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
     loan.status = 'REJECTED';
     loan.updatedAt = new Date().toISOString();
     try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
+    const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+    if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
+    dbStore.loans.set(tenantId, loans);
     return res.json({ success: true, message: 'Loan rejected by Credit Committee.', loan });
   }
 
@@ -3252,6 +3261,9 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
   }
   loan.updatedAt = new Date().toISOString();
   try { await fsService.updateLoanStatus(tenantId, loan.id, loan.status, { updatedAt: loan.updatedAt }); } catch {}
+  const idxCom = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+  if (idxCom >= 0) loans[idxCom] = loan; else loans.unshift(loan);
+  dbStore.loans.set(tenantId, loans);
 
   res.json({
     success: true,
@@ -3279,16 +3291,98 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
     loan.status = 'REJECTED';
     loan.updatedAt = new Date().toISOString();
     try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
+    const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+    if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
+    dbStore.loans.set(tenantId, loans);
     return res.json({ success: true, message: 'Loan rejected by Board of Directors.', loan });
   }
 
   loan.status = 'APPROVED';
   loan.updatedAt = new Date().toISOString();
   try { await fsService.updateLoanStatus(tenantId, loan.id, 'APPROVED', { updatedAt: loan.updatedAt }); } catch {}
+  const idxBod = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+  if (idxBod >= 0) loans[idxBod] = loan; else loans.unshift(loan);
+  dbStore.loans.set(tenantId, loans);
 
   res.json({
     success: true,
     message: 'Approved by Board of Directors. Ready for disbursement.',
+    loan,
+  });
+});
+
+app.post('/api/v1/loans/:id/reject', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const loanId = req.params.id;
+  const { remarks, rejectedBy } = req.body;
+  const fsService = FirestoreCoopService.getInstance();
+
+  let loans = dbStore.loans.get(tenantId) || [];
+  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  if (!loan) {
+    try {
+      loan = (await fsService.getLoan(tenantId, loanId)) as any;
+    } catch {}
+  }
+  if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
+
+  loan.status = 'REJECTED';
+  loan.updatedAt = new Date().toISOString();
+  if (remarks) (loan as any).rejectionRemarks = remarks;
+  if (rejectedBy) (loan as any).rejectedBy = rejectedBy;
+
+  try {
+    await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', {
+      updatedAt: loan.updatedAt,
+      ...(remarks ? { disbursementReference: remarks } : {}),
+    });
+  } catch {}
+
+  const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+  if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
+  dbStore.loans.set(tenantId, loans);
+
+  res.json({
+    success: true,
+    message: 'Loan application rejected.',
+    loan,
+  });
+});
+
+app.post('/api/v1/loans/:id/cancel', async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const loanId = req.params.id;
+  const { remarks, cancelledBy } = req.body;
+  const fsService = FirestoreCoopService.getInstance();
+
+  let loans = dbStore.loans.get(tenantId) || [];
+  let loan = loans.find((l) => l.id === loanId || l.loanNumber === loanId);
+  if (!loan) {
+    try {
+      loan = (await fsService.getLoan(tenantId, loanId)) as any;
+    } catch {}
+  }
+  if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
+
+  loan.status = 'CANCELLED';
+  loan.updatedAt = new Date().toISOString();
+  if (remarks) (loan as any).cancellationRemarks = remarks;
+  if (cancelledBy) (loan as any).cancelledBy = cancelledBy;
+
+  try {
+    await fsService.updateLoanStatus(tenantId, loan.id, 'CANCELLED', {
+      updatedAt: loan.updatedAt,
+      ...(remarks ? { disbursementReference: remarks } : {}),
+    });
+  } catch {}
+
+  const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
+  if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
+  dbStore.loans.set(tenantId, loans);
+
+  res.json({
+    success: true,
+    message: 'Loan application cancelled.',
     loan,
   });
 });

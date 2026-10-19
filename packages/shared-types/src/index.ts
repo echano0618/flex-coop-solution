@@ -388,6 +388,7 @@ export type LoanStatus =
   | 'BOD_APPROVAL'
   | 'APPROVED'
   | 'REJECTED'
+  | 'CANCELLED'
   | 'DISBURSED'
   | 'COMPLETED'
   | 'DEFAULTED'

@@ -239,8 +239,17 @@ export class FirestoreCoopService {
   }
 
   public async getLoan(tenantId: string, loanId: string): Promise<Loan | null> {
-    const doc = await this.loansCol(tenantId).doc(loanId).get();
-    return doc.exists ? (doc.data() as Loan) : null;
+    try {
+      const doc = await this.loansCol(tenantId).doc(loanId).get();
+      if (doc.exists) return doc.data() as Loan;
+    } catch {}
+
+    try {
+      const q = await this.loansCol(tenantId).where('loanNumber', '==', loanId).limit(1).get();
+      if (!q.empty) return q.docs[0].data() as Loan;
+    } catch {}
+
+    return null;
   }
 
   public async listLoans(tenantId: string): Promise<Loan[]> {
@@ -254,11 +263,24 @@ export class FirestoreCoopService {
     status: Loan['status'],
     extraFields?: Partial<Loan>
   ): Promise<void> {
-    await this.loansCol(tenantId).doc(loanId).update({
+    const updatePayload = {
       status,
       ...extraFields,
       updatedAt: new Date().toISOString(),
-    });
+    };
+    try {
+      await this.loansCol(tenantId).doc(loanId).update(updatePayload);
+      return;
+    } catch (err) {
+      // If doc(loanId) does not exist, attempt query by loanNumber
+      try {
+        const q = await this.loansCol(tenantId).where('loanNumber', '==', loanId).limit(1).get();
+        if (!q.empty) {
+          await q.docs[0].ref.update(updatePayload);
+          return;
+        }
+      } catch {}
+    }
   }
 
   // --------------------------------------------------------------------------

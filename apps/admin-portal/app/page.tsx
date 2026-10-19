@@ -28,6 +28,7 @@ import {
   UserCheck,
   Printer,
   X,
+  XCircle,
   Sliders,
   Plus,
   Clock,
@@ -2785,7 +2786,7 @@ export default function AdminDashboard() {
   // LOS Approval Matrix Confirmation Modal State
   const [losConfirmModal, setLosConfirmModal] = useState<{
     isOpen: boolean;
-    actionType: 'PROCEED_APPROVAL' | 'CANCEL_APPLICATION';
+    actionType: 'PROCEED_APPROVAL' | 'CANCEL_APPLICATION' | 'REJECT_APPLICATION';
     targetStatus: string;
     stageTitle: string;
     actionTitle: string;
@@ -2797,7 +2798,7 @@ export default function AdminDashboard() {
   const [losNotification, setLosNotification] = useState<string | null>(null);
 
   const handleOpenLosConfirm = (config: {
-    actionType: 'PROCEED_APPROVAL' | 'CANCEL_APPLICATION';
+    actionType: 'PROCEED_APPROVAL' | 'CANCEL_APPLICATION' | 'REJECT_APPLICATION';
     targetStatus: string;
     stageTitle: string;
     actionTitle: string;
@@ -2824,7 +2825,9 @@ export default function AdminDashboard() {
     if (activeLoanApplication) {
       const updatedApp = { ...activeLoanApplication, status: targetStatus };
       setActiveLoanApplication(updatedApp);
-      const updatedList = loanApplications.map((a) => (a.id === updatedApp.id ? updatedApp : a));
+      const updatedList = loanApplications.map((a) =>
+        a.id === updatedApp.id || (a as any).rawId === rawId ? updatedApp : a
+      );
       setLoanApplications(updatedList);
       try {
         const tenantInfo = resolveTenantCoop();
@@ -2834,7 +2837,11 @@ export default function AdminDashboard() {
     }
 
     const actionLabel =
-      losConfirmModal.actionType === 'PROCEED_APPROVAL' ? 'Approved & Advanced' : 'Cancelled';
+      losConfirmModal.actionType === 'PROCEED_APPROVAL'
+        ? 'Approved & Advanced'
+        : losConfirmModal.actionType === 'REJECT_APPLICATION'
+        ? 'Rejected'
+        : 'Cancelled';
     setLosNotification(
       `Application ${appId}: ${losConfirmModal.stageTitle} ${actionLabel}. New Status: ${targetStatus}.`
     );
@@ -2867,11 +2874,23 @@ export default function AdminDashboard() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
         });
-      } else if (targetStatus === 'CANCELLED') {
-        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/review?coop=${tenantInfo.slug}`, {
+      } else if (targetStatus === 'REJECTED') {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/reject?coop=${tenantInfo.slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
-          body: JSON.stringify({ approved: false, remarks: 'Formally cancelled by cooperative administration.' }),
+          body: JSON.stringify({
+            remarks: losConfirmModal.statutoryDetail || 'Loan rejected by cooperative administration.',
+            rejectedBy: currentStaff.name || currentStaff.role,
+          }),
+        });
+      } else if (targetStatus === 'CANCELLED') {
+        await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/cancel?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+          body: JSON.stringify({
+            remarks: losConfirmModal.statutoryDetail || 'Formally cancelled by cooperative administration.',
+            cancelledBy: currentStaff.name || currentStaff.role,
+          }),
         });
       }
     } catch (err) {
@@ -5858,25 +5877,45 @@ export default function AdminDashboard() {
                   <div className="text-2xl font-black text-slate-900">
                     ₱{activeLoanApplication.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                   </div>
-                  {loanStatus !== 'CANCELLED' && loanStatus !== 'DISBURSED' && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleOpenLosConfirm({
-                          actionType: 'CANCEL_APPLICATION',
-                          targetStatus: 'CANCELLED',
-                          stageTitle: 'Application Cancellation',
-                          actionTitle: 'Confirm Loan Application Cancellation',
-                          message: `Are you sure you want to cancel and void loan application ${activeLoanApplication.id} (${activeLoanApplication.memberName}, ₱${activeLoanApplication.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})?`,
-                          statutoryDetail: 'Under cooperative credit regulations, this will cancel the underwriting process, void pending co-maker solidary liabilities, and issue a cancellation audit log.',
-                          confirmBtnText: 'Confirm Cancellation',
-                          confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
-                        })
-                      }
-                      className="mt-1.5 text-[11px] font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded border border-rose-200 transition flex items-center gap-1"
-                    >
-                      <Ban className="w-3.5 h-3.5" /> Cancel Application
-                    </button>
+                  {loanStatus !== 'CANCELLED' && loanStatus !== 'REJECTED' && loanStatus !== 'DISBURSED' && (
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenLosConfirm({
+                            actionType: 'REJECT_APPLICATION',
+                            targetStatus: 'REJECTED',
+                            stageTitle: 'Credit Underwriting Rejection',
+                            actionTitle: 'Confirm Loan Application Rejection',
+                            message: `Are you sure you want to reject loan application ${activeLoanApplication.id} (${activeLoanApplication.memberName}, ₱${activeLoanApplication.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})?`,
+                            statutoryDetail: 'Under cooperative credit regulations, this will reject the loan application and update the status in the Members Portal.',
+                            confirmBtnText: 'Confirm Rejection',
+                            confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                          })
+                        }
+                        className="text-[11px] font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded border border-rose-300 transition flex items-center gap-1 shadow-xs"
+                      >
+                        <XCircle className="w-3.5 h-3.5 text-rose-600" /> Reject Loan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenLosConfirm({
+                            actionType: 'CANCEL_APPLICATION',
+                            targetStatus: 'CANCELLED',
+                            stageTitle: 'Application Cancellation',
+                            actionTitle: 'Confirm Loan Application Cancellation',
+                            message: `Are you sure you want to cancel and void loan application ${activeLoanApplication.id} (${activeLoanApplication.memberName}, ₱${activeLoanApplication.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})?`,
+                            statutoryDetail: 'Under cooperative credit regulations, this will cancel the underwriting process, void pending co-maker solidary liabilities, and issue a cancellation audit log.',
+                            confirmBtnText: 'Confirm Cancellation',
+                            confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                          })
+                        }
+                        className="text-[11px] font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 px-2.5 py-1 rounded border border-slate-300 transition flex items-center gap-1"
+                      >
+                        <Ban className="w-3.5 h-3.5 text-slate-500" /> Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -5955,12 +5994,16 @@ export default function AdminDashboard() {
                 <div className={`p-4 rounded-lg border ${
                   ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
                     ? 'border-emerald-300 bg-emerald-50/60'
+                    : loanStatus === 'REJECTED'
+                    ? 'border-rose-200 bg-rose-50/40'
                     : 'border-slate-300 bg-white'
                 }`}>
                   <div className="flex items-center justify-between text-xs font-bold mb-2">
                     <span className="text-slate-700">1. Loan Officer</span>
                     {['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
                       <span className="text-emerald-700 flex items-center gap-1">✓ Endorsed</span>
+                    ) : loanStatus === 'REJECTED' ? (
+                      <span className="text-rose-700 flex items-center gap-1 font-semibold">✕ Rejected</span>
                     ) : (
                       <span className="text-slate-500">Triage Queue</span>
                     )}
@@ -5987,24 +6030,44 @@ export default function AdminDashboard() {
                   {loanStatus === 'SUBMITTED' && (
                     <div>
                       {currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleOpenLosConfirm({
-                              actionType: 'PROCEED_APPROVAL',
-                              targetStatus: 'UNDER_CREDIT_REVIEW',
-                              stageTitle: 'Loan Officer Endorsement',
-                              actionTitle: 'Proceed Approval to Credit Committee',
-                              message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.`,
-                              statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
-                              confirmBtnText: 'Proceed Approval',
-                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                            })
-                          }
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
-                        >
-                          Endorse to Committee
-                        </button>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenLosConfirm({
+                                actionType: 'PROCEED_APPROVAL',
+                                targetStatus: 'UNDER_CREDIT_REVIEW',
+                                stageTitle: 'Loan Officer Endorsement',
+                                actionTitle: 'Proceed Approval to Credit Committee',
+                                message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.`,
+                                statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
+                                confirmBtnText: 'Proceed Approval',
+                                confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                              })
+                            }
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
+                          >
+                            Endorse
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenLosConfirm({
+                                actionType: 'REJECT_APPLICATION',
+                                targetStatus: 'REJECTED',
+                                stageTitle: 'Loan Officer Rejection',
+                                actionTitle: 'Decline / Reject Application',
+                                message: `Reject loan application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}) at the Loan Officer appraisal stage?`,
+                                statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
+                                confirmBtnText: 'Reject Application',
+                                confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                              })
+                            }
+                            className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
+                          >
+                            Decline
+                          </button>
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -6023,12 +6086,16 @@ export default function AdminDashboard() {
                 <div className={`p-4 rounded-lg border ${
                   ['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
                     ? 'border-emerald-300 bg-emerald-50/60'
+                    : loanStatus === 'REJECTED'
+                    ? 'border-rose-200 bg-rose-50/40'
                     : 'border-slate-300 bg-white'
                 }`}>
                   <div className="flex items-center justify-between text-xs font-bold mb-2">
                     <span className="text-slate-700">2. Credit Committee</span>
                     {['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
                       <span className="text-emerald-700 flex items-center gap-1">✓ Approved</span>
+                    ) : loanStatus === 'REJECTED' ? (
+                      <span className="text-rose-700 flex items-center gap-1 font-semibold">✕ Rejected</span>
                     ) : (
                       <span className="text-slate-400">Waiting</span>
                     )}
@@ -6037,24 +6104,44 @@ export default function AdminDashboard() {
                   {loanStatus === 'UNDER_CREDIT_REVIEW' && (
                     <div>
                       {currentStaff.role === 'CREDIT_COMMITTEE' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleOpenLosConfirm({
-                              actionType: 'PROCEED_APPROVAL',
-                              targetStatus: 'BOD_APPROVAL',
-                              stageTitle: 'Credit Committee Evaluation',
-                              actionTitle: 'Proceed Approval to Board of Directors',
-                              message: `You are approving application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) and escalating to the Board of Directors for policy sign-off.`,
-                              statutoryDetail: 'Committee sign-off verifies compliance with the cooperative credit manual and confirms collateral/co-maker risk buffers.',
-                              confirmBtnText: 'Proceed Approval',
-                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                            })
-                          }
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
-                        >
-                          Approve & Escalate to BOD
-                        </button>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenLosConfirm({
+                                actionType: 'PROCEED_APPROVAL',
+                                targetStatus: 'BOD_APPROVAL',
+                                stageTitle: 'Credit Committee Evaluation',
+                                actionTitle: 'Proceed Approval to Board of Directors',
+                                message: `You are approving application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) and escalating to the Board of Directors for policy sign-off.`,
+                                statutoryDetail: 'Committee sign-off verifies compliance with the cooperative credit manual and confirms collateral/co-maker risk buffers.',
+                                confirmBtnText: 'Proceed Approval',
+                                confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                              })
+                            }
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenLosConfirm({
+                                actionType: 'REJECT_APPLICATION',
+                                targetStatus: 'REJECTED',
+                                stageTitle: 'Credit Committee Rejection',
+                                actionTitle: 'Decline / Reject Application',
+                                message: `Reject loan application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}) at Credit Committee evaluation stage?`,
+                                statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
+                                confirmBtnText: 'Reject Application',
+                                confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                              })
+                            }
+                            className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
+                          >
+                            Decline
+                          </button>
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -6073,12 +6160,16 @@ export default function AdminDashboard() {
                 <div className={`p-4 rounded-lg border ${
                   ['APPROVED', 'DISBURSED'].includes(loanStatus)
                     ? 'border-emerald-300 bg-emerald-50/60'
+                    : loanStatus === 'REJECTED'
+                    ? 'border-rose-200 bg-rose-50/40'
                     : 'border-slate-300 bg-white'
                 }`}>
                   <div className="flex items-center justify-between text-xs font-bold mb-2">
                     <span className="text-slate-700">3. Board of Directors</span>
                     {['APPROVED', 'DISBURSED'].includes(loanStatus) ? (
                       <span className="text-emerald-700 flex items-center gap-1">✓ Approved</span>
+                    ) : loanStatus === 'REJECTED' ? (
+                      <span className="text-rose-700 flex items-center gap-1 font-semibold">✕ Rejected</span>
                     ) : (
                       <span className="text-slate-400">Waiting</span>
                     )}
@@ -6087,24 +6178,44 @@ export default function AdminDashboard() {
                   {loanStatus === 'BOD_APPROVAL' && (
                     <div>
                       {currentStaff.role === 'BOD' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleOpenLosConfirm({
-                              actionType: 'PROCEED_APPROVAL',
-                              targetStatus: 'APPROVED',
-                              stageTitle: 'Board of Directors Resolution',
-                              actionTitle: 'Proceed with BOD Final Authorization',
-                              message: `You are ratifying the Board Credit Facility Resolution for application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Funds will be unlocked for Cashier disbursement.`,
-                              statutoryDetail: 'Under CDA MC 2015-06, Board sign-off authorizes disbursement from cooperative deposit liabilities.',
-                              confirmBtnText: 'Proceed Approval',
-                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                            })
-                          }
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
-                        >
-                          BOD Final Sign-Off
-                        </button>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenLosConfirm({
+                                actionType: 'PROCEED_APPROVAL',
+                                targetStatus: 'APPROVED',
+                                stageTitle: 'Board of Directors Resolution',
+                                actionTitle: 'Proceed with BOD Final Authorization',
+                                message: `You are ratifying the Board Credit Facility Resolution for application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Funds will be unlocked for Cashier disbursement.`,
+                                statutoryDetail: 'Under CDA MC 2015-06, Board sign-off authorizes disbursement from cooperative deposit liabilities.',
+                                confirmBtnText: 'Proceed Approval',
+                                confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                              })
+                            }
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
+                          >
+                            BOD Sign-Off
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenLosConfirm({
+                                actionType: 'REJECT_APPLICATION',
+                                targetStatus: 'REJECTED',
+                                stageTitle: 'Board of Directors Rejection',
+                                actionTitle: 'Decline / Reject Application',
+                                message: `Decline and reject loan application ${activeLoanApplication?.id || ''} at BOD review stage?`,
+                                statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
+                                confirmBtnText: 'Reject Application',
+                                confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                              })
+                            }
+                            className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
+                          >
+                            Decline
+                          </button>
+                        </div>
                       ) : (
                         <button
                           type="button"

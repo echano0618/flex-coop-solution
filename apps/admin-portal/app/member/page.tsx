@@ -42,6 +42,8 @@ import {
   Check,
   ClipboardList,
   FileCheck,
+  Ban,
+  XCircle,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -415,6 +417,7 @@ export default function MemberPortalPage() {
 
   const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
   const [memberLoanApplications, setMemberLoanApplications] = useState<any[]>([]);
+  const [isRefreshingLoans, setIsRefreshingLoans] = useState<boolean>(false);
   const [selectedLoanForDisclosure, setSelectedLoanForDisclosure] = useState<any | null>(null);
   const [disclosureBackTab, setDisclosureBackTab] = useState<'home' | 'apply' | 'applications' | 'more'>('home');
 
@@ -831,7 +834,8 @@ export default function MemberPortalPage() {
   }, [tenantInfo.slug]);
 
   // Fetch member's submitted loans from localStorage & backend API
-  const fetchMemberLoanApplications = React.useCallback(async () => {
+  const fetchMemberLoanApplications = React.useCallback(async (showLoading = false) => {
+    if (showLoading) setIsRefreshingLoans(true);
     const tenant = resolveTenantCoop();
     const storageKey = `flexcoop_loan_applications_${tenant.slug}`;
     let apps: any[] = [];
@@ -851,15 +855,34 @@ export default function MemberPortalPage() {
     try {
       const res = await fetch(`${getApiBaseUrl()}/loans?coop=${tenant.slug}`);
       if (res.ok) {
-        const apiLoans = await res.json();
-        if (Array.isArray(apiLoans)) {
+        const resJson = await res.json();
+        const apiLoans = Array.isArray(resJson) ? resJson : Array.isArray(resJson?.data) ? resJson.data : [];
+        if (apiLoans.length > 0) {
           const map = new Map<string, any>();
-          apps.forEach((a) => map.set(a.id, a));
-          apiLoans.forEach((a) => map.set(a.id, { ...map.get(a.id), ...a }));
+          apps.forEach((a) => {
+            const key = a.loanNumber || a.id;
+            if (key) map.set(key, a);
+          });
+          apiLoans.forEach((a: any) => {
+            const key = a.loanNumber || a.id;
+            if (key) {
+              const existing = map.get(key) || {};
+              map.set(key, { ...existing, ...a });
+            } else if (a.id) {
+              map.set(a.id, a);
+            }
+          });
           apps = Array.from(map.values());
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(apps));
+          } catch {}
         }
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Backend loans fetch warning:', err);
+    } finally {
+      if (showLoading) setIsRefreshingLoans(false);
+    }
 
     // Filter for current member
     const filtered = apps.filter((app: any) => {
@@ -881,6 +904,24 @@ export default function MemberPortalPage() {
 
   useEffect(() => {
     fetchMemberLoanApplications();
+
+    // Auto-polling every 4 seconds to sync status changes from Admin Portal in real time
+    const interval = setInterval(() => {
+      fetchMemberLoanApplications(false);
+    }, 4000);
+
+    // Cross-tab storage listener to react instantly when admin changes status in another tab
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.includes('flexcoop_loan_applications')) {
+        fetchMemberLoanApplications(false);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, [fetchMemberLoanApplications]);
 
   const isTechFeePassThrough = techFeeTreatment === 'PASS_THROUGH';
@@ -1563,6 +1604,26 @@ export default function MemberPortalPage() {
                           </span>
                         </div>
                       </div>
+
+                      {/* Rejection / Cancellation Alert on Dashboard Card */}
+                      {app.status === 'REJECTED' && (
+                        <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>
+                            <strong>Application Declined:</strong> Underwriting evaluation did not approve this loan.
+                            {app.rejectionRemarks ? ` Remarks: ${app.rejectionRemarks}` : ''}
+                          </span>
+                        </div>
+                      )}
+                      {app.status === 'CANCELLED' && (
+                        <div className="p-2.5 rounded-lg bg-slate-100 border border-slate-300 text-slate-700 text-[11px] flex items-center gap-2">
+                          <Ban className="w-4 h-4 text-slate-500 shrink-0" />
+                          <span>
+                            <strong>Application Cancelled:</strong> This loan application has been cancelled and voided.
+                            {app.cancellationRemarks ? ` Remarks: ${app.cancellationRemarks}` : ''}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Key metrics */}
                       <div className="grid grid-cols-3 gap-2 py-2.5 px-3 bg-white rounded-lg border border-slate-200/80 text-xs">
@@ -3153,13 +3214,25 @@ export default function MemberPortalPage() {
                 <h2 className="text-xl font-bold text-slate-900">My Loan Applications &amp; Status</h2>
                 <p className="text-xs text-slate-500">Track real-time underwriting progress, co-maker solidary verification, and disbursement schedules.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveTab('apply')}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 shrink-0"
-              >
-                <Plus className="w-4 h-4" /> Apply for New Loan
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fetchMemberLoanApplications(true)}
+                  disabled={isRefreshingLoans}
+                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 shrink-0"
+                  title="Refresh loan application status from server"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingLoans ? 'animate-spin text-emerald-600' : 'text-slate-500'}`} />
+                  <span>{isRefreshingLoans ? 'Syncing...' : 'Refresh Status'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('apply')}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Plus className="w-4 h-4" /> Apply for New Loan
+                </button>
+              </div>
             </div>
 
             {memberLoanApplications.length === 0 ? (
@@ -3224,6 +3297,41 @@ export default function MemberPortalPage() {
                         </div>
                       </div>
 
+                      {/* Rejection / Cancellation Notice Banner */}
+                      {app.status === 'REJECTED' && (
+                        <div className="p-4 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-start gap-3 shadow-xs">
+                          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <div className="font-bold text-rose-950 text-sm">Loan Application Declined / Rejected</div>
+                            <p className="text-xs text-rose-800 leading-relaxed">
+                              This loan application was evaluated and declined during the cooperative credit review process. For questions or to submit an appeal, please contact the cooperative credit committee or management.
+                            </p>
+                            {(app.rejectionRemarks || app.disbursementReference) && (
+                              <div className="mt-1.5 p-2.5 rounded-lg bg-white/90 border border-rose-200 text-rose-950 text-xs">
+                                <span className="font-bold">Review Remarks:</span> {app.rejectionRemarks || app.disbursementReference}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {app.status === 'CANCELLED' && (
+                        <div className="p-4 rounded-xl bg-slate-100 border border-slate-300 text-slate-900 text-xs flex items-start gap-3 shadow-xs">
+                          <Ban className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <div className="font-bold text-slate-950 text-sm">Loan Application Cancelled</div>
+                            <p className="text-xs text-slate-700 leading-relaxed">
+                              This loan application has been cancelled and voided.
+                            </p>
+                            {(app.cancellationRemarks || app.disbursementReference) && (
+                              <div className="mt-1.5 p-2.5 rounded-lg bg-white/90 border border-slate-200 text-slate-900 text-xs">
+                                <span className="font-bold">Cancellation Remarks:</span> {app.cancellationRemarks || app.disbursementReference}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* 5-Stage Visual Workflow Pipeline */}
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
                         <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
@@ -3266,13 +3374,17 @@ export default function MemberPortalPage() {
 
                           {/* Step 3: Credit Evaluation */}
                           <div className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold ${
-                            creditReviewDone
+                            app.status === 'REJECTED'
+                              ? 'bg-rose-50 border-rose-300 text-rose-900'
+                              : creditReviewDone
                               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                               : app.status === 'UNDER_CREDIT_REVIEW'
                               ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
                               : 'bg-white border-slate-200 text-slate-400'
                           }`}>
-                            {creditReviewDone ? (
+                            {app.status === 'REJECTED' ? (
+                              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                            ) : creditReviewDone ? (
                               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                             ) : app.status === 'UNDER_CREDIT_REVIEW' ? (
                               <Clock className="w-4 h-4 text-indigo-600 shrink-0 animate-spin" />
@@ -3281,7 +3393,7 @@ export default function MemberPortalPage() {
                             )}
                             <div className="min-w-0">
                               <div className="text-[10px] uppercase text-slate-500">Step 3</div>
-                              <div className="truncate">Credit Triage</div>
+                              <div className="truncate">{app.status === 'REJECTED' ? 'Declined' : 'Credit Triage'}</div>
                             </div>
                           </div>
 
