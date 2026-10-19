@@ -1037,12 +1037,30 @@ export default function AdminDashboard() {
   };
 
   // Deposit Savings Feature Configuration (Cooperative Administration: Enable / Disable)
-  const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(true);
+  const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_savings_deposit_enabled_${tenant.slug}`);
+        if (cached !== null) {
+          return cached === 'true';
+        }
+      } catch {}
+    }
+    return true;
+  });
   const [savingsDepositNotification, setSavingsDepositNotification] = useState<string | null>(null);
 
   const handleSaveSavingsDepositConfig = (enabled: boolean) => {
     const tenant = resolveTenantCoop();
     setSavingsDepositEnabled(enabled);
+    try {
+      localStorage.setItem(`flexcoop_savings_deposit_enabled_${tenant.slug}`, String(enabled));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: `flexcoop_savings_deposit_enabled_${tenant.slug}`,
+        newValue: String(enabled),
+      }));
+    } catch {}
 
     // Sync online directly to Cloud Firestore
     fetch(`${getApiBaseUrl()}/system-config`, {
@@ -2447,6 +2465,13 @@ export default function AdminDashboard() {
             if (data.minPaidUpAmount !== undefined) setMinPaidUpAmount(Number(data.minPaidUpAmount));
             if (data.coopFilingFeeEnabled !== undefined) setCoopFilingFeeEnabled(Boolean(data.coopFilingFeeEnabled));
             if (data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(data.coopFilingFeeRatePercent));
+            if (data.savingsDepositEnabled !== undefined) {
+              const enabled = Boolean(data.savingsDepositEnabled);
+              setSavingsDepositEnabled(enabled);
+              try {
+                localStorage.setItem(`flexcoop_savings_deposit_enabled_${tenantInfo.slug}`, String(enabled));
+              } catch {}
+            }
             if (Array.isArray(data.registrationFields) && data.registrationFields.length > 0) {
               setRegistrationFields(data.registrationFields);
               try {

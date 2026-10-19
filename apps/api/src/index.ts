@@ -3526,13 +3526,28 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       if (principal <= 0) continue;
 
       // 1. Ensure borrower member has loanBalance updated
-      const borrower: any = members.find((m: any) =>
-        (loan.memberId && m.id === loan.memberId) ||
-        ((loan.memberNo || loan.memberNumber) && m.memberNumber === (loan.memberNo || loan.memberNumber)) ||
-        (loan.memberName && (m.name === loan.memberName || `${m.firstName} ${m.lastName}` === loan.memberName))
-      );
+      const borrower: any = members.find((m: any) => {
+        if (loan.memberId && (m.id === loan.memberId || m.memberNumber === loan.memberId || m.memberNo === loan.memberId)) return true;
+        const lNum = (loan.memberNo || loan.memberNumber || '').toString().trim().toUpperCase();
+        const mNum = (m.memberNumber || m.memberNo || m.id || '').toString().trim().toUpperCase();
+        if (lNum && mNum) {
+          if (lNum === mNum) return true;
+          const normL = lNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+          const normM = mNum.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+          if (normL === normM) return true;
+        }
+        const lName = (loan.memberName || '').toString().toLowerCase().trim();
+        const mName = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).toString().toLowerCase().trim();
+        if (lName && mName) {
+          if (lName === mName || lName.includes(mName) || mName.includes(lName)) return true;
+          const parts = mName.split(' ');
+          const last = parts[parts.length - 1];
+          if (last && last.length > 2 && lName.includes(last)) return true;
+        }
+        return false;
+      });
 
-      if (borrower && (Number(borrower.loanBalance || 0) < principal)) {
+      if (borrower && (Number(borrower.loanBalance || 0) !== principal)) {
         borrower.loanBalance = principal;
         borrower.activeLoanId = loan.id;
         borrower.activeLoanNumber = loan.loanNumber;

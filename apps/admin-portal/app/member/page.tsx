@@ -63,6 +63,29 @@ import {
   uint8ArrayToBase64Url,
 } from '../tenant-utils';
 
+function matchesMember(app: any, member: { id?: string; memberNumber?: string; memberNo?: string; name?: string }): boolean {
+  if (!app || !member) return false;
+  if (app.memberId && (app.memberId === member.id || app.memberId === member.memberNumber)) return true;
+  const appNo = (app.memberNo || app.memberNumber || app.memberId || '').toString().trim().toUpperCase();
+  const memNo = (member.memberNumber || member.memberNo || member.id || '').toString().trim().toUpperCase();
+  if (appNo && memNo) {
+    if (appNo === memNo) return true;
+    const normApp = appNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+    const normMem = memNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+    if (normApp === normMem) return true;
+  }
+  const appName = (app.memberName || '').toString().toLowerCase().trim();
+  const memName = (member.name || '').toString().toLowerCase().trim();
+  if (appName && memName) {
+    if (appName === memName) return true;
+    if (appName.includes(memName) || memName.includes(appName)) return true;
+    const parts = memName.split(' ');
+    const last = parts[parts.length - 1];
+    if (last && last.length > 2 && appName.includes(last)) return true;
+  }
+  return false;
+}
+
 const DEFAULT_LOAN_PRODUCTS = [
   {
     id: 'prod_regular',
@@ -361,17 +384,22 @@ export default function MemberPortalPage() {
                 fullName = 'Felix II Echano';
               }
               const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
+              const authLoanBal = parsed.loanBalance !== undefined ? Number(parsed.loanBalance) : 0;
               setCustomMember({
                 id: parsed.id || 'mem_0001',
-                memberNumber: parsed.memberNumber || 'MEM-2026-0001',
+                memberNumber: parsed.memberNumber || parsed.memberNo || 'MEM-2026-0001',
                 name: fullName,
                 initials: initials || 'MB',
                 type: parsed.position ? `${parsed.position} (Regular Member)` : (parsed.type || 'Regular Member'),
-                paidUpCapital: parsed.paidUpCapital !== undefined ? parsed.paidUpCapital : (isTestTenant ? 25000 : 0),
-                sharesCount: parsed.sharesCount !== undefined ? parsed.sharesCount : (isTestTenant ? 250 : 0),
-                savingsBalance: parsed.savingsBalance !== undefined ? parsed.savingsBalance : 0,
+                paidUpCapital: parsed.paidUpCapital !== undefined ? Number(parsed.paidUpCapital) : (isTestTenant ? 25000 : 0),
+                sharesCount: parsed.sharesCount !== undefined ? Number(parsed.sharesCount) : (isTestTenant ? 250 : 0),
+                savingsBalance: parsed.savingsBalance !== undefined ? Number(parsed.savingsBalance) : 0,
+                loanBalance: authLoanBal,
                 idType: parsed.idType || 'PhilSys Verified Member ID',
               });
+              if (authLoanBal > 0) {
+                setLoanBalance(authLoanBal);
+              }
             }
           } catch {}
         } else if (admin) {
@@ -383,17 +411,22 @@ export default function MemberPortalPage() {
                 fullName = 'Felix II Echano';
               }
               const initials = fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+              const adminLoanBal = parsedAdmin.loanBalance !== undefined ? Number(parsedAdmin.loanBalance) : 0;
               setCustomMember({
                 id: parsedAdmin.id || 'MEM-2026-0001',
-                memberNumber: 'MEM-2026-0001',
+                memberNumber: parsedAdmin.memberNumber || parsedAdmin.memberNo || 'MEM-2026-0001',
                 name: fullName,
                 initials: initials || 'GM',
                 type: 'General Manager (Regular Member)',
                 paidUpCapital: isTestTenant ? 10000 : 0,
                 sharesCount: isTestTenant ? 100 : 0,
-                savingsBalance: isTestTenant ? 5000 : 0,
+                savingsBalance: 0,
+                loanBalance: adminLoanBal,
                 idType: 'CDA General Manager Verified PhilSys ID',
               });
+              if (adminLoanBal > 0) {
+                setLoanBalance(adminLoanBal);
+              }
             }
           } catch {}
         } else {
@@ -412,7 +445,8 @@ export default function MemberPortalPage() {
               type: 'General Manager (Regular Member)',
               paidUpCapital: isTestTenant ? 10000 : 0,
               sharesCount: isTestTenant ? 100 : 0,
-              savingsBalance: isTestTenant ? 5000 : 0,
+              savingsBalance: 0,
+              loanBalance: 0,
               idType: 'CDA General Manager Verified PhilSys ID',
             });
           }
@@ -424,14 +458,32 @@ export default function MemberPortalPage() {
           .then((res) => {
             if (res.success && Array.isArray(res.data) && res.data.length > 0) {
               const userEmail = (auth?.email || admin?.email || '').toLowerCase().trim();
+              const userMemberNo = (auth?.memberNumber || auth?.memberNo || admin?.memberNumber || '').toUpperCase().trim();
+              const userName = (auth?.name || `${auth?.firstName || ''} ${auth?.lastName || ''}`.trim() || admin?.name || '').toLowerCase().trim();
+
               const matched =
-                res.data.find(
-                  (m: any) =>
-                    (userEmail && m.email?.toLowerCase().trim() === userEmail) ||
+                res.data.find((m: any) => {
+                  if (userEmail && m.email?.toLowerCase().trim() === userEmail) return true;
+                  if (userMemberNo) {
+                    const mNo = (m.memberNumber || m.memberNo || m.id || '').toUpperCase().trim();
+                    if (mNo === userMemberNo) return true;
+                    const normM = mNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+                    const normUser = userMemberNo.replace(/[-_ ]/g, '').replace(/^(MEM\d{0,4})0+/, '$1');
+                    if (normM === normUser) return true;
+                  }
+                  if (userName) {
+                    const mName = (m.name || `${m.firstName || ''} ${m.lastName || ''}`).toLowerCase().trim();
+                    if (mName === userName || mName.includes(userName) || userName.includes(mName)) return true;
+                    const nameParts = userName.split(' ');
+                    const last = nameParts[nameParts.length - 1];
+                    if (last && last.length > 2 && mName.includes(last)) return true;
+                  }
+                  return (
                     m.id === 'MEM-2026-0001' ||
                     m.memberNumber === 'MEM-2026-0001' ||
                     m.position === 'General Manager'
-                ) || res.data[0];
+                  );
+                }) || res.data[0];
 
               if (matched) {
                 const fullName = matched.name || `${matched.firstName || ''} ${matched.lastName || ''}`.trim();
@@ -439,20 +491,23 @@ export default function MemberPortalPage() {
                   (matched.firstName?.[0] || '') + (matched.lastName?.[0] || '') || fullName.slice(0, 2)
                 ).toUpperCase();
 
+                const resolvedSavings = matched.savingsBalance !== undefined ? Number(matched.savingsBalance) : 0;
+                const resolvedLoanBal = matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0;
+
                 setCustomMember({
                   id: matched.id || 'MEM-2026-0001',
                   memberNumber: matched.memberNumber || matched.memberNo || 'MEM-2026-0001',
                   name: fullName,
                   initials: initials || 'GM',
                   type: matched.position ? `${matched.position} (Regular Member)` : 'Regular Member',
-                  paidUpCapital: matched.paidUpShares !== undefined ? matched.paidUpShares : 10000,
-                  sharesCount: matched.sharesCount !== undefined ? matched.sharesCount : 100,
-                  savingsBalance: matched.savingsBalance !== undefined ? matched.savingsBalance : 5000,
-                  loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
+                  paidUpCapital: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : 10000,
+                  sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : 100,
+                  savingsBalance: resolvedSavings,
+                  loanBalance: resolvedLoanBal,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
                 });
-                if (matched.loanBalance !== undefined && Number(matched.loanBalance) > 0) {
-                  setLoanBalance(Number(matched.loanBalance));
+                if (resolvedLoanBal > 0) {
+                  setLoanBalance(resolvedLoanBal);
                 }
               }
             }
@@ -482,7 +537,8 @@ export default function MemberPortalPage() {
     type: 'General Manager (Regular Member)',
     paidUpCapital: isTestCoopTenant(tenantInfo.slug) ? 10000 : 0,
     sharesCount: isTestCoopTenant(tenantInfo.slug) ? 100 : 0,
-    savingsBalance: isTestCoopTenant(tenantInfo.slug) ? 5000 : 0,
+    savingsBalance: 0,
+    loanBalance: 0,
     idType: 'CDA General Manager Verified PhilSys ID',
   };
 
@@ -649,15 +705,37 @@ export default function MemberPortalPage() {
   const [repayAmount, setRepayAmount] = useState<number>(4442.44);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
 
-  // Active Loan State (Zero in production; sample demonstration in test instance)
+  // Active Loan State (Synchronized immediately with session and cached loan applications for 0ms initial render latency)
   const [loanBalance, setLoanBalance] = useState<number>(() => {
     if (typeof window !== 'undefined') {
-      const info = resolveTenantCoop();
-      if (!isTestCoopTenant(info.slug)) {
-        return 0.0;
-      }
+      try {
+        const info = resolveTenantCoop();
+        const auth = getTenantMemberSession(info.slug) || getTenantAdminSession(info.slug);
+        if (auth && auth.loanBalance !== undefined && Number(auth.loanBalance) > 0) {
+          return Number(auth.loanBalance);
+        }
+        // Calculate immediately from cached loan applications
+        const storageKey = `flexcoop_loan_applications_${info.slug}`;
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const apps = JSON.parse(raw);
+          if (Array.isArray(apps)) {
+            const userName = (auth?.name || `${auth?.firstName || ''} ${auth?.lastName || ''}`).toLowerCase().trim();
+            const userNum = (auth?.memberNumber || auth?.memberNo || auth?.id || '').toUpperCase().trim();
+            const disbursed = apps.filter((a: any) => {
+              if (a.status !== 'DISBURSED') return false;
+              if (userNum && (a.memberNo === userNum || a.memberNumber === userNum || a.memberId === userNum)) return true;
+              if (userName && a.memberName && (a.memberName.toLowerCase().trim() === userName || a.memberName.toLowerCase().includes(userName))) return true;
+              return false;
+            });
+            if (disbursed.length > 0) {
+              return disbursed.reduce((sum: number, l: any) => sum + (l.balanceRemaining !== undefined ? Number(l.balanceRemaining) : Number(l.amount || 0)), 0);
+            }
+          }
+        }
+      } catch {}
     }
-    return 50000.0;
+    return 0.0;
   });
 
   // Share Capital & Savings Balances State
@@ -681,12 +759,17 @@ export default function MemberPortalPage() {
   });
   const [savingsBalance, setSavingsBalance] = useState<number>(() => {
     if (typeof window !== 'undefined') {
-      const info = resolveTenantCoop();
-      if (!isTestCoopTenant(info.slug)) {
-        return 0; // Strictly zero in production
-      }
+      try {
+        const info = resolveTenantCoop();
+        const savingsEnabled = localStorage.getItem(`flexcoop_savings_deposit_enabled_${info.slug}`) === 'true';
+        if (!savingsEnabled) return 0;
+        const auth = getTenantMemberSession(info.slug) || getTenantAdminSession(info.slug);
+        if (auth && auth.savingsBalance !== undefined) {
+          return Number(auth.savingsBalance);
+        }
+      } catch {}
     }
-    return 5000;
+    return 0;
   });
 
   // Change Password State
@@ -913,7 +996,18 @@ export default function MemberPortalPage() {
   const [techFeeTreatment, setTechFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>('PASS_THROUGH');
   const [coopFilingFeeEnabled, setCoopFilingFeeEnabled] = useState<boolean>(true);
   const [coopFilingFeeRatePercent, setCoopFilingFeeRatePercent] = useState<number>(1.5);
-  const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(true);
+  const [savingsDepositEnabled, setSavingsDepositEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_savings_deposit_enabled_${tenant.slug}`);
+        if (cached !== null) {
+          return cached === 'true';
+        }
+      } catch {}
+    }
+    return false; // Safe default false prevents button and card flickering on refresh
+  });
 
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/system-config?coop=${tenantInfo.slug}`)
@@ -923,10 +1017,28 @@ export default function MemberPortalPage() {
           if (res.data.techFeeTreatment) setTechFeeTreatment(res.data.techFeeTreatment);
           if (res.data.coopFilingFeeEnabled !== undefined) setCoopFilingFeeEnabled(Boolean(res.data.coopFilingFeeEnabled));
           if (res.data.coopFilingFeeRatePercent !== undefined) setCoopFilingFeeRatePercent(Number(res.data.coopFilingFeeRatePercent));
-          if (res.data.savingsDepositEnabled !== undefined) setSavingsDepositEnabled(Boolean(res.data.savingsDepositEnabled));
+          if (res.data.savingsDepositEnabled !== undefined) {
+            const enabled = Boolean(res.data.savingsDepositEnabled);
+            setSavingsDepositEnabled(enabled);
+            try {
+              localStorage.setItem(`flexcoop_savings_deposit_enabled_${tenantInfo.slug}`, String(enabled));
+            } catch {}
+          }
         }
       })
       .catch(() => {});
+
+    // React in real time when admin toggles savings deposit configuration in another tab
+    const handleStorageUpdate = (e: StorageEvent) => {
+      if (e.key && e.key.includes('flexcoop_savings_deposit_enabled')) {
+        const val = e.newValue === 'true';
+        setSavingsDepositEnabled(val);
+      }
+    };
+    window.addEventListener('storage', handleStorageUpdate);
+    return () => {
+      window.removeEventListener('storage', handleStorageUpdate);
+    };
   }, [tenantInfo.slug]);
 
   // Fetch member's submitted loans from localStorage & backend API
@@ -980,12 +1092,9 @@ export default function MemberPortalPage() {
       if (showLoading) setIsRefreshingLoans(false);
     }
 
-    // Filter for current member
+    // Filter for current member using robust normalized matching
     const filtered = apps.filter((app: any) => {
-      const matchId = app.memberId && app.memberId === currentMember.id;
-      const matchNo = app.memberNo && app.memberNo === currentMember.memberNumber;
-      const matchName = app.memberName && app.memberName.toLowerCase().trim() === currentMember.name.toLowerCase().trim();
-      return matchId || matchNo || matchName;
+      return matchesMember(app, currentMember);
     });
 
     // Sort newest first
@@ -1005,8 +1114,10 @@ export default function MemberPortalPage() {
         return sum + bal;
       }, 0);
       setLoanBalance(totalBalance);
+    } else if (customMember?.loanBalance !== undefined && Number(customMember.loanBalance) > 0) {
+      setLoanBalance(Number(customMember.loanBalance));
     }
-  }, [currentMember.id, currentMember.memberNumber, currentMember.name]);
+  }, [currentMember.id, currentMember.memberNumber, currentMember.name, customMember?.loanBalance]);
 
   useEffect(() => {
     fetchMemberLoanApplications();
