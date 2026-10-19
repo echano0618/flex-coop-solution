@@ -194,7 +194,10 @@ export default function MemberPortalPage() {
           try {
             const parsed = auth;
             if (parsed && (parsed.firstName || parsed.name)) {
-              const fullName = parsed.name || `${parsed.firstName} ${parsed.lastName || ''}`.trim();
+              let fullName = parsed.name || `${parsed.firstName} ${parsed.lastName || ''}`.trim();
+              if (fullName.toUpperCase() === 'ECHANO0618') {
+                fullName = 'Felix II Echano';
+              }
               const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
               setCustomMember({
                 id: parsed.id || 'mem_0001',
@@ -207,16 +210,16 @@ export default function MemberPortalPage() {
                 savingsBalance: parsed.savingsBalance !== undefined ? parsed.savingsBalance : 0,
                 idType: parsed.idType || 'PhilSys Verified Member ID',
               });
-              return;
             }
           } catch {}
-        }
-
-        if (admin) {
+        } else if (admin) {
           try {
             const parsedAdmin = admin;
             if (parsedAdmin && parsedAdmin.name) {
-              const fullName = parsedAdmin.name;
+              let fullName = parsedAdmin.name;
+              if (fullName.toUpperCase() === 'ECHANO0618') {
+                fullName = 'Felix II Echano';
+              }
               const initials = fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
               setCustomMember({
                 id: parsedAdmin.id || 'MEM-2026-0001',
@@ -229,27 +232,66 @@ export default function MemberPortalPage() {
                 savingsBalance: isTestTenant ? 5000 : 0,
                 idType: 'CDA General Manager Verified PhilSys ID',
               });
-              return;
             }
           } catch {}
+        } else {
+          const gm = resolveGeneralManager(info.slug);
+          if (gm && gm.name) {
+            let gmName = gm.name;
+            if (gmName.toUpperCase() === 'ECHANO0618') {
+              gmName = 'Felix II Echano';
+            }
+            const initials = gmName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+            setCustomMember({
+              id: 'MEM-2026-0001',
+              memberNumber: 'MEM-2026-0001',
+              name: gmName,
+              initials: initials || 'GM',
+              type: 'General Manager (Regular Member)',
+              paidUpCapital: isTestTenant ? 10000 : 0,
+              sharesCount: isTestTenant ? 100 : 0,
+              savingsBalance: isTestTenant ? 5000 : 0,
+              idType: 'CDA General Manager Verified PhilSys ID',
+            });
+          }
         }
 
-        const gm = resolveGeneralManager(info.slug);
-        if (gm && gm.name) {
-          const initials = gm.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-          setCustomMember({
-            id: 'MEM-2026-0001',
-            memberNumber: 'MEM-2026-0001',
-            name: gm.name,
-            initials: initials || 'GM',
-            type: 'General Manager (Regular Member)',
-            paidUpCapital: isTestTenant ? 10000 : 0,
-            sharesCount: isTestTenant ? 100 : 0,
-            savingsBalance: isTestTenant ? 5000 : 0,
-            idType: 'CDA General Manager Verified PhilSys ID',
-          });
-          return;
-        }
+        // Live Database Sync: Query Cloud Firestore to get the authoritative member profile
+        fetch(`${getApiBaseUrl()}/members?coop=${info.slug}`)
+          .then((r) => r.json())
+          .then((res) => {
+            if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+              const userEmail = (auth?.email || admin?.email || '').toLowerCase().trim();
+              const matched =
+                res.data.find(
+                  (m: any) =>
+                    (userEmail && m.email?.toLowerCase().trim() === userEmail) ||
+                    m.id === 'MEM-2026-0001' ||
+                    m.memberNumber === 'MEM-2026-0001' ||
+                    m.position === 'General Manager'
+                ) || res.data[0];
+
+              if (matched) {
+                const fullName = matched.name || `${matched.firstName || ''} ${matched.lastName || ''}`.trim();
+                const initials = (
+                  (matched.firstName?.[0] || '') + (matched.lastName?.[0] || '') || fullName.slice(0, 2)
+                ).toUpperCase();
+
+                setCustomMember({
+                  id: matched.id || 'MEM-2026-0001',
+                  memberNumber: matched.memberNumber || matched.memberNo || 'MEM-2026-0001',
+                  name: fullName,
+                  initials: initials || 'GM',
+                  type: matched.position ? `${matched.position} (Regular Member)` : 'Regular Member',
+                  paidUpCapital: matched.paidUpShares !== undefined ? matched.paidUpShares : 10000,
+                  sharesCount: matched.sharesCount !== undefined ? matched.sharesCount : 100,
+                  savingsBalance: matched.savingsBalance !== undefined ? matched.savingsBalance : 5000,
+                  idType: matched.idType || 'PhilSys National ID (Verified Member)',
+                });
+              }
+            }
+          })
+          .catch(() => {});
       }
     } catch (e) {
       console.warn('Member state parse error:', e);

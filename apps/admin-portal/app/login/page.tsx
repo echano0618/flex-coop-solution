@@ -20,6 +20,7 @@ import {
   resolveTenantCoop,
   setTenantAdminSession,
   getTenantAdminSession,
+  resolveGeneralManager,
   TenantInfo,
 } from '../tenant-utils';
 
@@ -84,6 +85,27 @@ export default function AdminLoginPage() {
       } else if (cleanEmail.includes('compliance') || cleanEmail.includes('dpo')) {
         role = 'COMPLIANCE_OFFICER';
         roleTitle = 'Compliance Officer & DPO';
+      } else {
+        // Resolve registered General Manager / Staff Full Name from online database or tenant info
+        const gm = resolveGeneralManager(tenantInfo.slug);
+        if (gm && gm.name && gm.name !== 'General Manager') {
+          staffName = gm.name;
+        }
+        try {
+          const mRes = await fetch(`${getApiBaseUrl()}/members?coop=${tenantInfo.slug}`);
+          const mData = await mRes.json();
+          if (mData.success && Array.isArray(mData.data) && mData.data.length > 0) {
+            const matchedMem = mData.data.find(
+              (m: any) =>
+                m.email?.toLowerCase().trim() === cleanEmail ||
+                m.position === 'General Manager' ||
+                m.id === 'MEM-2026-0001'
+            ) || mData.data[0];
+            if (matchedMem && (matchedMem.name || matchedMem.firstName)) {
+              staffName = matchedMem.name || `${matchedMem.firstName} ${matchedMem.lastName || ''}`.trim();
+            }
+          }
+        } catch {}
       }
 
       const sessionData = {

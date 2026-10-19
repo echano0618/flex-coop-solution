@@ -83,6 +83,7 @@ import {
   resolveTenantCoop,
   resolveGeneralManager,
   getTenantAdminSession,
+  setTenantAdminSession,
   clearTenantAdminSession,
   GeneralManagerInfo,
   isTestCoopTenant,
@@ -1946,6 +1947,34 @@ export default function AdminDashboard() {
       }
 
       setMembers(list);
+
+      // Auto-correct currentStaff name if it contains raw email handle (e.g. ECHANO0618)
+      if (list.length > 0) {
+        const gmMember = list.find(
+          (m: any) => m.position === 'General Manager' || m.id === 'MEM-2026-0001' || m.memberNumber === 'MEM-2026-0001'
+        );
+        if (gmMember && (gmMember.name || gmMember.firstName)) {
+          const gmFullName = gmMember.name || `${gmMember.firstName} ${gmMember.lastName || ''}`.trim();
+          setCurrentStaff((prev: any) => {
+            if (
+              prev.role === 'GENERAL_MANAGER' &&
+              (!prev.name || prev.name.toUpperCase() === 'ECHANO0618' || prev.name === 'General Manager')
+            ) {
+              const updatedStaff = {
+                ...prev,
+                name: gmFullName,
+                initials: (gmFullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'FE').toUpperCase(),
+              };
+              try {
+                const tenantInfo = resolveTenantCoop();
+                setTenantAdminSession(updatedStaff, tenantInfo.slug, tenantInfo.name);
+              } catch {}
+              return updatedStaff;
+            }
+            return prev;
+          });
+        }
+      }
     } catch (e) {
       console.warn('Online members fetch error:', e);
     }
