@@ -195,6 +195,9 @@ export class OperatorService {
         storageQuotaMb: 10240, // 10 GB quota
         databaseSchema: `tenant_${tenant.slug}`,
         healthScore,
+        environment: tenant.environment || 'production',
+        tag: tenant.tag || '',
+        tags: tenant.tags || (tenant.tag ? [tenant.tag] : []),
         lastActiveAt: new Date().toISOString(),
         createdAt: tenant.createdAt,
       });
@@ -301,9 +304,17 @@ export class OperatorService {
    * System Broadcast Management
    */
   public static createBroadcast(broadcast: Omit<SystemBroadcast, 'id' | 'createdAt'>): SystemBroadcast {
+    const durationDays = broadcast.durationDays || 45;
+    // Auto-expire after 45 days from broadcast date by default
+    const expiresAt = broadcast.expiresAt || new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
     const record: SystemBroadcast = {
       ...broadcast,
       id: `bc_${Date.now()}`,
+      targetType: broadcast.targetType || (broadcast.targetTag ? 'TAG' : 'ALL'),
+      targetTag: (broadcast.targetTag || '').trim(),
+      durationDays,
+      autoExpireDays: 45,
+      expiresAt,
       createdAt: new Date().toISOString(),
     };
     dbStore.systemBroadcasts.unshift(record);
@@ -311,7 +322,66 @@ export class OperatorService {
   }
 
   public static getActiveBroadcasts(): SystemBroadcast[] {
-    return dbStore.systemBroadcasts.filter((b) => b.isActive);
+    const now = new Date().toISOString();
+    return dbStore.systemBroadcasts.filter((b) => {
+      if (!b.isActive) return false;
+      if (b.expiresAt && b.expiresAt <= now) return false;
+      if (b.scheduledDate && b.scheduledDate > now) return false;
+      return true;
+    });
+  }
+
+  public static async toggleBroadcastActiveAsync(id: string): Promise<SystemBroadcast | null> {
+    let broadcast = dbStore.systemBroadcasts.find((b) => b.id === id);
+    if (!broadcast) {
+      const all = await this.listBroadcastsAsync();
+      broadcast = all.find((b) => b.id === id);
+    }
+    if (!broadcast) return null;
+    broadcast.isActive = !broadcast.isActive;
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveBroadcast(broadcast);
+    } catch (err) {
+      console.warn('[OPERATOR] toggleBroadcastActiveAsync firestore error:', err);
+    }
+    return broadcast;
+  }
+
+  public static async updateTenantDetailsAsync(
+    tenantId: string,
+    details: { environment?: 'production' | 'testing'; tag?: string }
+  ): Promise<any> {
+    this.ensureInitialized();
+    let tenant = dbStore.tenants.get(tenantId);
+    if (!tenant) {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        const firestoreTenant = await fs.getTenant(tenantId);
+        if (firestoreTenant) tenant = firestoreTenant;
+      } catch {}
+    }
+    if (!tenant) return null;
+
+    if (details.environment !== undefined) {
+      tenant.environment = details.environment;
+    }
+    if (details.tag !== undefined) {
+      const cleanTag = details.tag.trim();
+      tenant.tag = cleanTag;
+      tenant.tags = cleanTag ? [cleanTag] : [];
+    }
+    tenant.updatedAt = new Date().toISOString();
+    dbStore.tenants.set(tenantId, tenant);
+
+    try {
+      const fs = FirestoreCoopService.getInstance();
+      await fs.saveTenant(tenant);
+    } catch (err) {
+      console.warn('[OPERATOR] updateTenantDetailsAsync firestore error:', err);
+    }
+
+    return tenant;
   }
 
   /**
@@ -1054,6 +1124,9 @@ https://tuntongtech.com`;
             storageQuotaMb: (tenant as any).storageQuotaMb || 10240,
             databaseSchema: `tenant_${tenant.slug}`,
             healthScore,
+            environment: (tenant as any).environment || 'production',
+            tag: (tenant as any).tag || '',
+            tags: (tenant as any).tags || ((tenant as any).tag ? [(tenant as any).tag] : []),
             lastActiveAt: tenant.updatedAt || new Date().toISOString(),
             createdAt: tenant.createdAt,
           });
@@ -1361,6 +1434,7 @@ https://tuntongtech.com`;
       instructions: methodData.instructions || 'Transfer via InstaPay or PESONet. Reference number required.',
       status: methodData.status || 'ACTIVE',
       isDefault: methodData.isDefault || false,
+      environment: methodData.environment || 'production',
       createdAt: methodData.createdAt || now,
       updatedAt: now,
       updatedBy: methodData.updatedBy || 'Platform Operator',

@@ -82,8 +82,30 @@ export class AuthService {
     }
   }
 
+  private static customStaffAccounts: Map<string, Array<{
+    id: string;
+    email: string;
+    fullName: string;
+    role: UserRole;
+    tenantId: string;
+    roleTitle: string;
+  }>> = new Map();
+
+  static addStaffAccount(account: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: UserRole;
+    tenantId: string;
+    roleTitle: string;
+  }) {
+    const list = this.customStaffAccounts.get(account.tenantId) || [];
+    const filtered = list.filter((a) => a.email.toLowerCase() !== account.email.toLowerCase());
+    this.customStaffAccounts.set(account.tenantId, [account, ...filtered]);
+  }
+
   /**
-   * Predefined staff accounts per cooperative
+   * Predefined and custom staff accounts per cooperative
    */
   static getStaffAccounts(tenantId: string): Array<{
     id: string;
@@ -93,7 +115,15 @@ export class AuthService {
     tenantId: string;
     roleTitle: string;
   }> {
-    return [
+    const custom = this.customStaffAccounts.get(tenantId) || [];
+    const defaults: Array<{
+      id: string;
+      email: string;
+      fullName: string;
+      role: UserRole;
+      tenantId: string;
+      roleTitle: string;
+    }> = [
       {
         id: 'usr_gm_01',
         email: 'gm@bayanicoop.ph',
@@ -151,6 +181,7 @@ export class AuthService {
         roleTitle: 'Compliance Officer & DPO',
       },
     ];
+    return [...custom, ...defaults];
   }
 
   /**

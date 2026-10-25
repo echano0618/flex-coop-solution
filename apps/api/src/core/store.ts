@@ -32,6 +32,7 @@ export interface PlatformPaymentMethod {
   instructions?: string;
   status: 'ACTIVE' | 'INACTIVE';
   isDefault?: boolean;
+  environment?: 'production' | 'test';
   createdAt: string;
   updatedAt: string;
   updatedBy?: string;

@@ -28,6 +28,9 @@ export interface Tenant {
   platformCreditBalance?: number;
   escrowFloatBalance?: number;
   status: TenantStatus;
+  environment?: 'production' | 'testing';
+  tag?: string;
+  tags?: string[];
   createdAt: string;
   updatedAt: string;
 }

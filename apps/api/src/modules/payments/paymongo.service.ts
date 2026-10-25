@@ -40,16 +40,35 @@ export class PayMongoService {
         const feeEnabledVal = doc.feeEnabled !== undefined ? Boolean(doc.feeEnabled) : isEnabledVal;
         const feeTreatmentVal =
           doc.feeTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+        const isLive = (doc.environment || 'test') === 'live';
+        const liveSecretKey = doc.liveSecretKey || (isLive ? doc.secretKey : '');
+        const livePublicKey = doc.livePublicKey || (isLive ? doc.publicKey : '');
+        const liveWebhookSecret = doc.liveWebhookSecret || (isLive ? doc.webhookSecret : '');
+        const liveIsEnabled = doc.liveIsEnabled !== undefined ? Boolean(doc.liveIsEnabled) : (isLive ? isEnabledVal : true);
+
+        const testSecretKey = doc.testSecretKey || (!isLive ? doc.secretKey : DEFAULT_PAYMONGO_CONFIG.secretKey);
+        const testPublicKey = doc.testPublicKey || (!isLive ? doc.publicKey : DEFAULT_PAYMONGO_CONFIG.publicKey);
+        const testWebhookSecret = doc.testWebhookSecret || (!isLive ? doc.webhookSecret : DEFAULT_PAYMONGO_CONFIG.webhookSecret);
+        const testIsEnabled = doc.testIsEnabled !== undefined ? Boolean(doc.testIsEnabled) : (!isLive ? isEnabledVal : true);
+
         this.cachedPlatformConfig = {
-          secretKey: doc.secretKey || DEFAULT_PAYMONGO_CONFIG.secretKey,
-          publicKey: doc.publicKey || DEFAULT_PAYMONGO_CONFIG.publicKey,
-          webhookSecret: doc.webhookSecret || DEFAULT_PAYMONGO_CONFIG.webhookSecret,
+          secretKey: doc.secretKey || (isLive ? liveSecretKey : testSecretKey) || DEFAULT_PAYMONGO_CONFIG.secretKey,
+          publicKey: doc.publicKey || (isLive ? livePublicKey : testPublicKey) || DEFAULT_PAYMONGO_CONFIG.publicKey,
+          webhookSecret: doc.webhookSecret || (isLive ? liveWebhookSecret : testWebhookSecret) || DEFAULT_PAYMONGO_CONFIG.webhookSecret,
           environment: doc.environment || 'test',
           isEnabled: isEnabledVal,
           feeEnabled: feeEnabledVal,
           feeTreatment: feeTreatmentVal,
           updatedAt: doc.updatedAt || new Date().toISOString(),
           updatedBy: doc.updatedBy || 'Platform Operator',
+          liveSecretKey,
+          livePublicKey,
+          liveWebhookSecret,
+          liveIsEnabled,
+          testSecretKey,
+          testPublicKey,
+          testWebhookSecret,
+          testIsEnabled,
         };
         this.lastPlatformFetchTime = now;
         return this.cachedPlatformConfig;
@@ -58,7 +77,17 @@ export class PayMongoService {
       console.warn('[PAYMONGO] Failed to load platform config from Firestore, using defaults:', err);
     }
 
-    this.cachedPlatformConfig = { ...DEFAULT_PAYMONGO_CONFIG };
+    this.cachedPlatformConfig = {
+      ...DEFAULT_PAYMONGO_CONFIG,
+      testSecretKey: DEFAULT_PAYMONGO_CONFIG.secretKey,
+      testPublicKey: DEFAULT_PAYMONGO_CONFIG.publicKey,
+      testWebhookSecret: DEFAULT_PAYMONGO_CONFIG.webhookSecret,
+      testIsEnabled: true,
+      liveSecretKey: '',
+      livePublicKey: '',
+      liveWebhookSecret: '',
+      liveIsEnabled: false,
+    };
     this.lastPlatformFetchTime = now;
     return this.cachedPlatformConfig;
   }
@@ -130,14 +159,41 @@ export class PayMongoService {
     const rawTreatment = updated.feeTreatment || current.feeTreatment || 'PASS_THROUGH';
     const effectiveFeeTreatment = rawTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
 
+    const targetEnv = updated.environment || current.environment;
+    
+    // Resolve live credentials
+    const liveSecretKey = (updated.liveSecretKey !== undefined ? updated.liveSecretKey : (targetEnv === 'live' && updated.secretKey ? updated.secretKey : current.liveSecretKey)) || '';
+    const livePublicKey = (updated.livePublicKey !== undefined ? updated.livePublicKey : (targetEnv === 'live' && updated.publicKey ? updated.publicKey : current.livePublicKey)) || '';
+    const liveWebhookSecret = (updated.liveWebhookSecret !== undefined ? updated.liveWebhookSecret : (targetEnv === 'live' && updated.webhookSecret ? updated.webhookSecret : current.liveWebhookSecret)) || '';
+    const liveIsEnabled = updated.liveIsEnabled !== undefined ? Boolean(updated.liveIsEnabled) : (targetEnv === 'live' && updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : (current.liveIsEnabled ?? true));
+
+    // Resolve test credentials
+    const testSecretKey = (updated.testSecretKey !== undefined ? updated.testSecretKey : (targetEnv === 'test' && updated.secretKey ? updated.secretKey : current.testSecretKey)) || DEFAULT_PAYMONGO_CONFIG.secretKey;
+    const testPublicKey = (updated.testPublicKey !== undefined ? updated.testPublicKey : (targetEnv === 'test' && updated.publicKey ? updated.publicKey : current.testPublicKey)) || DEFAULT_PAYMONGO_CONFIG.publicKey;
+    const testWebhookSecret = (updated.testWebhookSecret !== undefined ? updated.testWebhookSecret : (targetEnv === 'test' && updated.webhookSecret ? updated.webhookSecret : current.testWebhookSecret)) || DEFAULT_PAYMONGO_CONFIG.webhookSecret;
+    const testIsEnabled = updated.testIsEnabled !== undefined ? Boolean(updated.testIsEnabled) : (targetEnv === 'test' && updated.isEnabled !== undefined ? Boolean(updated.isEnabled) : (current.testIsEnabled ?? true));
+
+    const activeSecretKey = targetEnv === 'live' ? liveSecretKey : testSecretKey;
+    const activePublicKey = targetEnv === 'live' ? livePublicKey : testPublicKey;
+    const activeWebhookSecret = targetEnv === 'live' ? liveWebhookSecret : testWebhookSecret;
+    const activeIsEnabled = targetEnv === 'live' ? liveIsEnabled : testIsEnabled;
+
     const newConfig: PayMongoConfig = {
-      secretKey: updated.secretKey ? updated.secretKey.trim() : current.secretKey,
-      publicKey: updated.publicKey ? updated.publicKey.trim() : current.publicKey,
-      webhookSecret: updated.webhookSecret ? updated.webhookSecret.trim() : current.webhookSecret,
-      environment: updated.environment || current.environment,
-      isEnabled: isEnabledVal,
+      secretKey: (updated.secretKey ? updated.secretKey.trim() : activeSecretKey) || activeSecretKey,
+      publicKey: (updated.publicKey ? updated.publicKey.trim() : activePublicKey) || activePublicKey,
+      webhookSecret: (updated.webhookSecret ? updated.webhookSecret.trim() : activeWebhookSecret) || activeWebhookSecret,
+      environment: targetEnv,
+      isEnabled: activeIsEnabled,
       feeEnabled: feeEnabledVal,
       feeTreatment: effectiveFeeTreatment,
+      liveSecretKey: liveSecretKey.trim(),
+      livePublicKey: livePublicKey.trim(),
+      liveWebhookSecret: (liveWebhookSecret || '').trim(),
+      liveIsEnabled,
+      testSecretKey: testSecretKey.trim(),
+      testPublicKey: testPublicKey.trim(),
+      testWebhookSecret: (testWebhookSecret || '').trim(),
+      testIsEnabled,
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy || 'Platform Operator',
     };

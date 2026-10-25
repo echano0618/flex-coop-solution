@@ -77,6 +77,8 @@ import {
   PiggyBank,
   Zap,
   AlertCircle,
+  Megaphone,
+  Tag,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -536,6 +538,29 @@ export default function AdminDashboard() {
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
+
+  // Active System Broadcasts from Operator Platform
+  const [systemBroadcasts, setSystemBroadcasts] = useState<any[]>([]);
+  const [dismissedBroadcastIds, setDismissedBroadcastIds] = useState<string[]>([]);
+
+  const fetchSystemBroadcasts = useCallback(async () => {
+    try {
+      const tenant = resolveTenantCoop();
+      const res = await fetch(`${getApiBaseUrl()}/coop/broadcasts?slug=${encodeURIComponent(tenant.slug || '')}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setSystemBroadcasts(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch system broadcasts:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSystemBroadcasts();
+  }, [fetchSystemBroadcasts]);
 
   // Liveness timer: show manual sign-in / recovery options if auth verification takes > 1.2s
   useEffect(() => {
@@ -4726,6 +4751,73 @@ export default function AdminDashboard() {
 
         {/* Main Workspace Body */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6 print:p-0 print:m-0 print:max-w-none print:w-full print:space-y-0">
+          {/* System Broadcast Announcements (Operator Platform Advisory) */}
+          {systemBroadcasts
+            .filter((b) => !dismissedBroadcastIds.includes(b.id))
+            .map((b) => {
+              const isCritical = b.severity === 'CRITICAL';
+              const isWarning = b.severity === 'WARNING';
+              return (
+                <div
+                  key={b.id}
+                  className={`no-print p-4 rounded-xl border flex items-start justify-between gap-4 shadow-sm animate-in fade-in transition-all ${
+                    isCritical
+                      ? 'bg-rose-50 border-rose-300 text-rose-950'
+                      : isWarning
+                      ? 'bg-amber-50 border-amber-300 text-amber-950'
+                      : 'bg-indigo-50 border-indigo-200 text-indigo-950'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                      isCritical
+                        ? 'bg-rose-100 text-rose-700'
+                        : isWarning
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-indigo-100 text-indigo-700'
+                    }`}>
+                      <Megaphone className="w-4 h-4" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                          isCritical
+                            ? 'bg-rose-200 text-rose-900'
+                            : isWarning
+                            ? 'bg-amber-200 text-amber-900'
+                            : 'bg-indigo-200 text-indigo-900'
+                        }`}>
+                          {b.severity} BROADCAST
+                        </span>
+                        <h4 className="font-bold text-xs sm:text-sm">{b.title}</h4>
+                        {b.targetTag && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold bg-purple-100 text-purple-800 border border-purple-200 px-1.5 py-0.5 rounded">
+                            <Tag className="w-2.5 h-2.5" />
+                            <span>Target: {b.targetTag}</span>
+                          </span>
+                        )}
+                        {b.expiresAt && (
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            • Auto-expires: {new Date(b.expiresAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs leading-relaxed opacity-90">{b.message}</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setDismissedBroadcastIds((prev) => [...prev, b.id])}
+                    className="text-slate-400 hover:text-slate-700 p-1 shrink-0 rounded transition hover:bg-black/5"
+                    title="Dismiss Announcement"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
+
           {/* Cloud Firestore Sync Confirmation Banner */}
           {firestoreSyncStatus === 'SYNCED' && (
             <div className="no-print p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 mb-6 flex items-center justify-between shadow-xs animate-in fade-in duration-300">

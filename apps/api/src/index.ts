@@ -1482,6 +1482,140 @@ app.post('/api/v1/operator/tenants/:id/status', async (req: Request, res: Respon
   });
 });
 
+// Update Tenant Configuration (Environment Type & Tag)
+app.post('/api/v1/operator/tenants/:id/details', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.params.id;
+    const { environment, tag } = req.body;
+    const updated = await OperatorService.updateTenantDetailsAsync(tenantId, { environment, tag });
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Cooperative instance not found.' });
+    }
+    res.json({
+      success: true,
+      message: `Tenant configuration updated successfully (Environment: ${updated.environment || 'production'}, Tag: ${updated.tag || 'none'}).`,
+      data: updated,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Create Admin Portal User and Assign Role for Cooperative Instance
+app.post('/api/v1/operator/tenants/:id/admin-users', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.params.id;
+    const { fullName, email, username, password, role, phone } = req.body;
+    if (!fullName || !email || !password || !role) {
+      return res.status(400).json({
+        success: false,
+        error: 'Full Name, Email, Password, and Role are required to create an admin portal user.',
+      });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = (username || cleanEmail).trim().toLowerCase();
+    const userId = `usr_${String(role).toLowerCase()}_${Date.now().toString(36)}`;
+
+    const roleTitles: Record<string, string> = {
+      SYSTEM_ADMIN: 'System Administrator',
+      SUPERADMIN: 'Platform Superadmin',
+      GENERAL_MANAGER: 'General Manager',
+      LOAN_OFFICER: 'Senior Loan Officer',
+      CREDIT_COMMITTEE: 'Credit Committee Chairperson',
+      BOD: 'Board of Directors Chairman',
+      CASHIER: 'Branch Head Cashier & Teller',
+      ACCOUNTANT: 'Chief Bookkeeper & Accountant',
+      COMPLIANCE_OFFICER: 'Compliance Officer & DPO',
+    };
+    const roleTitle = roleTitles[role] || 'Cooperative Administrator';
+
+    // 1. Add to AuthService custom staff accounts
+    AuthService.addStaffAccount({
+      id: userId,
+      email: cleanEmail,
+      fullName: fullName.trim(),
+      role: role as UserRole,
+      tenantId,
+      roleTitle,
+    });
+
+    // 2. Persist credential into Firestore & dbStore
+    const fsService = FirestoreCoopService.getInstance();
+    const credPayload = {
+      id: userId,
+      tenantId,
+      fullName: fullName.trim(),
+      email: cleanEmail,
+      username: cleanUsername,
+      password: String(password).trim(),
+      pin: '123456',
+      role: role as UserRole,
+      roleTitle,
+      isStaff: true,
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      createdAt: new Date().toISOString(),
+    };
+    await fsService.saveMemberCredential(tenantId, credPayload);
+
+    // 3. Create active Member profile
+    const nameParts = fullName.trim().split(' ');
+    const memberRecord: Member = {
+      id: userId,
+      memberNumber: `ADM-${Date.now().toString(36).toUpperCase()}`,
+      firstName: nameParts[0] || fullName.trim(),
+      middleName: '',
+      lastName: nameParts.slice(1).join(' ') || 'Admin',
+      email: cleanEmail,
+      phone: phone || '+63 900 000 0000',
+      birthdate: '1988-01-01',
+      gender: 'OTHER',
+      civilStatus: 'SINGLE',
+      address: 'Cooperative Administrative Office',
+      position: roleTitle,
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await fsService.saveMember(tenantId, memberRecord);
+    } catch {}
+    const existingMembers = dbStore.members.get(tenantId) || [];
+    dbStore.members.set(tenantId, [memberRecord, ...existingMembers.filter((m) => m.email?.toLowerCase() !== cleanEmail)]);
+
+    res.status(201).json({
+      success: true,
+      message: `Admin portal user '${fullName}' successfully created with role '${roleTitle}'.`,
+      data: {
+        id: userId,
+        fullName: fullName.trim(),
+        email: cleanEmail,
+        username: cleanUsername,
+        role,
+        roleTitle,
+        tenantId,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// List Admin Users for Cooperative Instance
+app.get('/api/v1/operator/tenants/:id/admin-users', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.params.id;
+    const staff = AuthService.getStaffAccounts(tenantId);
+    res.json({ success: true, count: staff.length, data: staff });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Prepaid Credit Ledger (Stored in Firebase Firestore)
 app.get('/api/v1/operator/credit-transactions', async (req: Request, res: Response) => {
   try {
@@ -1505,7 +1639,7 @@ app.get('/api/v1/operator/payment-methods', async (_req: Request, res: Response)
 
 app.post('/api/v1/operator/payment-methods', async (req: Request, res: Response) => {
   try {
-    const { id, type, bankName, accountName, accountNumber, qrCodeUrl, instructions, status, isDefault, updatedBy } = req.body;
+    const { id, type, bankName, accountName, accountNumber, qrCodeUrl, instructions, status, isDefault, environment, updatedBy } = req.body;
     if (!bankName || !accountName || !accountNumber) {
       return res.status(400).json({ success: false, error: 'Bank Name, Account Name, and Account Number are required.' });
     }
@@ -1519,6 +1653,7 @@ app.post('/api/v1/operator/payment-methods', async (req: Request, res: Response)
       instructions,
       status,
       isDefault,
+      environment: environment || 'production',
       updatedBy,
     });
     res.json({ success: true, message: `Payment Method '${method.bankName}' saved successfully in Firebase.`, data: method });
@@ -1762,22 +1897,112 @@ app.get('/api/v1/operator/broadcasts', async (_req: Request, res: Response) => {
 });
 
 app.post('/api/v1/operator/broadcasts', async (req: Request, res: Response) => {
-  const { title, message, severity, targetTenantIds, expiresAt, createdBy } = req.body;
+  const { title, message, severity, targetType, targetTag, targetTenantIds, durationDays, scheduledDate, expiresAt, createdBy } = req.body;
   if (!title || !message) {
     return res.status(400).json({ success: false, error: 'Title and message are required.' });
   }
+
+  // 45 days auto-expire default
+  const duration = Number(durationDays) || 45;
+  const calculatedExpiresAt = expiresAt || new Date(Date.now() + duration * 24 * 60 * 60 * 1000).toISOString();
 
   const broadcast = await OperatorService.createBroadcastAsync({
     title,
     message,
     severity: severity || 'INFO',
+    targetType: targetType || (targetTag ? 'TAG' : 'ALL'),
+    targetTag: (targetTag || '').trim(),
     targetTenantIds: targetTenantIds || [],
     isActive: true,
-    expiresAt: expiresAt || new Date(Date.now() + 86400000 * 7).toISOString(),
+    scheduledDate: scheduledDate || undefined,
+    durationDays: duration,
+    autoExpireDays: 45,
+    expiresAt: calculatedExpiresAt,
     createdBy: createdBy || 'SaaS Operator',
   });
 
   res.status(201).json({ success: true, message: 'System broadcast published and stored in Firebase.', data: broadcast });
+});
+
+// Toggle Broadcast Active/Deactivated State
+app.post('/api/v1/operator/broadcasts/:id/toggle', async (req: Request, res: Response) => {
+  try {
+    const updated = await OperatorService.toggleBroadcastActiveAsync(req.params.id);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Broadcast not found.' });
+    }
+    res.json({
+      success: true,
+      message: `System broadcast status changed to ${updated.isActive ? 'ACTIVE' : 'DEACTIVATED'}.`,
+      data: updated,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Active System Broadcasts for Cooperative Tenants / Admin Portals
+app.get('/api/v1/coop/broadcasts', async (req: Request, res: Response) => {
+  try {
+    const slug = (req.query.slug as string || '').trim().toLowerCase();
+    const tenantIdParam = (req.query.tenantId as string || '').trim();
+
+    // Resolve tenant to know their environment & tag
+    let tenant: Tenant | null = null;
+    if (tenantIdParam) {
+      tenant = dbStore.tenants.get(tenantIdParam) || null;
+    } else if (slug) {
+      for (const t of dbStore.tenants.values()) {
+        if (t.slug?.toLowerCase() === slug || t.id.toLowerCase() === slug || t.id.toLowerCase() === `tenant_${slug}`) {
+          tenant = t;
+          break;
+        }
+      }
+    }
+
+    if (!tenant && tenantIdParam) {
+      try {
+        const fs = FirestoreCoopService.getInstance();
+        tenant = await fs.getTenant(tenantIdParam);
+      } catch {}
+    }
+
+    const allBroadcasts = await OperatorService.listBroadcastsAsync();
+    const now = new Date().toISOString();
+
+    const activeList = allBroadcasts.filter((b) => {
+      // Must be active
+      if (!b.isActive) return false;
+      // Auto-expire check: expiresAt must be in the future
+      if (b.expiresAt && b.expiresAt <= now) return false;
+      // Scheduled date check: if scheduled for future, not yet visible
+      if (b.scheduledDate && b.scheduledDate > now) return false;
+
+      // Targeting check
+      if (b.targetType === 'TAG' && b.targetTag) {
+        if (!tenant) return false;
+        const tenantTag = (tenant.tag || '').toLowerCase().trim();
+        const tenantTags = (tenant.tags || []).map((t) => t.toLowerCase().trim());
+        const targetTag = b.targetTag.toLowerCase().trim();
+        if (tenantTag !== targetTag && !tenantTags.includes(targetTag)) {
+          return false;
+        }
+      }
+
+      // If specific tenant IDs specified
+      if (b.targetTenantIds && b.targetTenantIds.length > 0) {
+        if (!tenant || !b.targetTenantIds.includes(tenant.id)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    res.json({ success: true, count: activeList.length, data: activeList });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // -------------------------------------------------------------

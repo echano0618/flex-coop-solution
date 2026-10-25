@@ -17,6 +17,9 @@ export interface TenantFleetSummary {
   adminName: string;
   billingMode: TenantBillingMode;
   status: TenantStatus;
+  environment?: 'production' | 'testing';
+  tag?: string;
+  tags?: string[];
   
   // Member Census
   totalMembers: number;
@@ -77,9 +80,14 @@ export interface SystemBroadcast {
   title: string;
   message: string;
   severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  targetType?: 'ALL' | 'TAG';
+  targetTag?: string;
   targetTenantIds?: string[]; // Empty means all tenants
   isActive: boolean;
   expiresAt: string;
+  scheduledDate?: string;
+  durationDays?: number;
+  autoExpireDays?: number;
   createdAt: string;
   createdBy: string;
 }
@@ -159,6 +167,32 @@ export interface PayMongoConfig {
   feeTreatment?: 'PASS_THROUGH' | 'OPEX';
   updatedAt: string;
   updatedBy: string;
+  // Dual environment configuration support
+  liveSecretKey?: string;
+  livePublicKey?: string;
+  liveWebhookSecret?: string;
+  liveIsEnabled?: boolean;
+  testSecretKey?: string;
+  testPublicKey?: string;
+  testWebhookSecret?: string;
+  testIsEnabled?: boolean;
 }
+
+export interface PlatformPaymentMethod {
+  id: string;
+  type: 'BANK_TRANSFER' | 'QRPH';
+  bankName: string;
+  accountName: string;
+  accountNumber: string;
+  qrCodeUrl?: string;
+  instructions?: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  isDefault?: boolean;
+  environment?: 'production' | 'test';
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 
 
