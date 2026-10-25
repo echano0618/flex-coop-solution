@@ -5,8 +5,11 @@
   "scripts": {
     "build": "tsc",
     "test": "tsc && node dist/test/suite.js",
+    "test:emulator": "firebase emulators:exec --only firestore,auth \"tsc && node dist/test/suite.js\"",
     "start": "node dist/index.js",
-    "dev": "tsc -w & node --watch dist/index.js"
+    "start:emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 node dist/index.js",
+    "dev": "tsc -w & node --watch dist/index.js",
+    "dev:emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 npm run dev"
   },
   "dependencies": {
     "@flexcoop/cda-coa": "^1.0.0",

@@ -16,6 +16,7 @@ export interface TrialBalanceItem {
   accountCode: string;
   accountName: string;
   category: string;
+  normalBalance?: 'DEBIT' | 'CREDIT';
   debitTotal: number;
   creditTotal: number;
   netDebit: number;
@@ -195,7 +196,7 @@ export class GeneralLedgerService {
     }
 
     if (params.mandatoryShareAmount && params.mandatoryShareAmount > 0) {
-      const shareAccount = CDACoAManager.findByCode('3-01-01')!;
+      const shareAccount = CDACoAManager.findByCode('3-01-03')!; // Paid-Up Share Capital - Common
       lines.push({
         accountCode: shareAccount.code,
         accountName: shareAccount.name,
@@ -240,13 +241,18 @@ export class GeneralLedgerService {
     interestPortion: number;
     penaltyPortion: number;
     passOnFee: number;
-    channel: 'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER';
+    channel: 'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER' | 'BANK_TRANSFER';
     userId: string;
     memberId?: string;
     memberNumber?: string;
     memberName?: string;
   }): Omit<JournalEntry, 'id'> {
-    const cashCode = params.channel === 'PAYMONGO_QRPH' ? '1-01-05' : '1-01-01';
+    const cashCode =
+      params.channel === 'PAYMONGO_QRPH'
+        ? '1-01-05'
+        : params.channel === 'BANK_TRANSFER'
+        ? '1-01-02'
+        : '1-01-01';
     const cashAccount = CDACoAManager.findByCode(cashCode)!;
     const loanAccount = CDACoAManager.findByCode('1-02-01')!;
     const interestAccount = CDACoAManager.findByCode('4-01-01')!;
@@ -331,6 +337,7 @@ export class GeneralLedgerService {
       totalDebit: validation.totalDebit,
       totalCredit: validation.totalCredit,
       isBalanced: true,
+      channel: params.channel,
       createdByUserId: params.userId,
       postedAt: new Date().toISOString(),
     };
@@ -347,6 +354,7 @@ export class GeneralLedgerService {
     channel?: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' | 'BANK_TRANSFER';
     passOnFee?: number;
     userId: string;
+    description?: string;
   }): Omit<JournalEntry, 'id'> {
     const cashCode =
       params.channel === 'PAYMONGO_QRPH'
@@ -401,11 +409,12 @@ export class GeneralLedgerService {
       postingDate: new Date().toISOString().split('T')[0],
       referenceType: 'SHARE_CAPITAL_DEPOSIT',
       referenceId: params.memberId,
-      description: `Share Capital Paid-Up Contribution (Member: ${params.memberNumber}, Channel: ${params.channel || 'IN_PERSON_CASHIER'})`,
+      description: params.description || `Share Capital Paid-Up Contribution (Member: ${params.memberNumber}, Channel: ${params.channel || 'IN_PERSON_CASHIER'})`,
       lines,
       totalDebit: validation.totalDebit,
       totalCredit: validation.totalCredit,
       isBalanced: true,
+      channel: params.channel || 'IN_PERSON_CASHIER',
       createdByUserId: params.userId,
       postedAt: new Date().toISOString(),
     };
@@ -488,6 +497,7 @@ export class GeneralLedgerService {
       totalDebit: validation.totalDebit,
       totalCredit: validation.totalCredit,
       isBalanced: true,
+      channel: params.channel || 'IN_PERSON_CASHIER',
       createdByUserId: params.userId,
       postedAt: new Date().toISOString(),
     };
@@ -502,13 +512,14 @@ export class GeneralLedgerService {
     totalCredit: number;
     isBalanced: boolean;
   } {
-    const accountMap = new Map<string, { debit: number; credit: number }>();
+    const accountMap = new Map<string, { debit: number; credit: number; name?: string }>();
 
     for (const entry of entries) {
       for (const line of entry.lines) {
-        const current = accountMap.get(line.accountCode) || { debit: 0, credit: 0 };
+        const current = accountMap.get(line.accountCode) || { debit: 0, credit: 0, name: line.accountName };
         current.debit += line.debit || 0;
         current.credit += line.credit || 0;
+        if (!current.name && line.accountName) current.name = line.accountName;
         accountMap.set(line.accountCode, current);
       }
     }
@@ -519,7 +530,16 @@ export class GeneralLedgerService {
 
     for (const [code, totals] of accountMap.entries()) {
       const coa = CDACoAManager.findByCode(code);
-      if (!coa) continue;
+      const name = coa?.name || totals.name || `Account ${code}`;
+      const category = coa?.category || (
+        code.startsWith('1-') ? 'ASSETS' :
+        code.startsWith('2-') ? 'LIABILITIES' :
+        code.startsWith('3-') ? 'EQUITY' :
+        code.startsWith('4-') ? 'REVENUE' : 'EXPENSES'
+      );
+      const normalBalance: 'DEBIT' | 'CREDIT' = coa?.normalBalance || (
+        (category === 'ASSETS' || category === 'EXPENSES') ? 'DEBIT' : 'CREDIT'
+      );
 
       const d = Math.round(totals.debit * 100) / 100;
       const c = Math.round(totals.credit * 100) / 100;
@@ -527,7 +547,7 @@ export class GeneralLedgerService {
       let netDebit = 0;
       let netCredit = 0;
 
-      if (coa.normalBalance === 'DEBIT') {
+      if (normalBalance === 'DEBIT') {
         const net = d - c;
         if (net >= 0) netDebit = net;
         else netCredit = Math.abs(net);
@@ -539,8 +559,9 @@ export class GeneralLedgerService {
 
       items.push({
         accountCode: code,
-        accountName: coa.name,
-        category: coa.category,
+        accountName: name,
+        category,
+        normalBalance,
         debitTotal: d,
         creditTotal: c,
         netDebit,
@@ -665,10 +686,16 @@ export class GeneralLedgerService {
             lineFullName === memberFullName
         );
 
+        const isGmMatch = Boolean(
+          (memNo === 'MEM-2026-0001' || member.id === 'MEM-2026-0001' || member.id === 'mem_gm_0001') &&
+          (lineMemNo === 'MEM-2026-0001' || line.memberId === 'MEM-2026-0001' || line.memberId === 'mem_gm_0001')
+        );
+
         const isTargetMember =
           line.memberId === member.id ||
           isNumMatch ||
           isNameMatch ||
+          isGmMatch ||
           (entry.referenceId === member.id &&
             (line.accountCode.startsWith('3-01-') || line.accountCode.startsWith('2-01-')));
 

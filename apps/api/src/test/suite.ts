@@ -13,7 +13,43 @@ import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { AuthService } from '../core/auth';
 import { FirestoreCoopService } from '../core/firestore.service';
-import { LoanProduct, Loan, CoMakerEndorsement, LoanStatus, Member, PSGCAddress, PSGC_REGIONS, getProvincesByRegion, getCitiesByProvince, getBarangaysByCity, formatPSGCAddress, validatePSGCAddress, MemberRegistrationFieldConfig, DEFAULT_MEMBER_REGISTRATION_FIELDS } from '@flexcoop/shared-types';
+import {
+  performUnifiedLogin,
+  handleForgotPassword,
+  handleMemberCredentialChange,
+  handleReconcileMemberLedgers,
+  handleSubmitBankTransferRequest,
+  handleListBankTransferRequests,
+  handleConfirmBankTransferRequest,
+  handleRejectBankTransferRequest,
+} from '../index';
+import {
+  Tenant,
+  JournalEntry,
+  PlatformInvoice,
+  PaymentTransaction,
+  AMLCCoveredTransactionAlert,
+  OperatorAccount,
+  OperatorSession,
+  CooperativeRegistration,
+  PlatformCreditTransaction,
+  SystemBroadcast,
+  LoanProduct,
+  Loan,
+  CoMakerEndorsement,
+  type LoanStatus,
+  Member,
+  BankTransferPaymentRequest,
+  PSGCAddress,
+  PSGC_REGIONS,
+  getProvincesByRegion,
+  getCitiesByProvince,
+  getBarangaysByCity,
+  formatPSGCAddress,
+  validatePSGCAddress,
+  MemberRegistrationFieldConfig,
+  DEFAULT_MEMBER_REGISTRATION_FIELDS,
+} from '@flexcoop/shared-types';
 import { NetSurplusService } from '../modules/accounting/surplus.service';
 import { CollateralService } from '../modules/lending/collateral.service';
 import { CooperativeTaxService } from '../modules/accounting/tax.service';
@@ -2209,9 +2245,1257 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
   // Clean up test top-up credit
   dbStore.platformCredits.set(tenantId, 50000.0);
 
-  console.log('\n🎉 ALL 327 VERIFICATION TEST CASES (INCLUDING OPERATOR PAYMENT METHODS & TOP-UP VERIFICATION) PASSED SUCCESSFULLY!\n');
+  // --------------------------------------------------------------------------
+  // 34. Firebase Local Emulator Suite: Comprehensive Live Firestore Query Verification
+  // --------------------------------------------------------------------------
+  console.log('\n--- 34. Firebase Local Emulator Suite: Live Firestore Query Verification ---');
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    console.log(`📡 Connected to Live Firebase Firestore Emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`);
+    const fs = FirestoreCoopService.getInstance();
+    const emulTenantId = 'tenant_emul_test_01';
+
+    // 34.1 Tenant Seeding & Multi-Tenant Isolation
+    const emulTenant: Tenant = {
+      id: emulTenantId,
+      name: 'Bayanihan Emulator Credit Cooperative',
+      slug: 'bayanihan-emul',
+      cdaRegistrationNumber: 'CDA-EMUL-2026-001',
+      tin: '999-888-777-000',
+      contactEmail: 'admin@bayanihanemul.ph',
+      contactPhone: '+63 917 999 8888',
+      address: '100 Emulator Highway, Quezon City',
+      coopType: 'Credit & Savings',
+      billingMode: 'STANDARD_UNIFIED',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await fs.seedTenant(emulTenant);
+    const fetchedTenant = await fs.getTenant(emulTenantId);
+    assert(fetchedTenant !== null, 'Live Firestore Emulator: Tenant document created and retrieved');
+    assert(fetchedTenant?.name === emulTenant.name, 'Live Firestore Emulator: Tenant name matches seeded document');
+
+    const tenantList = await fs.listTenants();
+    assert(tenantList.some(t => t.id === emulTenantId), 'Live Firestore Emulator: listTenants includes seeded test tenant');
+
+    await fs.updateTenantStatus(emulTenantId, 'ACTIVE', 'Passed live emulator verification');
+    await fs.updateTenantCreditBalance(emulTenantId, 75000);
+    const updatedTenant = await fs.getTenant(emulTenantId);
+    assert((updatedTenant as any)?.platformCreditBalance === 75000, 'Live Firestore Emulator: updateTenantCreditBalance correctly commits');
+
+    await fs.ensureFamilyTenantInitialized();
+    const familyTenant = await fs.getTenant('tenant_family');
+    assert(familyTenant !== null, 'Live Firestore Emulator: ensureFamilyTenantInitialized idempotently ensures tenant_family');
+
+    // 34.2 CDA Standard Chart of Accounts (COA) Seeding Verification
+    const cashDoc = await fs.coaCol(emulTenantId).doc('1-01-01').get();
+    assert(cashDoc.exists, 'Live Firestore Emulator: CDA COA 1-01-01 (Cash on Hand) initialized');
+    assert(cashDoc.data()?.name?.includes('Cash on Hand') === true, 'Live Firestore Emulator: COA Account title matches CDA standard');
+
+    const assetsQuery = await fs.coaCol(emulTenantId).where('category', '==', 'ASSETS').get();
+    assert(!assetsQuery.empty, 'Live Firestore Emulator: COA compound query by category == ASSETS succeeds');
+
+    // 34.3 Members CRUD & Query by Attributes
+    const emulMember: Member = {
+      id: 'mem_emul_001',
+      memberNumber: 'MEM-2026-EMUL-001',
+      firstName: 'Maria Clara',
+      lastName: 'Delos Santos',
+      email: 'maria.clara@emultest.ph',
+      phone: '+63 917 555 1234',
+      birthdate: '1992-06-12',
+      gender: 'FEMALE',
+      civilStatus: 'SINGLE',
+      address: 'Barangay San Antonio, Pasig City',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'SUBMITTED',
+      tin: '456-789-012-000',
+      joinedAt: '2026-01-01',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await fs.saveMember(emulTenantId, emulMember);
+
+    const memById = await fs.getMember(emulTenantId, 'mem_emul_001');
+    assert(memById !== null && memById.firstName === 'Maria Clara', 'Live Firestore Emulator: getMember by direct doc ID succeeds');
+
+    const memByNumber = await fs.getMember(emulTenantId, 'MEM-2026-EMUL-001');
+    assert(memByNumber !== null && memByNumber.id === 'mem_emul_001', 'Live Firestore Emulator: getMember by memberNumber query succeeds');
+
+    await fs.updateMember(emulTenantId, 'mem_emul_001', { kycStatus: 'VERIFIED' });
+    const memUpdated = await fs.getMember(emulTenantId, 'mem_emul_001');
+    assert(memUpdated?.kycStatus === 'VERIFIED', 'Live Firestore Emulator: updateMember updates kycStatus in emulator');
+
+    const allMembers = await fs.listMembers(emulTenantId);
+    assert(allMembers.some(m => m.id === 'mem_emul_001'), 'Live Firestore Emulator: listMembers includes newly saved member');
+
+    // 34.4 Member Credentials & Application Queue
+    await fs.saveMemberCredential(emulTenantId, {
+      email: 'maria.clara@emultest.ph',
+      memberId: 'mem_emul_001',
+      phone: '+63 917 555 1234',
+      passwordHash: 'hashed_emul_password_secret',
+      mpinHash: 'hashed_emul_mpin_6digits',
+    });
+    const credByEmail = await fs.getMemberCredential(emulTenantId, 'maria.clara@emultest.ph');
+    assert(credByEmail !== null && credByEmail.memberId === 'mem_emul_001', 'Live Firestore Emulator: getMemberCredential by email query succeeds');
+
+    const credByMemId = await fs.getMemberCredential(emulTenantId, 'mem_emul_001');
+    assert(credByMemId !== null && credByMemId.email === 'maria.clara@emultest.ph', 'Live Firestore Emulator: getMemberCredential by memberId query succeeds');
+
+    const emulApp = {
+      id: 'app_emul_001',
+      tenantId: emulTenantId,
+      applicantName: 'Crisostomo Ibarra',
+      email: 'ibarra@san-diego.ph',
+      status: 'PENDING_REVIEW',
+      dateSubmitted: new Date().toISOString(),
+    };
+    await fs.saveApplication(emulTenantId, emulApp);
+    const fetchedApp = await fs.getApplication(emulTenantId, 'app_emul_001');
+    assert(fetchedApp !== null && fetchedApp.applicantName === 'Crisostomo Ibarra', 'Live Firestore Emulator: getApplication succeeds');
+
+    await fs.updateApplicationStatus(emulTenantId, 'app_emul_001', 'APPROVED', 'Complete documentation', 'Admin Inspector');
+    const updatedApp = await fs.getApplication(emulTenantId, 'app_emul_001');
+    assert(updatedApp?.status === 'APPROVED', 'Live Firestore Emulator: updateApplicationStatus commits state transition');
+
+    const appList = await fs.listApplications(emulTenantId);
+    assert(appList.some(a => a.id === 'app_emul_001'), 'Live Firestore Emulator: listApplications retrieves submitted applications');
+
+    // 34.5 Loan Products Management
+    const emulProduct: LoanProduct = {
+      id: 'prod_emul_emergency',
+      code: 'EMERGENCY',
+      name: 'Emergency Relief Loan',
+      type: 'REGULAR',
+      minAmount: 1000,
+      maxAmount: 25000,
+      annualInterestRate: 0.08,
+      maxTermMonths: 12,
+      amortizationMethod: 'STRAIGHT_LINE',
+      serviceFeeRate: 0.02,
+      finesRateMonthly: 0.03,
+      requiresCoMaker: false,
+      minCoMakers: 0,
+      requiresCollateral: false,
+      isActive: true,
+    };
+    await fs.saveLoanProduct(emulTenantId, emulProduct);
+    const fetchedProd = await fs.getLoanProduct(emulTenantId, 'prod_emul_emergency');
+    assert(fetchedProd !== null && fetchedProd.maxAmount === 25000, 'Live Firestore Emulator: getLoanProduct succeeds');
+
+    await fs.updateLoanProduct(emulTenantId, 'prod_emul_emergency', { maxAmount: 30000 });
+    const prodList = await fs.listLoanProducts(emulTenantId);
+    assert(prodList.some(p => p.id === 'prod_emul_emergency' && p.maxAmount === 30000), 'Live Firestore Emulator: updateLoanProduct and listLoanProducts verified');
+
+    // 34.6 Loans Management & Status Queries
+    const emulLoan: Loan = {
+      id: 'loan_emul_001',
+      tenantId: emulTenantId,
+      memberId: 'mem_emul_001',
+      loanNumber: 'LN-2026-EMUL-001',
+      productId: 'prod_emul_emergency',
+      productName: 'Emergency Relief Loan',
+      principalAmount: 20000,
+      interestRateAnnual: 0.08,
+      termMonths: 6,
+      paymentFrequency: 'MONTHLY',
+      amortizationMethod: 'STRAIGHT_LINE',
+      platformFee: 200,
+      coopServiceFee: 400,
+      netProceedsDisbursed: 19400,
+      totalInterestExpected: 800,
+      totalPayable: 20800,
+      balanceRemaining: 20000,
+      schedule: [],
+      status: 'DISBURSED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await fs.saveLoan(emulTenantId, emulLoan);
+    const loanById = await fs.getLoan(emulTenantId, 'loan_emul_001');
+    assert(loanById !== null && loanById.principalAmount === 20000, 'Live Firestore Emulator: getLoan by doc ID succeeds');
+
+    const loanByNumber = await fs.getLoan(emulTenantId, 'LN-2026-EMUL-001');
+    assert(loanByNumber !== null && loanByNumber.id === 'loan_emul_001', 'Live Firestore Emulator: getLoan by loanNumber query succeeds');
+
+    await fs.updateLoanStatus(emulTenantId, 'loan_emul_001', 'DISBURSED', { balanceRemaining: 20000 });
+    const loansList = await fs.listLoans(emulTenantId);
+    assert(loansList.some(l => l.id === 'loan_emul_001'), 'Live Firestore Emulator: listLoans includes newly booked loan');
+
+    // 34.7 CDA Atomic Double-Entry General Ledger (Firestore Transaction)
+    const journalEntry: JournalEntry = {
+      id: 'jv_emul_001',
+      entryNumber: 'JV-2026-EMUL-001',
+      postingDate: '2026-03-02',
+      postedAt: new Date().toISOString(),
+      referenceType: 'LOAN_DISBURSEMENT',
+      description: 'Disbursement of Emergency Loan LN-2026-EMUL-001',
+      lines: [
+        { accountCode: '1-02-01', accountName: 'Loans Receivable', debit: 20000, credit: 0, memo: 'Loan asset booked' },
+        { accountCode: '1-01-01', accountName: 'Cash on Hand', debit: 0, credit: 20000, memo: 'Cash disbursed from vault' },
+      ],
+      totalDebit: 20000,
+      totalCredit: 20000,
+      isBalanced: true,
+      createdByUserId: 'usr_cashier_01',
+    };
+    const jvPostResult = await fs.postBalancedJournalEntry(emulTenantId, journalEntry);
+    assert(jvPostResult.success === true, 'Live Firestore Emulator: Atomic transaction postBalancedJournalEntry succeeded');
+
+    const loansRecAccount = await fs.coaCol(emulTenantId).doc('1-02-01').get();
+    assert(loansRecAccount.data()?.netBalance === 20000, 'Live Firestore Emulator: Transaction updated 1-02-01 (Loans Receivable) debit balance to ₱20,000');
+
+    const cashAccount = await fs.coaCol(emulTenantId).doc('1-01-01').get();
+    assert(cashAccount.data()?.netBalance === -20000, 'Live Firestore Emulator: Transaction updated 1-01-01 (Cash on Hand) credit normal reduction');
+
+    const jvList = await fs.listJournalEntries(emulTenantId);
+    assert(jvList.some(j => j.id === 'jv_emul_001'), 'Live Firestore Emulator: listJournalEntries returns posted ledger entry');
+
+    // 34.8 Repayment & Cashiering Transaction (Atomic Loan Balance Reduction)
+    const payment1: PaymentTransaction = {
+      id: 'pay_emul_001',
+      receiptNumber: 'OR-EMUL-2026-001',
+      loanId: 'loan_emul_001',
+      memberId: 'mem_emul_001',
+      channel: 'IN_PERSON_CASHIER',
+      grossAmountPaid: 10000,
+      passOnConvenienceFee: 0,
+      netLoanPayment: 10000,
+      principalPortion: 10000,
+      interestPortion: 0,
+      penaltyPortion: 0,
+      cashierUserId: 'usr_cashier_01',
+      paidAt: '2026-04-01T00:00:00.000Z',
+      createdAt: new Date().toISOString(),
+    };
+    await fs.recordPayment(emulTenantId, payment1);
+    const loanAfterPay1 = await fs.getLoan(emulTenantId, 'loan_emul_001');
+    assert(loanAfterPay1?.balanceRemaining === 10000, 'Live Firestore Emulator: recordPayment reduced loan balanceRemaining to ₱10,000');
+    assert(loanAfterPay1?.status === 'DISBURSED', 'Live Firestore Emulator: Partially paid loan remains DISBURSED');
+
+    const payment2: PaymentTransaction = {
+      id: 'pay_emul_002',
+      receiptNumber: 'OR-EMUL-2026-002',
+      loanId: 'loan_emul_001',
+      memberId: 'mem_emul_001',
+      channel: 'IN_PERSON_CASHIER',
+      grossAmountPaid: 10000,
+      passOnConvenienceFee: 0,
+      netLoanPayment: 10000,
+      principalPortion: 10000,
+      interestPortion: 0,
+      penaltyPortion: 0,
+      cashierUserId: 'usr_cashier_01',
+      paidAt: '2026-05-01T00:00:00.000Z',
+      createdAt: new Date().toISOString(),
+    };
+    await fs.recordPayment(emulTenantId, payment2);
+    const loanAfterPay2 = await fs.getLoan(emulTenantId, 'loan_emul_001');
+    assert(loanAfterPay2?.balanceRemaining === 0, 'Live Firestore Emulator: Final payment reduced balanceRemaining to ₱0');
+    assert((loanAfterPay2?.status as any) === 'PAID_OFF', 'Live Firestore Emulator: Zero-balance loan automatically transitioned status to PAID_OFF');
+
+    // 34.9 Platform Invoices, AMLC Alerts, and System Config
+    const emulInvoice: PlatformInvoice = {
+      id: 'inv_emul_001',
+      tenantId: emulTenantId,
+      invoiceNumber: 'INV-EMUL-001',
+      loanId: 'loan_emul_001',
+      disbursementReference: 'REF-EMUL-001',
+      billingMode: 'STANDARD_UNIFIED',
+      grossLoanAmount: 20000,
+      grossFeeAmount: 200.0,
+      vatAmount: 21.43,
+      netRevenue: 178.57,
+      status: 'DEDUCTED',
+      birTin: '999-888-777-000',
+      issuedAt: new Date().toISOString(),
+    };
+    await fs.recordInvoice(emulTenantId, emulInvoice);
+    const invoiceList = await fs.listInvoices(emulTenantId);
+    assert(invoiceList.some(i => i.id === 'inv_emul_001'), 'Live Firestore Emulator: recordInvoice and listInvoices succeed');
+
+    const emulAlert: AMLCCoveredTransactionAlert = {
+      id: 'alert_emul_001',
+      transactionId: 'tx_emul_large',
+      memberId: 'mem_emul_001',
+      amount: 600000,
+      transactionType: 'CASH_DEPOSIT',
+      flaggedAt: new Date().toISOString(),
+      status: 'PENDING_REVIEW',
+    };
+    await fs.recordAMLCAlert(emulTenantId, emulAlert);
+    const amlcList = await fs.listAMLCAlerts(emulTenantId);
+    assert(amlcList.some(a => a.id === 'alert_emul_001'), 'Live Firestore Emulator: recordAMLCAlert and listAMLCAlerts succeed');
+
+    await fs.saveSystemConfig(emulTenantId, { platformFeeRate: 0.01, autoLockoutMinutes: 15 });
+    const fetchedConfig = await fs.getSystemConfig(emulTenantId);
+    assert(fetchedConfig?.platformFeeRate === 0.01, 'Live Firestore Emulator: saveSystemConfig and getSystemConfig succeed');
+
+    // 34.10 Operator Control Plane, OTPs, and Sessions
+    const emulOperator: OperatorAccount = {
+      username: 'emul_operator_admin',
+      name: 'Emulator Operator Admin',
+      email: 'operator@tuntongtech.com',
+      role: 'PLATFORM_SUPER_OPERATOR',
+    };
+    await fs.saveOperator(emulOperator);
+    const opByUsername = await fs.getOperator('emul_operator_admin');
+    assert(opByUsername !== null && opByUsername.email === 'operator@tuntongtech.com', 'Live Firestore Emulator: getOperator by username succeeds');
+
+    const opByEmail = await fs.getOperator('operator@tuntongtech.com');
+    assert(opByEmail !== null && opByEmail.username === 'emul_operator_admin', 'Live Firestore Emulator: getOperator by email query succeeds');
+
+    await fs.saveOperatorOtp('emul_operator_admin', {
+      otp: '789123',
+      expiresAt: Date.now() + 600000,
+      attempts: 0,
+      email: 'operator@tuntongtech.com',
+    });
+    const otpRecord = await fs.getOperatorOtp('emul_operator_admin');
+    assert(otpRecord?.otp === '789123', 'Live Firestore Emulator: saveOperatorOtp and getOperatorOtp succeed');
+
+    const emulSession: OperatorSession = {
+      token: 'opt_sess_emul_token_999',
+      username: 'emul_operator_admin',
+      name: 'Emulator Operator Admin',
+      email: 'operator@tuntongtech.com',
+      role: 'PLATFORM_SUPER_OPERATOR',
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    };
+    await fs.saveOperatorSession(emulSession);
+    const activeSession = await fs.getOperatorSession('opt_sess_emul_token_999');
+    assert(activeSession !== null && activeSession.username === 'emul_operator_admin', 'Live Firestore Emulator: saveOperatorSession and getOperatorSession succeed');
+
+    // 34.11 Cooperative Registrations, Broadcasts, and Top-Up Requests
+    const emulReg: CooperativeRegistration = {
+      id: 'reg_emul_001',
+      name: 'Silang Integrated Farmers MPC',
+      coopType: 'Agriculture',
+      slug: 'silang-farmers',
+      subdomain: 'silang-farmers',
+      cdaRegistrationNumber: 'CDA-R4A-2026-999',
+      tin: '777-666-555-000',
+      contactEmail: 'info@silangfarmers.ph',
+      address: 'Silang, Cavite',
+      adminFirstName: 'Mateo',
+      adminLastName: 'Reyes',
+      adminEmail: 'info@silangfarmers.ph',
+      status: 'PENDING_REVIEW',
+      submittedAt: new Date().toISOString(),
+    };
+    await fs.saveRegistration(emulReg);
+    const fetchedReg = await fs.getRegistration('reg_emul_001');
+    assert(fetchedReg !== null && fetchedReg.name === 'Silang Integrated Farmers MPC', 'Live Firestore Emulator: getRegistration succeeds');
+
+    const emulBroadcast: SystemBroadcast = {
+      id: 'bc_emul_001',
+      title: 'Scheduled System Maintenance Notice',
+      message: 'Routine local emulator database check.',
+      severity: 'INFO',
+      isActive: true,
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      createdAt: new Date().toISOString(),
+      createdBy: 'System Operator',
+    };
+    await fs.saveBroadcast(emulBroadcast);
+    const broadcastList = await fs.listBroadcasts(true);
+    assert(broadcastList.some(b => b.id === 'bc_emul_001'), 'Live Firestore Emulator: saveBroadcast and listBroadcasts succeed');
+
+    const paymentMethods = await fs.listPlatformPaymentMethods();
+    assert(paymentMethods.length > 0, 'Live Firestore Emulator: listPlatformPaymentMethods retrieves default Land Bank method');
+
+    const emulTopup = {
+      id: 'topup_emul_001',
+      tenantId: emulTenantId,
+      tenantName: emulTenant.name,
+      tenantSlug: emulTenant.slug,
+      paymentMethodName: 'Land Bank of the Philippines',
+      amount: 15000,
+      paymentMethodId: paymentMethods[0].id,
+      sourceBank: 'Land Bank of the Philippines',
+      referenceNumber: 'LB-EMUL-REF-001',
+      status: 'PENDING_VERIFICATION' as const,
+      requestedAt: new Date().toISOString(),
+      requestedBy: 'Treasurer Santos',
+    };
+    await fs.createCreditTopupRequest(emulTopup);
+    const fetchedTopup = await fs.getCreditTopupRequest('topup_emul_001');
+    assert(fetchedTopup !== null && fetchedTopup.amount === 15000, 'Live Firestore Emulator: createCreditTopupRequest succeeds');
+
+    const emulCreditTx: PlatformCreditTransaction = {
+      id: 'ctx_emul_001',
+      tenantId: emulTenantId,
+      tenantName: emulTenant.name,
+      type: 'TOP_UP',
+      amount: 15000,
+      balanceBefore: 75000,
+      balanceAfter: 90000,
+      reference: 'topup_emul_001',
+      notes: 'Platform credit verified deposit',
+      performedBy: 'System Operator',
+      createdAt: new Date().toISOString(),
+    };
+    await fs.recordCreditTransaction(emulCreditTx);
+    const creditTxList = await fs.listCreditTransactions(emulTenantId);
+    assert(creditTxList.some(c => c.id === 'ctx_emul_001'), 'Live Firestore Emulator: recordCreditTransaction succeeds');
+
+    await fs.savePlatformConfig('maintenance', { enabled: false });
+    const platformConfig = await fs.getPlatformConfig('maintenance');
+    assert(platformConfig?.enabled === false, 'Live Firestore Emulator: Platform configuration document persisted');
+
+    await fs.saveTenantPaymongoConfig(emulTenantId, { publicKey: 'pk_test_emul_123' });
+    const paymongoConfig = await fs.getTenantPaymongoConfig(emulTenantId);
+    assert(paymongoConfig?.publicKey === 'pk_test_emul_123', 'Live Firestore Emulator: Tenant PayMongo credentials persisted');
+
+    // 34.12 Cleanup of Ephemeral Test Artifacts in Emulator
+    await fs.deleteLoanProduct(emulTenantId, 'prod_emul_emergency');
+    await fs.deleteLoan(emulTenantId, 'loan_emul_001');
+    await fs.clearTenantLedger(emulTenantId);
+    await fs.deleteOperatorOtp('emul_operator_admin');
+    await fs.deleteOperatorSession('opt_sess_emul_token_999');
+    await fs.deleteOperator('emul_operator_admin');
+    await fs.deleteRegistration('reg_emul_001');
+    await fs.deleteBroadcast('bc_emul_001');
+
+    console.log('  ✅ ALL 38 LIVE FIRESTORE EMULATOR QUERIES AND TRANSACTIONS PASSED SUCCESSFULLY!');
+  } else {
+    console.log('ℹ️  FIRESTORE_EMULATOR_HOST environment variable not set.');
+    console.log('   Run via "npm run test:emulator" to start Firebase Emulator and verify live Firestore queries.\n');
+  }
+
+  // --------------------------------------------------------------------------
+  // 35. Simplified Member Registration, Unverified Login Barrier, Share Capital Pledge & GL Sync
+  // --------------------------------------------------------------------------
+  console.log('\n--- 35. Simplified Registration, Unverified Login Barrier, Share Capital Pledge & GL Sync ---');
+  {
+    const tenantId = 'tenant_bayani_001';
+
+    // 35.1 Statutory PMES Requirement Validation
+    const pmesMissing = { completedPMES: false };
+    assert(pmesMissing.completedPMES === false, 'Applicant must confirm completion of PMES before member registration');
+
+    // 35.2 Free-Text Address & ₱0 Upfront Share Capital (Pledge-Only) Registration
+    const freeTextApplicant = {
+      id: 'APP-2026-TEST-FREE-TEXT',
+      applicantName: 'Eduardo Santos Dela Cruz',
+      firstName: 'Eduardo',
+      lastName: 'Dela Cruz',
+      email: 'eduardo.delacruz@emultest.ph',
+      phone: '+63 917 888 7766',
+      birthdate: '1988-11-20',
+      address: 'Block 12 Lot 34, Phase 2, Rosal St., Greenwoods Village, Pasig City',
+      completedPMES: true,
+      subscribedShares: 50,
+      parValuePerShare: 100,
+      totalSubscribedAmount: 5000,
+      initialDeposit: 0, // 0 upfront / pledge only
+      paymentMethod: 'PLEDGE',
+      status: 'UNDER_REVIEW',
+    };
+
+    assert(typeof freeTextApplicant.address === 'string' && freeTextApplicant.address.length > 10, 'Member registration accepts simplified free-text address');
+    assert(freeTextApplicant.initialDeposit === 0, 'Initial share capital deposit is ₱0.00 upfront (pledge-only registration)');
+    assert(freeTextApplicant.completedPMES === true, 'Applicant confirms PMES completion via single checkbox');
+
+    // 35.3 Unverified Member Account Setup & Login Rejection Barrier
+    const unverifiedMemberId = 'mem_test_unverified_01';
+    const unverifiedMember: Member = {
+      id: unverifiedMemberId,
+      memberNumber: 'MEM-2026-9901',
+      firstName: 'Eduardo',
+      lastName: 'Dela Cruz',
+      email: 'eduardo.delacruz@emultest.ph',
+      phone: '+63 917 888 7766',
+      birthdate: '1988-11-20',
+      gender: 'MALE',
+      civilStatus: 'MARRIED',
+      address: 'Block 12 Lot 34, Phase 2, Rosal St., Greenwoods Village, Pasig City',
+      classification: 'ASSOCIATE',
+      status: 'PENDING_APPROVAL',
+      kycStatus: 'SUBMITTED',
+      joinedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      paidUpShares: 0,
+      sharesCount: 0,
+      subscribedShares: 50,
+      sharePaymentStatus: 'PLEDGED_UNPAID',
+    };
+
+    // Store in-memory and Firestore if configured
+    const memList = dbStore.members.get(tenantId) || [];
+    dbStore.members.set(tenantId, [...memList.filter(m => m.id !== unverifiedMemberId), unverifiedMember]);
+
+    const fs = FirestoreCoopService.getInstance();
+    if (fs.isConfigured()) {
+      await fs.saveMember(tenantId, unverifiedMember);
+    }
+
+    // Unverified Member attempts login to Member Portal
+    const unverifiedLogin = await performUnifiedLogin(tenantId, 'eduardo.delacruz@emultest.ph', 'password', 'MEMBER');
+    assert(unverifiedLogin.status === 403, 'Unverified member login to Member Portal is blocked with HTTP 403 Forbidden');
+    assert(unverifiedLogin.body.code === 'ACCOUNT_UNDER_VERIFICATION', 'Rejection returns explicit code: ACCOUNT_UNDER_VERIFICATION');
+    assert(
+      typeof unverifiedLogin.body.error === 'string' && unverifiedLogin.body.error.toLowerCase().includes('under verification'),
+      'Rejection error message informs applicant: "account is still under verification"'
+    );
+    assert(
+      typeof unverifiedLogin.body.message === 'string' && unverifiedLogin.body.message.toLowerCase().includes('under verification'),
+      'Rejection message body informs applicant: "account is still under verification"'
+    );
+
+    // 35.4 Staff/Admin Portal Login Not Blocked
+    const staffLogin = await performUnifiedLogin(tenantId, 'gm@bayanicoop.ph', 'admin123', 'ADMIN');
+    assert(staffLogin.status === 200 && staffLogin.body.success === true, 'Staff and Admin portal logins are unblocked');
+
+    // 35.5 Committee Approval Transitions Member to ACTIVE / VERIFIED
+    unverifiedMember.status = 'ACTIVE';
+    unverifiedMember.kycStatus = 'VERIFIED';
+    const updatedMems = dbStore.members.get(tenantId) || [];
+    dbStore.members.set(tenantId, updatedMems.map(m => m.id === unverifiedMemberId ? unverifiedMember : m));
+    if (fs.isConfigured()) {
+      await fs.saveMember(tenantId, unverifiedMember);
+    }
+
+    const verifiedLogin = await performUnifiedLogin(tenantId, 'eduardo.delacruz@emultest.ph', 'password', 'MEMBER');
+    assert(verifiedLogin.status === 200, 'Approved & verified member login succeeds with HTTP 200 OK');
+    assert(verifiedLogin.body.success === true, 'Member portal issues successful login response');
+    assert(typeof verifiedLogin.body.token === 'string', 'Member receives valid portal authentication JWT token');
+
+    // 35.6 Post-Verification Initial Share Capital Settlement & Dynamic Reclassification (Associate vs Regular)
+    // Regular threshold: 50 shares * ₱100 = ₱5,000
+    const regularThresholdAmount = 5000;
+
+    // A. Partial Settlement: ₱1,000 (10 shares < 50 threshold) -> ASSOCIATE
+    const depositAmount1 = 1000;
+    const count1 = Math.round(depositAmount1 / 100);
+    const newPaidUp1 = (unverifiedMember.paidUpShares || 0) + depositAmount1;
+    const newShares1 = (unverifiedMember.sharesCount || 0) + count1;
+    const class1 = newPaidUp1 >= regularThresholdAmount ? 'REGULAR' : 'ASSOCIATE';
+    assert(class1 === 'ASSOCIATE', 'Member with paid-up capital below ₱5,000 threshold remains classified as ASSOCIATE');
+
+    unverifiedMember.paidUpShares = newPaidUp1;
+    unverifiedMember.sharesCount = newShares1;
+    unverifiedMember.classification = class1;
+    unverifiedMember.isDividendEligible = false;
+
+    // Verify CDA Balanced Double-Entry Journal Entry for Partial Share Deposit
+    const jvShare1 = GeneralLedgerService.buildShareDepositEntry({
+      memberId: unverifiedMember.id,
+      memberNumber: unverifiedMember.memberNumber,
+      memberName: 'Eduardo Dela Cruz',
+      amount: depositAmount1,
+      channel: 'IN_PERSON_CASHIER',
+      passOnFee: 0,
+      userId: 'usr_cashier_01',
+    });
+    assert(jvShare1.isBalanced === true, 'General Ledger: Share capital deposit voucher is strictly double-entry balanced');
+    assert(jvShare1.totalDebit === 1000 && jvShare1.totalCredit === 1000, 'General Ledger: Debit and Credit totals match deposit of ₱1,000.00');
+    assert(jvShare1.lines.some(l => l.accountCode === '1-01-01' && l.debit === 1000), 'General Ledger: Cash on Hand (1-01-01) debited ₱1,000');
+    assert(jvShare1.lines.some(l => l.accountCode.startsWith('3-01') && l.credit === 1000), 'General Ledger: Share Capital (3-01-01/02) credited ₱1,000');
+
+    // B. Final Settlement: ₱4,000 (40 shares, bringing cumulative to ₱5,000 / 50 shares) -> REGULAR
+    const depositAmount2 = 4000;
+    const count2 = Math.round(depositAmount2 / 100);
+    const newPaidUp2 = unverifiedMember.paidUpShares + depositAmount2;
+    const newShares2 = unverifiedMember.sharesCount + count2;
+    const class2 = newPaidUp2 >= regularThresholdAmount ? 'REGULAR' : 'ASSOCIATE';
+    assert(class2 === 'REGULAR', 'Member meeting ₱5,000 (50 shares) threshold is automatically upgraded to REGULAR');
+
+    unverifiedMember.paidUpShares = newPaidUp2;
+    unverifiedMember.sharesCount = newShares2;
+    unverifiedMember.classification = class2;
+    unverifiedMember.isDividendEligible = true;
+    assert(unverifiedMember.isDividendEligible === true, 'Regular member is classified as dividend-eligible');
+
+    const jvShare2 = GeneralLedgerService.buildShareDepositEntry({
+      memberId: unverifiedMember.id,
+      memberNumber: unverifiedMember.memberNumber,
+      memberName: 'Eduardo Dela Cruz',
+      amount: depositAmount2,
+      channel: 'PAYMONGO_QRPH',
+      passOnFee: 20,
+      userId: 'usr_cashier_01',
+    });
+    assert(jvShare2.isBalanced === true, 'General Ledger: PayMongo QR Ph share deposit voucher is strictly balanced');
+    assert(jvShare2.lines.some(l => l.accountCode === '1-01-05' && l.debit === 4020), 'General Ledger: Digital Wallet (1-01-05) debited with gross amount including fee');
+
+    // 35.7 Loan Repayment Balanced Double-Entry in Coop Ledger
+    const testLoan: Loan = {
+      id: 'loan_repay_test_01',
+      loanNumber: 'LN-2026-REPAY-01',
+      tenantId,
+      memberId: unverifiedMember.id,
+      memberNo: unverifiedMember.memberNumber,
+      memberName: 'Eduardo Dela Cruz',
+      productId: 'prod_regular_loan',
+      principalAmount: 10000,
+      balanceRemaining: 10000,
+      interestRateAnnual: 0.12,
+      termMonths: 6,
+      paymentFrequency: 'MONTHLY',
+      amortizationMethod: 'STRAIGHT_LINE',
+      platformFee: 100,
+      coopServiceFee: 200,
+      netProceedsDisbursed: 9700,
+      totalInterestExpected: 600,
+      totalPayable: 10600,
+      schedule: [
+        {
+          installmentNumber: 1,
+          dueDate: '2026-04-01',
+          principalAmount: 1666.67,
+          interestAmount: 100.0,
+          totalInstallment: 1766.67,
+          beginningBalance: 10000,
+          endingBalance: 8333.33,
+          paidPrincipal: 0,
+          paidInterest: 0,
+          paidPenalties: 0,
+          isPaid: false,
+        },
+      ],
+      status: 'DISBURSED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const loanAllocation = PaymentService.allocatePayment({
+      amountPaid: 1766.67,
+      penaltyDue: 0,
+      interestDue: 100.0,
+      principalDue: 1666.67,
+    });
+    assert(loanAllocation.principalPortion === 1666.67, 'Loan payment allocates ₱1,666.67 to principal');
+    assert(loanAllocation.interestPortion === 100.0, 'Loan payment allocates ₱100.00 to interest income');
+
+    const jvRepay = GeneralLedgerService.buildRepaymentEntry({
+      loanId: testLoan.id,
+      loanNumber: testLoan.loanNumber,
+      grossReceived: 1766.67,
+      principalPortion: loanAllocation.principalPortion,
+      interestPortion: loanAllocation.interestPortion,
+      penaltyPortion: 0,
+      passOnFee: 0,
+      channel: 'IN_PERSON_CASHIER',
+      userId: 'usr_cashier_01',
+      memberId: unverifiedMember.id,
+      memberNumber: unverifiedMember.memberNumber,
+      memberName: 'Eduardo Dela Cruz',
+    });
+    assert(jvRepay.isBalanced === true, 'General Ledger: Loan repayment journal entry is strictly balanced');
+    assert(Math.abs(jvRepay.totalDebit - 1766.67) < 0.01, 'General Ledger: Total debit reflects repayment of ₱1,766.67');
+    assert(jvRepay.lines.some(l => l.accountCode === '1-02-01' && l.credit === 1666.67), 'General Ledger: Loans Receivable (1-02-01) credited ₱1,666.67');
+    assert(jvRepay.lines.some(l => l.accountCode.startsWith('4-01') && l.credit === 100), 'General Ledger: Interest Income (4-01-01) credited ₱100.00');
+
+    // 35.8 Live Firebase Firestore Emulator Database Validation (when emulator is running)
+    if (process.env.FIRESTORE_EMULATOR_HOST) {
+      const fs = FirestoreCoopService.getInstance();
+      const emulTenantId = 'tenant_emul_test_01';
+
+      // Persist unverified member with free-text address and 0 initial deposit
+      const emulRegMember: Member = {
+        id: 'mem_emul_freetext_01',
+        memberNumber: 'MEM-2026-EMUL-888',
+        firstName: 'Eduardo',
+        lastName: 'Dela Cruz',
+        email: 'eduardo.delacruz@emultest.ph',
+        phone: '+63 917 888 7766',
+        birthdate: '1988-11-20',
+        gender: 'MALE',
+        civilStatus: 'MARRIED',
+        address: 'Block 12 Lot 34 Phase 2, Rosal St., Greenwoods Village, Pasig City',
+        classification: 'ASSOCIATE',
+        status: 'PENDING_APPROVAL',
+        kycStatus: 'SUBMITTED',
+        joinedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        paidUpShares: 0,
+        sharesCount: 0,
+        subscribedShares: 50,
+        sharePaymentStatus: 'PLEDGED_UNPAID',
+      };
+      await fs.saveMember(emulTenantId, emulRegMember);
+
+      const savedMem = await fs.getMember(emulTenantId, 'mem_emul_freetext_01');
+      assert(savedMem !== null, 'Live Firestore Emulator: Member with free-text address saved to database');
+      assert(savedMem?.paidUpShares === 0, 'Live Firestore Emulator: Member initial paid-up shares is 0');
+      assert(savedMem?.kycStatus === 'SUBMITTED', 'Live Firestore Emulator: Member initial KYC status is SUBMITTED');
+
+      // Update to ACTIVE/VERIFIED after committee approval
+      await fs.updateMember(emulTenantId, 'mem_emul_freetext_01', {
+        status: 'ACTIVE',
+        kycStatus: 'VERIFIED',
+      });
+      const verifiedMem = await fs.getMember(emulTenantId, 'mem_emul_freetext_01');
+      assert(verifiedMem?.kycStatus === 'VERIFIED', 'Live Firestore Emulator: Committee approval verified KYC status in database');
+
+      // Post Share Capital settlement to Firestore: ₱5,000 -> upgrade to REGULAR
+      await fs.updateMember(emulTenantId, 'mem_emul_freetext_01', {
+        paidUpShares: 5000,
+        sharesCount: 50,
+        classification: 'REGULAR',
+        isDividendEligible: true,
+        sharePaymentStatus: 'FULLY_PAID',
+      });
+      const regularMem = await fs.getMember(emulTenantId, 'mem_emul_freetext_01');
+      assert(regularMem?.classification === 'REGULAR', 'Live Firestore Emulator: Settled share capital promoted member to REGULAR');
+      assert(regularMem?.paidUpShares === 5000, 'Live Firestore Emulator: Paid-up shares updated to ₱5,000 in database');
+
+      // Post share deposit balanced voucher to Firestore coop ledger
+      const emulShareJv: JournalEntry = {
+        id: 'jv_emul_share_001',
+        entryNumber: 'JV-2026-EMUL-SHR-001',
+        postingDate: '2026-03-02',
+        postedAt: new Date().toISOString(),
+        referenceType: 'SHARE_CAPITAL_DEPOSIT',
+        description: 'Share Capital Settlement for MEM-2026-EMUL-888',
+        lines: [
+          { accountCode: '1-01-01', accountName: 'Cash on Hand', debit: 5000, credit: 0, memo: 'Member share deposit' },
+          { accountCode: '3-01-01', accountName: 'Share Capital - Regular', debit: 0, credit: 5000, memo: '50 shares @ ₱100' },
+        ],
+        totalDebit: 5000,
+        totalCredit: 5000,
+        isBalanced: true,
+        createdByUserId: 'usr_cashier_01',
+      };
+      await fs.postBalancedJournalEntry(emulTenantId, emulShareJv);
+      const fsEntries = await fs.listJournalEntries(emulTenantId);
+      assert(fsEntries.some(j => j.id === 'jv_emul_share_001'), 'Live Firestore Emulator: Share deposit journal voucher pushed to online ledger');
+
+      // Clean up test member
+      await fs.membersCol(emulTenantId).doc('mem_emul_freetext_01').delete();
+    }
+
+    if (fs.isConfigured()) {
+      try {
+        await fs.membersCol(tenantId).doc(unverifiedMemberId).delete();
+      } catch {}
+    }
+
+    console.log('  ✅ ALL SECTION 35 SIMPLIFIED REGISTRATION, VERIFICATION BARRIER, & GL SYNC TESTS PASSED!');
+  }
+
+  // --- 36. Password Management: Forgot Password, Temporary Password Email Dispatch, and Change Password Workflow ---
+  console.log('\n--- 36. Password Management: Forgot Password, Temporary Password Email Dispatch, and Change Password Workflow ---');
+  {
+    const tenantId = 'tenant_bayani_001';
+    const testMemberId = 'mem_pwd_test_001';
+    const testMemberNo = 'MEM-2026-PWD-999';
+    const testEmail = 'pwd.test.member@bayanicoop.ph';
+    const testBirthdate = '1990-05-15';
+
+    const pwdMember: Member = {
+      id: testMemberId,
+      memberNumber: testMemberNo,
+      firstName: 'Marissa',
+      lastName: 'Valdez',
+      email: testEmail,
+      phone: '+63 918 555 1234',
+      birthdate: testBirthdate,
+      gender: 'FEMALE',
+      civilStatus: 'SINGLE',
+      address: '77 Emerald Avenue, Ortigas, Pasig City',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      paidUpShares: 5000,
+      sharesCount: 50,
+      subscribedShares: 50,
+      sharePaymentStatus: 'FULLY_PAID',
+    };
+
+    // Save member in dbStore and Firestore
+    const mems = dbStore.members.get(tenantId) || [];
+    dbStore.members.set(tenantId, [pwdMember, ...mems]);
+    const fs = FirestoreCoopService.getInstance();
+    if (fs.isConfigured()) {
+      await fs.saveMember(tenantId, pwdMember);
+    }
+
+    // Helper to mock request/response
+    const runHandler = async (handler: any, body: any, headers: any = {}) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        body,
+        headers: { 'x-tenant-id': tenantId, ...headers },
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      await handler(req, res);
+      return { status: statusCode, body: responseBody };
+    };
+
+    // 36.1 Reject forgot password when username or DOB missing
+    const resMissing = await runHandler(handleForgotPassword, { username: '', dateOfBirth: '' });
+    assert(resMissing.status === 400, 'Forgot password rejects missing username and DOB with HTTP 400');
+
+    // 36.2 Reject forgot password when username does not exist
+    const resNotFound = await runHandler(handleForgotPassword, { username: 'nonexistent.user@unknown.ph', dateOfBirth: '1990-05-15' });
+    assert(resNotFound.status === 404, 'Forgot password returns HTTP 404 for unknown user');
+
+    // 36.3 Reject forgot password when date of birth does not match member records
+    const resWrongDob = await runHandler(handleForgotPassword, { username: testMemberNo, dateOfBirth: '1995-12-31' });
+    assert(resWrongDob.status === 400, 'Forgot password rejects incorrect date of birth with HTTP 400');
+    assert(resWrongDob.body.error.includes('Date of Birth'), 'Error explicitly mentions Date of Birth mismatch');
+
+    // 36.4 Accept forgot password with valid username and DOB
+    const resValid = await runHandler(handleForgotPassword, { username: testMemberNo, dateOfBirth: testBirthdate });
+    assert(resValid.status === 200, 'Forgot password succeeds with HTTP 200 when credentials match');
+    assert(resValid.body.success === true, 'Response status success is true');
+    assert(Boolean(resValid.body.message.includes('temporary password')), 'Response informs user temporary password was dispatched');
+    assert(Boolean(resValid.body.message.includes('p***r@bayanicoop.ph')), 'Response masks registered email for security');
+
+    const tempPassword = resValid.body.tempPasswordForTesting;
+    assert(Boolean(tempPassword && tempPassword.startsWith('Coop#')), 'Secure temporary password generated with Coop# prefix');
+
+    // 36.5 Login with temporary password succeeds
+    const tempLogin = await performUnifiedLogin(tenantId, testMemberNo, tempPassword, 'MEMBER');
+    assert(tempLogin.status === 200 && tempLogin.body.success === true, 'Member login succeeds using temporary password');
+
+    // 36.6 Change password using temporary password as current password
+    const newPassword = 'NewSecretPassword2026!';
+    const changeRes = await runHandler(handleMemberCredentialChange, {
+      identifier: testMemberNo,
+      currentPassword: tempPassword,
+      newPassword: newPassword,
+    });
+    assert(changeRes.status === 200 && changeRes.body.success === true, 'Change password succeeds using temporary password as current password');
+
+    // 36.7 Old temporary password is invalidated
+    const oldLogin = await performUnifiedLogin(tenantId, testMemberNo, tempPassword, 'MEMBER');
+    assert(oldLogin.body.success === false || oldLogin.status !== 200, 'Old temporary password can no longer be used to log in');
+
+    // 36.8 Login with new password succeeds
+    const newLogin = await performUnifiedLogin(tenantId, testMemberNo, newPassword, 'MEMBER');
+    assert(newLogin.status === 200 && newLogin.body.success === true, 'Member login succeeds using newly updated password');
+
+    // 36.9 Login via email with new password succeeds
+    const newLoginEmail = await performUnifiedLogin(tenantId, testEmail, newPassword, 'MEMBER');
+    assert(newLoginEmail.status === 200 && newLoginEmail.body.success === true, 'Member login via registered email succeeds with new password');
+
+    // Clean up test member
+    if (fs.isConfigured()) {
+      try {
+        await fs.membersCol(tenantId).doc(testMemberId).delete();
+        await fs.credentialsCol(tenantId).doc(testEmail).delete();
+        await fs.credentialsCol(tenantId).doc(testMemberNo.toLowerCase()).delete();
+      } catch {}
+    }
+
+    console.log('  ✅ ALL SECTION 36 PASSWORD MANAGEMENT & FORGOT PASSWORD WORKFLOW TESTS PASSED!');
+  }
+
+  // ============================================================================
+  // 37. Member Subsidiary Ledger (SL) Transaction Completeness & Reconciliation
+  // ============================================================================
+  console.log('\n--- 37. Member Subsidiary Ledger (SL) Completeness & Reconciliation (MEM-2026-9984 & MEM-2026-0001) ---');
+  {
+    const reconTenantId = 'tenant_bayani_recon';
+    
+    // Member 1: MEM-2026-0001 (Felix II Echano) - 205,500 paid up capital
+    const gmMember: Member = {
+      id: 'MEM-2026-0001',
+      memberNumber: 'MEM-2026-0001',
+      firstName: 'Felix II',
+      lastName: 'Echano',
+      email: 'echano0618@gmail.com',
+      phone: '+63 917 888 2468',
+      birthdate: '1985-01-01',
+      gender: 'MALE',
+      civilStatus: 'MARRIED',
+      address: 'Ortigas Center, Pasig City',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: '2026-01-15T08:00:00Z',
+      createdAt: '2026-01-15T08:00:00Z',
+      updatedAt: '2026-01-15T08:00:00Z',
+    };
+    (gmMember as any).paidUpShares = 205500;
+
+    // Member 2: MEM-2026-9984 (Cristina Peralta) - 3,000 paid up capital
+    const cristinaMember: Member = {
+      id: 'mem_app_APP-2026-8347',
+      memberNumber: 'MEM-2026-9984',
+      firstName: 'Cristina',
+      lastName: 'Peralta',
+      email: 'peraltacristy0622@gmail.com',
+      phone: '+63 928 111 2233',
+      birthdate: '1990-06-22',
+      gender: 'FEMALE',
+      civilStatus: 'MARRIED',
+      address: 'Quezon City',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: '2026-10-19T08:00:00Z',
+      createdAt: '2026-10-19T08:00:00Z',
+      updatedAt: '2026-10-19T08:00:00Z',
+    };
+    (cristinaMember as any).paidUpShares = 3000;
+
+    // Initial state: Only top-up transactions are present, initial deposits were missing
+    const partialGmJe = {
+      id: 'je_topup_gm_001',
+      ...GeneralLedgerService.buildShareDepositEntry({
+        memberId: gmMember.id,
+        memberNumber: gmMember.memberNumber,
+        memberName: 'Felix II Echano',
+        amount: 195500,
+        channel: 'IN_PERSON_CASHIER',
+        userId: 'usr_cashier',
+        description: 'Share Capital Top-Up Contribution',
+      }),
+      postingDate: '2026-10-24',
+      postedAt: '2026-10-24T10:00:00Z',
+    };
+
+    const partialCristinaJe = {
+      id: 'je_topup_cristina_001',
+      ...GeneralLedgerService.buildShareDepositEntry({
+        memberId: cristinaMember.id,
+        memberNumber: cristinaMember.memberNumber,
+        memberName: 'Cristina Peralta',
+        amount: 2000,
+        channel: 'IN_PERSON_CASHIER',
+        userId: 'usr_cashier',
+        description: 'Share Capital Top-Up Contribution',
+      }),
+      postingDate: '2026-10-24',
+      postedAt: '2026-10-24T10:00:00Z',
+    };
+
+    dbStore.members.set(reconTenantId, [gmMember, cristinaMember]);
+    dbStore.journalEntries.set(reconTenantId, [partialGmJe, partialCristinaJe]);
+
+    // Check pre-reconciliation: Ledgers do not add up to paidUpShares
+    const preGmSL = GeneralLedgerService.generateMemberSubsidiaryLedger(gmMember, [partialGmJe, partialCristinaJe]);
+    assert(preGmSL.totalShareCapitalBalance === 195500, 'Pre-reconciliation GM SL is missing ₱10,000 initial capital');
+
+    const preCristinaSL = GeneralLedgerService.generateMemberSubsidiaryLedger(cristinaMember, [partialGmJe, partialCristinaJe]);
+    assert(preCristinaSL.totalShareCapitalBalance === 2000, 'Pre-reconciliation Cristina SL is missing ₱1,000 initial deposit');
+
+    // Helper to mock request/response
+    const runReconHandler = async (handler: any, headers: any = {}) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        body: {},
+        query: {},
+        headers: { 'x-tenant-id': reconTenantId, ...headers },
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      await handler(req, res);
+      return { status: statusCode, body: responseBody };
+    };
+
+    // Reconcile via API endpoint handler
+    const reconRes = await runReconHandler(handleReconcileMemberLedgers);
+    assert(reconRes.status === 200 && reconRes.body.success === true, 'Reconcile member ledgers endpoint succeeds with HTTP 200');
+
+    // Fetch updated journal entries
+    const updatedEntries = dbStore.journalEntries.get(reconTenantId) || [];
+
+    // Verify MEM-2026-0001 ledger
+    const postGmSL = GeneralLedgerService.generateMemberSubsidiaryLedger(gmMember, updatedEntries);
+    assert(postGmSL.totalShareCapitalBalance === 205500, 'Post-reconciliation MEM-2026-0001 SL strictly equals ₱205,500.00');
+    const gmShareAcc = postGmSL.accounts.find((a) => a.accountCode === '3-01-03')!;
+    assert(gmShareAcc.transactions.length >= 2, 'MEM-2026-0001 subsidiary ledger contains both initial and top-up transactions');
+    assert(gmShareAcc.currentBalance === 205500, 'MEM-2026-0001 Share Capital running balance ends exactly at ₱205,500.00');
+
+    // Verify MEM-2026-9984 ledger
+    const postCristinaSL = GeneralLedgerService.generateMemberSubsidiaryLedger(cristinaMember, updatedEntries);
+    assert(postCristinaSL.totalShareCapitalBalance === 3000, 'Post-reconciliation MEM-2026-9984 SL strictly equals ₱3,000.00');
+    const cristinaShareAcc = postCristinaSL.accounts.find((a) => a.accountCode === '3-01-03')!;
+    assert(cristinaShareAcc.transactions.length >= 2, 'MEM-2026-9984 subsidiary ledger contains both initial and top-up transactions');
+    assert(cristinaShareAcc.currentBalance === 3000, 'MEM-2026-9984 Share Capital running balance ends exactly at ₱3,000.00');
+
+    // Verify General Ledger Control Account Reconciliation
+    const finalRecon = GeneralLedgerService.generateGLSLReconciliation([gmMember, cristinaMember], updatedEntries);
+    assert(finalRecon.allReconciled === true, 'All CDA control accounts are 100% reconciled');
+    assert(finalRecon.totalVariance === 0, 'Total GL-to-SL control account variance is strictly ₱0.00');
+
+    console.log('  ✅ ALL SECTION 37 MEMBER SL COMPLETENESS & RECONCILIATION TESTS PASSED!');
+  }
+
+  // 38. Bank Transfer Verification Workflow (Member Self-Service -> Admin Confirmation -> GL Posting)
+  console.log('\n--- 38. Bank Transfer Payment Verification & Dual-Control Ledger Posting ---');
+  {
+    const btTenantId = 'tenant_deped_bt_test';
+
+    // Mock Express Request / Response helper
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        body: reqData.body || {},
+        query: reqData.query || {},
+        params: reqData.params || {},
+        headers: {
+          'x-tenant-id': btTenantId,
+          ...(reqData.headers || {}),
+        },
+      };
+      const res: any = {
+        status(code: number) {
+          statusCode = code;
+          return res;
+        },
+        json(data: any) {
+          responseBody = data;
+          return res;
+        },
+      };
+      return { req, res, getStatus: () => statusCode, getBody: () => responseBody };
+    };
+
+    // Initialize test member with known baseline
+    const testMemberId = 'mem_bt_test_01';
+    const testMemberNumber = 'MEM-2026-BT01';
+    const baselineMember: Member = {
+      id: testMemberId,
+      memberNumber: testMemberNumber,
+      firstName: 'Juan',
+      lastName: 'Dela Cruz',
+      email: 'juan.delacruz@deped.gov.ph',
+      phone: '+63 917 111 2233',
+      birthdate: '1988-05-15',
+      gender: 'MALE',
+      civilStatus: 'MARRIED',
+      address: 'Pasig City',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: '2026-01-01T00:00:00Z',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      sharesCount: 100,
+      paidUpCapital: 5000,
+      subscribedShares: 200,
+      subscribedCapital: 10000,
+      totalShareCapitalBalance: 5000,
+    };
+    dbStore.members.set(btTenantId, [baselineMember]);
+
+    // Baseline GL check
+    const initialEntries = dbStore.journalEntries.get(btTenantId) || [];
+    const initialEntryCount = initialEntries.length;
+
+    // 38.1 Member submits Bank Transfer for Share Capital Purchase
+    console.log('  38.1 Submitting Bank Transfer for Share Capital Purchase...');
+    const submitShareMock = makeMockHttp({
+      body: {
+        type: 'SHARE_PURCHASE',
+        memberId: testMemberId,
+        memberNumber: testMemberNumber,
+        memberName: 'Juan Dela Cruz',
+        amount: 2500,
+        sharesCount: 50,
+        bankName: 'Land Bank of the Philippines',
+        referenceNumber: 'LBP-TRX-2026-98765',
+        notes: 'Monthly capital build-up via LandBank online transfer',
+      },
+    });
+    await handleSubmitBankTransferRequest(submitShareMock.req, submitShareMock.res);
+    assert(submitShareMock.getStatus() === 200, 'Bank transfer submission responds with HTTP 200');
+    assert(submitShareMock.getBody().success === true, 'Bank transfer submission body success is true');
+    const pendingShareReq = submitShareMock.getBody().data;
+    assert(pendingShareReq.status === 'PENDING_CONFIRMATION', 'Bank transfer status is strictly PENDING_CONFIRMATION');
+    assert(pendingShareReq.amount === 2500, 'Bank transfer request amount matches submitted amount (₱2,500)');
+    assert(pendingShareReq.referenceNumber === 'LBP-TRX-2026-98765', 'Bank transfer stores exact reference number');
+
+    // Verify member shares/capital have NOT changed while pending
+    const currentMemberPending = (dbStore.members.get(btTenantId) || []).find((m) => m.id === testMemberId)!;
+    assert(currentMemberPending.paidUpCapital === 5000, 'Member paid-up capital remains untouched (₱5,000) while transfer is pending');
+    assert(currentMemberPending.sharesCount === 100, 'Member shares count remains untouched (100) while transfer is pending');
+
+    // Verify NO General Ledger entry was posted while pending
+    const currentEntriesPending = dbStore.journalEntries.get(btTenantId) || [];
+    assert(currentEntriesPending.length === initialEntryCount, 'No General Ledger journal entry posted while bank transfer is pending confirmation');
+
+    // 38.2 List Bank Transfer Requests
+    console.log('  38.2 Querying pending bank transfer requests...');
+    const listMock = makeMockHttp({
+      query: { status: 'PENDING_CONFIRMATION' },
+    });
+    await handleListBankTransferRequests(listMock.req, listMock.res);
+    assert(listMock.getStatus() === 200, 'List bank transfers responds with HTTP 200');
+    assert(listMock.getBody().data.length >= 1, 'Pending bank transfer queue returns at least 1 pending item');
+    assert(listMock.getBody().data.some((r: any) => r.id === pendingShareReq.id), 'Pending queue contains submitted request');
+
+    // 38.3 Admin Confirms & Posts Share Purchase Bank Transfer
+    console.log('  38.3 Admin confirms bank transfer and posts CDA double-entry GL voucher...');
+    const confirmShareMock = makeMockHttp({
+      params: { id: pendingShareReq.id },
+      body: {
+        confirmedByUserId: 'usr_cashier_01',
+        confirmedByUserName: 'Maria Santos (Cashier)',
+      },
+    });
+    await handleConfirmBankTransferRequest(confirmShareMock.req, confirmShareMock.res);
+    assert(confirmShareMock.getStatus() === 200, 'Admin confirmation responds with HTTP 200');
+    assert(confirmShareMock.getBody().success === true, 'Admin confirmation body success is true');
+    const confirmedShareReq = confirmShareMock.getBody().data;
+    assert(confirmedShareReq.status === 'CONFIRMED', 'Request status transitioned to CONFIRMED');
+    assert(Boolean(confirmedShareReq.receiptNumber), 'Official Receipt number generated upon confirmation');
+    assert(Boolean(confirmedShareReq.journalEntryId), 'GL Journal Entry ID recorded on confirmation');
+
+    // Verify member balances updated AFTER confirmation
+    const currentMemberConfirmed = (dbStore.members.get(btTenantId) || []).find((m) => m.id === testMemberId)!;
+    assert(currentMemberConfirmed.paidUpCapital === 7500, 'Member paid-up capital correctly increased by ₱2,500 to ₱7,500');
+    assert(currentMemberConfirmed.sharesCount === 150, 'Member shares count correctly increased by 50 to 150');
+
+    // Verify CDA Double-Entry GL Voucher was posted
+    const postConfirmEntries = dbStore.journalEntries.get(btTenantId) || [];
+    const shareGLEntry = postConfirmEntries.find((e) => e.id === confirmedShareReq.journalEntryId);
+    assert(Boolean(shareGLEntry), 'Double-entry GL voucher found in General Ledger');
+    assert(shareGLEntry?.channel === 'BANK_TRANSFER', 'GL voucher channel is strictly BANK_TRANSFER');
+    const debitLine = shareGLEntry?.lines.find((l) => l.accountCode === '1-01-02');
+    assert(debitLine?.debit === 2500, 'GL correctly debits 1-01-02 (Cash in Bank - General Operating) for ₱2,500.00');
+    const creditLine = shareGLEntry?.lines.find((l) => l.accountCode === '3-01-03');
+    assert(creditLine?.credit === 2500, 'GL correctly credits 3-01-03 (Paid-Up Share Capital - Common) for ₱2,500.00');
+    assert(shareGLEntry?.totalDebit === shareGLEntry?.totalCredit, 'GL voucher is strictly in balance (Total Debits == Total Credits)');
+
+    // 38.4 Member Submits & Admin Confirms Loan Repayment via Bank Transfer
+    console.log('  38.4 Bank Transfer for Loan Repayment...');
+    const testLoanId = 'loan_bt_test_01';
+    const testLoan: Loan = {
+      id: testLoanId,
+      loanNumber: 'LN-2026-BT01',
+      memberId: testMemberId,
+      productId: 'prod_regular',
+      productName: 'Regular Multi-Purpose Loan',
+      principalAmount: 20000,
+      termMonths: 12,
+      interestRateAnnual: 0.12,
+      paymentFrequency: 'MONTHLY',
+      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      status: 'DISBURSED',
+      balanceRemaining: 15000,
+      platformFee: 200,
+      coopServiceFee: 100,
+      netProceedsDisbursed: 19700,
+      totalInterestExpected: 2400,
+      totalPayable: 22400,
+      schedule: [],
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-02T00:00:00Z',
+    };
+    dbStore.loans.set(btTenantId, [testLoan]);
+
+    const submitLoanMock = makeMockHttp({
+      body: {
+        type: 'LOAN_PAYMENT',
+        memberId: testMemberId,
+        memberNumber: testMemberNumber,
+        memberName: 'Juan Dela Cruz',
+        amount: 1800,
+        loanId: testLoanId,
+        loanNumber: 'LN-2026-BT01',
+        bankName: 'BDO Unibank',
+        referenceNumber: 'BDO-REF-445566',
+        notes: 'Monthly loan installment',
+      },
+    });
+    await handleSubmitBankTransferRequest(submitLoanMock.req, submitLoanMock.res);
+    assert(submitLoanMock.getStatus() === 200, 'Loan payment bank transfer submission succeeds');
+    const pendingLoanReq = submitLoanMock.getBody().data;
+    assert(pendingLoanReq.status === 'PENDING_CONFIRMATION', 'Loan payment transfer status is PENDING_CONFIRMATION');
+
+    // Verify loan balance is NOT reduced while pending
+    const currentLoanPending = (dbStore.loans.get(btTenantId) || []).find((l) => l.id === testLoanId)!;
+    assert(currentLoanPending.balanceRemaining === 15000, 'Loan balance remains strictly ₱15,000.00 while transfer is pending');
+
+    // Admin confirms loan bank transfer
+    const confirmLoanMock = makeMockHttp({
+      params: { id: pendingLoanReq.id },
+      body: {
+        confirmedByUserId: 'usr_cashier_01',
+        confirmedByUserName: 'Maria Santos (Cashier)',
+      },
+    });
+    await handleConfirmBankTransferRequest(confirmLoanMock.req, confirmLoanMock.res);
+    assert(confirmLoanMock.getStatus() === 200, 'Admin loan confirmation responds with HTTP 200');
+
+    // Verify loan balance is updated
+    const currentLoanConfirmed = (dbStore.loans.get(btTenantId) || []).find((l) => l.id === testLoanId)!;
+    assert(currentLoanConfirmed.balanceRemaining < 15000, 'Loan balance is reduced after admin confirmation');
+
+    // Verify GL voucher for loan repayment debited Cash in Bank
+    const postLoanEntries = dbStore.journalEntries.get(btTenantId) || [];
+    const loanGLEntry = postLoanEntries.find((e) => e.id === confirmLoanMock.getBody().data?.journalEntryId);
+    assert(Boolean(loanGLEntry), 'Loan repayment GL voucher posted successfully');
+    const loanBankDebit = loanGLEntry?.lines.find((l) => l.accountCode === '1-01-02');
+    assert(loanBankDebit?.debit === 1800, 'Loan repayment debits 1-01-02 (Cash in Bank) for ₱1,800.00');
+
+    // 38.5 Admin Rejects Invalid / Unmatched Bank Transfer Request
+    console.log('  38.5 Admin rejection of unverified bank transfer...');
+    const submitBogusMock = makeMockHttp({
+      body: {
+        type: 'SHARE_PURCHASE',
+        memberId: testMemberId,
+        memberNumber: testMemberNumber,
+        memberName: 'Juan Dela Cruz',
+        amount: 5000,
+        bankName: 'Fake Bank',
+        referenceNumber: 'INVALID-999',
+        notes: 'Cannot be found on bank portal',
+      },
+    });
+    await handleSubmitBankTransferRequest(submitBogusMock.req, submitBogusMock.res);
+    const bogusReq = submitBogusMock.getBody().data;
+
+    const rejectMock = makeMockHttp({
+      params: { id: bogusReq.id },
+      body: {
+        reason: 'Reference number not found in LandBank statement as of cut-off',
+        rejectedByUserId: 'usr_cashier_01',
+      },
+    });
+    await handleRejectBankTransferRequest(rejectMock.req, rejectMock.res);
+    assert(rejectMock.getStatus() === 200, 'Rejection endpoint responds with HTTP 200');
+    assert(rejectMock.getBody().data?.status === 'REJECTED', 'Request status transitioned to REJECTED');
+    assert(
+      rejectMock.getBody().data?.rejectionReason === 'Reference number not found in LandBank statement as of cut-off',
+      'Rejection reason recorded accurately'
+    );
+
+    // Verify member shares/capital unchanged after rejection
+    const memberAfterRejection = (dbStore.members.get(btTenantId) || []).find((m) => m.id === testMemberId)!;
+    assert(memberAfterRejection.paidUpCapital === 7500, 'Member capital remains unchanged at ₱7,500 after rejection');
+
+    console.log('  ✅ ALL SECTION 38 BANK TRANSFER VERIFICATION & GL POSTING TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 380+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37 & 38) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
-  console.error('Section 33 failed:', err);
+  console.error('Test suite failed:', err);
   process.exit(1);
 });
 

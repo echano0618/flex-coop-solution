@@ -103,6 +103,7 @@ export const PSGC_PROVINCES: PSGCProvince[] = [
 
   // Region V (Bicol)
   { code: '050500000', regionCode: '050000000', name: 'Albay' },
+  { code: '050160000', regionCode: '050000000', name: 'Camarines Norte' },
   { code: '051700000', regionCode: '050000000', name: 'Camarines Sur' },
 
   // Region VI (Western Visayas)
@@ -215,6 +216,10 @@ export const PSGC_CITIES_MUNICIPALITIES: PSGCCityMunicipality[] = [
   { code: '045802000', provinceCode: '045800000', regionCode: '040000000', name: 'City of Antipolo', isCity: true, defaultPostalCode: '1870' },
   { code: '045804000', provinceCode: '045800000', regionCode: '040000000', name: 'Cainta', isCity: false, defaultPostalCode: '1900' },
 
+  // Albay (Region V)
+  { code: '0500506000', provinceCode: '050500000', regionCode: '050000000', name: 'Legazpi City', isCity: true, defaultPostalCode: '4500' },
+  { code: '0500503000', provinceCode: '050500000', regionCode: '050000000', name: 'Daraga', isCity: false, defaultPostalCode: '4502' },
+
   // Pangasinan (Region I)
   { code: '015518000', provinceCode: '015500000', regionCode: '010000000', name: 'City of Dagupan', isCity: true, defaultPostalCode: '2400' },
   { code: '015546000', provinceCode: '015500000', regionCode: '010000000', name: 'City of Urdaneta', isCity: true, defaultPostalCode: '2428' },
@@ -262,6 +267,9 @@ export const PSGC_BARANGAYS: PSGCBarangay[] = [
   { code: '034903028', cityMunicipalityCode: '034903000', name: 'San Josef Norte' },
   { code: '034903029', cityMunicipalityCode: '034903000', name: 'San Josef Sur' },
   { code: '034903045', cityMunicipalityCode: '034903000', name: 'Zulueta' },
+
+  // Daraga (0500503000)
+  { code: '0500503052', cityMunicipalityCode: '0500503000', name: 'Tabon-tabon' },
 
   // Pasig City (NCR) - 137403000
   { code: '137403023', cityMunicipalityCode: '137403000', name: 'San Antonio' },

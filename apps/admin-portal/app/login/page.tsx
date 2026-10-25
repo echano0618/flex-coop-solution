@@ -14,6 +14,7 @@ import {
   KeyRound,
   ExternalLink,
   Users,
+  X,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -31,14 +32,15 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
-    slug: 'default',
-    name: 'Cooperative Enterprise',
-    isSubdomain: false,
-    registrationNumber: 'CDA Registered',
-    logoLetter: 'C',
-    coopType: 'Multi-Purpose',
-  });
+
+  // Forgot Password State
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState<boolean>(false);
+  const [forgotUsername, setForgotUsername] = useState('');
+  const [forgotDob, setForgotDob] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSuccess, setForgotSuccess] = useState('');
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo>(() => resolveTenantCoop());
 
   React.useEffect(() => {
     const info = resolveTenantCoop();
@@ -48,11 +50,12 @@ export default function AdminLoginPage() {
       if (typeof window !== 'undefined') {
         const existing = getTenantAdminSession(info.slug);
         if (existing) {
-          router.replace(info.slug && info.slug !== 'default' ? `/?coop=${info.slug}` : '/');
+          const targetUrl = info.slug && info.slug !== 'default' ? `/?coop=${info.slug}` : '/';
+          window.location.href = targetUrl;
         }
       }
     } catch (e) {}
-  }, [router]);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,7 +92,8 @@ export default function AdminLoginPage() {
           if (data.member) {
             setTenantMemberSession(data.member, tenantInfo.slug, tenantInfo.name);
           }
-          router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/');
+          const targetUrl = tenantInfo.slug && tenantInfo.slug !== 'default' ? `/?coop=${tenantInfo.slug}` : '/';
+          window.location.href = targetUrl;
           return;
         } else {
           // User is authenticated as a Member but does not hold Staff/Admin role
@@ -98,7 +102,8 @@ export default function AdminLoginPage() {
           }
           setErrorMessage('Authenticated as Member! You do not have Staff/Admin rights for this cooperative. Redirecting to your Member Portal...');
           setTimeout(() => {
-            router.push(tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member');
+            const targetUrl = tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member?coop=${tenantInfo.slug}` : '/member';
+            window.location.href = targetUrl;
           }, 1500);
           return;
         }
@@ -110,6 +115,49 @@ export default function AdminLoginPage() {
       console.error(err);
       setIsLoading(false);
       setErrorMessage('Unable to connect to the cooperative authentication service. Please check your internet connection.');
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotSuccess('');
+
+    if (!forgotUsername.trim() || !forgotDob.trim()) {
+      setForgotError('Please enter your Staff Username, Email, or Member ID, and Date of Birth.');
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/auth/forgot-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          username: forgotUsername.trim(),
+          dateOfBirth: forgotDob.trim(),
+          tenantSlug: tenantInfo.slug,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setForgotSuccess(
+          data.message ||
+            'A temporary password has been sent to your registered email from support@tuntongtech.com. Remember to change your password immediately upon login.'
+        );
+        setForgotUsername('');
+        setForgotDob('');
+      } else {
+        setForgotError(data.error || 'Failed to request password reset. Please check your details.');
+      }
+    } catch (err: any) {
+      setForgotError('Unable to connect to the recovery service. Please check your internet connection.');
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -247,9 +295,17 @@ export default function AdminLoginPage() {
                 <label className="block text-xs font-medium text-slate-300">
                   Password or 6-Digit MPIN
                 </label>
-                <span className="text-[11px] text-indigo-400 cursor-pointer hover:underline">
-                  Single Credential
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPasswordModal(true);
+                    setForgotError('');
+                    setForgotSuccess('');
+                  }}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300 cursor-pointer hover:underline transition"
+                >
+                  Forgot password?
+                </button>
               </div>
               <div className="relative">
                 <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
@@ -290,6 +346,132 @@ export default function AdminLoginPage() {
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative space-y-5 text-slate-100">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForgotPasswordModal(false);
+                setForgotError('');
+                setForgotSuccess('');
+              }}
+              className="absolute right-4 top-4 p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white tracking-tight">Forgot Password</h3>
+                <p className="text-xs text-slate-400">Staff &amp; Admin Account Recovery</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Enter your Staff Username, registered email, or Member ID, along with your Date of Birth. If verified, a temporary password will be dispatched to your registered email.
+            </p>
+
+            {forgotError && (
+              <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs text-rose-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                <span>{forgotError}</span>
+              </div>
+            )}
+
+            {forgotSuccess && (
+              <div className="p-3.5 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-xs text-emerald-300 space-y-2">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+                  <span className="font-semibold leading-relaxed">{forgotSuccess}</span>
+                </div>
+                <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-lg text-[11px] text-amber-200 font-medium">
+                  ⚠️ <strong>Reminder:</strong> For your security, you must change this temporary password immediately upon logging in to your account.
+                </div>
+              </div>
+            )}
+
+            {!forgotSuccess && (
+              <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Staff Email / Username / Member ID
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={forgotUsername}
+                    onChange={(e) => setForgotUsername(e.target.value)}
+                    placeholder="e.g. admin@familycoop.ph or MEM-2026-0001"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Date of Birth
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={forgotDob}
+                    onChange={(e) => setForgotDob(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Must match your official registration record.
+                  </span>
+                </div>
+
+                <div className="text-[11px] text-slate-400 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                  <span>Recovery emails are dispatched from <strong>support@tuntongtech.com</strong>.</span>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPasswordModal(false)}
+                    className="w-1/2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="w-1/2 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-md shadow-indigo-600/30"
+                  >
+                    {forgotLoading ? (
+                      <span>Sending...</span>
+                    ) : (
+                      <span>Send Temp Password</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {forgotSuccess && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotPasswordModal(false);
+                  setForgotError('');
+                  setForgotSuccess('');
+                }}
+                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition text-xs shadow-md shadow-indigo-600/30"
+              >
+                Back to Sign In
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="max-w-5xl w-full mx-auto pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">

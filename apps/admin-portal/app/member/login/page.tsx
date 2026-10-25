@@ -12,6 +12,11 @@ import {
   Eye,
   EyeOff,
   Fingerprint,
+  ShieldCheck,
+  KeyRound,
+  Calendar,
+  X,
+  CheckCircle2,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../../api-config';
 import {
@@ -41,6 +46,14 @@ export default function MemberLoginPage() {
     rpId?: string;
   } | null>(null);
   const [isBioAuthenticating, setIsBioAuthenticating] = useState<boolean>(false);
+
+  // Forgot Password State
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState<boolean>(false);
+  const [forgotUsername, setForgotUsername] = useState('');
+  const [forgotDob, setForgotDob] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSuccess, setForgotSuccess] = useState('');
   const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
     slug: 'default',
     name: 'Cooperative Enterprise',
@@ -222,13 +235,62 @@ export default function MemberLoginPage() {
     }
   };
 
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotSuccess('');
+
+    if (!forgotUsername.trim() || !forgotDob.trim()) {
+      setForgotError('Please enter your username/email/member number and date of birth.');
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/auth/forgot-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify({
+          username: forgotUsername.trim(),
+          dateOfBirth: forgotDob.trim(),
+          tenantSlug: tenantInfo.slug,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setForgotSuccess(
+          data.message ||
+            'A temporary password has been sent to your registered email from support@tuntongtech.com. Remember to change your password immediately upon login.'
+        );
+        setForgotUsername('');
+        setForgotDob('');
+      } else {
+        setForgotError(data.error || 'Failed to request password reset. Please check your details.');
+      }
+    } catch (err: any) {
+      setForgotError('Unable to connect to the recovery service. Please check your internet connection.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50/90 via-white to-emerald-100/40 text-slate-800 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
       {/* Minimal Header */}
       <div className="max-w-md w-full mx-auto flex items-center justify-center pt-2 sm:pt-4">
         <div className="flex items-center space-x-3 text-center">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-emerald-600/20 shrink-0">
-            {tenantInfo.logoLetter}
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-emerald-600/20 shrink-0 overflow-hidden">
+            <img
+              src="/logo.png"
+              alt={tenantInfo.name}
+              className="w-full h-full object-cover"
+              onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+            />
+            <span className="sr-only">{tenantInfo.logoLetter}</span>
           </div>
           <div className="text-left">
             <h1 className="font-extrabold text-base text-slate-900 leading-tight">
@@ -254,9 +316,19 @@ export default function MemberLoginPage() {
           </div>
 
           {errorMessage && (
-            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{errorMessage}</span>
+            <div
+              className={`p-3.5 rounded-xl border text-xs flex items-center gap-2.5 ${
+                errorMessage.toLowerCase().includes('verification')
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-rose-50 border-rose-200 text-rose-700'
+              }`}
+            >
+              {errorMessage.toLowerCase().includes('verification') ? (
+                <ShieldCheck className="w-5 h-5 shrink-0 text-amber-600" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              )}
+              <span className="font-medium leading-relaxed">{errorMessage}</span>
             </div>
           )}
 
@@ -332,6 +404,17 @@ export default function MemberLoginPage() {
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Password
                 </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPasswordModal(true);
+                    setForgotError('');
+                    setForgotSuccess('');
+                  }}
+                  className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:underline transition"
+                >
+                  Forgot password?
+                </button>
               </div>
               <div className="relative">
                 <Lock className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -386,6 +469,132 @@ export default function MemberLoginPage() {
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative space-y-5">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForgotPasswordModal(false);
+                setForgotError('');
+                setForgotSuccess('');
+              }}
+              className="absolute right-4 top-4 p-1.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900 tracking-tight">Forgot Password</h3>
+                <p className="text-xs text-slate-500">Account Access Recovery</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Enter your username, registered email, or Member ID, along with your Date of Birth. If verified, a temporary password will be sent to your registered email.
+            </p>
+
+            {forgotError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                <span>{forgotError}</span>
+              </div>
+            )}
+
+            {forgotSuccess && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-2">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+                  <span className="font-semibold leading-relaxed">{forgotSuccess}</span>
+                </div>
+                <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-lg text-[11px] text-amber-900 font-medium">
+                  ⚠️ <strong>Reminder:</strong> For your security, you must change this temporary password immediately upon logging in to your account.
+                </div>
+              </div>
+            )}
+
+            {!forgotSuccess && (
+              <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Username / Registered Email / Member ID
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={forgotUsername}
+                    onChange={(e) => setForgotUsername(e.target.value)}
+                    placeholder="e.g. member@email.com or MEM-2026-0001"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Date of Birth
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={forgotDob}
+                    onChange={(e) => setForgotDob(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Must match your official membership application records.
+                  </span>
+                </div>
+
+                <div className="text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                  <span>Recovery emails are dispatched from <strong>support@tuntongtech.com</strong>.</span>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPasswordModal(false)}
+                    className="w-1/2 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="w-1/2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-md shadow-emerald-600/20"
+                  >
+                    {forgotLoading ? (
+                      <span>Sending...</span>
+                    ) : (
+                      <span>Send Temp Password</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {forgotSuccess && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotPasswordModal(false);
+                  setForgotError('');
+                  setForgotSuccess('');
+                }}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition text-xs shadow-md shadow-emerald-600/20"
+              >
+                Back to Sign In
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Minimal Clean Footer */}
       <div className="max-w-md w-full mx-auto text-center pb-2 text-[11px] text-slate-400 space-y-1">

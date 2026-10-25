@@ -92,6 +92,29 @@ export function purgeTenantDummyRecords(slug: string) {
       }
     }
   } catch {}
+
+  // 3. Purge legacy dummy collateral records
+  try {
+    const normSlug = normalizeCoopSlug(targetSlug);
+    const colKeys = Array.from(new Set([`flexcoop_collaterals_${targetSlug}`, `flexcoop_collaterals_${normSlug}`]));
+    for (const ck of colKeys) {
+      const rawCols = localStorage.getItem(ck);
+      if (rawCols) {
+        const parsedCols = JSON.parse(rawCols);
+        if (Array.isArray(parsedCols)) {
+          const filteredCols = parsedCols.filter(
+            (c: any) =>
+              c.id !== 'col_dummy_1' &&
+              c.id !== 'col_dummy_2' &&
+              !c.description?.includes('240 sqm Commercial Property with 3-Door Commercial Unit')
+          );
+          if (filteredCols.length !== parsedCols.length) {
+            localStorage.setItem(ck, JSON.stringify(filteredCols));
+          }
+        }
+      }
+    }
+  } catch {}
 }
 
 /**

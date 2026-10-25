@@ -107,30 +107,43 @@ Strict double-entry validation enforces $\sum \text{Debit} == \sum \text{Credit}
 
 ---
 
-## 🚀 Quickstart & Verification
+## 🚀 Quickstart & Local Emulator Suite
 
-### 1. Run the Automated Verification Suite
-To verify all 18 test cases across monetization math, VAT decomposition, amortization schedules, CDA double-entry balance, and PayMongo QR Ph fees:
+### 1. Test All Queries in Firebase Local Emulator (Zero Cloud Cost)
+Runs all 327+ core domain test cases and tests all 38 live Firestore queries & transactions in the Firebase Local Emulator Suite:
 ```bash
-npm run --workspace=apps/api test
+npm run test:emulator
 ```
 
-### 2. Start the Backend API
+### 2. Start the Local Firebase Emulator Suite
+Runs Firestore (port 8080), Auth (port 9099), Storage (port 9199), and the Emulator UI (port 4001):
 ```bash
-npm run --workspace=apps/api start
-# API starts on http://localhost:4000
+npm run emulator:start
+# Open Emulator UI: http://localhost:4001
 ```
 
-### 3. Start the Next.js Admin Portal
+### 3. Start the Local API Test Server
+Runs the API server connected to the local Firebase emulators (port 4000):
 ```bash
-npm run --workspace=apps/admin-portal dev
+npm run dev:local
+```
+
+### 4. Start the Next.js Admin Portal
+```bash
+npm run dev:admin
 # Open http://localhost:3000 in your browser
 ```
 
-### 4. Run with Docker (PostgreSQL & Redis)
+### 5. Pre-Deployment Gate & Minimal-Cost Cloud Run Deployment
+Never trigger Cloud Build or remote deployments until tests pass locally:
 ```bash
-docker-compose up -d
+# 1. Enforce local pre-deployment check (blocks deployment if tests fail)
+npm run predeploy:check
+
+# 2. Deploy with minimal cost flags (--min-instances=0, --cpu-throttling, 512Mi memory)
+npm run deploy:cloudrun -- --execute
 ```
+For detailed architecture and cost guidelines, see [LOCAL_DEV_AND_COST_OPTIMIZATION.md](LOCAL_DEV_AND_COST_OPTIMIZATION.md).
 
 ---
 

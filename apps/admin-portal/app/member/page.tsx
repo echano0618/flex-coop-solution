@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Plus,
   X,
+  Search,
   Landmark,
   Banknote,
   Calculator,
@@ -49,6 +50,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Coins,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -515,6 +517,8 @@ export default function MemberPortalPage() {
             type: auth.position ? `${auth.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
             paidUpCapital: auth.paidUpCapital !== undefined ? Number(auth.paidUpCapital) : (isTestTenant ? 25000 : 0),
             sharesCount: auth.sharesCount !== undefined ? Number(auth.sharesCount) : (isTestTenant ? 250 : 0),
+            subscribedShares: auth.subscribedShares !== undefined ? Number(auth.subscribedShares) : (isTestTenant ? 250 : 50),
+            sharePaymentStatus: auth.sharePaymentStatus || 'PARTIALLY_PAID',
             savingsBalance: auth.savingsBalance !== undefined ? Number(auth.savingsBalance) : 0,
             loanBalance: 0,
             idType: auth.idType || 'PhilSys Verified Member ID',
@@ -561,6 +565,8 @@ export default function MemberPortalPage() {
                 type: parsed.position ? `${parsed.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
                 paidUpCapital: parsed.paidUpCapital !== undefined ? Number(parsed.paidUpCapital) : (isTestTenant ? 25000 : 0),
                 sharesCount: parsed.sharesCount !== undefined ? Number(parsed.sharesCount) : (isTestTenant ? 250 : 0),
+                subscribedShares: parsed.subscribedShares !== undefined ? Number(parsed.subscribedShares) : (isTestTenant ? 250 : 50),
+                sharePaymentStatus: parsed.sharePaymentStatus || 'PARTIALLY_PAID',
                 savingsBalance: parsed.savingsBalance !== undefined ? Number(parsed.savingsBalance) : 0,
                 loanBalance: 0,
                 idType: parsed.idType || 'PhilSys Verified Member ID',
@@ -620,6 +626,36 @@ export default function MemberPortalPage() {
           .then((r) => r.json())
           .then((res) => {
             if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+              // Populate Member Directory strictly with Selfie, First Name, and Last Name sorted alphabetically
+              try {
+                const dirList = res.data.map((m: any) => {
+                  let first = m.firstName || '';
+                  let last = m.lastName || '';
+                  if (!first && !last && m.name) {
+                    const parts = m.name.trim().split(/\s+/);
+                    if (parts.length > 1) {
+                      last = parts.pop() || '';
+                      first = parts.join(' ');
+                    } else {
+                      first = parts[0] || 'Member';
+                      last = '';
+                    }
+                  }
+                  return {
+                    id: m.id || `${first}-${last}`,
+                    firstName: first || 'Member',
+                    lastName: last || '',
+                    selfieUrl: m.selfieUrl || m.selfiePreview || m.avatarUrl || null,
+                  };
+                });
+                dirList.sort((a: any, b: any) => {
+                  const firstCmp = (a.firstName || '').localeCompare(b.firstName || '', undefined, { sensitivity: 'base' });
+                  if (firstCmp !== 0) return firstCmp;
+                  return (a.lastName || '').localeCompare(b.lastName || '', undefined, { sensitivity: 'base' });
+                });
+                setDirectoryMembers(dirList);
+              } catch {}
+
               // Identity is resolved strictly from the authenticated session.
               // A member session always takes precedence over a (possibly stale) admin session.
               const identitySource: any = auth || admin || {};
@@ -673,6 +709,8 @@ export default function MemberPortalPage() {
                   type: matched.position ? `${matched.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
                   paidUpCapital: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : (isTestTenant ? 10000 : 0),
                   sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : (isTestTenant ? 100 : 0),
+                  subscribedShares: matched.subscribedShares !== undefined ? Number(matched.subscribedShares) : (isTestTenant ? 100 : 50),
+                  sharePaymentStatus: matched.sharePaymentStatus || (matched.paidUpShares >= ((matched.subscribedShares || 50) * 100) ? 'FULLY_PAID' : 'PARTIALLY_PAID'),
                   savingsBalance: resolvedSavings,
                   loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
@@ -689,6 +727,8 @@ export default function MemberPortalPage() {
                       loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
                       paidUpShares: matched.paidUpShares !== undefined ? Number(matched.paidUpShares) : auth.paidUpShares,
                       sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : auth.sharesCount,
+                      subscribedShares: matched.subscribedShares !== undefined ? Number(matched.subscribedShares) : auth.subscribedShares,
+                      sharePaymentStatus: matched.sharePaymentStatus || auth.sharePaymentStatus,
                     };
                     setTenantMemberSession(updatedAuth, info.slug, info.name);
                   } catch {}
@@ -718,17 +758,23 @@ export default function MemberPortalPage() {
     memberNumber: 'MEM-2026-0001',
     name: gmInfo.name || 'General Manager',
     initials: gmInitials || 'GM',
+    selfieUrl: '/avatars/MEM-2026-0001.jpg',
+    selfiePreview: '/avatars/MEM-2026-0001.jpg',
     classification: 'ASSOCIATE',
     isDividendEligible: false,
     type: 'Associate Member',
     paidUpCapital: isTestCoopTenant(tenantInfo.slug) ? 10000 : 0,
     sharesCount: isTestCoopTenant(tenantInfo.slug) ? 100 : 0,
+    subscribedShares: isTestCoopTenant(tenantInfo.slug) ? 100 : 50,
+    sharePaymentStatus: 'PARTIALLY_PAID',
     savingsBalance: 0,
     loanBalance: 0,
     idType: 'CDA Verified Associate Member PhilSys ID',
   };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+  const isTestTenant = isTestCoopTenant(tenantInfo.slug);
+
+  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
   const [memberLoanApplications, setMemberLoanApplications] = useState<any[]>([]);
   const [isRefreshingLoans, setIsRefreshingLoans] = useState<boolean>(false);
   const [selectedLoanForDisclosure, setSelectedLoanForDisclosure] = useState<any | null>(null);
@@ -908,9 +954,13 @@ export default function MemberPortalPage() {
   }, [currentPersona, currentMember.name]);
 
   // Repayment State
-  const [repayChannel, setRepayChannel] = useState<'PAYMONGO_QRPH' | 'IN_PERSON'>('PAYMONGO_QRPH');
+  const [repayChannel, setRepayChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
   const [repayAmount, setRepayAmount] = useState<number>(4442.44);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
+  const [loanBankReferenceInput, setLoanBankReferenceInput] = useState<string>('');
+  const [loanBankTransferNotes, setLoanBankTransferNotes] = useState<string>('');
+  const [isSubmittingLoanBankTransfer, setIsSubmittingLoanBankTransfer] = useState<boolean>(false);
+  const [loanBankTransferPendingResult, setLoanBankTransferPendingResult] = useState<{ reference: string; amount: number; bankName: string } | null>(null);
 
   // Active Loan State (Synchronized strictly with the authenticated member's own active loans)
   const [loanBalance, setLoanBalance] = useState<number>(() => {
@@ -967,6 +1017,15 @@ export default function MemberPortalPage() {
     }
     return 150;
   });
+  const [subscribedShares, setSubscribedShares] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      if (!isTestCoopTenant(info.slug)) {
+        return 50; // CDA standard minimum pledge for regular membership
+      }
+    }
+    return 150;
+  });
   const [savingsBalance, setSavingsBalance] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -1005,9 +1064,80 @@ export default function MemberPortalPage() {
     if (customMember) {
       if (customMember.paidUpCapital !== undefined) setPaidUpCapital(Number(customMember.paidUpCapital));
       if (customMember.sharesCount !== undefined) setSharesCount(Number(customMember.sharesCount));
+      if (customMember.subscribedShares !== undefined) setSubscribedShares(Number(customMember.subscribedShares));
       if (customMember.savingsBalance !== undefined) setSavingsBalance(Number(customMember.savingsBalance));
     }
   }, [customMember]);
+
+  // Load authoritative share transactions from Firestore
+  useEffect(() => {
+    if (isTestTenant) return;
+    const memId = currentMember?.id || currentMember?.memberNumber;
+    if (!memId) return;
+
+    fetch(`/api/v1/shares/transactions?memberId=${encodeURIComponent(memId)}`, {
+      headers: { 'x-tenant-id': tenantInfo.slug },
+    })
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          let runningBalance = 0;
+          const sortedAsc = [...json.data].sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+          const mapped = sortedAsc.map((tx: any) => {
+            runningBalance += Number(tx.amount || 0);
+            const d = tx.createdAt ? new Date(tx.createdAt) : new Date();
+            const dateStr = d.toLocaleDateString('en-CA');
+            return {
+              date: dateStr,
+              ref: tx.receiptNumber || tx.journalEntryId || 'OR-SHR',
+              particulars: tx.particulars || `Share Capital Deposit (+${tx.sharesCount || Math.round(tx.amount / 100)} shares)`,
+              shares: Number(tx.sharesCount || Math.round(tx.amount / 100)),
+              debit: 0,
+              credit: Number(tx.amount || 0),
+              balance: runningBalance,
+            };
+          });
+          if (paidUpCapital > runningBalance) {
+            const missingAmount = paidUpCapital - runningBalance;
+            const missingShares = Math.round(missingAmount / 100);
+            const isGm = currentMember.memberNumber === 'MEM-2026-0001' || currentMember.id === 'MEM-2026-0001';
+            const initEntry = {
+              date: isGm ? '2026-01-15' : '2026-10-19',
+              ref: `OR-SHR-INIT-${currentMember.memberNumber || '001'}`,
+              particulars: isGm
+                ? 'Initial Subscription & Paid-Up Capital (PMES Admission & Statutory GM Undertaking)'
+                : `Initial Subscription & PMES Admission Deposit (${missingShares} Shares @ ₱100 Par)`,
+              shares: missingShares,
+              debit: 0,
+              credit: missingAmount,
+              balance: missingAmount,
+            };
+            mapped.unshift(initEntry);
+            let reRunBal = 0;
+            mapped.forEach((entry) => {
+              reRunBal += entry.credit - entry.debit;
+              entry.balance = reRunBal;
+            });
+          }
+          setProdShareLedger(mapped.reverse());
+        } else if (paidUpCapital > 0) {
+          const isGm = currentMember.memberNumber === 'MEM-2026-0001' || currentMember.id === 'MEM-2026-0001';
+          const initEntry = {
+            date: isGm ? '2026-01-15' : '2026-10-19',
+            ref: `OR-SHR-INIT-${currentMember.memberNumber || '001'}`,
+            particulars: isGm
+              ? 'Initial Subscription & Paid-Up Capital (PMES Admission & Statutory GM Undertaking)'
+              : `Initial Subscription & PMES Admission Deposit (${Math.round(paidUpCapital / 100)} Shares @ ₱100 Par)`,
+            shares: Math.round(paidUpCapital / 100),
+            debit: 0,
+            credit: paidUpCapital,
+            balance: paidUpCapital,
+          };
+          setProdShareLedger([initEntry]);
+        }
+      })
+      .catch((err) => console.warn('Failed to load member share transactions:', err));
+  }, [currentMember?.id, currentMember?.memberNumber, tenantInfo.slug, isTestTenant, paidUpCapital]);
 
   // Synchronize device biometrics state for current tenant
   useEffect(() => {
@@ -1025,13 +1155,43 @@ export default function MemberPortalPage() {
   const [depositModalType, setDepositModalType] = useState<'SHARES' | 'SAVINGS' | null>(null);
   const [depositSharesCount, setDepositSharesCount] = useState<number>(10); // 10 shares @ ₱100 = ₱1,000
   const [depositSavingsAmount, setDepositSavingsAmount] = useState<number>(1000);
-  const [depositChannel, setDepositChannel] = useState<'PAYMONGO_QRPH' | 'IN_PERSON_SLIP'>('PAYMONGO_QRPH');
+  const [depositChannel, setDepositChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
+  const [bankReferenceInput, setBankReferenceInput] = useState<string>('');
+  const [isSubmittingDirectShare, setIsSubmittingDirectShare] = useState<boolean>(false);
+  const [coopPaymentOptions, setCoopPaymentOptions] = useState<any>(null);
+
+  // Members Directory State (Showing strictly Selfie, First Name, Last Name sorted alphabetically)
+  const [directoryMembers, setDirectoryMembers] = useState<Array<{
+    id: string;
+    firstName: string;
+    lastName: string;
+    selfieUrl?: string;
+    selfiePreview?: string | null;
+  }>>([]);
+  const [isLoadingDirectory, setIsLoadingDirectory] = useState<boolean>(false);
+  const [directorySearchQuery, setDirectorySearchQuery] = useState<string>('');
+
+  useEffect(() => {
+    const slug = tenantInfo.slug || 'default';
+    fetch(`${getApiBaseUrl()}/coop/payment-options`, {
+      headers: { 'x-tenant-slug': slug },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          setCoopPaymentOptions(data.data);
+        }
+      })
+      .catch(() => {});
+  }, [tenantInfo.slug]);
+
   const [depositSuccessResult, setDepositSuccessResult] = useState<{
     type: string;
     amount: number;
     reference: string;
     channel: string;
     sharesAdded?: number;
+    isPendingConfirmation?: boolean;
   } | null>(null);
 
   // Real PayMongo Payment Intent & Live QR Ph State
@@ -1080,8 +1240,10 @@ export default function MemberPortalPage() {
     }
   };
 
+  const shareVerifyInFlightRef = useRef(false);
   const handleVerifyAndCompletePaymongoShares = async () => {
-    if (!paymongoActivePayment) return;
+    if (!paymongoActivePayment || shareVerifyInFlightRef.current) return;
+    shareVerifyInFlightRef.current = true;
     setIsVerifyingPaymongo(true);
     try {
       const targetTenantSlug = tenantInfo.slug || 'family-coop';
@@ -1105,17 +1267,53 @@ export default function MemberPortalPage() {
       if (res.ok && json.success) {
         const addedAmount = paymongoActivePayment.principalAmount;
         const addedShares = paymongoActivePayment.sharesCount;
-        setPaidUpCapital((prev) => prev + addedAmount);
-        setSharesCount((prev) => prev + addedShares);
-        setCustomMember((prev: any) =>
-          prev
-            ? {
-                ...prev,
-                paidUpCapital: (prev.paidUpCapital || 0) + addedAmount,
-                sharesCount: (prev.sharesCount || 0) + addedShares,
-              }
-            : prev
-        );
+        // Use the authoritative balances persisted in the database (never increment locally only)
+        const serverPaidUp = json.member?.paidUpShares;
+        const serverShares = json.member?.sharesCount;
+        const serverSubscribed = json.member?.subscribedShares;
+        const serverSharePaymentStatus = json.member?.sharePaymentStatus;
+        const serverClassification = json.member?.classification || json.classification;
+        const serverIsDividendEligible = json.member?.isDividendEligible !== undefined ? json.member?.isDividendEligible : (serverClassification === 'REGULAR');
+
+        if (serverPaidUp !== undefined && serverPaidUp !== null) {
+          setPaidUpCapital(Number(serverPaidUp));
+          setSharesCount(Number(serverShares || Math.round(Number(serverPaidUp) / 100)));
+          if (serverSubscribed !== undefined) setSubscribedShares(Number(serverSubscribed));
+          setCustomMember((prev: any) =>
+            prev ? {
+              ...prev,
+              paidUpCapital: Number(serverPaidUp),
+              paidUpShares: Number(serverPaidUp),
+              sharesCount: Number(serverShares || 0),
+              subscribedShares: serverSubscribed !== undefined ? Number(serverSubscribed) : prev.subscribedShares,
+              sharePaymentStatus: serverSharePaymentStatus || prev.sharePaymentStatus,
+              ...(serverClassification ? {
+                classification: serverClassification,
+                isDividendEligible: serverIsDividendEligible,
+                type: prev.position ? `${prev.position} (${serverClassification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (serverClassification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
+              } : {}),
+            } : prev
+          );
+        } else if (!json.duplicate) {
+          setPaidUpCapital((prev) => prev + addedAmount);
+          setSharesCount((prev) => prev + addedShares);
+        }
+
+        // Update local session
+        try {
+          const auth = getTenantMemberSession(tenantInfo.slug);
+          if (auth) {
+            setTenantMemberSession({
+              ...auth,
+              paidUpShares: serverPaidUp !== undefined ? Number(serverPaidUp) : (auth.paidUpShares + addedAmount),
+              sharesCount: serverShares !== undefined ? Number(serverShares) : (auth.sharesCount + addedShares),
+              subscribedShares: serverSubscribed !== undefined ? Number(serverSubscribed) : auth.subscribedShares,
+              sharePaymentStatus: serverSharePaymentStatus || auth.sharePaymentStatus,
+              ...(serverClassification ? { classification: serverClassification, isDividendEligible: serverIsDividendEligible } : {}),
+            }, tenantInfo.slug, tenantInfo.name);
+          }
+        } catch {}
+
         setDepositSuccessResult({
           type: 'Share Capital Purchase',
           amount: addedAmount,
@@ -1130,9 +1328,230 @@ export default function MemberPortalPage() {
     } catch (err: any) {
       alert(`Network error: ${err.message}`);
     } finally {
+      shareVerifyInFlightRef.current = false;
       setIsVerifyingPaymongo(false);
     }
   };
+
+  const handleBankTransferShareDeposit = async () => {
+    if (!bankReferenceInput || !bankReferenceInput.trim()) {
+      alert('Please enter your Bank Transfer Reference / Trace Number for admin verification.');
+      return;
+    }
+
+    setIsSubmittingDirectShare(true);
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const amount = depositSharesCount * 100;
+
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          type: 'SHARE_PURCHASE',
+          memberId: currentMember.id,
+          memberNumber: currentMember.memberNumber,
+          memberName: currentMember.name,
+          amount,
+          sharesCount: depositSharesCount,
+          bankName: coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines',
+          referenceNumber: bankReferenceInput.trim(),
+          notes: `Capital Build-Up: ${depositSharesCount} Common Shares @ ₱100.00 par value`,
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setDepositSuccessResult({
+          type: 'Share Purchase (Awaiting Confirmation)',
+          amount,
+          reference: json.data?.referenceNumber || bankReferenceInput.trim(),
+          channel: `${coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank'} Transfer (Pending Admin Confirmation)`,
+          sharesAdded: depositSharesCount,
+          isPendingConfirmation: true,
+        });
+        setBankReferenceInput('');
+      } else {
+        alert(json.error || 'Failed to submit bank transfer request.');
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setIsSubmittingDirectShare(false);
+    }
+  };
+
+  const handleBankTransferSavingsDeposit = async () => {
+    if (!bankReferenceInput || !bankReferenceInput.trim()) {
+      alert('Please enter your Bank Transfer Reference / Trace Number for admin verification.');
+      return;
+    }
+
+    setIsSubmittingDirectShare(true);
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const amount = depositSavingsAmount;
+
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          type: 'SAVINGS_DEPOSIT',
+          memberId: currentMember.id,
+          memberNumber: currentMember.memberNumber,
+          memberName: currentMember.name,
+          amount,
+          bankName: coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines',
+          referenceNumber: bankReferenceInput.trim(),
+          notes: 'Voluntary Member Savings Deposit',
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setDepositSuccessResult({
+          type: 'Savings Deposit (Awaiting Confirmation)',
+          amount,
+          reference: json.data?.referenceNumber || bankReferenceInput.trim(),
+          channel: `${coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank'} Transfer (Pending Admin Confirmation)`,
+          isPendingConfirmation: true,
+        });
+        setBankReferenceInput('');
+      } else {
+        alert(json.error || 'Failed to submit bank transfer deposit.');
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setIsSubmittingDirectShare(false);
+    }
+  };
+
+  const handleSubmitLoanBankTransfer = async () => {
+    if (!loanBankReferenceInput || !loanBankReferenceInput.trim()) {
+      alert('Please enter the Bank Transfer Reference / Trace Number for verification.');
+      return;
+    }
+
+    setIsSubmittingLoanBankTransfer(true);
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          type: 'LOAN_PAYMENT',
+          memberId: currentMember.id,
+          memberNumber: currentMember.memberNumber,
+          memberName: currentMember.name,
+          amount: repayAmount,
+          loanId: 'LOAN-ACTIVE-001',
+          loanNumber: 'LN-2026-00001',
+          bankName: coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines',
+          referenceNumber: loanBankReferenceInput.trim(),
+          notes: loanBankTransferNotes.trim() || 'Loan Amortization Repayment',
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setLoanBankTransferPendingResult({
+          reference: json.data?.referenceNumber || loanBankReferenceInput.trim(),
+          amount: repayAmount,
+          bankName: coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines',
+        });
+        setLoanBankReferenceInput('');
+        setLoanBankTransferNotes('');
+      } else {
+        alert(json.error || 'Failed to submit loan bank transfer payment.');
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setIsSubmittingLoanBankTransfer(false);
+    }
+  };
+
+  // Helper to load and sort member directory alphabetically
+  const loadDirectoryMembers = async () => {
+    setIsLoadingDirectory(true);
+    try {
+      const slug = tenantInfo.slug || 'family-coop';
+      const res = await fetch(`${getApiBaseUrl()}/members?coop=${slug}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const dirList = json.data.map((m: any) => {
+          let first = m.firstName || '';
+          let last = m.lastName || '';
+          if (!first && !last && m.name) {
+            const parts = m.name.trim().split(/\s+/);
+            if (parts.length > 1) {
+              last = parts.pop() || '';
+              first = parts.join(' ');
+            } else {
+              first = parts[0] || 'Member';
+              last = '';
+            }
+          }
+          return {
+            id: m.id || `${first}-${last}`,
+            firstName: first || 'Member',
+            lastName: last || '',
+            selfieUrl: m.selfieUrl || m.selfiePreview || m.avatarUrl || null,
+          };
+        });
+        dirList.sort((a: any, b: any) => {
+          const firstCmp = (a.firstName || '').localeCompare(b.firstName || '', undefined, { sensitivity: 'base' });
+          if (firstCmp !== 0) return firstCmp;
+          return (a.lastName || '').localeCompare(b.lastName || '', undefined, { sensitivity: 'base' });
+        });
+        setDirectoryMembers(dirList);
+      }
+    } catch (err) {
+      console.error('Failed to load member directory:', err);
+    } finally {
+      setIsLoadingDirectory(false);
+    }
+  };
+
+  const filteredDirectoryMembers = useMemo(() => {
+    const query = directorySearchQuery.trim().toLowerCase();
+    const list = query
+      ? directoryMembers.filter(
+          (m) =>
+            m.firstName.toLowerCase().includes(query) ||
+            m.lastName.toLowerCase().includes(query)
+        )
+      : directoryMembers;
+
+    return [...list].sort((a, b) => {
+      const firstCmp = (a.firstName || '').localeCompare(b.firstName || '', undefined, { sensitivity: 'base' });
+      if (firstCmp !== 0) return firstCmp;
+      return (a.lastName || '').localeCompare(b.lastName || '', undefined, { sensitivity: 'base' });
+    });
+  }, [directoryMembers, directorySearchQuery]);
+
+  useEffect(() => {
+    if (activeTab === 'members' && directoryMembers.length === 0) {
+      loadDirectoryMembers();
+    }
+  }, [activeTab]);
 
   // Real-time automatic background payment status polling for QR Ph & Checkout Link
   useEffect(() => {
@@ -1691,8 +2110,6 @@ export default function MemberPortalPage() {
     balance: number;
   }[]>([]);
 
-  const isTestTenant = isTestCoopTenant(tenantInfo.slug);
-
   const activeShareLedger = isTestTenant
     ? (currentPersona === 'maria' ? mariaShareLedger : juanShareLedger)
     : (prodShareLedger.length > 0
@@ -2024,6 +2441,54 @@ export default function MemberPortalPage() {
     }
   };
 
+  // Persist a verified PayMongo passbook Savings / Shares payment to the cooperative database before reflecting it on-device
+  const persistPassbookPayment = async (kind: 'SAVINGS' | 'SHARES', amount: number): Promise<any | null> => {
+    try {
+      const targetTenantSlug =
+        tenantInfo.slug && tenantInfo.slug !== 'default' ? tenantInfo.slug : resolveTenantCoop().slug || 'family-coop';
+      const targetTenantId =
+        (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+          ? (currentMember as any)?.tenantId
+          : `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const url =
+        kind === 'SHARES'
+          ? `${getApiBaseUrl()}/shares/paymongo/verify-and-complete?coop=${targetTenantSlug}`
+          : `${getApiBaseUrl()}/savings/deposit?coop=${targetTenantSlug}`;
+      const body =
+        kind === 'SHARES'
+          ? {
+              memberId: currentMember.id,
+              sharesCount: Math.floor(amount / 100),
+              amount,
+              paymentIntentId: passbookPayModal.paymentIntentId,
+              checkoutLinkId: passbookPayModal.checkoutLinkId,
+            }
+          : {
+              memberId: currentMember.id,
+              amount,
+              savingsType: 'VOLUNTARY',
+              channel: 'PAYMONGO_QRPH',
+              passOnFee: calculateConvenienceFee(amount),
+              paymentIntentId: passbookPayModal.paymentIntentId,
+              checkoutLinkId: passbookPayModal.checkoutLinkId,
+            };
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tenant-slug': targetTenantSlug, 'x-tenant-id': targetTenantId },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) {
+        alert(j.error || 'Your payment could not be recorded in the cooperative database. No changes were applied.');
+        return null;
+      }
+      return j;
+    } catch (e: any) {
+      alert(`Network error while recording payment: ${e?.message || 'unknown error'}. No changes were applied.`);
+      return null;
+    }
+  };
+
   const handleExecutePassbookPayment = async (type: 'LOAN' | 'SAVINGS' | 'SHARES', amount: number) => {
     const fee = calculateConvenienceFee(amount);
     const total = Math.round((amount + fee) * 100) / 100;
@@ -2062,8 +2527,61 @@ export default function MemberPortalPage() {
           ? Number(nextDueRow.pr)
           : Math.max(0, Math.round((amount - interestPart) * 100) / 100);
 
-      const newBal = Math.max(0, Math.round((effectiveBal - principalPart) * 100) / 100);
+      const localNewBal = Math.max(0, Math.round((effectiveBal - principalPart) * 100) / 100);
       const loanRef = targetLoan?.loanNumber || targetLoan?.id || passbookPayModal.loanNumber || 'LN-2026-00001';
+
+      // 1. Persist repayment to the cooperative database FIRST (Firestore loan schedule, balance, borrower loanBalance, CDA GL).
+      //    The device only reflects the payment after the server confirms it was saved.
+      let serverBalance: number | undefined;
+      try {
+        const targetTenantSlug =
+          tenantInfo.slug && tenantInfo.slug !== 'default'
+            ? tenantInfo.slug
+            : resolveTenantCoop().slug || 'family-coop';
+        const targetTenantId =
+          (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+            ? (currentMember as any)?.tenantId
+            : `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+        const repayRes = await fetch(
+          `${getApiBaseUrl()}/loans/${encodeURIComponent(targetLoan?.id || loanRef)}/repay?coop=${targetTenantSlug}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tenant-slug': targetTenantSlug,
+              'x-tenant-id': targetTenantId,
+            },
+            body: JSON.stringify({
+              memberId: currentMember.id,
+              installmentNumber: instNum,
+              dueAmount: amount,
+              principalAmount: principalPart,
+              interestAmount: interestPart,
+              convenienceFee: fee,
+              feeTreatment: !paymongoFeeEnabled || paymongoFeeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
+              paymentIntentId: passbookPayModal.paymentIntentId,
+              checkoutLinkId: passbookPayModal.checkoutLinkId,
+              orNumber: orNum,
+            }),
+          }
+        );
+        const repayJson = await repayRes.json().catch(() => ({}));
+        if (!repayRes.ok || !repayJson.success) {
+          alert(
+            repayJson.error ||
+              'Your loan payment could not be recorded in the cooperative database. No changes were applied. Please try again or contact the cooperative office.'
+          );
+          return;
+        }
+        if (repayJson.loanBalanceRemaining !== undefined && repayJson.loanBalanceRemaining !== null) {
+          serverBalance = Number(repayJson.loanBalanceRemaining);
+        }
+      } catch (repayErr: any) {
+        alert(`Network error while recording loan payment: ${repayErr?.message || 'unknown error'}. No changes were applied.`);
+        return;
+      }
+
+      const newBal = serverBalance !== undefined ? serverBalance : localNewBal;
       const newRepaymentEntry = {
         date: dateStr,
         ref: orNum,
@@ -2136,38 +2654,6 @@ export default function MemberPortalPage() {
         }
       } catch {}
 
-      // Persist repayment to Backend API (updates Firestore loan schedule, balanceRemaining, borrower loanBalance, and CDA GL)
-      try {
-        const targetTenantSlug =
-          tenantInfo.slug && tenantInfo.slug !== 'default'
-            ? tenantInfo.slug
-            : resolveTenantCoop().slug || 'family-coop';
-        const targetTenantId =
-          (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
-            ? (currentMember as any)?.tenantId
-            : `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
-        fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(targetLoan?.id || loanRef)}/repay?coop=${targetTenantSlug}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-tenant-slug': targetTenantSlug,
-            'x-tenant-id': targetTenantId,
-          },
-          body: JSON.stringify({
-            memberId: currentMember.id,
-            installmentNumber: instNum,
-            dueAmount: amount,
-            principalAmount: principalPart,
-            interestAmount: interestPart,
-            convenienceFee: fee,
-            feeTreatment: !paymongoFeeEnabled || paymongoFeeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH',
-            paymentIntentId: passbookPayModal.paymentIntentId,
-            checkoutLinkId: passbookPayModal.checkoutLinkId,
-            orNumber: orNum,
-          }),
-        }).catch(() => {});
-      } catch {}
-
       setPassbookReceipt({
         orNumber: orNum,
         date: dateStr,
@@ -2182,7 +2668,12 @@ export default function MemberPortalPage() {
         description: `Installment #${instNum} Loan Amortization Payment`,
       });
     } else if (type === 'SAVINGS') {
-      const newBal = Math.round((savingsBalance + amount) * 100) / 100;
+      const persisted = await persistPassbookPayment('SAVINGS', amount);
+      if (!persisted) return;
+      const newBal =
+        persisted.member?.savingsBalance !== undefined
+          ? Number(persisted.member.savingsBalance)
+          : Math.round((savingsBalance + amount) * 100) / 100;
       setSavingsBalance(newBal);
 
       if (isTestTenant) {
@@ -2239,10 +2730,19 @@ export default function MemberPortalPage() {
         description: 'Voluntary Member Savings Deposit',
       });
     } else if (type === 'SHARES') {
+      const persisted = await persistPassbookPayment('SHARES', amount);
+      if (!persisted) return;
       const newShares = Math.floor(amount / 100);
-      const newPaidUp = Math.round((paidUpCapital + amount) * 100) / 100;
+      const newPaidUp =
+        persisted.member?.paidUpShares !== undefined
+          ? Number(persisted.member.paidUpShares)
+          : Math.round((paidUpCapital + amount) * 100) / 100;
       setPaidUpCapital(newPaidUp);
-      setSharesCount((prev) => prev + newShares);
+      if (persisted.member?.sharesCount !== undefined) {
+        setSharesCount(Number(persisted.member.sharesCount));
+      } else if (!persisted.duplicate) {
+        setSharesCount((prev) => prev + newShares);
+      }
 
       if (isTestTenant) {
         if (currentPersona === 'maria') {
@@ -2428,6 +2928,9 @@ export default function MemberPortalPage() {
         },
         body: JSON.stringify({
           identifier: id,
+          email: currentMember.email,
+          memberNumber: currentMember.memberNumber,
+          memberId: currentMember.id,
           currentPassword: cur,
           newPassword: next,
           currentPin: cur,
@@ -2505,32 +3008,20 @@ export default function MemberPortalPage() {
 
             {/* Member Account Card with Financial Overview (Moved from More) */}
             <div className="bg-gradient-to-r from-emerald-800 to-slate-900 text-white rounded-2xl p-6 shadow-md">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-extrabold text-xl flex items-center justify-center shrink-0 shadow-inner">
-                  {currentMember.initials}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider">Member Account</span>
-                    <span className="bg-emerald-500/30 text-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/40">
-                      CDA Good Standing
-                    </span>
-                  </div>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
                   <h2 className="text-xl font-bold truncate text-white">{currentMember.name}</h2>
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className="text-xs text-slate-300 font-mono">
-                      {currentMember.memberNumber}
-                    </span>
-                    <span className="text-slate-400">•</span>
-                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                      currentMember.classification === 'REGULAR'
-                        ? 'bg-emerald-500/30 text-emerald-100 border border-emerald-400/30'
-                        : 'bg-amber-500/30 text-amber-100 border border-amber-400/30'
-                    }`}>
-                      {currentMember.classification === 'REGULAR' ? 'Regular Member (Dividend Eligible)' : 'Associate Member (Non-Dividend)'}
-                    </span>
+                  <div className="text-xs text-slate-300 font-mono mt-0.5">
+                    {currentMember.memberNumber}
                   </div>
                 </div>
+                <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 border ${
+                  currentMember.classification === 'REGULAR'
+                    ? 'bg-emerald-500/30 text-emerald-100 border-emerald-400/40'
+                    : 'bg-amber-500/30 text-amber-100 border-amber-400/40'
+                }`}>
+                  {currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'}
+                </span>
               </div>
 
               {/* Financial Quick Glance */}
@@ -2557,6 +3048,41 @@ export default function MemberPortalPage() {
                 </div>
               </div>
             </div>
+
+            {/* Initial Share Capital Payment Alert for Verified Member with Pending Initial Share Capital */}
+            {paidUpCapital === 0 && (
+              <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-emerald-500/10 border-2 border-amber-500/30 rounded-2xl p-4 sm:p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20">
+                      <Coins className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                          Action Required: Settle Initial Share Capital
+                        </h3>
+                        <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300">
+                          Verified • Pledge Pending
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        Your membership application has been approved! Settle your pledged initial share capital to activate your account, qualify for loans, and earn annual dividends.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setDepositModalType('SHARES');
+                    }}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 shrink-0 flex items-center justify-center gap-1.5 transition"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    <span>Pay Initial Share Capital</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Active Loan Next Payment Due Date & Due Amount Reminder with PayMongo QR Ph "Pay Now" */}
             {(() => {
@@ -3013,79 +3539,161 @@ export default function MemberPortalPage() {
               </div>
 
               {/* SUB-LEDGER 1: SHARE CAPITAL (3-01-03) */}
-              {passbookSubTab === 'shares' && (
-                <div className="p-6 space-y-6">
-                  {/* Share Capital Target & Subscription Summary */}
-                  <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
-                    <div>
-                      <div className="font-bold text-amber-950 text-sm flex items-center gap-2">
-                        <span>Paid-Up Common Stock Subscription</span>
-                        <span className="bg-amber-200 text-amber-900 text-[10px] px-2 py-0.5 rounded font-mono">
-                          ₱100.00 Par Value
-                        </span>
+              {passbookSubTab === 'shares' && (() => {
+                const effectiveSubscribed = Math.max(subscribedShares || 50, sharesCount || 0);
+                const totalSubscribedAmount = effectiveSubscribed * 100;
+                const unpaidPledgeAmount = Math.max(0, totalSubscribedAmount - paidUpCapital);
+                const unpaidPledgeShares = Math.max(0, effectiveSubscribed - sharesCount);
+                const paidUpRatio = totalSubscribedAmount > 0 ? Math.min(100, Math.round((paidUpCapital / totalSubscribedAmount) * 100)) : 100;
+                const isPledgeFullyPaid = unpaidPledgeAmount === 0;
+
+                return (
+                  <div className="p-6 space-y-6">
+                    {/* Share Capital Target & Subscription Summary */}
+                    <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
+                      <div>
+                        <div className="font-bold text-amber-950 text-sm flex items-center gap-2">
+                          <span>Common Stock Subscription & Paid-Up Capital</span>
+                          <span className="bg-amber-200 text-amber-900 text-[10px] px-2 py-0.5 rounded font-mono">
+                            ₱100.00 Par Value
+                          </span>
+                          {isPledgeFullyPaid ? (
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded font-bold border border-emerald-300 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> FULLY PAID PLEDGE
+                            </span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-900 text-[10px] px-2 py-0.5 rounded font-bold border border-amber-300">
+                              PARTIALLY PAID PLEDGE
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-amber-800 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span>Subscribed Shares: <strong>{effectiveSubscribed} shares (₱{totalSubscribedAmount.toLocaleString()}.00)</strong></span>
+                          <span>•</span>
+                          <span>Paid-Up: <strong>{sharesCount} shares (₱{paidUpCapital.toLocaleString()}.00)</strong></span>
+                          {unpaidPledgeAmount > 0 ? (
+                            <>
+                              <span>•</span>
+                              <span className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                                Unpaid Pledge Balance: ₱{unpaidPledgeAmount.toLocaleString()}.00 ({unpaidPledgeShares} shares)
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span>•</span>
+                              <span className="text-emerald-700 font-bold">
+                                Subscription Pledge 100% Settled
+                              </span>
+                            </>
+                          )}
+                        </p>
+                        {unpaidPledgeAmount > 0 && (
+                          <div className="mt-2.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDepositModalType('SHARES');
+                                setDepositSharesCount(unpaidPledgeShares);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs rounded-lg transition shadow-sm"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>Settle Unpaid Pledge ({unpaidPledgeShares} shares / ₱{unpaidPledgeAmount.toLocaleString()}.00)</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-amber-800 mt-1">
-                        Subscribed Shares: <strong>{(sharesCount + 50)} shares (₱{((sharesCount + 50) * 100).toLocaleString()}.00)</strong> • Paid-Up: <strong>{sharesCount} shares (₱{paidUpCapital.toLocaleString()}.00)</strong>
-                      </p>
+
+                      <div className="sm:text-right shrink-0">
+                        <div className="text-[10px] font-bold text-amber-900 uppercase">Paid-Up Ratio</div>
+                        <div className="text-2xl font-black text-amber-900 font-mono">
+                          {paidUpRatio}%
+                        </div>
+                        <div className="text-[10px] text-amber-700 font-medium">
+                          {isPledgeFullyPaid ? 'Pledge 100% Settled' : `₱${unpaidPledgeAmount.toLocaleString()} to complete`}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="sm:text-right shrink-0">
-                      <div className="text-[10px] font-bold text-amber-900 uppercase">Paid-Up Ratio</div>
-                      <div className="text-xl font-black text-amber-900 font-mono">
-                        {Math.round((paidUpCapital / ((sharesCount + 50) * 100)) * 100)}%
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Share Capital Ledger Table */}
-                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                        <tr>
-                          <th className="p-3.5">Posting Date</th>
-                          <th className="p-3.5">OR / Ref No.</th>
-                          <th className="p-3.5">Transaction Particulars</th>
-                          <th className="p-3.5 text-center">Shares</th>
-                          <th className="p-3.5 text-right">Debit (DR)</th>
-                          <th className="p-3.5 text-right">Credit (CR)</th>
-                          <th className="p-3.5 text-right">Running Paid-Up Balance</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                        {activeShareLedger.length === 0 ? (
+                    {/* Share Capital Ledger Table */}
+                    <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                           <tr>
-                            <td colSpan={7} className="p-8 text-center text-slate-400 font-sans text-xs">
-                              No share capital transactions recorded yet. Initial transactions will appear once paid-up capital contribution is confirmed.
+                            <th className="p-3.5">Posting Date</th>
+                            <th className="p-3.5">OR / Ref No.</th>
+                            <th className="p-3.5">Transaction Particulars</th>
+                            <th className="p-3.5 text-center">Shares</th>
+                            <th className="p-3.5 text-right">Debit (DR)</th>
+                            <th className="p-3.5 text-right">Credit (CR)</th>
+                            <th className="p-3.5 text-right">Running Paid-Up</th>
+                            <th className="p-3.5 text-right">Unpaid Pledge Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                          {/* Opening Capital Subscription Pledge Commitment */}
+                          <tr className="bg-amber-50/40 text-amber-950 font-medium">
+                            <td className="p-3.5 text-slate-500 font-sans">Initial</td>
+                            <td className="p-3.5 font-bold text-amber-900">SUB-PLEDGE</td>
+                            <td className="p-3.5 font-sans">
+                              Capital Subscription Pledge Commitment ({effectiveSubscribed} Shares @ ₱100 Par)
+                            </td>
+                            <td className="p-3.5 text-center font-bold text-amber-900">{effectiveSubscribed} (Pledged)</td>
+                            <td className="p-3.5 text-right text-slate-400">₱0.00</td>
+                            <td className="p-3.5 text-right text-slate-400">₱0.00</td>
+                            <td className="p-3.5 text-right font-black text-slate-900">₱0.00</td>
+                            <td className="p-3.5 text-right font-bold text-rose-700">
+                              ₱{totalSubscribedAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                             </td>
                           </tr>
-                        ) : (
-                          activeShareLedger.map((tx, idx) => (
-                            <tr key={idx} className="hover:bg-amber-50/20 transition">
-                              <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
-                              <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
-                              <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
-                              <td className="p-3.5 text-center font-bold text-amber-800">+{tx.shares}</td>
-                              <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
-                              <td className="p-3.5 text-right font-bold text-emerald-700">
-                                ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="p-3.5 text-right font-black text-slate-900">
-                                ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+
+                          {activeShareLedger.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="p-8 text-center text-slate-400 font-sans text-xs">
+                                No share capital deposits recorded yet. Payments applied towards the subscription pledge will appear here.
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                          ) : (
+                            activeShareLedger.map((tx, idx) => {
+                              const remainingPledge = Math.max(0, totalSubscribedAmount - tx.balance);
+                              return (
+                                <tr key={idx} className="hover:bg-amber-50/20 transition">
+                                  <td className="p-3.5 text-slate-500 font-sans">{tx.date}</td>
+                                  <td className="p-3.5 font-bold text-slate-900">{tx.ref}</td>
+                                  <td className="p-3.5 font-sans font-medium text-slate-800">{tx.particulars}</td>
+                                  <td className="p-3.5 text-center font-bold text-amber-800">+{tx.shares}</td>
+                                  <td className="p-3.5 text-right text-slate-400">₱{tx.debit.toFixed(2)}</td>
+                                  <td className="p-3.5 text-right font-bold text-emerald-700">
+                                    ₱{tx.credit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-3.5 text-right font-black text-slate-900">
+                                    ₱{tx.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-3.5 text-right font-bold">
+                                    {remainingPledge === 0 ? (
+                                      <span className="text-emerald-700">₱0.00 (Fully Settled)</span>
+                                    ) : (
+                                      <span className="text-amber-800">
+                                        ₱{remainingPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
 
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center justify-between">
-                    <div>
-                      💡 <strong>Statutory Note (RA 9520 Art. 86):</strong> Interest on Share Capital (ISC) is calculated based on the monthly average paid-up share capital balance and is 100% exempt from Philippine withholding tax.
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center justify-between">
+                      <div>
+                        💡 <strong>Statutory Note (RA 9520 Art. 86):</strong> Interest on Share Capital (ISC) is calculated based on the monthly average paid-up share capital balance and is 100% exempt from Philippine withholding tax. Payments prioritize paying down the unpaid subscription pledge first.
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* SUB-LEDGER 2: SAVINGS PASSBOOK (2-01-01) */}
               {savingsDepositEnabled && passbookSubTab === 'savings' && (
@@ -3372,6 +3980,99 @@ export default function MemberPortalPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* TAB: MEMBERS DIRECTORY (SHOWING ONLY SELFIE, FIRST NAME, AND LAST NAME - SORTED ALPHABETICALLY) */}
+        {activeTab === 'members' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <button
+                type="button"
+                onClick={() => setActiveTab('home')}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 px-2 -ml-2 rounded-lg hover:bg-slate-100 w-fit"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to Dashboard
+              </button>
+
+              {/* Search bar for members */}
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={directorySearchQuery}
+                  onChange={(e) => setDirectorySearchQuery(e.target.value)}
+                  placeholder="Search by first or last name..."
+                  className="w-full pl-10 pr-8 py-2.5 text-xs bg-white border border-slate-200 rounded-xl shadow-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
+                />
+                {directorySearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setDirectorySearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Members Grid (Displaying ONLY Selfie, First Name, and Last Name) */}
+            {isLoadingDirectory ? (
+              <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
+                <RefreshCw className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-2" />
+                <p className="text-xs text-slate-500 font-medium">Loading members directory...</p>
+              </div>
+            ) : filteredDirectoryMembers.length === 0 ? (
+              <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
+                <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-slate-700">No members found</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {directorySearchQuery ? `No members matching "${directorySearchQuery}"` : 'No cooperative members currently registered.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {filteredDirectoryMembers.map((mem) => {
+                  const initials = `${(mem.firstName?.[0] || 'M')}${(mem.lastName?.[0] || '')}`.toUpperCase();
+                  const photoUrl = mem.selfieUrl || mem.selfiePreview;
+
+                  return (
+                    <div
+                      key={mem.id}
+                      className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col items-center text-center shadow-xs hover:shadow-md hover:border-emerald-300 transition-all group"
+                    >
+                      {/* Selfie / Photo */}
+                      <div className="relative mb-3">
+                        {photoUrl ? (
+                          <img
+                            src={photoUrl}
+                            alt={`${mem.firstName} ${mem.lastName}`}
+                            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-2 border-emerald-500/30 group-hover:border-emerald-600 transition-colors shadow-sm"
+                          />
+                        ) : (
+                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 border-2 border-emerald-200/80 text-emerald-800 font-black text-xl sm:text-2xl flex items-center justify-center shadow-xs group-hover:border-emerald-500 transition-colors">
+                            {initials}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* First Name & Last Name ONLY (Privacy-First Policy) */}
+                      <div className="w-full">
+                        <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-snug truncate" title={mem.firstName}>
+                          {mem.firstName}
+                        </h4>
+                        <p className="text-xs text-slate-600 font-medium truncate mt-0.5" title={mem.lastName}>
+                          {mem.lastName}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -4403,10 +5104,38 @@ export default function MemberPortalPage() {
             </button>
             <div>
               <h2 className="text-xl font-bold text-slate-900">Loan Repayment & PayMongo QR Ph Terminal</h2>
-              <p className="text-xs text-slate-500">Fast, secure payments via GCash, Maya, BDO, BPI, or over-the-counter branch teller.</p>
+              <p className="text-xs text-slate-500">Fast, secure payments via QR Ph (GCash, Maya, Bank Apps) or Cooperative Bank Transfer.</p>
             </div>
 
-            {paymentSuccess ? (
+            {loanBankTransferPendingResult ? (
+              <div className="p-8 text-center bg-blue-50 border border-blue-200 rounded-2xl space-y-4">
+                <div className="w-16 h-16 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
+                  <Clock className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-bold text-blue-950">Bank Transfer Submitted!</h3>
+                <p className="text-xs text-blue-800 max-w-md mx-auto">
+                  Your loan repayment of <strong>₱{loanBankTransferPendingResult.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong> has been submitted.
+                  A confirmation from the admin portal is necessary before posting to your loan ledger.
+                </p>
+                <div className="text-xs font-mono bg-white p-3 rounded-lg border border-blue-200 max-w-sm mx-auto text-left space-y-1">
+                  <div>Status: <strong className="text-amber-700">PENDING ADMIN CONFIRMATION</strong></div>
+                  <div>Bank Reference: <strong>{loanBankTransferPendingResult.reference}</strong></div>
+                  <div>Bank: <strong>{loanBankTransferPendingResult.bankName}</strong></div>
+                  <div>Amount: <strong>₱{loanBankTransferPendingResult.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
+                </div>
+                <div className="pt-2 flex justify-center gap-3">
+                  <button
+                    onClick={() => {
+                      setLoanBankTransferPendingResult(null);
+                      setActiveTab('home');
+                    }}
+                    className="bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-lg hover:bg-blue-800 cursor-pointer"
+                  >
+                    Return to Portfolio
+                  </button>
+                </div>
+              </div>
+            ) : paymentSuccess ? (
               <div className="p-8 text-center bg-emerald-50 border border-emerald-200 rounded-2xl space-y-4">
                 <div className="w-16 h-16 bg-emerald-600 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
                   <CheckCircle2 className="w-8 h-8" />
@@ -4455,8 +5184,8 @@ export default function MemberPortalPage() {
                         onClick={() => setRepayChannel('PAYMONGO_QRPH')}
                         className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
                           repayChannel === 'PAYMONGO_QRPH'
-                            ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950'
-                            : 'border-slate-200 bg-white text-slate-700'
+                            ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
@@ -4467,17 +5196,17 @@ export default function MemberPortalPage() {
 
                       <button
                         type="button"
-                        onClick={() => setRepayChannel('IN_PERSON')}
+                        onClick={() => setRepayChannel('BANK_TRANSFER')}
                         className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
-                          repayChannel === 'IN_PERSON'
-                            ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950'
-                            : 'border-slate-200 bg-white text-slate-700'
+                          repayChannel === 'BANK_TRANSFER'
+                            ? 'border-blue-600 bg-blue-50/70 font-bold text-blue-950 ring-2 ring-blue-500/20'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
-                          <Building2 className="w-4 h-4 text-emerald-600" /> Branch Teller
+                          <Landmark className="w-4 h-4 text-blue-600" /> Bank Transfer
                         </div>
-                        <div className="text-[11px] text-slate-500 font-normal">₱0.00 convenience fee</div>
+                        <div className="text-[11px] text-slate-500 font-normal">Admin verification required</div>
                       </button>
                     </div>
                   </div>
@@ -4487,26 +5216,49 @@ export default function MemberPortalPage() {
                       <span className="text-slate-600">Loan Credit:</span>
                       <span className="font-bold text-slate-900">₱{repayAmount.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-amber-700">
-                      <span>Pass-On Gateway Fee:</span>
-                      <span className="font-bold">+ ₱{passOnFee.toFixed(2)}</span>
-                    </div>
+                    {repayChannel === 'PAYMONGO_QRPH' && (
+                      <div className="flex justify-between text-amber-700">
+                        <span>Pass-On Gateway Fee:</span>
+                        <span className="font-bold">+ ₱{passOnFee.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm text-slate-900">
                       <span>Total Amount to Pay:</span>
-                      <span className="text-emerald-700">₱{totalCharge.toFixed(2)}</span>
+                      <span className="text-emerald-700">₱{(repayChannel === 'PAYMONGO_QRPH' ? totalCharge : repayAmount).toFixed(2)}</span>
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleSimulatePayment}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors"
-                  >
-                    Simulate Payment Settlement
-                  </button>
+                  {repayChannel === 'PAYMONGO_QRPH' ? (
+                    <button
+                      type="button"
+                      onClick={handleSimulatePayment}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors cursor-pointer"
+                    >
+                      Simulate Payment Settlement
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isSubmittingLoanBankTransfer}
+                      onClick={handleSubmitLoanBankTransfer}
+                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isSubmittingLoanBankTransfer ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Submitting for Admin Confirmation...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Landmark className="w-4 h-4" />
+                          <span>Submit Bank Transfer for Admin Confirmation</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
 
-                {/* QR Ph Code Display */}
+                {/* Right Column: QR Ph Code or Official Bank Transfer Form */}
                 <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 flex flex-col items-center justify-center text-center">
                   {repayChannel === 'PAYMONGO_QRPH' ? (
                     <>
@@ -4523,15 +5275,67 @@ export default function MemberPortalPage() {
                       </div>
                     </>
                   ) : (
-                    <>
-                      <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 mb-3">
-                        <Building2 className="w-8 h-8" />
+                    <div className="w-full space-y-4 text-left">
+                      <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 mb-1">
+                        <Landmark className="w-6 h-6" />
                       </div>
-                      <div className="font-bold text-slate-900 text-sm">In-Person Counter Cashiering</div>
-                      <div className="text-xs text-slate-500 max-w-xs mt-1">
-                        Pay cash directly at any cooperative counter. Full ₱{repayAmount.toFixed(2)} goes to your loan with zero fees.
+                      <div>
+                        <div className="font-bold text-slate-900 text-sm">Official Bank Transfer Instructions</div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          Transfer your loan installment directly to the cooperative's bank account, then submit your reference number below.
+                        </div>
                       </div>
-                    </>
+
+                      <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 font-sans">Bank:</span>
+                          <strong className="text-slate-900">{coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines'}</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 font-sans">Account Name:</span>
+                          <strong className="text-slate-900">{coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 font-sans">Account Number:</span>
+                          <strong className="text-blue-700 font-mono">{coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">
+                            Transfer Reference / Trace No. (Required):
+                          </label>
+                          <input
+                            type="text"
+                            value={loanBankReferenceInput}
+                            onChange={(e) => setLoanBankReferenceInput(e.target.value)}
+                            placeholder="e.g. LBP-TX-987654321"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-900 font-medium"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1">
+                            Notes / Remarks (Optional):
+                          </label>
+                          <input
+                            type="text"
+                            value={loanBankTransferNotes}
+                            onChange={(e) => setLoanBankTransferNotes(e.target.value)}
+                            placeholder="e.g. Installment settlement"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-900 font-medium"
+                          />
+                        </div>
+
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <span>
+                            <strong>Admin Confirmation Required:</strong> A confirmation from the admin portal is necessary before posting this loan payment to your ledger.
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -5538,6 +6342,25 @@ export default function MemberPortalPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Cooperative Members Directory */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('members')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        Members Directory
+                      </h4>
+                      <p className="text-[11px] text-slate-500">Alphabetical roster of cooperative members</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
                 {/* My Loan Applications & Status */}
                 <button
                   type="button"
@@ -5883,6 +6706,77 @@ export default function MemberPortalPage() {
                         </p>
                       </div>
 
+                      {/* Subscription Pledge Allocation Breakdown */}
+                      {(() => {
+                        const effectiveSub = Math.max(subscribedShares || 50, sharesCount || 0);
+                        const curUnpaidPledge = Math.max(0, (effectiveSub * 100) - paidUpCapital);
+                        const curUnpaidPledgeShares = Math.max(0, effectiveSub - sharesCount);
+                        const depositNum = depositSharesCount * 100;
+                        const appliedToPledge = Math.min(depositNum, curUnpaidPledge);
+                        const excessPledge = Math.max(0, depositNum - curUnpaidPledge);
+                        const appliedShares = Math.min(depositSharesCount, curUnpaidPledgeShares);
+                        const excessShares = Math.max(0, depositSharesCount - appliedShares);
+                        const remainingAfter = Math.max(0, curUnpaidPledge - appliedToPledge);
+
+                        return (
+                          <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] space-y-1.5 text-amber-950">
+                            <div className="font-bold flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <Landmark className="w-3.5 h-3.5 text-amber-700" />
+                                {curUnpaidPledge > 0 ? 'Pledge Pay-Down Priority (RA 9520)' : 'Additional Capital Build-Up'}
+                              </span>
+                              {curUnpaidPledge > 0 ? (
+                                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                  ₱{curUnpaidPledge.toLocaleString()} Unpaid Pledge
+                                </span>
+                              ) : (
+                                <span className="bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                  Pledge 100% Settled
+                                </span>
+                              )}
+                            </div>
+                            {curUnpaidPledge > 0 ? (
+                              <>
+                                <p className="text-slate-600">
+                                  Your deposit will <strong className="text-amber-900">prioritize paying down your unpaid subscription pledge first</strong> before expanding your total subscribed shares:
+                                </p>
+                                <div className="bg-white/80 rounded-lg p-2 border border-amber-200/60 font-mono space-y-1">
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-600 font-sans">Applied to Unpaid Pledge:</span>
+                                    <strong className="text-emerald-700">₱{appliedToPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({appliedShares} shares)</strong>
+                                  </div>
+                                  {excessPledge > 0 && (
+                                    <div className="flex justify-between text-blue-700">
+                                      <span className="font-sans">New Additional Capital:</span>
+                                      <strong>+₱{excessPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({excessShares} shares)</strong>
+                                    </div>
+                                  )}
+                                  <div className="flex justify-between text-slate-700 pt-1 border-t border-amber-100">
+                                    <span className="font-sans">Pledge Remaining After:</span>
+                                    <strong className={remainingAfter === 0 ? 'text-emerald-700 font-bold' : 'text-rose-700'}>
+                                      {remainingAfter === 0 ? '₱0.00 (100% Fully Paid!)' : `₱${remainingAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (${Math.floor(remainingAfter / 100)} shares)`}
+                                    </strong>
+                                  </div>
+                                </div>
+                                {curUnpaidPledgeShares > 0 && curUnpaidPledgeShares !== depositSharesCount && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDepositSharesCount(curUnpaidPledgeShares)}
+                                    className="w-full mt-1 py-1 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[10px] transition"
+                                  >
+                                    Set to Pay Exactly Remaining Pledge ({curUnpaidPledgeShares} shares / ₱{curUnpaidPledge.toLocaleString()})
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-slate-600">
+                                You have already fully settled your subscription pledge of {effectiveSub} shares. This deposit will build up additional voting equity and dividend entitlement.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       <div>
                         <label className="text-xs font-semibold text-slate-700 block mb-1">
                           Select Shares to Purchase:
@@ -6063,9 +6957,9 @@ export default function MemberPortalPage() {
                       {/* Payment Channel Choice */}
                       <div>
                         <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
-                          Fulfillment Method:
+                          Available Payment Options:
                         </label>
-                        <div className={`grid ${depositModalType === 'SHARES' ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <button
                             type="button"
                             onClick={() => setDepositChannel('PAYMONGO_QRPH')}
@@ -6076,36 +6970,75 @@ export default function MemberPortalPage() {
                             }`}
                           >
                             <div className="flex items-center gap-1.5 mb-1">
-                              <QrCode className="w-4 h-4 text-emerald-600" />
-                              <span>PayMongo QR Ph &amp; Online Checkout</span>
+                              <QrCode className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span className="text-xs font-bold">PayMongo QR Ph</span>
                             </div>
-                            <div className="text-[11px] text-slate-500 font-normal">
-                              Instant credit via GCash, Maya, QR Ph, or any InstaPay bank app.
+                            <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                              Instant via GCash, Maya, ShopeePay, or bank apps.
                             </div>
                           </button>
 
-                          {/* In-Person Teller is completely removed for Cooperative Shares */}
-                          {depositModalType !== 'SHARES' && (
-                            <button
-                              type="button"
-                              onClick={() => setDepositChannel('IN_PERSON_SLIP')}
-                              className={`p-3 border rounded-xl text-left transition ${
-                                depositChannel === 'IN_PERSON_SLIP'
-                                  ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <Landmark className="w-4 h-4 text-emerald-600" />
-                                <span>In-Person Teller</span>
-                              </div>
-                              <div className="text-[11px] text-slate-500 font-normal">
-                                Generate deposit slip for cashier counter (₱0 fee).
-                              </div>
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDepositChannel('BANK_TRANSFER')}
+                            className={`p-3 border rounded-xl text-left transition ${
+                              depositChannel === 'BANK_TRANSFER'
+                                ? 'border-blue-600 bg-blue-50/80 font-bold text-blue-950 ring-2 ring-blue-500/20'
+                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Landmark className="w-4 h-4 text-blue-600 shrink-0" />
+                              <span className="text-xs font-bold">Bank Transfer</span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                              Official transfer (Requires admin confirmation before posting).
+                            </div>
+                          </button>
                         </div>
                       </div>
+
+                      {/* Bank Details Display if Bank Transfer selected */}
+                      {depositChannel === 'BANK_TRANSFER' && (
+                        <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-900">
+                          <div className="font-bold flex items-center gap-1.5 text-blue-950">
+                            <Landmark className="w-4 h-4 text-blue-700" />
+                            <span>Cooperative Official Bank Account</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                            <div>
+                              <span className="text-slate-500 block font-sans">Bank:</span>
+                              <strong>{coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines'}</strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block font-sans">Account Number:</span>
+                              <strong className="text-blue-900">{coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                            </div>
+                            <div className="col-span-2">
+                              <span className="text-slate-500 block font-sans">Account Name:</span>
+                              <strong>{coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                              Transfer Reference / Trace No. (Required):
+                            </label>
+                            <input
+                              type="text"
+                              value={bankReferenceInput}
+                              onChange={(e) => setBankReferenceInput(e.target.value)}
+                              placeholder="e.g. LBP-TRX-12345678"
+                              className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-900 flex items-start gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                            <span>
+                              <strong>Admin Confirmation Required:</strong> A confirmation from the admin portal is necessary before posting this share purchase or savings deposit.
+                            </span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Summary & Execution */}
                       {(() => {
@@ -6132,7 +7065,7 @@ export default function MemberPortalPage() {
                             )}
                             <div className="border-t border-slate-200 pt-2 flex justify-between text-slate-900 font-bold">
                               <span>Total Amount to Pay:</span>
-                              <span className="text-emerald-700 font-mono text-base">₱{total.toFixed(2)}</span>
+                              <span className="text-emerald-700 font-mono text-base">₱{(depositChannel === 'PAYMONGO_QRPH' ? total : principal).toFixed(2)}</span>
                             </div>
                             {depositChannel === 'PAYMONGO_QRPH' && depositModalType === 'SHARES' && (
                               <div className="text-[10px] text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-200">
@@ -6146,7 +7079,7 @@ export default function MemberPortalPage() {
                                   type="button"
                                   disabled={isGeneratingPaymongo}
                                   onClick={handleInitiatePaymongoShares}
-                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                                 >
                                   {isGeneratingPaymongo ? (
                                     <RefreshCw className="w-4 h-4 animate-spin" />
@@ -6172,29 +7105,42 @@ export default function MemberPortalPage() {
                                       channel: 'PayMongo QR Ph (Instant Self-Service)',
                                     });
                                   }}
-                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                                 >
                                   <QrCode className="w-4 h-4" />
                                   <span>Simulate Instant QR Ph Settlement</span>
                                 </button>
                               )
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const refNo = `DEP-SAV-${Math.floor(10000 + Math.random() * 90000)}`;
-                                  setDepositSuccessResult({
-                                    type: 'Savings Deposit Slip',
-                                    amount: principal,
-                                    reference: refNo,
-                                    channel: 'In-Person Branch Teller Counter',
-                                  });
-                                }}
-                                className="w-full mt-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
-                              >
-                                <FileText className="w-4 h-4" />
-                                <span>Generate In-Person Counter Deposit Slip</span>
-                              </button>
+                              depositModalType === 'SHARES' ? (
+                                <button
+                                  type="button"
+                                  disabled={isSubmittingDirectShare}
+                                  onClick={handleBankTransferShareDeposit}
+                                  className="w-full mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                                >
+                                  {isSubmittingDirectShare ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Landmark className="w-4 h-4" />
+                                  )}
+                                  <span>{isSubmittingDirectShare ? 'Submitting Bank Transfer...' : 'Submit Bank Transfer for Admin Confirmation'}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={isSubmittingDirectShare}
+                                  onClick={handleBankTransferSavingsDeposit}
+                                  className="w-full mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                                >
+                                  {isSubmittingDirectShare ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Landmark className="w-4 h-4" />
+                                  )}
+                                  <span>{isSubmittingDirectShare ? 'Submitting Bank Transfer...' : 'Submit Bank Transfer for Admin Confirmation'}</span>
+                                </button>
+                              )
                             )}
                           </div>
                         );
@@ -6205,20 +7151,32 @@ export default function MemberPortalPage() {
               )) : (
                 /* Success / Receipt Screen */
                 <div className="p-6 text-center space-y-4">
-                  <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
-                    <CheckCircle2 className="w-8 h-8" />
+                  <div className={`w-14 h-14 ${depositSuccessResult.isPendingConfirmation ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'} rounded-full flex items-center justify-center mx-auto shadow-sm`}>
+                    {depositSuccessResult.isPendingConfirmation ? (
+                      <Clock className="w-8 h-8" />
+                    ) : (
+                      <CheckCircle2 className="w-8 h-8" />
+                    )}
                   </div>
 
                   <div>
                     <h4 className="text-base font-bold text-slate-900">{depositSuccessResult.type}</h4>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {depositSuccessResult.channel.includes('Instant')
+                      {depositSuccessResult.isPendingConfirmation
+                        ? 'Submitted for admin verification! A confirmation from the admin portal is necessary before posting to your account.'
+                        : depositSuccessResult.channel.includes('Instant')
                         ? 'Transaction settled and credited to your account!'
-                        : 'Deposit slip generated! Present at any coop cashier counter.'}
+                        : 'Deposit recorded successfully!'}
                     </p>
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-left font-mono text-xs space-y-2">
+                    {depositSuccessResult.isPendingConfirmation && (
+                      <div className="flex justify-between border-b pb-1.5 text-amber-800">
+                        <span className="font-sans font-bold">Status:</span>
+                        <strong className="text-amber-700">PENDING ADMIN CONFIRMATION</strong>
+                      </div>
+                    )}
                     <div className="flex justify-between border-b pb-1.5">
                       <span className="text-slate-500 font-sans">Reference Number:</span>
                       <strong className="text-indigo-600">{depositSuccessResult.reference}</strong>
@@ -6231,7 +7189,7 @@ export default function MemberPortalPage() {
                     </div>
                     {depositSuccessResult.sharesAdded && (
                       <div className="flex justify-between border-b pb-1.5">
-                        <span className="text-slate-500 font-sans">New Shares Issued:</span>
+                        <span className="text-slate-500 font-sans">Shares to be Issued:</span>
                         <strong className="text-amber-800">+{depositSuccessResult.sharesAdded} Common Shares</strong>
                       </div>
                     )}
@@ -6860,9 +7818,6 @@ export default function MemberPortalPage() {
                       {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-1 block">
-                    Default password is 123456 if not previously updated.
-                  </span>
                 </div>
 
                 <div>
@@ -6969,7 +7924,7 @@ export default function MemberPortalPage() {
         className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl pt-2 px-4"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
-        <div className="max-w-md mx-auto grid grid-cols-3 gap-2">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-2">
           {/* 1. Dashboard (My Portfolio) */}
           <button
             type="button"
@@ -6977,14 +7932,14 @@ export default function MemberPortalPage() {
               setActiveTab('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
               activeTab === 'home'
                 ? 'text-emerald-700 font-bold bg-emerald-50/80'
                 : 'text-slate-500 hover:text-slate-900 font-medium'
             }`}
           >
-            <LayoutDashboard className={`w-6 h-6 mb-1 ${activeTab === 'home' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
-            <span className="text-[11px] leading-tight">Dashboard</span>
+            <LayoutDashboard className={`w-5 h-5 mb-1 ${activeTab === 'home' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+            <span className="text-[10px] leading-tight">Dashboard</span>
           </button>
 
           {/* 2. Passbook (Digital Passbook & SL) */}
@@ -6994,38 +7949,55 @@ export default function MemberPortalPage() {
               setActiveTab('passbook');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
               activeTab === 'passbook'
                 ? 'text-emerald-700 font-bold bg-emerald-50/80'
                 : 'text-slate-500 hover:text-slate-900 font-medium'
             }`}
           >
-            <BookOpen className={`w-6 h-6 mb-1 ${activeTab === 'passbook' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
-            <span className="text-[11px] leading-tight">Passbook</span>
+            <BookOpen className={`w-5 h-5 mb-1 ${activeTab === 'passbook' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+            <span className="text-[10px] leading-tight">Passbook</span>
           </button>
 
-          {/* 3. More (All Other Services & Settings) */}
+          {/* 3. Members (Directory) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('members');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
+              activeTab === 'members'
+                ? 'text-emerald-700 font-bold bg-emerald-50/80'
+                : 'text-slate-500 hover:text-slate-900 font-medium'
+            }`}
+          >
+            <Users className={`w-5 h-5 mb-1 ${activeTab === 'members' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+            <span className="text-[10px] leading-tight">Members</span>
+          </button>
+
+          {/* 4. More (All Other Services & Settings) */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('more');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition-all ${
-              activeTab !== 'home' && activeTab !== 'passbook'
+            className={`relative flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
+              activeTab !== 'home' && activeTab !== 'passbook' && activeTab !== 'members'
                 ? 'text-emerald-700 font-bold bg-emerald-50/80'
                 : 'text-slate-500 hover:text-slate-900 font-medium'
             }`}
           >
             <div className="relative">
-              <Menu className={`w-6 h-6 mb-1 ${activeTab !== 'home' && activeTab !== 'passbook' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+              <Menu className={`w-5 h-5 mb-1 ${activeTab !== 'home' && activeTab !== 'passbook' && activeTab !== 'members' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
               {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
                 <span className="absolute -top-1 -right-2 bg-amber-500 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
                   1
                 </span>
               )}
             </div>
-            <span className="text-[11px] leading-tight">More</span>
+            <span className="text-[10px] leading-tight">More</span>
           </button>
         </div>
       </nav>

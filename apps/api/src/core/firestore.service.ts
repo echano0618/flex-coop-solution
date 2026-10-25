@@ -16,7 +16,7 @@ import {
   SystemBroadcast,
 } from '@flexcoop/shared-types';
 import { CDACoAManager } from '@flexcoop/cda-coa';
-import { PlatformPaymentMethod, PlatformCreditTopupRequest } from './store';
+import { dbStore, PlatformPaymentMethod, PlatformCreditTopupRequest } from './store';
 
 export class FirestoreCoopService {
   private static instance: FirestoreCoopService;
@@ -52,6 +52,16 @@ export class FirestoreCoopService {
 
   public getFirestore(): Firestore {
     return this.db;
+  }
+
+  public isConfigured(): boolean {
+    return !!(
+      process.env.FIRESTORE_EMULATOR_HOST ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+      process.env.FIREBASE_CONFIG ||
+      process.env.K_SERVICE ||
+      process.env.NODE_ENV === 'production'
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -96,6 +106,14 @@ export class FirestoreCoopService {
 
   public paymentsCol(tenantId: string) {
     return this.tenantDoc(tenantId).collection('payments');
+  }
+
+  public shareTransactionsCol(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('share_transactions');
+  }
+
+  public bankTransferRequestsCol(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('bank_transfer_requests');
   }
 
   public invoicesCol(tenantId: string) {
@@ -143,6 +161,7 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async seedTenant(tenant: Tenant): Promise<void> {
+    if (!this.isConfigured()) return;
     const batch = this.db.batch();
 
     // 1. Tenant metadata document
@@ -166,6 +185,7 @@ export class FirestoreCoopService {
   }
 
   public async ensureFamilyTenantInitialized(): Promise<void> {
+    if (!this.isConfigured()) return;
     try {
       const familyDoc = await this.tenantDoc('tenant_family').get();
       if (!familyDoc.exists) {
@@ -200,38 +220,46 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveMember(tenantId: string, member: Member): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.membersCol(tenantId).doc(member.id).set(member, { merge: true });
   }
 
   public async updateMember(tenantId: string, memberId: string, updates: Record<string, any>): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.membersCol(tenantId).doc(memberId).set(updates, { merge: true });
   }
 
   public async getMember(tenantId: string, memberId: string): Promise<Member | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.membersCol(tenantId).doc(memberId).get();
-    if (doc.exists) return doc.data() as Member;
+    if (doc.exists) return { ...(doc.data() as any), id: doc.id } as Member;
 
     if (memberId === 'mem_gm_0001') {
       const gmDoc = await this.membersCol(tenantId).doc('MEM-2026-0001').get();
-      if (gmDoc.exists) return gmDoc.data() as Member;
+      if (gmDoc.exists) return { ...(gmDoc.data() as any), id: gmDoc.id } as Member;
     }
 
     try {
       const q1 = await this.membersCol(tenantId).where('memberNumber', '==', memberId).limit(1).get();
-      if (!q1.empty) return q1.docs[0].data() as Member;
+      if (!q1.empty) return { ...(q1.docs[0].data() as any), id: q1.docs[0].id } as Member;
     } catch {}
 
     try {
       const q2 = await this.membersCol(tenantId).where('memberNo', '==', memberId).limit(1).get();
-      if (!q2.empty) return q2.docs[0].data() as Member;
+      if (!q2.empty) return { ...(q2.docs[0].data() as any), id: q2.docs[0].id } as Member;
     } catch {}
 
     return null;
   }
 
   public async listMembers(tenantId: string): Promise<Member[]> {
-    const snapshot = await this.membersCol(tenantId).get();
-    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as Member);
+    if (!this.isConfigured()) return [];
+    try {
+      const snapshot = await this.membersCol(tenantId).get();
+      return snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ ...(doc.data() as any), id: doc.id } as Member));
+    } catch {
+      return [];
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -239,10 +267,12 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveLoan(tenantId: string, loan: Loan): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.loansCol(tenantId).doc(loan.id).set(loan, { merge: true });
   }
 
   public async getLoan(tenantId: string, loanId: string): Promise<Loan | null> {
+    if (!this.isConfigured()) return null;
     try {
       const doc = await this.loansCol(tenantId).doc(loanId).get();
       if (doc.exists) return doc.data() as Loan;
@@ -257,6 +287,7 @@ export class FirestoreCoopService {
   }
 
   public async listLoans(tenantId: string): Promise<Loan[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.loansCol(tenantId).get();
     return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as Loan);
   }
@@ -267,6 +298,7 @@ export class FirestoreCoopService {
     status: Loan['status'],
     extraFields?: Partial<Loan>
   ): Promise<void> {
+    if (!this.isConfigured()) return;
     const updatePayload = {
       status,
       ...extraFields,
@@ -292,6 +324,7 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveLoanProduct(tenantId: string, product: LoanProduct | any): Promise<void> {
+    if (!this.isConfigured()) return;
     const prodId = product.id || `prod_${(product.code || 'loan').toLowerCase()}_${Date.now()}`;
     await this.loanProductsCol(tenantId).doc(prodId).set(
       {
@@ -305,11 +338,13 @@ export class FirestoreCoopService {
   }
 
   public async getLoanProduct(tenantId: string, productId: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.loanProductsCol(tenantId).doc(productId).get();
     return doc.exists ? doc.data() : null;
   }
 
   public async listLoanProducts(tenantId: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.loanProductsCol(tenantId).get();
     return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
   }
@@ -319,6 +354,7 @@ export class FirestoreCoopService {
     productId: string,
     updates: Partial<LoanProduct> | any
   ): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.loanProductsCol(tenantId).doc(productId).set(
       {
         ...updates,
@@ -329,6 +365,7 @@ export class FirestoreCoopService {
   }
 
   public async deleteLoanProduct(tenantId: string, productId: string): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.loanProductsCol(tenantId).doc(productId).delete();
   }
 
@@ -340,6 +377,7 @@ export class FirestoreCoopService {
     tenantId: string,
     entry: JournalEntry
   ): Promise<{ success: boolean; entryId: string; error?: string }> {
+    if (!this.isConfigured()) return { success: true, entryId: entry.id };
     // 1. Double-entry validation: Total Debits must strictly equal Total Credits
     const totalDebit = entry.lines.reduce((sum, l) => sum + (l.debit || 0), 0);
     const totalCredit = entry.lines.reduce((sum, l) => sum + (l.credit || 0), 0);
@@ -350,17 +388,8 @@ export class FirestoreCoopService {
 
     // 2. Execute atomic Firestore Transaction
     return await this.db.runTransaction(async (transaction: Transaction) => {
-      // Create journal entry record (Immutable)
-      const entryRef = this.journalEntriesCol(tenantId).doc(entry.id);
-      transaction.set(entryRef, {
-        ...entry,
-        totalDebit,
-        totalCredit,
-        isBalanced: true,
-        postedAt: new Date().toISOString(),
-      });
-
-      // Atomically increment / update account balances in CDA COA
+      // 2.1 READ ALL ACCOUNTS FIRST (Firestore requires all reads before writes)
+      const accountUpdates: { ref: any; updates: any }[] = [];
       for (const line of entry.lines) {
         const accRef = this.coaCol(tenantId).doc(line.accountCode);
         const accDoc = await transaction.get(accRef);
@@ -374,13 +403,30 @@ export class FirestoreCoopService {
           const isDebitNormal = data.normalBalance === 'DEBIT';
           const netBalance = isDebitNormal ? newDebit - newCredit : newCredit - newDebit;
 
-          transaction.update(accRef, {
-            currentDebit: newDebit,
-            currentCredit: newCredit,
-            netBalance,
-            updatedAt: new Date().toISOString(),
+          accountUpdates.push({
+            ref: accRef,
+            updates: {
+              currentDebit: newDebit,
+              currentCredit: newCredit,
+              netBalance,
+              updatedAt: new Date().toISOString(),
+            },
           });
         }
+      }
+
+      // 2.2 EXECUTE ALL WRITES
+      const entryRef = this.journalEntriesCol(tenantId).doc(entry.id);
+      transaction.set(entryRef, {
+        ...entry,
+        totalDebit,
+        totalCredit,
+        isBalanced: true,
+        postedAt: new Date().toISOString(),
+      });
+
+      for (const acc of accountUpdates) {
+        transaction.update(acc.ref, acc.updates);
       }
 
       return { success: true, entryId: entry.id };
@@ -388,6 +434,7 @@ export class FirestoreCoopService {
   }
 
   public async postJournalEntry(tenantId: string, entry: any): Promise<void> {
+    if (!this.isConfigured()) return;
     try {
       await this.postBalancedJournalEntry(tenantId, entry);
     } catch (err) {
@@ -401,6 +448,7 @@ export class FirestoreCoopService {
   }
 
   public async listJournalEntries(tenantId: string): Promise<JournalEntry[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.journalEntriesCol(tenantId).get();
     const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as JournalEntry);
     return list.sort(
@@ -411,6 +459,7 @@ export class FirestoreCoopService {
   }
 
   public async deleteLoan(tenantId: string, loanId: string): Promise<void> {
+    if (!this.isConfigured()) return;
     try {
       await this.loansCol(tenantId).doc(loanId).delete();
     } catch {}
@@ -429,10 +478,12 @@ export class FirestoreCoopService {
   }
 
   public async deleteJournalEntry(tenantId: string, entryId: string): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.journalEntriesCol(tenantId).doc(entryId).delete();
   }
 
   public async rebuildChartOfAccounts(tenantId: string, entries: JournalEntry[]): Promise<void> {
+    if (!this.isConfigured()) return;
     const accountsSnap = await this.coaCol(tenantId).get();
     if (accountsSnap.empty) return;
 
@@ -472,14 +523,15 @@ export class FirestoreCoopService {
     tenantId: string,
     payment: PaymentTransaction
   ): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.db.runTransaction(async (transaction: Transaction) => {
-      // 1. Save payment record
-      const paymentRef = this.paymentsCol(tenantId).doc(payment.id);
-      transaction.set(paymentRef, payment);
-
-      // 2. Reduce remaining balance on active loan
+      // 1. READ LOAN RECORD FIRST (Firestore requires all reads before writes)
       const loanRef = this.loansCol(tenantId).doc(payment.loanId);
       const loanDoc = await transaction.get(loanRef);
+
+      // 2. EXECUTE ALL WRITES
+      const paymentRef = this.paymentsCol(tenantId).doc(payment.id);
+      transaction.set(paymentRef, payment);
 
       if (loanDoc.exists) {
         const currentLoan = loanDoc.data() as Loan;
@@ -500,12 +552,123 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async recordInvoice(tenantId: string, invoice: PlatformInvoice): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.invoicesCol(tenantId).doc(invoice.id).set(invoice);
   }
 
   public async listInvoices(tenantId: string): Promise<PlatformInvoice[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.invoicesCol(tenantId).get();
     return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as PlatformInvoice);
+  }
+
+  // --------------------------------------------------------------------------
+  // Share Capital Transactions
+  // --------------------------------------------------------------------------
+
+  public async recordShareTransaction(tenantId: string, txn: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    const docId = txn.id || `stx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await this.shareTransactionsCol(tenantId).doc(docId).set(
+      {
+        ...txn,
+        id: docId,
+        createdAt: txn.createdAt || new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  public async syncShareTransactionsFromJournalEntries(tenantId: string): Promise<number> {
+    if (!this.isConfigured()) return 0;
+    try {
+      const journalSnap = await this.journalEntriesCol(tenantId).where('referenceType', '==', 'SHARE_CAPITAL_DEPOSIT').get();
+      if (journalSnap.empty) return 0;
+
+      const existingSnap = await this.shareTransactionsCol(tenantId).get();
+      const existingIds = new Set(existingSnap.docs.map((d: any) => d.id));
+      const existingJournalIds = new Set(existingSnap.docs.map((d: any) => d.data().journalEntryId));
+
+      let backfilledCount = 0;
+      for (const doc of journalSnap.docs) {
+        const je = doc.data();
+        const expectedStxId = `stx_${je.id}`;
+        if (!existingIds.has(expectedStxId) && !existingJournalIds.has(je.id)) {
+          const shareLine = (je.lines || []).find((l: any) => l.subledgerType === 'SHARE_CAPITAL' || (l.credit && l.credit > 0)) || (je.lines || [])[0];
+          const amount = je.totalCredit || je.totalDebit || (shareLine ? shareLine.credit : 0) || 0;
+          const memberId = je.referenceId || (shareLine ? shareLine.memberId : '') || '';
+          const memberNumber = (shareLine ? shareLine.memberNumber : '') || '';
+          const memberName = (shareLine ? shareLine.memberName : '') || '';
+          const sharesCount = Math.round(Number(amount) / 100);
+
+          await this.shareTransactionsCol(tenantId).doc(expectedStxId).set({
+            id: expectedStxId,
+            memberId,
+            memberNumber,
+            memberName,
+            amount: Number(amount),
+            sharesCount,
+            channel: je.channel || 'IN_PERSON_CASHIER',
+            receiptNumber: je.receiptNumber || `OR-SHR-${je.id}`,
+            journalEntryId: je.id,
+            classification: Number(amount) >= 5000 ? 'REGULAR' : 'ASSOCIATE',
+            createdAt: je.postedAt || je.postingDate || new Date().toISOString(),
+          }, { merge: true });
+          backfilledCount++;
+        }
+      }
+      return backfilledCount;
+    } catch (err) {
+      console.warn('syncShareTransactionsFromJournalEntries warning:', err);
+      return 0;
+    }
+  }
+
+  public async listShareTransactions(tenantId: string, memberId?: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    await this.syncShareTransactionsFromJournalEntries(tenantId);
+    const snapshot = await this.shareTransactionsCol(tenantId).get();
+    let records = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ id: doc.id, ...doc.data() }));
+    if (memberId) {
+      const target = String(memberId).trim().toLowerCase();
+      records = records.filter(
+        (t: any) =>
+          String(t.memberId || '').trim().toLowerCase() === target ||
+          String(t.memberNumber || '').trim().toLowerCase() === target
+      );
+    }
+    return records.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  // --------------------------------------------------------------------------
+  // Bank Transfer Payment Verification Requests
+  // --------------------------------------------------------------------------
+
+  public async saveBankTransferRequest(tenantId: string, req: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    await this.bankTransferRequestsCol(tenantId).doc(req.id).set(req, { merge: true });
+  }
+
+  public async getBankTransferRequest(tenantId: string, id: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    const doc = await this.bankTransferRequestsCol(tenantId).doc(id).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  public async listBankTransferRequests(tenantId: string, status?: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    let q: any = this.bankTransferRequestsCol(tenantId);
+    if (status) {
+      q = q.where('status', '==', status);
+    }
+    const snapshot = await q.get();
+    const list = snapshot.docs.map((d: any) => d.data());
+    return list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  public async updateBankTransferRequest(tenantId: string, id: string, updates: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    await this.bankTransferRequestsCol(tenantId).doc(id).set(updates, { merge: true });
   }
 
   // --------------------------------------------------------------------------
@@ -513,10 +676,12 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async recordAMLCAlert(tenantId: string, alert: AMLCCoveredTransactionAlert): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.amlcAlertsCol(tenantId).doc(alert.id).set(alert);
   }
 
   public async listAMLCAlerts(tenantId: string): Promise<AMLCCoveredTransactionAlert[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.amlcAlertsCol(tenantId).get();
     return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as AMLCCoveredTransactionAlert);
   }
@@ -526,15 +691,18 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveApplication(tenantId: string, application: any): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.applicationsCol(tenantId).doc(application.id).set(application, { merge: true });
   }
 
   public async getApplication(tenantId: string, applicationId: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.applicationsCol(tenantId).doc(applicationId).get();
     return doc.exists ? doc.data() : null;
   }
 
   public async listApplications(tenantId: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.applicationsCol(tenantId).get();
     const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
     return list.sort((a, b) => new Date(b.dateSubmitted || 0).getTime() - new Date(a.dateSubmitted || 0).getTime());
@@ -547,6 +715,7 @@ export class FirestoreCoopService {
     notes?: string,
     reviewedBy?: string
   ): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.applicationsCol(tenantId).doc(applicationId).set(
       {
         status,
@@ -566,41 +735,93 @@ export class FirestoreCoopService {
   public async saveMemberCredential(tenantId: string, cred: any): Promise<void> {
     const rawEmail = cred.email || (cred.username && cred.username.includes('@') ? cred.username : '');
     const email = (rawEmail || '').toLowerCase().trim();
-    if (!email) {
-      console.warn('saveMemberCredential skipped: missing registered email address for', cred);
+    const docKey = email || (cred.memberNumber || cred.memberId || cred.username || '').toLowerCase().trim();
+    if (!docKey) {
+      console.warn('saveMemberCredential skipped: missing registered identifier for', cred);
       return;
     }
 
-    // Single entry in credentials table strictly keyed by registered email address
-    await this.credentialsCol(tenantId).doc(email).set(
-      {
-        ...cred,
-        username: email,
-        email,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    const payload = {
+      ...cred,
+      username: cred.username || email || docKey,
+      email: email || cred.email,
+      memberNumber: cred.memberNumber,
+      memberId: cred.memberId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 1. In-memory cache in dbStore for fast lookup and offline resilience
+    if (!dbStore.memberCredentials.has(tenantId)) {
+      dbStore.memberCredentials.set(tenantId, new Map());
+    }
+    const tenantCreds = dbStore.memberCredentials.get(tenantId)!;
+    tenantCreds.set(docKey, payload);
+    if (email) tenantCreds.set(email, payload);
+    if (cred.memberNumber) tenantCreds.set(cred.memberNumber.toLowerCase().trim(), payload);
+    if (cred.memberId) tenantCreds.set(cred.memberId.toLowerCase().trim(), payload);
+    if (cred.username) tenantCreds.set(cred.username.toLowerCase().trim(), payload);
+
+    if (!this.isConfigured()) return;
+
+    try {
+      // Primary save by docKey
+      await this.credentialsCol(tenantId).doc(docKey).set(payload, { merge: true });
+
+      // Also mirror to email doc if email exists and docKey was different
+      if (email && docKey !== email) {
+        await this.credentialsCol(tenantId).doc(email).set(payload, { merge: true });
+      }
+      // Also mirror to memberNumber doc if memberNumber exists
+      if (cred.memberNumber && docKey !== cred.memberNumber.toLowerCase().trim()) {
+        await this.credentialsCol(tenantId).doc(cred.memberNumber.toLowerCase().trim()).set(payload, { merge: true });
+      }
+    } catch (err) {
+      // Graceful fallback when Firestore ADC is unconfigured locally
+    }
   }
 
   public async getMemberCredential(tenantId: string, identifier: string): Promise<any | null> {
-    const idLower = identifier.toLowerCase().trim();
+    const idTrim = (identifier || '').trim();
+    const idLower = idTrim.toLowerCase();
+    if (!idLower) return null;
 
-    // 1. Check direct doc by registered email (Standard single entry)
-    const doc = await this.credentialsCol(tenantId).doc(idLower).get();
-    if (doc.exists) return doc.data();
+    // 1. Check in-memory store cache first
+    const memCreds = dbStore.memberCredentials.get(tenantId);
+    if (memCreds) {
+      if (memCreds.has(idLower)) return memCreds.get(idLower);
+      if (memCreds.has(idTrim)) return memCreds.get(idTrim);
+    }
 
-    // 2. Query by email field
-    const byEmail = await this.credentialsCol(tenantId).where('email', '==', idLower).limit(1).get();
-    if (!byEmail.empty) return byEmail.docs[0].data();
+    if (!this.isConfigured()) return null;
 
-    // 3. Query by memberId
-    const byMemberId = await this.credentialsCol(tenantId).where('memberId', '==', identifier.trim()).limit(1).get();
-    if (!byMemberId.empty) return byMemberId.docs[0].data();
+    try {
+      // 1. Check direct doc by identifier (email, username, or memberNumber)
+      const doc = await this.credentialsCol(tenantId).doc(idLower).get();
+      if (doc.exists) return doc.data();
 
-    // 4. Query by phone
-    const byPhone = await this.credentialsCol(tenantId).where('phone', '==', identifier.trim()).limit(1).get();
-    if (!byPhone.empty) return byPhone.docs[0].data();
+      // 2. Query by email field
+      const byEmail = await this.credentialsCol(tenantId).where('email', '==', idLower).limit(1).get();
+      if (!byEmail.empty) return byEmail.docs[0].data();
+
+      // 3. Query by memberNumber
+      const byMemberNo = await this.credentialsCol(tenantId).where('memberNumber', '==', idTrim).limit(1).get();
+      if (!byMemberNo.empty) return byMemberNo.docs[0].data();
+
+      // 4. Query by memberId
+      const byMemberId = await this.credentialsCol(tenantId).where('memberId', '==', idTrim).limit(1).get();
+      if (!byMemberId.empty) return byMemberId.docs[0].data();
+
+      // 5. Query by username
+      const byUsername = await this.credentialsCol(tenantId).where('username', '==', idLower).limit(1).get();
+      if (!byUsername.empty) return byUsername.docs[0].data();
+
+      // 6. Query by phone
+      const byPhone = await this.credentialsCol(tenantId).where('phone', '==', idTrim).limit(1).get();
+      if (!byPhone.empty) return byPhone.docs[0].data();
+    } catch (err) {
+      // Graceful fallback when Firestore ADC is unconfigured locally
+      return null;
+    }
 
     return null;
   }
@@ -629,17 +850,28 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveTenant(tenant: Tenant): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.tenantDoc(tenant.id).set(tenant, { merge: true });
   }
 
   public async getTenant(tenantId: string): Promise<Tenant | null> {
-    const doc = await this.tenantDoc(tenantId).get();
-    return doc.exists ? (doc.data() as Tenant) : null;
+    if (!this.isConfigured()) return null;
+    try {
+      const doc = await this.tenantDoc(tenantId).get();
+      return doc.exists ? (doc.data() as Tenant) : null;
+    } catch {
+      return null;
+    }
   }
 
   public async listTenants(): Promise<Tenant[]> {
-    const snapshot = await this.db.collection('tenants').get();
-    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as Tenant);
+    if (!this.isConfigured()) return [];
+    try {
+      const snapshot = await this.db.collection('tenants').get();
+      return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as Tenant);
+    } catch {
+      return [];
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -647,6 +879,7 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async clearTenantLedger(tenantId: string): Promise<void> {
+    if (!this.isConfigured()) return;
     // Delete all journal entries
     const entries = await this.journalEntriesCol(tenantId).get();
     if (!entries.empty) {
@@ -676,6 +909,7 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveOperator(operator: OperatorAccount): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.operatorsCol().doc(operator.username.toLowerCase()).set({
       ...operator,
       updatedAt: new Date().toISOString(),
@@ -683,6 +917,7 @@ export class FirestoreCoopService {
   }
 
   public async getOperator(usernameOrEmail: string): Promise<OperatorAccount | null> {
+    if (!this.isConfigured()) return null;
     const q = (usernameOrEmail || '').toLowerCase().trim();
     const doc = await this.operatorsCol().doc(q).get();
     if (doc.exists) return doc.data() as OperatorAccount;
@@ -692,11 +927,13 @@ export class FirestoreCoopService {
   }
 
   public async listOperators(): Promise<OperatorAccount[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.operatorsCol().get();
     return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as OperatorAccount);
   }
 
   public async deleteOperator(username: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
     const docRef = this.operatorsCol().doc(username.toLowerCase());
     const doc = await docRef.get();
     if (!doc.exists) return false;
@@ -705,6 +942,7 @@ export class FirestoreCoopService {
   }
 
   public async saveOperatorOtp(username: string, data: { otp: string; expiresAt: number; attempts: number; email: string }): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.operatorOtpsCol().doc(username.toLowerCase()).set({
       ...data,
       updatedAt: new Date().toISOString(),
@@ -712,24 +950,29 @@ export class FirestoreCoopService {
   }
 
   public async getOperatorOtp(username: string): Promise<{ otp: string; expiresAt: number; attempts: number; email: string } | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.operatorOtpsCol().doc(username.toLowerCase()).get();
     return doc.exists ? (doc.data() as any) : null;
   }
 
   public async deleteOperatorOtp(username: string): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.operatorOtpsCol().doc(username.toLowerCase()).delete();
   }
 
   public async saveOperatorSession(session: OperatorSession): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.operatorSessionsCol().doc(session.token).set(session);
   }
 
   public async getOperatorSession(token: string): Promise<OperatorSession | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.operatorSessionsCol().doc(token).get();
     return doc.exists ? (doc.data() as OperatorSession) : null;
   }
 
   public async deleteOperatorSession(token: string): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.operatorSessionsCol().doc(token).delete();
   }
 
@@ -738,6 +981,7 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async updateTenantStatus(tenantId: string, status: string, reason?: string): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.tenantDoc(tenantId).set({
       status,
       statusReason: reason || '',
@@ -746,6 +990,7 @@ export class FirestoreCoopService {
   }
 
   public async updateTenantCreditBalance(tenantId: string, balance: number): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.tenantDoc(tenantId).set({
       platformCreditBalance: balance,
       updatedAt: new Date().toISOString(),
@@ -757,21 +1002,25 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveRegistration(reg: CooperativeRegistration): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.coopRegistrationsCol().doc(reg.id).set(reg, { merge: true });
   }
 
   public async getRegistration(id: string): Promise<CooperativeRegistration | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.coopRegistrationsCol().doc(id).get();
     return doc.exists ? (doc.data() as CooperativeRegistration) : null;
   }
 
   public async listRegistrations(): Promise<CooperativeRegistration[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.coopRegistrationsCol().get();
     const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as CooperativeRegistration);
     return list.sort((a, b) => new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime());
   }
 
   public async deleteRegistration(id: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
     const ref = this.coopRegistrationsCol().doc(id);
     const doc = await ref.get();
     if (!doc.exists) return false;
@@ -780,6 +1029,7 @@ export class FirestoreCoopService {
   }
 
   public async clearAllRegistrations(): Promise<void> {
+    if (!this.isConfigured()) return;
     const snapshot = await this.coopRegistrationsCol().get();
     if (snapshot.empty) return;
     const batch = this.db.batch();
@@ -792,10 +1042,12 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async recordCreditTransaction(tx: PlatformCreditTransaction): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.creditTransactionsCol().doc(tx.id).set(tx);
   }
 
   public async listCreditTransactions(tenantId?: string): Promise<PlatformCreditTransaction[]> {
+    if (!this.isConfigured()) return [];
     let query: any = this.creditTransactionsCol();
     if (tenantId) {
       query = query.where('tenantId', '==', tenantId);
@@ -810,10 +1062,12 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveBroadcast(broadcast: SystemBroadcast): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.broadcastsCol().doc(broadcast.id).set(broadcast, { merge: true });
   }
 
   public async listBroadcasts(onlyActive?: boolean): Promise<SystemBroadcast[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.broadcastsCol().get();
     let list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as SystemBroadcast);
     if (onlyActive) {
@@ -824,6 +1078,7 @@ export class FirestoreCoopService {
   }
 
   public async deleteBroadcast(id: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
     const ref = this.broadcastsCol().doc(id);
     const doc = await ref.get();
     if (!doc.exists) return false;
@@ -836,6 +1091,7 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async listPlatformPaymentMethods(): Promise<PlatformPaymentMethod[]> {
+    if (!this.isConfigured()) return [];
     const snapshot = await this.platformPaymentMethodsCol().get();
     let list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as PlatformPaymentMethod);
     if (list.length === 0) {
@@ -859,10 +1115,12 @@ export class FirestoreCoopService {
   }
 
   public async savePlatformPaymentMethod(method: PlatformPaymentMethod): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.platformPaymentMethodsCol().doc(method.id).set(method, { merge: true });
   }
 
   public async deletePlatformPaymentMethod(id: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
     const ref = this.platformPaymentMethodsCol().doc(id);
     const doc = await ref.get();
     if (!doc.exists) return false;
@@ -875,10 +1133,12 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async createCreditTopupRequest(request: PlatformCreditTopupRequest): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.creditTopupRequestsCol().doc(request.id).set(request, { merge: true });
   }
 
   public async listCreditTopupRequests(tenantId?: string): Promise<PlatformCreditTopupRequest[]> {
+    if (!this.isConfigured()) return [];
     let query: any = this.creditTopupRequestsCol();
     if (tenantId) {
       query = query.where('tenantId', '==', tenantId);
@@ -889,11 +1149,13 @@ export class FirestoreCoopService {
   }
 
   public async getCreditTopupRequest(id: string): Promise<PlatformCreditTopupRequest | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.creditTopupRequestsCol().doc(id).get();
     return doc.exists ? (doc.data() as PlatformCreditTopupRequest) : null;
   }
 
   public async updateCreditTopupRequest(id: string, updates: Partial<PlatformCreditTopupRequest>): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.creditTopupRequestsCol().doc(id).set({
       ...updates,
       updatedAt: new Date().toISOString(),
@@ -909,11 +1171,13 @@ export class FirestoreCoopService {
   }
 
   public async getPlatformConfig(configId: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
     const doc = await this.platformConfigCol().doc(configId).get();
     return doc.exists ? doc.data() : null;
   }
 
   public async savePlatformConfig(configId: string, data: any): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.platformConfigCol().doc(configId).set({
       ...data,
       updatedAt: new Date().toISOString(),
@@ -925,6 +1189,7 @@ export class FirestoreCoopService {
   }
 
   public async getTenantPaymongoConfig(tenantId: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
     try {
       const doc = await this.tenantPaymongoDoc(tenantId).get();
       return doc.exists ? doc.data() : null;
@@ -934,6 +1199,7 @@ export class FirestoreCoopService {
   }
 
   public async saveTenantPaymongoConfig(tenantId: string, data: any): Promise<void> {
+    if (!this.isConfigured()) return;
     await this.tenantPaymongoDoc(tenantId).set({
       ...data,
       updatedAt: new Date().toISOString(),

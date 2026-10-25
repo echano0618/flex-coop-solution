@@ -15,6 +15,7 @@ import {
   PlatformCreditTransaction,
   SystemBroadcast,
   CooperativeRegistration,
+  BankTransferPaymentRequest,
 } from '@flexcoop/shared-types';
 import { AmortizationService } from '../modules/lending/amortization.service';
 import { MonetizationService } from '../modules/monetization/monetization.service';
@@ -78,6 +79,8 @@ export class AppDataStore {
   public systemConfigs: Map<string, any> = new Map(); // tenantId -> SystemConfig
   public platformPaymentMethods: PlatformPaymentMethod[] = [];
   public creditTopupRequests: PlatformCreditTopupRequest[] = [];
+  public memberCredentials: Map<string, Map<string, any>> = new Map(); // tenantId -> (identifier -> cred)
+  public bankTransferRequests: Map<string, BankTransferPaymentRequest[]> = new Map(); // tenantId -> requests
 
   constructor() {
     this.seedDefaultPaymentMethods();

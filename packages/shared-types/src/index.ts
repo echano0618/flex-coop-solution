@@ -141,6 +141,16 @@ export interface Member {
   gender: 'MALE' | 'FEMALE' | 'OTHER';
   civilStatus: 'SINGLE' | 'MARRIED' | 'WIDOWED' | 'SEPARATED';
   address: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  municipality?: string;
+  barangay?: string;
+  street?: string;
+  houseNumber?: string;
+  buildingNumber?: string;
+  zipCode?: string;
+  zipcode?: string;
   psgcAddress?: import('./psgc').PSGCAddress;
   // Institutional / Workplace & Employment Details
   employeeIdNumber?: string;
@@ -154,6 +164,18 @@ export interface Member {
   isDividendEligible?: boolean;
   status: MemberStatus;
   kycStatus: KYCStatus;
+  paidUpShares?: number;
+  paidUpCapital?: number;
+  sharesCount?: number;
+  subscribedShares?: number;
+  subscribedCapital?: number;
+  totalShareCapitalBalance?: number;
+  savingsBalance?: number;
+  loanBalance?: number;
+  sharePaymentStatus?: string;
+  memberNo?: string;
+  selfieUrl?: string;
+  selfiePreview?: string | null;
   joinedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -543,6 +565,9 @@ export interface Loan {
   balanceRemaining: number;
   schedule: AmortizationScheduleItem[];
   coMaker?: CoMakerEndorsement;
+  memberName?: string;
+  memberNo?: string;
+  repayments?: any[];
   createdAt: string;
   updatedAt: string;
 }
@@ -612,6 +637,7 @@ export interface JournalEntry {
   totalDebit: number;
   totalCredit: number;
   isBalanced: boolean;
+  channel?: string;
   createdByUserId: string;
   postedAt: string;
 }
@@ -822,3 +848,34 @@ export * from './psgc';
 // 11. SAAS OPERATOR & CONTROL PLANE
 // ==========================================
 export * from './operator';
+
+// ==========================================
+// 12. MEMBER BANK TRANSFER VERIFICATION REQUESTS
+// ==========================================
+export type BankTransferPaymentType = 'SHARE_PURCHASE' | 'LOAN_PAYMENT' | 'SAVINGS_DEPOSIT';
+export type BankTransferPaymentStatus = 'PENDING_CONFIRMATION' | 'CONFIRMED' | 'REJECTED';
+
+export interface BankTransferPaymentRequest {
+  id: string;
+  tenantId: string;
+  type: BankTransferPaymentType;
+  memberId: string;
+  memberNumber: string;
+  memberName: string;
+  amount: number;
+  sharesCount?: number;
+  loanId?: string;
+  loanNumber?: string;
+  bankName: string;
+  referenceNumber: string;
+  notes?: string;
+  status: BankTransferPaymentStatus;
+  createdAt: string;
+  confirmedAt?: string;
+  confirmedByUserId?: string;
+  confirmedByUserName?: string;
+  rejectionReason?: string;
+  journalEntryId?: string;
+  receiptNumber?: string;
+}
+

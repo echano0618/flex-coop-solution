@@ -81,6 +81,7 @@ import {
 import {
   MemberRegistrationFieldConfig,
   DEFAULT_MEMBER_REGISTRATION_FIELDS,
+  BankTransferPaymentRequest,
 } from '@flexcoop/shared-types';
 import { getApiBaseUrl } from './api-config';
 import {
@@ -477,14 +478,61 @@ const INITIAL_COLLATERALS: any[] = [];
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
-  const [authTimeoutNotice, setAuthTimeoutNotice] = useState<boolean>(false);
-  const [coopName, setCoopName] = useState<string>('Cooperative Enterprise');
-  const [tenantSlug, setTenantSlug] = useState<string>('default');
+  const [coopName, setCoopName] = useState<string>(() => resolveTenantCoop().name);
+  const [tenantSlug, setTenantSlug] = useState<string>(() => resolveTenantCoop().slug);
   const isTestTenant = isTestCoopTenant(tenantSlug);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [currentStaff, setCurrentStaff] = useState<StaffAccount>(STAFF_ACCOUNTS[0]);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const info = resolveTenantCoop();
+    const session = getTenantAdminSession(info.slug);
+    return !!(session && (session.token || session.role || session.email));
+  });
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const info = resolveTenantCoop();
+    const session = getTenantAdminSession(info.slug);
+    return !(session && (session.token || session.role || session.email));
+  });
+  const [authTimeoutNotice, setAuthTimeoutNotice] = useState<boolean>(false);
+  const [currentStaff, setCurrentStaff] = useState<StaffAccount>(() => {
+    if (typeof window !== 'undefined') {
+      const info = resolveTenantCoop();
+      const session = getTenantAdminSession(info.slug);
+      if (session && (session.token || session.role || session.email)) {
+        const matched = STAFF_ACCOUNTS.find((a) => a.role === session.role || a.email === session.email);
+        if (matched) return matched;
+        return {
+          id: session.id || 'usr_session',
+          role: session.role || 'GENERAL_MANAGER',
+          roleTitle: session.roleTitle || 'Administrator',
+          name: session.name || 'Cooperative Administrator',
+          initials: (session.name || 'AD').split(' ').map((n: string) => n[0]).join('').slice(0, 2),
+          color: 'bg-indigo-600',
+          description: 'Authenticated Staff Session',
+          allowedTabs: [
+            'overview',
+            'members',
+            'products',
+            'los',
+            'calculator',
+            'amortization_schedules',
+            'collateral',
+            'cashier',
+            'accounting',
+            'surplus',
+            'invoices',
+            'reports',
+            'iam',
+            'rbac',
+            'system_config',
+            'platform_usage',
+          ],
+        } as StaffAccount;
+      }
+    }
+    return STAFF_ACCOUNTS[0];
+  });
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SYNCED'>('IDLE');
@@ -554,8 +602,8 @@ export default function AdminDashboard() {
 
         if (stored) {
           const parsed = stored;
-          // Invalidate legacy dev bypass sessions
-          if (parsed && (parsed.id === 'usr_gm_session' || parsed.id === 'usr_sysadmin_01' || parsed.name === 'Platform System Administrator')) {
+          // Invalidate legacy mock dev bypass sessions without valid token
+          if (parsed && parsed.id === 'usr_gm_session' && !parsed.token) {
             clearTenantAdminSession(tenantInfo.slug);
             stored = null;
           }
@@ -563,7 +611,7 @@ export default function AdminDashboard() {
 
         if (stored) {
           const parsed = stored;
-          if (parsed && parsed.token && (parsed.role || parsed.email)) {
+          if (parsed && (parsed.token || parsed.role || parsed.email)) {
             const matched = STAFF_ACCOUNTS.find((a) => a.role === parsed.role || a.email === parsed.email) || {
               id: parsed.id || 'usr_session',
               role: parsed.role || 'GENERAL_MANAGER',
@@ -589,15 +637,16 @@ export default function AdminDashboard() {
       console.warn('Admin auth session parse error:', e);
     }
 
-    // Clear stale cookies so they never interfere with /login
+    // Unauthenticated: clean cookies and redirect to login
     if (typeof document !== 'undefined') {
       document.cookie = 'flexcoop_admin_session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     }
 
     setIsCheckingAuth(false);
+    setIsAuthenticated(false);
     const targetLoginUrl = tenantInfo.slug && tenantInfo.slug !== 'default' ? `/login?coop=${tenantInfo.slug}` : '/login';
-    router.replace(targetLoginUrl);
-  }, [router]);
+    window.location.href = targetLoginUrl;
+  }, []);
 
   const handleAdminSignOut = () => {
     const tenantInfo = resolveTenantCoop();
@@ -638,7 +687,9 @@ export default function AdminDashboard() {
   const [rbacNotification, setRbacNotification] = useState<string | null>(null);
 
   // System Configuration Sub-Section State
-  const [systemConfigSection, setSystemConfigSection] = useState<'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee' | 'savings_deposit' | 'paymongo'>('membership_registration');
+  const [systemConfigSection, setSystemConfigSection] = useState<
+    'membership_registration' | 'security_policies' | 'share_capital' | 'tech_fee' | 'coop_filing_fee' | 'savings_deposit' | 'paymongo' | 'payment_options'
+  >('membership_registration');
 
   // Derive visible tabs based on dynamic rolePermissions for currentStaff.role
   const effectiveAllowedTabs = rolePermissions[currentStaff.role] || currentStaff.allowedTabs;
@@ -1405,6 +1456,197 @@ export default function AdminDashboard() {
     }
   };
 
+  // Cooperative Payment Options Configuration (Bank Transfer, e-Wallet Transfer, QR PH via PayMongo)
+  const [bankTransferConfig, setBankTransferConfig] = useState<{
+    enabled: boolean;
+    bankName: string;
+    accountName: string;
+    accountNumber: string;
+    branch: string;
+    instructions: string;
+  }>(() => {
+    let initial = {
+      enabled: true,
+      bankName: 'Land Bank of the Philippines',
+      accountName: 'Family Multi-Purpose Cooperative General Account',
+      accountNumber: '0012-9981-22',
+      branch: 'Head Office Branch',
+      instructions: 'Transfer via InstaPay or PESONet. Use your Member Number / Name as the transfer reference note.',
+    };
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_bank_transfer_${tenant.slug}`);
+        if (cached) {
+          initial = { ...initial, ...JSON.parse(cached) };
+        } else {
+          initial.accountName = `${tenant.name} General Account`;
+        }
+      } catch {}
+    }
+    return initial;
+  });
+
+  const [ewalletTransferConfig, setEwalletTransferConfig] = useState<{
+    enabled: boolean;
+    provider: string;
+    accountName: string;
+    accountNumber: string;
+    qrCodeUrl: string;
+    instructions: string;
+  }>(() => {
+    let initial = {
+      enabled: true,
+      provider: 'GCash',
+      accountName: 'Family Multi-Purpose Cooperative Official Finance',
+      accountNumber: '0917-888-2468',
+      qrCodeUrl: '',
+      instructions: 'Send via Express Send or Scan QR. Please input your Member Number in the message note.',
+    };
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_ewallet_transfer_${tenant.slug}`);
+        if (cached) {
+          initial = { ...initial, ...JSON.parse(cached) };
+        } else {
+          initial.accountName = `${tenant.name} Official Finance`;
+        }
+      } catch {}
+    }
+    return initial;
+  });
+
+  const [paymentOptionsActiveSubTab, setPaymentOptionsActiveSubTab] = useState<'all' | 'bank' | 'ewallet' | 'paymongo'>('all');
+  const [paymentOptionsSaving, setPaymentOptionsSaving] = useState<boolean>(false);
+  const [paymentOptionsNotification, setPaymentOptionsNotification] = useState<string | null>(null);
+
+  const fetchPaymentOptionsConfig = async () => {
+    try {
+      const tenant = resolveTenantCoop();
+      const res = await fetch(`${getApiBaseUrl()}/coop/payment-options`, {
+        headers: {
+          'x-tenant-slug': tenant.slug || 'family-coop',
+          'x-tenant-id': `tenant_${(tenant.slug || 'family').replace(/[-_]coop$/, '')}`,
+        },
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.data) {
+        if (data.data.bankTransfer) {
+          setBankTransferConfig((prev) => ({ ...prev, ...data.data.bankTransfer }));
+          try {
+            localStorage.setItem(`flexcoop_bank_transfer_${tenant.slug}`, JSON.stringify(data.data.bankTransfer));
+          } catch {}
+        }
+        if (data.data.ewalletTransfer) {
+          setEwalletTransferConfig((prev) => ({ ...prev, ...data.data.ewalletTransfer }));
+          try {
+            localStorage.setItem(`flexcoop_ewallet_transfer_${tenant.slug}`, JSON.stringify(data.data.ewalletTransfer));
+          } catch {}
+        }
+        if (data.data.paymongo) {
+          setTenantPaymongoConfig((prev) => ({
+            ...prev,
+            isEnabled: data.data.paymongo.enabled !== false,
+            environment: data.data.paymongo.environment || 'test',
+            secretKey: data.data.paymongo.secretKey || prev.secretKey,
+            publicKey: data.data.paymongo.publicKey || prev.publicKey,
+            webhookSecret: data.data.paymongo.webhookSecret || prev.webhookSecret,
+            feeTreatment: data.data.paymongo.feeTreatment || 'PASS_THROUGH',
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load payment options config:', err);
+    }
+    try {
+      await fetchTenantPaymongoConfig();
+    } catch {}
+  };
+
+  const handleSavePaymentOptions = async () => {
+    setPaymentOptionsSaving(true);
+    setPaymentOptionsNotification(null);
+    try {
+      const tenant = resolveTenantCoop();
+      try {
+        localStorage.setItem(`flexcoop_bank_transfer_${tenant.slug}`, JSON.stringify(bankTransferConfig));
+        localStorage.setItem(`flexcoop_ewallet_transfer_${tenant.slug}`, JSON.stringify(ewalletTransferConfig));
+        localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`, tenantPaymongoConfig.feeTreatment);
+        localStorage.setItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`, String(tenantPaymongoConfig.isEnabled));
+      } catch {}
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-tenant-slug': tenant.slug || 'family-coop',
+        'x-tenant-id': `tenant_${(tenant.slug || 'family').replace(/[-_]coop$/, '')}`,
+      };
+
+      const payload = {
+        bankTransfer: bankTransferConfig,
+        ewalletTransfer: ewalletTransferConfig,
+        paymongo: {
+          enabled: tenantPaymongoConfig.isEnabled,
+          environment: tenantPaymongoConfig.environment,
+          secretKey: tenantPaymongoConfig.secretKey,
+          publicKey: tenantPaymongoConfig.publicKey,
+          webhookSecret: tenantPaymongoConfig.webhookSecret,
+          feeTreatment: tenantPaymongoConfig.feeTreatment,
+        },
+      };
+
+      const res = await fetch(`${getApiBaseUrl()}/coop/payment-options`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      try {
+        await handleSaveTenantPaymongoConfig();
+      } catch {}
+
+      if (res.ok && data.success) {
+        setPaymentOptionsNotification('All payment options (Bank Transfer, e-Wallet Transfer, and QR PH via PayMongo) were saved successfully!');
+        setTimeout(() => setPaymentOptionsNotification(null), 5000);
+      } else {
+        alert(data.error || 'Failed to save payment options.');
+      }
+    } catch (err: any) {
+      alert(`Network error saving payment options: ${err.message}`);
+    } finally {
+      setPaymentOptionsSaving(false);
+    }
+  };
+
+  const handleResetPaymentOptions = () => {
+    const tenant = resolveTenantCoop();
+    setBankTransferConfig({
+      enabled: true,
+      bankName: 'Land Bank of the Philippines',
+      accountName: `${tenant.name} General Account`,
+      accountNumber: '0012-9981-22',
+      branch: 'Head Office Branch',
+      instructions: 'Transfer via InstaPay or PESONet. Use your Member Number / Name as the transfer reference note.',
+    });
+    setEwalletTransferConfig({
+      enabled: true,
+      provider: 'GCash',
+      accountName: `${tenant.name} Official Finance`,
+      accountNumber: '0917-888-2468',
+      qrCodeUrl: '',
+      instructions: 'Send via Express Send or Scan QR. Please input your Member Number in the message note.',
+    });
+    setTenantPaymongoConfig((prev) => ({
+      ...prev,
+      isEnabled: true,
+      feeTreatment: 'PASS_THROUGH',
+      environment: 'test',
+    }));
+    setPaymentOptionsNotification('Payment options reset to defaults. Click "Save Payment Options" to commit changes.');
+    setTimeout(() => setPaymentOptionsNotification(null), 4000);
+  };
+
   // Platform Escrow & Usage State
   interface EscrowTransaction {
     id: string;
@@ -2003,33 +2245,71 @@ export default function AdminDashboard() {
     setTimeout(() => setProductSaveNotification(null), 5000);
   };
 
-  // Collaterals & Chattel Mortgages State
-  const [collaterals, setCollaterals] = useState<any[]>(INITIAL_COLLATERALS);
+  // Collaterals & Chattel Mortgages State (Starting balance strictly 0 on production tenants; zero dummy records)
+  const [collaterals, setCollaterals] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const stored = localStorage.getItem(`flexcoop_collaterals_${tenant.slug}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            if (!isTestCoopTenant(tenant.slug)) {
+              return parsed.filter(
+                (c: any) =>
+                  c.id !== 'col_dummy_1' &&
+                  c.id !== 'col_dummy_2' &&
+                  !c.description?.includes('240 sqm Commercial Property')
+              );
+            }
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return [];
+  });
   const [showCollateralModal, setShowCollateralModal] = useState<boolean>(false);
   const [collateralNotification, setCollateralNotification] = useState<string | null>(null);
 
-  // New Collateral Form State
+  // New Collateral Form State (Clean defaults, zero dummy values)
   const [newColType, setNewColType] = useState<'REAL_ESTATE_MORTGAGE' | 'CHATTEL_MORTGAGE'>('REAL_ESTATE_MORTGAGE');
-  const [newColMemberId, setNewColMemberId] = useState<string>('mem_1');
-  const [newColDescription, setNewColDescription] = useState<string>('240 sqm Commercial Property with 3-Door Commercial Unit');
-  const [newColAppraisedValue, setNewColAppraisedValue] = useState<number>(2500000);
-  const [newColLoanPrincipal, setNewColLoanPrincipal] = useState<number>(1500000);
-  const [newColDocNumber, setNewColDocNumber] = useState<string>('TCT-004-2022009183');
-  const [newColRegistryLocation, setNewColRegistryLocation] = useState<string>('Quezon City Registry of Deeds');
+  const [newColMemberId, setNewColMemberId] = useState<string>('');
+  const [newColDescription, setNewColDescription] = useState<string>('');
+  const [newColAppraisedValue, setNewColAppraisedValue] = useState<number>(0);
+  const [newColLoanPrincipal, setNewColLoanPrincipal] = useState<number>(0);
+  const [newColDocNumber, setNewColDocNumber] = useState<string>('');
+  const [newColRegistryLocation, setNewColRegistryLocation] = useState<string>('');
 
   // Computed LTV in modal
   const computedModalLTV = newColAppraisedValue > 0 ? (newColLoanPrincipal / newColAppraisedValue) * 100 : 0;
   const maxAllowedLTVLimit = newColType === 'REAL_ESTATE_MORTGAGE' ? 70.0 : 60.0;
   const isModalLTVExceeded = computedModalLTV > maxAllowedLTVLimit;
 
+  // Dynamic Total Registered Assets & Portfolio Average LTV (Starts at 0.00 for clean tenants)
+  const totalRegisteredAssets = useMemo(() => {
+    return collaterals.reduce((sum, c) => sum + (Number(c.appraisedValue) || 0), 0);
+  }, [collaterals]);
+
+  const portfolioAverageLtv = useMemo(() => {
+    if (collaterals.length === 0) return 0;
+    const totalAppraised = collaterals.reduce((sum, c) => sum + (Number(c.appraisedValue) || 0), 0);
+    const totalMaxLoan = collaterals.reduce((sum, c) => sum + (Number(c.maxAllowableLoanAmount) || 0), 0);
+    return totalAppraised > 0 ? (totalMaxLoan / totalAppraised) * 100 : 0;
+  }, [collaterals]);
+
   const handleRegisterCollateral = (e: React.FormEvent) => {
     e.preventDefault();
-    const selectedMember = members.find((m) => m.id === newColMemberId) || members[0];
+    const selectedMember = members.find((m) => m.id === newColMemberId) || members[0] || {
+      id: 'mem_default',
+      memberNo: 'MEM-2026-0001',
+      name: 'Cooperative Member',
+    };
     const maxLTVRatio = newColType === 'REAL_ESTATE_MORTGAGE' ? 0.70 : 0.60;
     const item = {
       id: `col_${Date.now()}`,
       memberId: selectedMember.id,
-      memberNumber: selectedMember.memberNo,
+      memberNumber: selectedMember.memberNo || (selectedMember as any).memberNumber || 'MEM-2026-0001',
       memberName: selectedMember.name,
       type: newColType,
       description: newColDescription,
@@ -2046,26 +2326,39 @@ export default function AdminDashboard() {
       notes: `Registered with ${newColRegistryLocation}. Fair market appraisal verified by licensed appraiser.`,
     };
 
-    setCollaterals((prev) => [item, ...prev]);
+    const updated = [item, ...collaterals];
+    setCollaterals(updated);
+    try {
+      const tenant = resolveTenantCoop();
+      localStorage.setItem(`flexcoop_collaterals_${tenant.slug}`, JSON.stringify(updated));
+    } catch {}
     setShowCollateralModal(false);
+    setNewColDescription('');
+    setNewColAppraisedValue(0);
+    setNewColLoanPrincipal(0);
+    setNewColDocNumber('');
+    setNewColRegistryLocation('');
     setCollateralNotification(`Collateral "${item.description}" registered successfully with LTV ${(computedModalLTV).toFixed(1)}%!`);
     setTimeout(() => setCollateralNotification(null), 5000);
   };
 
   const handleDischargeMortgage = (colId: string) => {
-    setCollaterals((prev) =>
-      prev.map((c) =>
-        c.id === colId
-          ? {
-              ...c,
-              encumbranceStatus: 'DISCHARGED',
-              linkedLoanId: undefined,
-              linkedLoanNumber: undefined,
-              notes: `MORTGAGE RELEASED & DISCHARGED upon full loan payoff on ${new Date().toLocaleDateString('en-PH')}.`,
-            }
-          : c
-      )
+    const updated = collaterals.map((c) =>
+      c.id === colId
+        ? {
+            ...c,
+            encumbranceStatus: 'DISCHARGED',
+            linkedLoanId: undefined,
+            linkedLoanNumber: undefined,
+            notes: `MORTGAGE RELEASED & DISCHARGED upon full loan payoff on ${new Date().toLocaleDateString('en-PH')}.`,
+          }
+        : c
     );
+    setCollaterals(updated);
+    try {
+      const tenant = resolveTenantCoop();
+      localStorage.setItem(`flexcoop_collaterals_${tenant.slug}`, JSON.stringify(updated));
+    } catch {}
     setCollateralNotification('Mortgage encumbrance successfully discharged and released to borrower!');
     setTimeout(() => setCollateralNotification(null), 4000);
   };
@@ -2233,6 +2526,13 @@ export default function AdminDashboard() {
     birthdate: '1990-01-01',
     gender: 'FEMALE',
     civilStatus: 'SINGLE',
+    country: 'Philippines',
+    region: '',
+    city: '',
+    barangay: '',
+    street: '',
+    houseNumber: '',
+    zipCode: '',
     address: '',
     employeeIdNumber: '',
     position: '',
@@ -2260,6 +2560,16 @@ export default function AdminDashboard() {
     const tenantInfo = resolveTenantCoop();
     const effectiveSlug = tenantInfo.slug && tenantInfo.slug !== 'default' ? tenantInfo.slug : 'family-coop';
 
+    const formattedAddress = [
+      newMemberForm.houseNumber.trim(),
+      newMemberForm.street.trim(),
+      newMemberForm.barangay.trim(),
+      newMemberForm.city.trim(),
+      newMemberForm.region.trim(),
+      newMemberForm.zipCode.trim(),
+      newMemberForm.country.trim() || 'Philippines',
+    ].filter(Boolean).join(', ');
+
     try {
       const res = await fetch(`${getApiBaseUrl()}/auth/member/register`, {
         method: 'POST',
@@ -2277,7 +2587,17 @@ export default function AdminDashboard() {
           birthdate: newMemberForm.birthdate,
           gender: newMemberForm.gender,
           civilStatus: newMemberForm.civilStatus,
-          address: newMemberForm.address.trim() || 'Philippines',
+          country: newMemberForm.country.trim() || 'Philippines',
+          region: newMemberForm.region.trim(),
+          city: newMemberForm.city.trim(),
+          municipality: newMemberForm.city.trim(),
+          barangay: newMemberForm.barangay.trim(),
+          street: newMemberForm.street.trim(),
+          houseNumber: newMemberForm.houseNumber.trim(),
+          buildingNumber: newMemberForm.houseNumber.trim(),
+          zipCode: newMemberForm.zipCode.trim(),
+          zipcode: newMemberForm.zipCode.trim(),
+          address: formattedAddress || newMemberForm.address.trim() || 'Philippines',
           employeeIdNumber: newMemberForm.employeeIdNumber.trim(),
           position: newMemberForm.position.trim(),
           officeUnitSection: newMemberForm.officeUnitSection.trim(),
@@ -2321,6 +2641,13 @@ export default function AdminDashboard() {
         birthdate: '1990-01-01',
         gender: 'FEMALE',
         civilStatus: 'SINGLE',
+        country: 'Philippines',
+        region: '',
+        city: '',
+        barangay: '',
+        street: '',
+        houseNumber: '',
+        zipCode: '',
         address: '',
         employeeIdNumber: '',
         position: '',
@@ -2496,6 +2823,7 @@ export default function AdminDashboard() {
         reviewedBy: 'Cooperative Development Authority (CDA)',
         reviewDate: 'Jan 15, 2026',
         reviewNotes: 'Declared General Manager registered as Member #1 upon cooperative accreditation pursuant to RA 9520.',
+        selfiePreview: '/avatars/MEM-2026-0001.jpg',
       };
 
       const list: MemberRecord[] = [gmMember];
@@ -2714,16 +3042,16 @@ export default function AdminDashboard() {
         console.warn('Error loading online system config:', err);
       }
       try {
-        await fetchTenantPaymongoConfig();
+        await fetchPaymentOptionsConfig();
       } catch {}
     }
     loadOnlineSystemConfig();
   }, []);
 
-  // Sync PayMongo config when navigating to system_config tab or paymongo section
+  // Sync Payment Options & PayMongo config when navigating to system_config tab or payment_options/paymongo section
   useEffect(() => {
-    if (activeTab === 'system_config' || systemConfigSection === 'paymongo') {
-      fetchTenantPaymongoConfig();
+    if (activeTab === 'system_config' || systemConfigSection === 'payment_options' || systemConfigSection === 'paymongo') {
+      fetchPaymentOptionsConfig();
     }
   }, [activeTab, systemConfigSection]);
 
@@ -3000,23 +3328,34 @@ export default function AdminDashboard() {
       );
     }
 
-    try {
-      const tenantInfo = resolveTenantCoop();
-      fetch(`${getApiBaseUrl()}/shares/deposit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-slug': tenantInfo.slug,
-        },
-        body: JSON.stringify({
-          memberId: sharePaymentMember.id,
-          amount: pledge,
-          channel: sharePaymentMethod === 'QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
-        }),
-      }).catch((e) => console.warn('Online shares deposit sync error:', e));
-    } catch (e) {
-      console.warn('Error initiating online shares deposit:', e);
-    }
+    (async () => {
+      try {
+        const tenantInfo = resolveTenantCoop();
+        const targetTenantId = (currentStaff as any)?.tenantId || 'tenant_' + tenantInfo.slug.replace(/[-_]coop$/, '');
+        const res = await fetch(`${getApiBaseUrl()}/shares/deposit?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-slug': tenantInfo.slug,
+            'x-tenant-id': targetTenantId,
+          },
+          body: JSON.stringify({
+            memberId: sharePaymentMember.id,
+            amount: pledge,
+            sharesCount: Math.floor(pledge / 100),
+            channel: sharePaymentMethod === 'QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER',
+            cashierUserId: currentStaff?.id || 'usr_admin',
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          await loadAndSyncMembers();
+          await loadAccountingData();
+        }
+      } catch (e) {
+        console.warn('Error initiating online shares deposit:', e);
+      }
+    })();
 
     setTimeout(() => setMemberActionNotification(null), 6000);
     setShowSharePaymentModal(false);
@@ -3652,6 +3991,12 @@ export default function AdminDashboard() {
       : 0;
   const totalCharge = activeTxAmount + passOnFee;
 
+  // Pending Member Bank Transfer Requests State (Requires Admin/Cashier Confirmation)
+  const [pendingBankTransfers, setPendingBankTransfers] = useState<BankTransferPaymentRequest[]>([]);
+  const [isLoadingBankTransfers, setIsLoadingBankTransfers] = useState<boolean>(false);
+  const [isConfirmingBankTransferId, setIsConfirmingBankTransferId] = useState<string | null>(null);
+  const [isRejectingBankTransferId, setIsRejectingBankTransferId] = useState<string | null>(null);
+
   // Official Receipt Modal State
   const [officialReceiptModal, setOfficialReceiptModal] = useState<{
     receiptNo: string;
@@ -3716,6 +4061,336 @@ export default function AdminDashboard() {
       console.warn('Accounting load error:', err);
     }
   }, []);
+
+  const [isPostingCashierTx, setIsPostingCashierTx] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (members.length > 0 && (!cashierMemberId || !members.some((m) => m.id === cashierMemberId))) {
+      setCashierMemberId(members[0].id);
+    }
+  }, [members, cashierMemberId]);
+
+  const handlePostCashierTransaction = async () => {
+    if (isPostingCashierTx) return;
+    const member = members.find((m) => m.id === cashierMemberId) || members[0];
+    if (!member) {
+      alert('Please select a valid cooperative member.');
+      return;
+    }
+
+    const tenantInfo = resolveTenantCoop();
+    const targetTenantId = (currentStaff as any)?.tenantId || 'tenant_' + tenantInfo.slug.replace(/[-_]coop$/, '');
+
+    setIsPostingCashierTx(true);
+    try {
+      const nowIso = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+      const debitAccount = paymentChannel === 'IN_PERSON_CASHIER' ? '1-01-01 (Cash on Hand)' : '1-01-05 (Payment Gateway Float)';
+
+      if (cashierTxCategory === 'SHARE_PURCHASE') {
+        const addedShares = sharesToBuy;
+        const addedAmount = addedShares * 100;
+
+        const res = await fetch(`${getApiBaseUrl()}/shares/deposit?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-slug': tenantInfo.slug,
+            'x-tenant-id': targetTenantId,
+          },
+          body: JSON.stringify({
+            memberId: member.id,
+            amount: addedAmount,
+            sharesCount: addedShares,
+            channel: paymentChannel,
+            cashierUserId: currentStaff.id,
+            passOnFee: paymentChannel === 'PAYMONGO_QRPH' ? passOnFee : 0,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to post share capital transaction.');
+        }
+
+        const orNumber = data.receiptNumber || `OR-SHR-${Date.now().toString(36).toUpperCase()}`;
+        const particulars = `Purchase & Subscription of ${addedShares} Common Shares @ ₱100.00 par value`;
+        const creditAccount = '3-01-03 (Paid-Up Share Capital - Common)';
+
+        await loadAndSyncMembers();
+        await loadAccountingData();
+
+        setOfficialReceiptModal({
+          receiptNo: orNumber,
+          memberName: member.name,
+          memberNo: member.memberNo,
+          txType: 'Share Capital Purchase (Capital Build-Up)',
+          grossAmount: addedAmount,
+          particulars,
+          channel: paymentChannel === 'IN_PERSON_CASHIER' ? 'Over-The-Counter Cash' : 'Counter PayMongo QR Ph',
+          date: nowIso,
+          glEntry: `DR: ${debitAccount} ₱${addedAmount.toFixed(2)} | CR: ${creditAccount} ₱${addedAmount.toFixed(2)}`,
+          cashierName: currentStaff.name,
+        });
+      } else if (cashierTxCategory === 'SAVINGS_DEPOSIT') {
+        const depositAmount = savingsDepositAmount;
+
+        const res = await fetch(`${getApiBaseUrl()}/savings/deposit?coop=${tenantInfo.slug}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-slug': tenantInfo.slug,
+            'x-tenant-id': targetTenantId,
+          },
+          body: JSON.stringify({
+            memberId: member.id,
+            amount: depositAmount,
+            savingsType: savingsCategory,
+            channel: paymentChannel,
+            cashierUserId: currentStaff.id,
+            passOnFee: paymentChannel === 'PAYMONGO_QRPH' ? passOnFee : 0,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to post savings deposit.');
+        }
+
+        const orNumber = data.receiptNumber || `OR-SAV-${Date.now().toString(36).toUpperCase()}`;
+        const particulars = `Deposit to ${savingsCategory === 'COMPULSORY' ? 'Compulsory' : 'Voluntary Regular'} Savings Account`;
+        const creditAccount =
+          savingsCategory === 'COMPULSORY'
+            ? '2-01-01 (Savings Deposits - Compulsory)'
+            : '2-01-02 (Savings Deposits - Voluntary)';
+
+        await loadAndSyncMembers();
+        await loadAccountingData();
+
+        setOfficialReceiptModal({
+          receiptNo: orNumber,
+          memberName: member.name,
+          memberNo: member.memberNo,
+          txType: 'Savings Account Deposit',
+          grossAmount: depositAmount,
+          particulars,
+          channel: paymentChannel === 'IN_PERSON_CASHIER' ? 'Over-The-Counter Cash' : 'Counter PayMongo QR Ph',
+          date: nowIso,
+          glEntry: `DR: ${debitAccount} ₱${depositAmount.toFixed(2)} | CR: ${creditAccount} ₱${depositAmount.toFixed(2)}`,
+          cashierName: currentStaff.name,
+        });
+      } else {
+        // LOAN_REPAYMENT
+        const activeLoan = loanApplications.find(
+          (l: any) => (l.memberId === member.id || l.memberNo === member.memberNo) && l.status === 'DISBURSED'
+        );
+
+        let res: Response;
+        if (activeLoan) {
+          res = await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(activeLoan.rawId || activeLoan.id)}/repay?coop=${tenantInfo.slug}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tenant-slug': tenantInfo.slug,
+              'x-tenant-id': targetTenantId,
+            },
+            body: JSON.stringify({
+              memberId: member.id,
+              memberName: member.name,
+              memberNo: member.memberNo,
+              amountPaid: paymentAmount,
+              channel: paymentChannel,
+              principalPortion: Math.max(0, paymentAmount - 500),
+              interestPortion: 450,
+              penaltyPortion: 50,
+              feeTreatment: 'PASS_THROUGH',
+              cashierUserId: currentStaff.id,
+            }),
+          });
+        } else {
+          res = await fetch(`${getApiBaseUrl()}/payments/cashier?coop=${tenantInfo.slug}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tenant-slug': tenantInfo.slug,
+              'x-tenant-id': targetTenantId,
+            },
+            body: JSON.stringify({
+              memberId: member.id,
+              amountPaid: paymentAmount,
+              channel: paymentChannel,
+              cashierUserId: currentStaff.id,
+            }),
+          });
+        }
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to post loan repayment.');
+        }
+
+        const orNumber = data.receiptNumber || `OR-LN-${Date.now().toString(36).toUpperCase()}`;
+        const particulars = 'Loan Amortization Repayment (Principal + Interest)';
+        const creditAccount = '1-02-01 (Loans Receivable) / 4-01-01 (Interest Income)';
+
+        await loadAndSyncMembers();
+        await loadAccountingData();
+
+        setOfficialReceiptModal({
+          receiptNo: orNumber,
+          memberName: member.name,
+          memberNo: member.memberNo,
+          txType: 'Loan Amortization Repayment',
+          grossAmount: paymentAmount,
+          particulars,
+          channel: paymentChannel === 'IN_PERSON_CASHIER' ? 'Over-The-Counter Cash' : 'Counter PayMongo QR Ph',
+          date: nowIso,
+          glEntry: `DR: ${debitAccount} ₱${paymentAmount.toFixed(2)} | CR: ${creditAccount} ₱${paymentAmount.toFixed(2)}`,
+          cashierName: currentStaff.name,
+        });
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error posting transaction to Cashier counter.');
+    } finally {
+      setIsPostingCashierTx(false);
+    }
+  };
+
+  const loadPendingBankTransfers = useCallback(async () => {
+    setIsLoadingBankTransfers(true);
+    try {
+      const tenantInfo = resolveTenantCoop();
+      const targetTenantId = (currentStaff as any)?.tenantId || 'tenant_' + tenantInfo.slug.replace(/[-_]coop$/, '');
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/requests?status=PENDING_CONFIRMATION&coop=${tenantInfo.slug}`, {
+        headers: {
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': targetTenantId,
+        },
+      });
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.data)) {
+        setPendingBankTransfers(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load pending bank transfers:', err);
+    } finally {
+      setIsLoadingBankTransfers(false);
+    }
+  }, [currentStaff]);
+
+  useEffect(() => {
+    if (activeTab === 'cashier') {
+      loadPendingBankTransfers();
+    }
+  }, [activeTab, loadPendingBankTransfers]);
+
+  useEffect(() => {
+    // Initial fetch of pending bank transfers for badge count
+    loadPendingBankTransfers();
+  }, [loadPendingBankTransfers]);
+
+  const handleConfirmBankTransfer = async (request: BankTransferPaymentRequest) => {
+    if (isConfirmingBankTransferId) return;
+    const isShare = request.type === 'SHARE_PURCHASE';
+    const isLoan = request.type === 'LOAN_PAYMENT';
+    const typeLabel = isShare ? 'Share Capital Purchase' : isLoan ? 'Loan Installment Repayment' : 'Savings Deposit';
+    const confirmed = window.confirm(
+      `Confirm and post bank transfer of ₱${request.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} for ${request.memberName}?\n\n` +
+      `This will execute the CDA double-entry voucher (DR 1-01-02 Cash in Bank) and update the member's ${typeLabel} ledger.`
+    );
+    if (!confirmed) return;
+
+    setIsConfirmingBankTransferId(request.id);
+    try {
+      const tenantInfo = resolveTenantCoop();
+      const targetTenantId = (currentStaff as any)?.tenantId || 'tenant_' + tenantInfo.slug.replace(/[-_]coop$/, '');
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/${request.id}/confirm?coop=${tenantInfo.slug}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          confirmedByUserId: currentStaff.id,
+          confirmedByUserName: currentStaff.name,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to confirm bank transfer.');
+      }
+
+      await loadPendingBankTransfers();
+      await loadAndSyncMembers();
+      await loadAccountingData();
+
+      const orNum = data.data?.receiptNumber || `OR-BT-${Date.now().toString(36).toUpperCase()}`;
+      const nowIso = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+      const creditAccount = isShare
+        ? '3-01-03 (Paid-Up Share Capital - Common)'
+        : isLoan
+        ? '1-02-01 (Loans Receivable - Members)'
+        : '2-01-02 (Voluntary Savings Deposits)';
+
+      setOfficialReceiptModal({
+        receiptNo: orNum,
+        memberName: request.memberName,
+        memberNo: request.memberNumber,
+        txType: `${typeLabel} (Bank Transfer Verified)`,
+        grossAmount: request.amount,
+        particulars: request.notes || `Bank Transfer Settlement (${request.bankName} Trace #${request.referenceNumber})`,
+        channel: `${request.bankName} Official Transfer`,
+        date: nowIso,
+        glEntry: `DR: 1-01-02 (Cash in Bank - General Operating) ₱${request.amount.toFixed(2)} | CR: ${creditAccount} ₱${request.amount.toFixed(2)}`,
+        cashierName: currentStaff.name,
+      });
+    } catch (err: any) {
+      alert(`Confirmation Error: ${err.message}`);
+    } finally {
+      setIsConfirmingBankTransferId(null);
+    }
+  };
+
+  const handleRejectBankTransfer = async (request: BankTransferPaymentRequest) => {
+    if (isRejectingBankTransferId) return;
+    const reason = window.prompt(
+      `Reject bank transfer of ₱${request.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} for ${request.memberName}?\n\nPlease enter the reason for rejection:`,
+      'Trace / Reference number unverified against bank statement'
+    );
+    if (!reason || !reason.trim()) return;
+
+    setIsRejectingBankTransferId(request.id);
+    try {
+      const tenantInfo = resolveTenantCoop();
+      const targetTenantId = (currentStaff as any)?.tenantId || 'tenant_' + tenantInfo.slug.replace(/[-_]coop$/, '');
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/${request.id}/reject?coop=${tenantInfo.slug}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          rejectedByUserId: currentStaff.id,
+          rejectedByUserName: currentStaff.name,
+          rejectionReason: reason.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to reject bank transfer.');
+      }
+
+      await loadPendingBankTransfers();
+      alert(`Bank transfer request ${request.referenceNumber} has been rejected.`);
+    } catch (err: any) {
+      alert(`Rejection Error: ${err.message}`);
+    } finally {
+      setIsRejectingBankTransferId(null);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'accounting') {
@@ -3807,9 +4482,16 @@ export default function AdminDashboard() {
                   <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
                   <span className="truncate">{tab.label}</span>
                 </div>
-                {isActive && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0"></span>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {tab.id === 'cashier' && pendingBankTransfers.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white font-bold text-[9px] shadow-xs animate-pulse">
+                      {pendingBankTransfers.length}
+                    </span>
+                  )}
+                  {isActive && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0"></span>
+                  )}
+                </div>
               </button>
             );
           })}
@@ -3888,7 +4570,14 @@ export default function AdminDashboard() {
                       <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
                       <span className="truncate">{tab.label}</span>
                     </div>
-                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0"></span>}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {tab.id === 'cashier' && pendingBankTransfers.length > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white font-bold text-[9px] shadow-xs animate-pulse">
+                          {pendingBankTransfers.length}
+                        </span>
+                      )}
+                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0"></span>}
+                    </div>
                   </button>
                 );
               })}
@@ -4554,25 +5243,27 @@ export default function AdminDashboard() {
                           </div>
                         </td>
                         <td className="p-3 text-right">
-                          {m.sharePaymentStatus === 'UNPAID' ? (
+                          {(!m.paidUpShares || Number(m.paidUpShares) === 0) ? (
                             <div>
                               <div className="font-semibold text-amber-700 font-mono">₱0.00</div>
                               <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-200 font-bold px-1.5 py-0.5 rounded inline-block mt-0.5">
-                                UNPAID (₱{(m.initialPledge || 3000).toLocaleString()} Pledged)
+                                UNPAID (₱{(m.initialPledge || (m.subscribedShares ? m.subscribedShares * 100 : 5000)).toLocaleString()} Pledged)
                               </span>
                             </div>
                           ) : (
                             <div>
                               <div className="font-semibold text-slate-900 font-mono">
-                                ₱{m.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                ₱{Number(m.paidUpShares).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                               </div>
                               <div className="text-[10px] mt-0.5">
-                                {m.sharePaymentStatus === 'PAID_QRPH' ? (
-                                  <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
-                                    <QrCode className="w-3 h-3 text-emerald-600" /> Paid via QR Ph
+                                {m.sharePaymentStatus === 'PARTIALLY_PAID' || (Number(m.paidUpShares) < ((m.subscribedShares || 50) * 100)) ? (
+                                  <span className="text-amber-800 font-semibold inline-flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                    ₱{Math.max(0, ((m.subscribedShares || 50) * 100) - Number(m.paidUpShares)).toLocaleString()} Pledge Left
                                   </span>
                                 ) : (
-                                  <span className="text-slate-500 font-medium">Paid via OTC</span>
+                                  <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Fully Paid
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -4973,43 +5664,66 @@ export default function AdminDashboard() {
 
                       {/* Pillar 4: Capital Build-Up (CBU) */}
                       <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900 flex items-center gap-1.5">
-                            <CreditCard className="w-4 h-4 text-amber-600" />
-                            4. Capital Build-Up (CBU) Pledge
-                          </span>
-                          <span className={`font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border ${
-                            selectedMemberForReview.sharePaymentStatus === 'UNPAID'
-                              ? 'bg-amber-100 text-amber-900 border-amber-200'
-                              : 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                          }`}>
-                            <CheckCircle2 className="w-3 h-3" />
-                            {selectedMemberForReview.sharePaymentStatus === 'UNPAID' ? 'DEFERRED (POST-REVIEW)' : 'CAPITAL PAID'}
-                          </span>
-                        </div>
-                        <div className="space-y-1 text-[11px] text-slate-600 pt-1">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Subscribed Shares:</span>
-                            <span className="font-semibold text-slate-800">
-                              {selectedMemberForReview.subscribedShares || selectedMemberForReview.sharesCount || 30} Shares (@ ₱100/par)
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Initial Pledge:</span>
-                            <span className="font-bold text-slate-900">
-                              ₱{(selectedMemberForReview.initialPledge || 3000).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Paid-Up Capital:</span>
-                            <span className={`font-mono font-bold ${selectedMemberForReview.paidUpShares > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
-                              ₱{selectedMemberForReview.paidUpShares.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-200">
-                            * Share capital payment is deferred until review passes. Payable via OTC (₱0 fee) or QR Ph (1.5% fee).
-                          </div>
-                        </div>
+                        {(() => {
+                          const subShares = selectedMemberForReview.subscribedShares || selectedMemberForReview.sharesCount || 50;
+                          const pledgeAmt = subShares * 100;
+                          const paidUp = Number(selectedMemberForReview.paidUpShares || 0);
+                          const unpaidPledge = Math.max(0, pledgeAmt - paidUp);
+                          const isFullyPaid = unpaidPledge === 0 && paidUp > 0;
+                          const isPartiallyPaid = paidUp > 0 && unpaidPledge > 0;
+
+                          return (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                                  <CreditCard className="w-4 h-4 text-amber-600" />
+                                  4. Capital Build-Up (CBU) Pledge
+                                </span>
+                                <span className={`font-bold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                                  paidUp === 0
+                                    ? 'bg-amber-100 text-amber-900 border-amber-200'
+                                    : isPartiallyPaid
+                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                    : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                }`}>
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  {paidUp === 0 ? 'PLEDGED (DEFERRED)' : isPartiallyPaid ? 'PARTIALLY PAID' : 'FULLY PAID'}
+                                </span>
+                              </div>
+                              <div className="space-y-1 text-[11px] text-slate-600 pt-1">
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Subscribed Pledge:</span>
+                                  <span className="font-semibold text-slate-800">
+                                    {subShares} Shares (@ ₱100/par)
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Committed Pledge Amount:</span>
+                                  <span className="font-bold text-slate-900">
+                                    ₱{pledgeAmt.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Paid-Up Capital:</span>
+                                  <span className={`font-mono font-bold ${paidUp > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                    ₱{paidUp.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                                {unpaidPledge > 0 && (
+                                  <div className="flex justify-between text-rose-700 font-medium">
+                                    <span>Remaining Unpaid Pledge:</span>
+                                    <span className="font-mono font-bold">
+                                      ₱{unpaidPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({Math.floor(unpaidPledge / 100)} shares)
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-200">
+                                  * Share capital payment prioritizes paying down the subscription pledge first before expanding subscribed shares.
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -5362,20 +6076,41 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Pledge Overview */}
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Subscribed Shares:</span>
-                      <strong className="text-slate-900 font-mono">
-                        {sharePaymentMember.subscribedShares || 30} Common Shares (@ ₱100.00 par)
-                      </strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Pledged Capital Amount:</span>
-                      <strong className="text-emerald-700 font-mono text-sm">
-                        ₱{(sharePaymentMember.initialPledge || 3000).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                      </strong>
-                    </div>
-                  </div>
+                  {(() => {
+                    const subShares = sharePaymentMember.subscribedShares || sharePaymentMember.sharesCount || 50;
+                    const pledgeAmt = subShares * 100;
+                    const paidUp = Number(sharePaymentMember.paidUpShares || 0);
+                    const unpaidPledge = Math.max(0, pledgeAmt - paidUp);
+
+                    return (
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Subscribed Shares:</span>
+                          <strong className="text-slate-900 font-mono">
+                            {subShares} Common Shares (@ ₱100.00 par)
+                          </strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Committed Pledge Amount:</span>
+                          <strong className="text-slate-900 font-mono">
+                            ₱{pledgeAmt.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Paid-Up To Date:</span>
+                          <strong className="text-emerald-700 font-mono">
+                            ₱{paidUp.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({Math.floor(paidUp / 100)} shares)
+                          </strong>
+                        </div>
+                        <div className="flex justify-between border-t border-slate-200 pt-1.5">
+                          <span className="text-slate-600 font-bold">Unpaid Pledge Balance:</span>
+                          <strong className={unpaidPledge === 0 ? "text-emerald-700 font-mono text-sm" : "text-amber-800 font-mono text-sm"}>
+                            {unpaidPledge === 0 ? '₱0.00 (Fully Settled)' : `₱${unpaidPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (${Math.floor(unpaidPledge / 100)} shares)`}
+                          </strong>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Payment Method Selector */}
                   <div className="space-y-3">
@@ -8884,6 +9619,155 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+            {/* CDA Internal Control Notice & Pending Bank Transfers Queue */}
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-amber-950">
+                        Pending Member Bank Transfers (Awaiting Cashier Confirmation)
+                      </h3>
+                      {pendingBankTransfers.length > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-600 text-white font-bold text-[10px]">
+                          {pendingBankTransfers.length} Action Required
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold text-[10px] border border-emerald-200">
+                          All Cleared
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-amber-800/80 mt-0.5">
+                      CDA Audit Control: Member self-service bank transfers remain pending until verified against official cooperative bank deposits. Confirming executes double-entry voucher (DR 1-01-02 Cash in Bank) and updates member ledgers.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => loadPendingBankTransfers()}
+                  disabled={isLoadingBankTransfers}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-white hover:bg-amber-100/50 text-amber-900 text-xs font-semibold shadow-2xs transition shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingBankTransfers ? 'animate-spin' : ''}`} />
+                  <span>Refresh Queue</span>
+                </button>
+              </div>
+
+              {isLoadingBankTransfers ? (
+                <div className="py-6 text-center text-xs text-amber-800 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+                  <span>Loading pending bank transfer requests...</span>
+                </div>
+              ) : pendingBankTransfers.length === 0 ? (
+                <div className="bg-white/80 rounded-lg border border-amber-200/60 p-4 text-center">
+                  <p className="text-xs text-slate-500 font-medium">
+                    No pending member bank transfers awaiting confirmation. New transfer submissions will appear here automatically.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto bg-white rounded-lg border border-amber-200 shadow-2xs">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-amber-100/60 text-amber-950 font-bold border-b border-amber-200 uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-2.5 px-3">Date / Time</th>
+                        <th className="py-2.5 px-3">Member Details</th>
+                        <th className="py-2.5 px-3">Transaction Type</th>
+                        <th className="py-2.5 px-3">Bank & Reference #</th>
+                        <th className="py-2.5 px-3 text-right">Amount</th>
+                        <th className="py-2.5 px-3 text-center">Cashier Verification</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pendingBankTransfers.map((req) => {
+                        const isShare = req.type === 'SHARE_PURCHASE';
+                        const isLoan = req.type === 'LOAN_PAYMENT';
+                        return (
+                          <tr key={req.id} className="hover:bg-amber-50/30 transition">
+                            <td className="py-3 px-3 text-slate-600 whitespace-nowrap">
+                              <div className="font-semibold text-slate-900">
+                                {new Date(req.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {new Date(req.createdAt).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="font-bold text-slate-900">{req.memberName}</div>
+                              <div className="text-[10px] font-mono text-slate-500">ID: {req.memberNumber || req.memberId}</div>
+                            </td>
+                            <td className="py-3 px-3">
+                              {isShare ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[10px]">
+                                  📈 Share Capital {req.sharesCount ? `(${req.sharesCount} shares)` : ''}
+                                </span>
+                              ) : isLoan ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold text-[10px]">
+                                  💰 Loan Repayment {req.loanNumber ? `(#${req.loanNumber})` : ''}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-semibold text-[10px]">
+                                  🏦 Savings Deposit
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="font-bold text-slate-900">{req.bankName}</div>
+                              <div className="font-mono text-emerald-700 text-[11px] font-semibold">Ref: {req.referenceNumber}</div>
+                              {req.notes && (
+                                <div className="text-[10px] text-slate-500 truncate max-w-xs">{req.notes}</div>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <div className="font-extrabold text-sm text-slate-900">
+                                ₱{req.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              <div className="text-[10px] text-amber-700 font-medium">Pending Post</div>
+                            </td>
+                            <td className="py-3 px-3 text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmBankTransfer(req)}
+                                  disabled={isConfirmingBankTransferId === req.id || isRejectingBankTransferId === req.id}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition disabled:opacity-50"
+                                >
+                                  {isConfirmingBankTransferId === req.id ? (
+                                    <>
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Posting...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      <span>Confirm & Post</span>
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectBankTransfer(req)}
+                                  disabled={isConfirmingBankTransferId === req.id || isRejectingBankTransferId === req.id}
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md border border-rose-300 text-rose-700 hover:bg-rose-50 font-semibold text-xs transition disabled:opacity-50"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Reject</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left Column: Transaction Input Controls */}
               <div className="lg:col-span-7 space-y-5">
@@ -8973,20 +9857,54 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="p-3 bg-white rounded-lg border border-amber-200 text-xs space-y-1 text-slate-700">
-                      <div className="flex justify-between">
-                        <span>Total Paid-Up Consideration:</span>
-                        <strong className="text-slate-900 font-mono">₱{(sharesToBuy * 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                      </div>
-                      <div className="flex justify-between text-emerald-700">
-                        <span>New Subscribed & Paid-Up Total:</span>
-                        <strong className="font-mono">
-                          {((members.find((m) => m.id === cashierMemberId)?.sharesCount || 150) + sharesToBuy)} Shares (₱
-                          {((members.find((m) => m.id === cashierMemberId)?.paidUpShares || 15000) + sharesToBuy * 100).toLocaleString()}
-                          )
-                        </strong>
-                      </div>
-                    </div>
+                    {(() => {
+                      const selMem = members.find((m) => m.id === cashierMemberId);
+                      const curPaidUp = selMem ? Number(selMem.paidUpShares || 0) : 0;
+                      const curShares = selMem ? Number(selMem.sharesCount || Math.floor(curPaidUp / 100)) : 0;
+                      const curSubscribed = selMem ? Number(selMem.subscribedShares || Math.max(50, curShares)) : 50;
+                      const unpaidPledge = Math.max(0, (curSubscribed * 100) - curPaidUp);
+
+                      const paymentAmount = sharesToBuy * 100;
+                      const appliedToPledge = Math.min(paymentAmount, unpaidPledge);
+                      const excessPledge = Math.max(0, paymentAmount - unpaidPledge);
+                      const newPaidUp = curPaidUp + paymentAmount;
+                      const newShares = curShares + sharesToBuy;
+                      const newSubscribed = curSubscribed + Math.floor(excessPledge / 100);
+                      const remainingPledge = Math.max(0, (newSubscribed * 100) - newPaidUp);
+
+                      return (
+                        <div className="p-3 bg-white rounded-lg border border-amber-200 text-xs space-y-1.5 text-slate-700">
+                          <div className="flex justify-between">
+                            <span>Payment Amount:</span>
+                            <strong className="text-slate-900 font-mono">₱{paymentAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({sharesToBuy} shares)</strong>
+                          </div>
+                          {appliedToPledge > 0 && (
+                            <div className="flex justify-between text-emerald-700 font-medium">
+                              <span>Applied to Subscription Pledge:</span>
+                              <strong className="font-mono">₱{appliedToPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({Math.floor(appliedToPledge / 100)} shares)</strong>
+                            </div>
+                          )}
+                          {excessPledge > 0 && (
+                            <div className="flex justify-between text-blue-700 font-medium">
+                              <span>Additional Capital Build-Up:</span>
+                              <strong className="font-mono">₱{excessPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({Math.floor(excessPledge / 100)} shares)</strong>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-slate-800 pt-1 border-t border-slate-100">
+                            <span>Unpaid Pledge Balance After:</span>
+                            <strong className={remainingPledge === 0 ? "text-emerald-700 font-mono font-bold" : "text-amber-800 font-mono font-bold"}>
+                              {remainingPledge === 0 ? '₱0.00 (Fully Settled)' : `₱${remainingPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (${Math.floor(remainingPledge / 100)} shares)`}
+                            </strong>
+                          </div>
+                          <div className="flex justify-between text-slate-900 pt-1 border-t border-slate-100">
+                            <span>New Total Paid-Up Capital:</span>
+                            <strong className="font-mono font-black text-emerald-800">
+                              ₱{newPaidUp.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({newShares} Shares)
+                            </strong>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -9123,88 +10041,21 @@ export default function AdminDashboard() {
                     {currentStaff.role === 'CASHIER' || currentStaff.role === 'GENERAL_MANAGER' ? (
                       <button
                         type="button"
-                        onClick={() => {
-                          const member = members.find((m) => m.id === cashierMemberId) || members[0];
-                          const orNumber = `OR-2026-${Math.floor(10000 + Math.random() * 90000)}`;
-                          const nowIso = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
-
-                          let particulars = '';
-                          let debitAccount = paymentChannel === 'IN_PERSON_CASHIER' ? '1-01-01 (Cash on Hand)' : '1-01-05 (Payment Gateway Float)';
-                          let creditAccount = '';
-
-                          if (cashierTxCategory === 'SHARE_PURCHASE') {
-                            const addedShares = sharesToBuy;
-                            const addedAmount = addedShares * 100;
-                            particulars = `Purchase & Subscription of ${addedShares} Common Shares @ ₱100.00 par value`;
-                            creditAccount = '3-01-03 (Paid-Up Share Capital - Common)';
-
-                            setMembers((prev) =>
-                              prev.map((m) =>
-                                m.id === member.id
-                                  ? {
-                                      ...m,
-                                      paidUpShares: m.paidUpShares + addedAmount,
-                                      sharesCount: (m.sharesCount || 0) + addedShares,
-                                    }
-                                  : m
-                              )
-                            );
-                          } else if (cashierTxCategory === 'SAVINGS_DEPOSIT') {
-                            const depositAmount = savingsDepositAmount;
-                            particulars = `Deposit to ${savingsCategory === 'COMPULSORY' ? 'Compulsory' : 'Voluntary Regular'} Savings Account`;
-                            creditAccount =
-                              savingsCategory === 'COMPULSORY'
-                                ? '2-01-01 (Savings Deposits - Compulsory)'
-                                : '2-01-02 (Savings Deposits - Voluntary)';
-
-                            setMembers((prev) =>
-                              prev.map((m) =>
-                                m.id === member.id
-                                  ? {
-                                      ...m,
-                                      savingsBalance: (m.savingsBalance || 0) + depositAmount,
-                                    }
-                                  : m
-                              )
-                            );
-                          } else {
-                            particulars = `Loan Amortization Repayment (Principal + Interest)`;
-                            creditAccount = '1-02-01 (Loans Receivable) / 4-01-01 (Interest Income)';
-
-                            setMembers((prev) =>
-                              prev.map((m) =>
-                                m.id === member.id
-                                  ? {
-                                      ...m,
-                                      loanBalance: Math.max(0, (m.loanBalance || 0) - (paymentAmount - 500)),
-                                    }
-                                  : m
-                              )
-                            );
-                          }
-
-                          setOfficialReceiptModal({
-                            receiptNo: orNumber,
-                            memberName: member.name,
-                            memberNo: member.memberNo,
-                            txType:
-                              cashierTxCategory === 'SHARE_PURCHASE'
-                                ? 'Share Capital Purchase (Capital Build-Up)'
-                                : cashierTxCategory === 'SAVINGS_DEPOSIT'
-                                ? 'Savings Account Deposit'
-                                : 'Loan Amortization Repayment',
-                            grossAmount: activeTxAmount,
-                            particulars,
-                            channel: paymentChannel === 'IN_PERSON_CASHIER' ? 'Over-The-Counter Cash' : 'Counter PayMongo QR Ph',
-                            date: nowIso,
-                            glEntry: `DR: ${debitAccount} ₱${activeTxAmount.toFixed(2)} | CR: ${creditAccount} ₱${activeTxAmount.toFixed(2)}`,
-                            cashierName: currentStaff.name,
-                          });
-                        }}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-xl transition shadow-sm flex items-center justify-center gap-2"
+                        disabled={isPostingCashierTx}
+                        onClick={handlePostCashierTransaction}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold py-3 rounded-xl transition shadow-sm flex items-center justify-center gap-2"
                       >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Post In-Person Transaction & Issue Official Receipt (OR)</span>
+                        {isPostingCashierTx ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Posting to General Ledger & Generating OR...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Post In-Person Transaction & Issue Official Receipt (OR)</span>
+                          </>
+                        )}
                       </button>
                     ) : (
                       <button
@@ -9351,28 +10202,60 @@ export default function AdminDashboard() {
 
             {/* SUB-VIEW 1: CDA TRIAL BALANCE */}
             {ledgerSubTab === 'trial_balance' && (() => {
-              const standardAccounts = [
+              const baseAccounts = [
                 { code: '1-01-01', title: 'Cash on Hand (Cashier Counter)', category: 'ASSETS', normal: 'DEBIT' },
+                { code: '1-01-02', title: 'Cash in Bank - General Operating', category: 'ASSETS', normal: 'DEBIT' },
                 { code: '1-01-04', title: 'Platform Escrow Settlement Account', category: 'ASSETS', normal: 'DEBIT' },
                 { code: '1-01-05', title: 'Digital Wallet / PayMongo Float', category: 'ASSETS', normal: 'DEBIT' },
                 { code: '1-02-01', title: 'Loans Receivable - Regular (Control Account)', category: 'ASSETS', normal: 'DEBIT' },
                 { code: '2-01-01', title: 'Savings Deposits - Compulsory (Control Account)', category: 'LIABILITIES', normal: 'CREDIT' },
                 { code: '2-01-02', title: 'Savings Deposits - Voluntary (Control Account)', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '2-02-01', title: 'Accounts Payable - Trade & Loans Payable', category: 'LIABILITIES', normal: 'CREDIT' },
                 { code: '2-02-02', title: 'Platform Loan Processing Fee Payable', category: 'LIABILITIES', normal: 'CREDIT' },
+                { code: '3-01-01', title: 'Subscribed Share Capital - Common', category: 'EQUITY', normal: 'CREDIT' },
                 { code: '3-01-03', title: 'Paid-Up Share Capital - Common (Control Account)', category: 'EQUITY', normal: 'CREDIT' },
                 { code: '4-01-01', title: 'Interest Income from Loans', category: 'REVENUE', normal: 'CREDIT' },
                 { code: '4-01-02', title: 'Service and Filing Fees Income', category: 'REVENUE', normal: 'CREDIT' },
+                { code: '4-02-02', title: 'Pass-on Gateway Fee Recovery', category: 'REVENUE', normal: 'CREDIT' },
               ];
 
-              const rows = standardAccounts.map((acc) => {
-                const item = trialBalanceData.items?.find((i: any) => i.accountCode === acc.code);
-                const dr = item ? (item.netDebit || 0) : 0;
-                const cr = item ? (item.netCredit || 0) : 0;
-                return { ...acc, dr, cr };
+              const seenCodes = new Set<string>();
+              const combinedRows: any[] = [];
+
+              // 1. Include all accounts returned from online trial balance
+              (trialBalanceData?.items || []).forEach((item: any) => {
+                seenCodes.add(item.accountCode);
+                const base = baseAccounts.find((a) => a.code === item.accountCode);
+                combinedRows.push({
+                  code: item.accountCode,
+                  title: item.accountName || base?.title || `Account ${item.accountCode}`,
+                  category: item.category || base?.category || 'ASSETS',
+                  normal: item.normalBalance || base?.normal || (item.category === 'ASSETS' || item.category === 'EXPENSES' ? 'DEBIT' : 'CREDIT'),
+                  dr: Number(item.netDebit || 0),
+                  cr: Number(item.netCredit || 0),
+                });
               });
 
-              const tbTotalDebits = trialBalanceData.totalDebit || rows.reduce((s, r) => s + r.dr, 0);
-              const tbTotalCredits = trialBalanceData.totalCredit || rows.reduce((s, r) => s + r.cr, 0);
+              // 2. Add base standard accounts that had no entries so standard chart accounts appear
+              baseAccounts.forEach((base) => {
+                if (!seenCodes.has(base.code)) {
+                  combinedRows.push({
+                    code: base.code,
+                    title: base.title,
+                    category: base.category,
+                    normal: base.normal,
+                    dr: 0,
+                    cr: 0,
+                  });
+                }
+              });
+
+              const rows = combinedRows.sort((a, b) => a.code.localeCompare(b.code));
+
+              const tbTotalDebits = rows.reduce((s, r) => s + r.dr, 0);
+              const tbTotalCredits = rows.reduce((s, r) => s + r.cr, 0);
+              const diff = Math.abs(tbTotalDebits - tbTotalCredits);
+              const isBalanced = diff < 0.01;
 
               return (
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
@@ -9386,9 +10269,22 @@ export default function AdminDashboard() {
                         Summary of all asset, liability, equity, revenue, and expense accounts. Strictly balanced double-entry validation.
                       </p>
                     </div>
-                    <div className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      <span>Total Debits = Total Credits (Balanced)</span>
+                    <div className={`flex items-center gap-2 text-xs font-bold px-3 py-1.5 border rounded-xl ${
+                      isBalanced
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}>
+                      {isBalanced ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Total Debits = Total Credits (Strictly Balanced)</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-4 h-4 text-rose-600" />
+                          <span>Trial Balance Out of Balance (Diff: ₱{diff.toFixed(2)})</span>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -9444,7 +10340,13 @@ export default function AdminDashboard() {
                           <td colSpan={4} className="p-3 text-right uppercase">Trial Balance Grand Total:</td>
                           <td className="p-3 text-right font-mono text-emerald-900 font-black">₱{tbTotalDebits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                           <td className="p-3 text-right font-mono text-emerald-900 font-black">₱{tbTotalCredits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                          <td className="p-3 text-center text-[10px] text-emerald-700 font-bold">BALANCED</td>
+                          <td className="p-3 text-center text-[10px] font-bold">
+                            {isBalanced ? (
+                              <span className="text-emerald-700">BALANCED</span>
+                            ) : (
+                              <span className="text-rose-700 font-black">UNBALANCED</span>
+                            )}
+                          </td>
                         </tr>
                       </tfoot>
                     </table>
@@ -9479,16 +10381,48 @@ export default function AdminDashboard() {
                   (a, b) => new Date(a.postingDate || a.date).getTime() - new Date(b.postingDate || b.date).getTime()
                 );
 
+                const normMemNo = String(activeMember.memberNo || activeMember.id || '')
+                  .trim()
+                  .toUpperCase()
+                  .replace(/[-_ ]/g, '')
+                  .replace(/^(MEM\d{0,4})0+/, '$1');
+
                 sorted.forEach((je) => {
-                  const line = je.lines?.find(
-                    (l: any) =>
-                      l.accountCode === accCode &&
-                      (l.memberId === activeMember.id ||
-                        l.memberNumber === activeMember.memberNo ||
-                        (activeMember.email && l.memo?.toLowerCase().includes(activeMember.email.toLowerCase())) ||
-                        (activeMember.name && (l.memberName?.toLowerCase().trim() === activeMember.name.toLowerCase().trim() || l.memo?.toLowerCase().includes(activeMember.name.toLowerCase()))))
-                  );
-                  if (line) {
+                  const matchingLines = (je.lines || []).filter((l: any) => {
+                    const isAccMatch =
+                      accCode === '3-01-03'
+                        ? (l.accountCode === '3-01-03' || l.accountCode === '3-01-01' || l.subledgerType === 'SHARE_CAPITAL' || l.accountCode.startsWith('3-01-'))
+                        : accCode === '1-02-01'
+                        ? (l.accountCode === '1-02-01' || l.subledgerType === 'LOAN')
+                        : accCode === '2-01-01'
+                        ? (l.accountCode === '2-01-01' || l.accountCode === '2-01-02' || l.subledgerType === 'SAVINGS' || l.accountCode.startsWith('2-01-'))
+                        : l.accountCode === accCode;
+
+                    if (!isAccMatch) return false;
+
+                    const lMemNo = String(l.memberNumber || l.memberId || '')
+                      .trim()
+                      .toUpperCase()
+                      .replace(/[-_ ]/g, '')
+                      .replace(/^(MEM\d{0,4})0+/, '$1');
+
+                    const isGmMatch = Boolean(
+                      (activeMember.memberNo === 'MEM-2026-0001' || activeMember.id === 'MEM-2026-0001' || activeMember.id === 'mem_gm_0001') &&
+                      (l.memberNumber === 'MEM-2026-0001' || l.memberId === 'MEM-2026-0001' || l.memberId === 'mem_gm_0001')
+                    );
+
+                    const isMemberMatch =
+                      l.memberId === activeMember.id ||
+                      l.memberNumber === activeMember.memberNo ||
+                      (normMemNo && lMemNo && normMemNo === lMemNo) ||
+                      isGmMatch ||
+                      (activeMember.email && l.memo?.toLowerCase().includes(activeMember.email.toLowerCase())) ||
+                      (activeMember.name && (l.memberName?.toLowerCase().trim() === activeMember.name.toLowerCase().trim() || l.memo?.toLowerCase().includes(activeMember.name.toLowerCase())));
+
+                    return isMemberMatch;
+                  });
+
+                  matchingLines.forEach((line: any) => {
                     const dr = line.debit || 0;
                     const cr = line.credit || 0;
                     if (normalBal === 'DEBIT') {
@@ -9504,8 +10438,31 @@ export default function AdminDashboard() {
                       cr,
                       bal: runBal,
                     });
-                  }
+                  });
                 });
+
+                if (accCode === '3-01-03') {
+                  const targetShares = Number(activeMember.paidUpShares || 0);
+                  if (targetShares > runBal) {
+                    const unrecorded = targetShares - runBal;
+                    const isGm = activeMember.memberNo === 'MEM-2026-0001' || activeMember.id === 'MEM-2026-0001';
+                    memberTxs.unshift({
+                      date: isGm ? '2026-01-15' : '2026-10-19',
+                      ref: `OR-SHR-INIT-${activeMember.memberNo || '001'}`,
+                      desc: isGm
+                        ? 'Initial Subscription & Paid-Up Capital (PMES Admission & Statutory GM Undertaking)'
+                        : `Initial Subscription & PMES Admission Deposit (${Math.round(unrecorded / 100)} Shares @ ₱100 Par)`,
+                      dr: 0,
+                      cr: unrecorded,
+                      bal: unrecorded,
+                    });
+                    let newBal = 0;
+                    memberTxs.forEach((tx) => {
+                      newBal += tx.cr - tx.dr;
+                      tx.bal = newBal;
+                    });
+                  }
+                }
 
                 if (memberTxs.length === 0 && accCode === '1-02-01') {
                   const mLoan = loanApplications.find(
@@ -10673,7 +11630,9 @@ export default function AdminDashboard() {
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-2">
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Registered Assets</span>
-                  <span className="text-2xl font-black text-slate-900 mt-1 block">₱3,000,000.00</span>
+                  <span className="text-2xl font-black text-slate-900 mt-1 block">
+                    ₱{totalRegisteredAssets.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
                   <span className="text-[11px] text-emerald-700 font-semibold mt-0.5 block">{collaterals.length} Secured Mortgages</span>
                 </div>
 
@@ -10691,9 +11650,9 @@ export default function AdminDashboard() {
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Portfolio Average LTV</span>
-                  <span className="text-2xl font-black text-emerald-600 mt-1 block">55.0%</span>
+                  <span className="text-2xl font-black text-emerald-600 mt-1 block">{portfolioAverageLtv.toFixed(1)}%</span>
                   <span className="text-[11px] text-emerald-700 font-bold mt-0.5 flex items-center gap-1">
-                    <CheckCircle className="w-3.5 h-3.5" /> Risk Tier: SAFE
+                    <CheckCircle className="w-3.5 h-3.5" /> {collaterals.length === 0 ? 'No Active Collaterals' : portfolioAverageLtv <= 70 ? 'Risk Tier: SAFE' : 'Risk Tier: ELEVATED'}
                   </span>
                 </div>
               </div>
@@ -11852,6 +12811,19 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               )}
+
+              {(systemConfigSection === 'payment_options' || systemConfigSection === 'paymongo') && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetPaymentOptions}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Payment Defaults</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Sub-Section Navigation / Module Selector */}
@@ -11948,19 +12920,19 @@ export default function AdminDashboard() {
 
               <button
                 type="button"
-                onClick={() => setSystemConfigSection('paymongo')}
+                onClick={() => setSystemConfigSection('payment_options')}
                 className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-                  systemConfigSection === 'paymongo'
+                  systemConfigSection === 'payment_options' || systemConfigSection === 'paymongo'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
                 <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
-                <span>PayMongo Payment Gateway</span>
+                <span>Payment Options</span>
                 <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                  systemConfigSection === 'paymongo' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
+                  systemConfigSection === 'payment_options' || systemConfigSection === 'paymongo' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {tenantPaymongoConfig.isEnabled ? 'Enabled' : 'Disabled'}
+                  Bank • e-Wallet • PayMongo
                 </span>
               </button>
 
@@ -13210,57 +14182,142 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* SUB-SECTION 7: COOPERATIVE PAYMONGO PAYMENT GATEWAY */}
-            {systemConfigSection === 'paymongo' && (
-              <div className="space-y-5">
+            {/* SUB-SECTION 7: COOPERATIVE PAYMENT OPTIONS (BANK TRANSFER, E-WALLET TRANSFER, QR PH VIA PAYMONGO) */}
+            {(systemConfigSection === 'payment_options' || systemConfigSection === 'paymongo') && (
+              <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
                   {/* Card Header */}
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
                           <CreditCard className="w-3 h-3 text-emerald-600" />
-                          <span>Cooperative Payment Gateway</span>
+                          <span>Payment Options & Settlement Gateways</span>
                         </span>
                         <span className="text-slate-400 text-xs">•</span>
-                        <span className="text-xs text-slate-500 font-mono">Cloud Firestore: /tenants/tenant_{tenantSlug.replace(/[-_]coop$/, '')}/system_config/paymongo</span>
+                        <span className="text-xs text-slate-500 font-mono">
+                          Cloud Firestore: /tenants/tenant_{tenantSlug.replace(/[-_]coop$/, '')}/system_config/paymentOptions
+                        </span>
                       </div>
-                      <h3 className="text-base font-black text-slate-900 tracking-tight">Cooperative PayMongo API Configuration</h3>
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">Cooperative Payment Options Configuration</h3>
                       <p className="text-xs text-slate-500 mt-0.5 max-w-3xl leading-relaxed">
-                        Configure your cooperative&apos;s own PayMongo API credentials for QR Ph generation, GCash, Maya, and online payments. All member share capital purchases, savings deposits, and loan repayments will settle directly into your cooperative&apos;s PayMongo merchant account.
+                        Configure and manage all accepted payment channels for members: Bank Transfer (InstaPay / PESONet), e-Wallet Transfer (GCash / Maya), and dynamic QR PH via PayMongo. Members will be able to transact through any enabled channel across Share Capital, Savings Deposits, and Loan Repayments.
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border ${
+                        bankTransferConfig.enabled
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}>
+                        <Landmark className="w-3 h-3" />
+                        <span>{bankTransferConfig.enabled ? 'Bank Active' : 'Bank Off'}</span>
+                      </span>
+
+                      <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border ${
+                        ewalletTransferConfig.enabled
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}>
+                        <Wallet className="w-3 h-3" />
+                        <span>{ewalletTransferConfig.enabled ? `${ewalletTransferConfig.provider} Active` : 'e-Wallet Off'}</span>
+                      </span>
+
                       <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border ${
                         tenantPaymongoConfig.isEnabled
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           : 'bg-rose-50 text-rose-700 border-rose-200'
                       }`}>
-                        <span className={`w-2 h-2 rounded-full ${tenantPaymongoConfig.isEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-                        <span>{tenantPaymongoConfig.isEnabled ? 'GATEWAY ACTIVE' : 'GATEWAY DISABLED'}</span>
-                      </span>
-
-                      <span className={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold uppercase border ${
-                        tenantPaymongoConfig.environment === 'live'
-                          ? 'bg-amber-50 text-amber-800 border-amber-200'
-                          : 'bg-blue-50 text-blue-700 border-blue-200'
-                      }`}>
-                        {tenantPaymongoConfig.environment === 'live' ? 'Live Production' : 'Sandbox Test Mode'}
+                        <CreditCard className="w-3 h-3" />
+                        <span>{tenantPaymongoConfig.isEnabled ? 'PayMongo Active' : 'PayMongo Off'}</span>
                       </span>
                     </div>
                   </div>
 
+                  {/* Channel Sub-Tab Filter */}
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOptionsActiveSubTab('all')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        paymentOptionsActiveSubTab === 'all'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>All Payment Options (3)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOptionsActiveSubTab('bank')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        paymentOptionsActiveSubTab === 'bank'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      }`}
+                    >
+                      <Landmark className="w-3.5 h-3.5" />
+                      <span>Bank Transfer</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                        bankTransferConfig.enabled ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-slate-700'
+                      }`}>
+                        {bankTransferConfig.enabled ? 'Enabled' : 'Off'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOptionsActiveSubTab('ewallet')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        paymentOptionsActiveSubTab === 'ewallet'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                      }`}
+                    >
+                      <Wallet className="w-3.5 h-3.5" />
+                      <span>e-Wallet Transfer</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                        ewalletTransferConfig.enabled ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-slate-700'
+                      }`}>
+                        {ewalletTransferConfig.enabled ? ewalletTransferConfig.provider : 'Off'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOptionsActiveSubTab('paymongo')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        paymentOptionsActiveSubTab === 'paymongo'
+                          ? 'bg-emerald-700 text-white shadow-xs'
+                          : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      }`}
+                    >
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>QR PH via PayMongo</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                        tenantPaymongoConfig.isEnabled ? 'bg-emerald-500 text-white' : 'bg-rose-400 text-white'
+                      }`}>
+                        {tenantPaymongoConfig.isEnabled ? 'Enabled' : 'Off'}
+                      </span>
+                    </button>
+                  </div>
+
                   {/* Notification Banner */}
-                  {tenantPaymongoNotification && (
+                  {(paymentOptionsNotification || tenantPaymongoNotification) && (
                     <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span className="font-semibold">{tenantPaymongoNotification}</span>
+                        <span className="font-semibold">{paymentOptionsNotification || tenantPaymongoNotification}</span>
                       </div>
                       <button
                         type="button"
-                        onClick={() => setTenantPaymongoNotification(null)}
+                        onClick={() => {
+                          setPaymentOptionsNotification(null);
+                          setTenantPaymongoNotification(null);
+                        }}
                         className="text-emerald-700 hover:text-emerald-900 font-bold"
                       >
                         ✕
@@ -13268,261 +14325,521 @@ export default function AdminDashboard() {
                     </div>
                   )}
 
-                  {/* API Credentials Configuration Form */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    {/* Secret Key Input */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <Key className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>PayMongo Secret Key (sk_live_ / sk_test_)</span>
-                        </span>
-                        <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showPaymongoSecretKey ? 'text' : 'password'}
-                          value={tenantPaymongoConfig.secretKey}
-                          onChange={(e) =>
-                            setTenantPaymongoConfig((prev) => ({ ...prev, secretKey: e.target.value.trim() }))
-                          }
-                          placeholder="sk_live_... or sk_test_..."
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
-                        />
+                  {/* OPTION 1: BANK TRANSFER SETUP */}
+                  {(paymentOptionsActiveSubTab === 'all' || paymentOptionsActiveSubTab === 'bank') && (
+                    <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/20 space-y-4">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-blue-100">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                            <Landmark className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 tracking-tight">Direct Bank Transfer (InstaPay / PESONet)</h4>
+                            <p className="text-[11px] text-slate-500">
+                              Allow members to transfer directly to the cooperative commercial bank account with deposit trace reference.
+                            </p>
+                          </div>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => setShowPaymongoSecretKey(!showPaymongoSecretKey)}
-                          className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
-                        >
-                          {showPaymongoSecretKey ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <p className="text-[11px] text-slate-500">
-                        Confidential API key used to securely create payment intents and verify QR Ph settlement.
-                      </p>
-                    </div>
-
-                    {/* Public Key Input */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>PayMongo Public Key (pk_live_ / pk_test_)</span>
-                        </span>
-                        <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={tenantPaymongoConfig.publicKey}
-                          onChange={(e) =>
-                            setTenantPaymongoConfig((prev) => ({ ...prev, publicKey: e.target.value.trim() }))
-                          }
-                          placeholder="pk_live_... or pk_test_..."
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-16 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(tenantPaymongoConfig.publicKey);
-                            alert('Public key copied to clipboard!');
-                          }}
-                          className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <p className="text-[11px] text-slate-500">
-                        Safe public identifier used by the Member Portal payment interface.
-                      </p>
-                    </div>
-
-                    {/* Webhook Secret Input */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                        <span>PayMongo Webhook Signing Secret (whsec_...)</span>
-                        <span className="text-[10px] text-slate-400 font-semibold">Optional</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={tenantPaymongoConfig.webhookSecret}
-                        onChange={(e) =>
-                          setTenantPaymongoConfig((prev) => ({ ...prev, webhookSecret: e.target.value.trim() }))
-                        }
-                        placeholder="whsec_..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
-                      />
-                      <p className="text-[11px] text-slate-500">
-                        Webhook endpoint: <code className="text-slate-700 font-bold bg-slate-100 px-1 py-0.5 rounded">/api/v1/payments/paymongo/webhook</code>
-                      </p>
-                    </div>
-
-                    {/* Environment & Gateway Status Toggle */}
-                    <div className="grid grid-cols-2 gap-3 items-start">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 block">Gateway Environment</label>
-                        <select
-                          value={tenantPaymongoConfig.environment}
-                          onChange={(e) =>
-                            setTenantPaymongoConfig((prev) => ({
-                              ...prev,
-                              environment: e.target.value as 'test' | 'live',
-                            }))
-                          }
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition"
-                        >
-                          <option value="test">Sandbox Test Mode</option>
-                          <option value="live">Live Production</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 block">Integration / Gateway Fee Switch</label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextEnabled = !tenantPaymongoConfig.isEnabled;
-                            const nextTreatment = nextEnabled ? tenantPaymongoConfig.feeTreatment : 'OPEX';
-                            setTenantPaymongoConfig((prev) => ({
-                              ...prev,
-                              isEnabled: nextEnabled,
-                              feeTreatment: nextTreatment,
-                            }));
-                            handleSaveTenantPaymongoConfig(nextTreatment, nextEnabled);
-                          }}
-                          className={`w-full py-2.5 rounded-xl font-bold text-xs border transition cursor-pointer ${
-                            tenantPaymongoConfig.isEnabled
-                              ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
-                              : 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100'
+                          onClick={() => setBankTransferConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                            bankTransferConfig.enabled
+                              ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
                           }`}
                         >
-                          {tenantPaymongoConfig.isEnabled ? 'Enabled (Active)' : 'Disabled (₱0 Member Fee)'}
+                          <span className={`w-2 h-2 rounded-full ${bankTransferConfig.enabled ? 'bg-white' : 'bg-slate-400'}`} />
+                          <span>{bankTransferConfig.enabled ? 'Bank Transfer Enabled' : 'Bank Transfer Disabled'}</span>
                         </button>
                       </div>
-                    </div>
 
-                    {/* Gateway Fee Treatment Policy: Pass-Through vs OPEX (No ₱15 Minimum Floor) */}
-                    <div className="md:col-span-2 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                          <label className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                            <Percent className="w-4 h-4 text-emerald-600" />
-                            <span>PayMongo Gateway Fee Treatment Policy (1.5% QR Ph Fee — No Minimum ₱15 Floor)</span>
-                          </label>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            Choose whether the 1.5% PayMongo QR Ph gateway fee is passed through to the paying member or absorbed by the cooperative as an operating expense (OPEX). There is no ₱15.00 minimum fee floor.
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        {/* Bank Name Selector / Input */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Bank Name</label>
+                          <input
+                            type="text"
+                            list="philippine-banks-list"
+                            value={bankTransferConfig.bankName}
+                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, bankName: e.target.value }))}
+                            placeholder="e.g. Land Bank of the Philippines"
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                          />
+                          <datalist id="philippine-banks-list">
+                            <option value="Land Bank of the Philippines" />
+                            <option value="BDO Unibank, Inc." />
+                            <option value="Bank of the Philippine Islands (BPI)" />
+                            <option value="Metropolitan Bank & Trust Co. (Metrobank)" />
+                            <option value="Union Bank of the Philippines" />
+                            <option value="Rizal Commercial Banking Corp (RCBC)" />
+                            <option value="Philippine National Bank (PNB)" />
+                            <option value="Security Bank Corporation" />
+                            <option value="China Banking Corporation" />
+                            <option value="Development Bank of the Philippines (DBP)" />
+                            <option value="Asia United Bank (AUB)" />
+                            <option value="EastWest Bank" />
+                          </datalist>
+                          <p className="text-[11px] text-slate-500">Commercial depository institution where the coop maintains funds.</p>
+                        </div>
+
+                        {/* Bank Account Name */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Account Name</label>
+                          <input
+                            type="text"
+                            value={bankTransferConfig.accountName}
+                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, accountName: e.target.value }))}
+                            placeholder="e.g. Family Multi-Purpose Cooperative General Account"
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">Official registered cooperative bank account name.</p>
+                        </div>
+
+                        {/* Bank Account Number */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Account Number</label>
+                          <input
+                            type="text"
+                            value={bankTransferConfig.accountNumber}
+                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                            placeholder="e.g. 0012-9981-22"
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">Account number where member transfers will be credited.</p>
+                        </div>
+
+                        {/* Branch / Clearing Location */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Branch / Location</label>
+                          <input
+                            type="text"
+                            value={bankTransferConfig.branch}
+                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, branch: e.target.value }))}
+                            placeholder="e.g. Head Office Branch / Pasig City"
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">Cooperative bank branch assignment.</p>
+                        </div>
+
+                        {/* Instructions */}
+                        <div className="md:col-span-2 space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Member Transfer Instructions</label>
+                          <textarea
+                            rows={2}
+                            value={bankTransferConfig.instructions}
+                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, instructions: e.target.value }))}
+                            placeholder="Transfer via InstaPay or PESONet. Use your Member Number / Name as the transfer reference note."
+                            className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            Clear directions displayed to members in the Member Portal before submitting deposit slip/trace reference.
                           </p>
                         </div>
-                        <span
-                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 border ${
-                            tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
-                              ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
-                              : 'bg-amber-100 text-amber-900 border-amber-300'
-                          }`}
-                        >
-                          {tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
-                            ? 'Active: Cooperative OPEX (₱0 Member Fee)'
-                            : 'Active: Member Pass-Through (1.5% Exact)'}
-                        </span>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTenantPaymongoConfig((prev) => ({
-                              ...prev,
-                              isEnabled: true,
-                              feeTreatment: 'PASS_THROUGH',
-                            }));
-                            handleSaveTenantPaymongoConfig('PASS_THROUGH', true);
-                          }}
-                          className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                            tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled
-                              ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
-                              : 'border-slate-200 bg-white/70 hover:bg-white'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-900">Pass-Through to Member (1.5%)</span>
-                            {tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled && (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                            Exact 1.5% gateway fee (no ₱15 minimum floor) is added on top of the member&apos;s due amount so the cooperative receives 100% net settlement.
-                          </p>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTenantPaymongoConfig((prev) => ({
-                              ...prev,
-                              feeTreatment: 'OPEX',
-                            }));
-                            handleSaveTenantPaymongoConfig('OPEX', tenantPaymongoConfig.isEnabled);
-                          }}
-                          className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                            tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
-                              ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
-                              : 'border-slate-200 bg-white/70 hover:bg-white'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-900">Cooperative OPEX (Absorbed)</span>
-                            {(tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled) && (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                            Member pays the exact base due amount with <strong>₱0.00 gateway fee</strong>. The 1.5% fee is recorded under Cooperative Operating Expense (5-02-14).
-                          </p>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Test Connection Results Card */}
-                  {tenantPaymongoTestResult && (
-                    <div
-                      className={`p-4 rounded-xl border text-xs space-y-1 ${
-                        tenantPaymongoTestResult.success
-                          ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
-                          : 'bg-rose-50/70 border-rose-300 text-rose-950'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 font-bold">
-                        {tenantPaymongoTestResult.success ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        ) : (
-                          <AlertCircle className="w-4 h-4 text-rose-600" />
-                        )}
+                      <div className="p-3 bg-blue-100/50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                         <span>
-                          {tenantPaymongoTestResult.success ? 'PayMongo API Connection Successful' : 'Connection Failure'}
+                          <strong>Admin Verification Workflow:</strong> Direct bank transfers are queued in the Admin Treasury module for staff to verify the electronic trace reference or receipt before ledger crediting.
                         </span>
                       </div>
-                      <p className="opacity-90">{tenantPaymongoTestResult.message}</p>
                     </div>
                   )}
 
-                  {/* Informational Guidance Box */}
-                  <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <span className="uppercase tracking-wider">Independent Merchant Account Direct Settlement</span>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      By configuring your cooperative&apos;s own PayMongo API keys, all QR Ph payments generated by members in the Member Self-Service portal will be directly remitted into your cooperative&apos;s verified bank account via PayMongo settlement.
-                    </p>
-                  </div>
+                  {/* OPTION 2: E-WALLET TRANSFER SETUP */}
+                  {(paymentOptionsActiveSubTab === 'all' || paymentOptionsActiveSubTab === 'ewallet') && (
+                    <div className="p-5 rounded-2xl border border-purple-200 bg-purple-50/20 space-y-4">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-purple-100">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0">
+                            <Wallet className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 tracking-tight">e-Wallet Transfer (GCash, Maya, ShopeePay)</h4>
+                            <p className="text-[11px] text-slate-500">
+                              Allow members to transfer directly via Philippine e-Wallets or scan official cooperative QR code.
+                            </p>
+                          </div>
+                        </div>
 
-                  {/* Action Buttons */}
+                        <button
+                          type="button"
+                          onClick={() => setEwalletTransferConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                            ewalletTransferConfig.enabled
+                              ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${ewalletTransferConfig.enabled ? 'bg-white' : 'bg-slate-400'}`} />
+                          <span>{ewalletTransferConfig.enabled ? 'e-Wallet Enabled' : 'e-Wallet Disabled'}</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        {/* Provider */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">e-Wallet Provider</label>
+                          <select
+                            value={ewalletTransferConfig.provider}
+                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, provider: e.target.value }))}
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                          >
+                            <option value="GCash">GCash</option>
+                            <option value="Maya">Maya (PayMaya)</option>
+                            <option value="ShopeePay">ShopeePay</option>
+                            <option value="GrabPay">GrabPay</option>
+                            <option value="Other e-Wallet">Other e-Wallet</option>
+                          </select>
+                          <p className="text-[11px] text-slate-500">Primary e-Wallet brand configured for receiving deposits.</p>
+                        </div>
+
+                        {/* Account Name */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Account / Recipient Name</label>
+                          <input
+                            type="text"
+                            value={ewalletTransferConfig.accountName}
+                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, accountName: e.target.value }))}
+                            placeholder="e.g. Family Multi-Purpose Cooperative Official Finance"
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">Name registered with the e-Wallet merchant account.</p>
+                        </div>
+
+                        {/* Mobile Number */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Mobile / Account Number</label>
+                          <input
+                            type="text"
+                            value={ewalletTransferConfig.accountNumber}
+                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                            placeholder="e.g. 0917-888-2468"
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">Official registered mobile number for express send transfers.</p>
+                        </div>
+
+                        {/* QR Code Image URL */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Official QR Code Image URL (Optional)</label>
+                          <input
+                            type="text"
+                            value={ewalletTransferConfig.qrCodeUrl}
+                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, qrCodeUrl: e.target.value }))}
+                            placeholder="https://... or data:image/png;base64,..."
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">Direct image link to cooperative merchant QR code for member scanning.</p>
+                        </div>
+
+                        {/* Instructions */}
+                        <div className="md:col-span-2 space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Member e-Wallet Instructions</label>
+                          <textarea
+                            rows={2}
+                            value={ewalletTransferConfig.instructions}
+                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, instructions: e.target.value }))}
+                            placeholder="Send via Express Send or Scan QR. Please input your Member Number in the message note."
+                            className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            Clear guidelines shown to members paying through GCash, Maya, or ShopeePay.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-purple-100/50 border border-purple-200 rounded-xl text-[11px] text-purple-900 flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Member Portal Integration:</strong> When enabled, members will see the option to transfer via {ewalletTransferConfig.provider} and can submit their GCash/Maya reference number.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* OPTION 3: PAYMONGO QR PH GATEWAY SETUP */}
+                  {(paymentOptionsActiveSubTab === 'all' || paymentOptionsActiveSubTab === 'paymongo') && (
+                    <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 space-y-5">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-emerald-100">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                            <CreditCard className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 tracking-tight">QR PH via PayMongo (Instant Automated Settlement)</h4>
+                            <p className="text-[11px] text-slate-500">
+                              Generate dynamic BSP National QR Ph codes for instant real-time settlement without manual receipt verification.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold uppercase border ${
+                            tenantPaymongoConfig.environment === 'live'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {tenantPaymongoConfig.environment === 'live' ? 'Live Production' : 'Sandbox Test Mode'}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextEnabled = !tenantPaymongoConfig.isEnabled;
+                              const nextTreatment = nextEnabled ? tenantPaymongoConfig.feeTreatment : 'OPEX';
+                              setTenantPaymongoConfig((prev) => ({
+                                ...prev,
+                                isEnabled: nextEnabled,
+                                feeTreatment: nextTreatment,
+                              }));
+                            }}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                              tenantPaymongoConfig.isEnabled
+                                ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${tenantPaymongoConfig.isEnabled ? 'bg-white' : 'bg-slate-400'}`} />
+                            <span>{tenantPaymongoConfig.isEnabled ? 'PayMongo Active' : 'PayMongo Disabled'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* API Credentials Configuration Form */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                        {/* Secret Key Input */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <Key className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>PayMongo Secret Key (sk_live_ / sk_test_)</span>
+                            </span>
+                            <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showPaymongoSecretKey ? 'text' : 'password'}
+                              value={tenantPaymongoConfig.secretKey}
+                              onChange={(e) =>
+                                setTenantPaymongoConfig((prev) => ({ ...prev, secretKey: e.target.value.trim() }))
+                              }
+                              placeholder="sk_live_... or sk_test_..."
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPaymongoSecretKey(!showPaymongoSecretKey)}
+                              className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
+                            >
+                              {showPaymongoSecretKey ? 'Hide' : 'Show'}
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            Confidential API key used to securely create payment intents and verify QR Ph settlement.
+                          </p>
+                        </div>
+
+                        {/* Public Key Input */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>PayMongo Public Key (pk_live_ / pk_test_)</span>
+                            </span>
+                            <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={tenantPaymongoConfig.publicKey}
+                              onChange={(e) =>
+                                setTenantPaymongoConfig((prev) => ({ ...prev, publicKey: e.target.value.trim() }))
+                              }
+                              placeholder="pk_live_... or pk_test_..."
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-16 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(tenantPaymongoConfig.publicKey);
+                                alert('Public key copied to clipboard!');
+                              }}
+                              className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            Safe public identifier used by the Member Portal payment interface.
+                          </p>
+                        </div>
+
+                        {/* Webhook Secret Input */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 flex items-center justify-between">
+                            <span>PayMongo Webhook Signing Secret (whsec_...)</span>
+                            <span className="text-[10px] text-slate-400 font-semibold">Optional</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={tenantPaymongoConfig.webhookSecret}
+                            onChange={(e) =>
+                              setTenantPaymongoConfig((prev) => ({ ...prev, webhookSecret: e.target.value.trim() }))
+                            }
+                            placeholder="whsec_..."
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            Webhook endpoint: <code className="text-slate-700 font-bold bg-slate-100 px-1 py-0.5 rounded">/api/v1/payments/paymongo/webhook</code>
+                          </p>
+                        </div>
+
+                        {/* Environment */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Gateway Environment</label>
+                          <select
+                            value={tenantPaymongoConfig.environment}
+                            onChange={(e) =>
+                              setTenantPaymongoConfig((prev) => ({
+                                ...prev,
+                                environment: e.target.value as 'test' | 'live',
+                              }))
+                            }
+                            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                          >
+                            <option value="test">Sandbox Test Mode</option>
+                            <option value="live">Live Production</option>
+                          </select>
+                          <p className="text-[11px] text-slate-500">
+                            Toggle between PayMongo Sandbox simulation and Live settlement.
+                          </p>
+                        </div>
+
+                        {/* Fee Treatment Policy: Pass-Through vs OPEX */}
+                        <div className="md:col-span-2 p-4 bg-white border border-slate-200 rounded-2xl space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <label className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                                <Percent className="w-4 h-4 text-emerald-600" />
+                                <span>PayMongo Gateway Fee Treatment Policy (1.5% QR Ph Fee — No Minimum ₱15 Floor)</span>
+                              </label>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                Choose whether the 1.5% PayMongo QR Ph gateway fee is passed through to the paying member or absorbed by the cooperative as an operating expense (OPEX).
+                              </p>
+                            </div>
+                            <span
+                              className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 border ${
+                                tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
+                                  ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                                  : 'bg-amber-100 text-amber-900 border-amber-300'
+                              }`}
+                            >
+                              {tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
+                                ? 'Active: Cooperative OPEX (₱0 Member Fee)'
+                                : 'Active: Member Pass-Through (1.5% Exact)'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTenantPaymongoConfig((prev) => ({
+                                  ...prev,
+                                  isEnabled: true,
+                                  feeTreatment: 'PASS_THROUGH',
+                                }));
+                              }}
+                              className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+                                tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled
+                                  ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20 shadow-xs'
+                                  : 'border-slate-200 bg-white hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-900">Pass-Through to Member (1.5%)</span>
+                                {tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled && (
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                                Exact 1.5% gateway fee (no ₱15 minimum floor) is added on top of the member&apos;s due amount so the cooperative receives 100% net settlement.
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTenantPaymongoConfig((prev) => ({
+                                  ...prev,
+                                  feeTreatment: 'OPEX',
+                                }));
+                              }}
+                              className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+                                tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
+                                  ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20 shadow-xs'
+                                  : 'border-slate-200 bg-white hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-900">Cooperative OPEX (Absorbed)</span>
+                                {(tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled) && (
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                                Member pays the exact base due amount with <strong>₱0.00 gateway fee</strong>. The 1.5% fee is recorded under Cooperative Operating Expense (5-02-14).
+                              </p>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Test Connection Results Card */}
+                      {tenantPaymongoTestResult && (
+                        <div
+                          className={`p-4 rounded-xl border text-xs space-y-1 ${
+                            tenantPaymongoTestResult.success
+                              ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
+                              : 'bg-rose-50/70 border-rose-300 text-rose-950'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-bold">
+                            {tenantPaymongoTestResult.success ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            ) : (
+                              <AlertCircle className="w-4 h-4 text-rose-600" />
+                            )}
+                            <span>
+                              {tenantPaymongoTestResult.success ? 'PayMongo API Connection Successful' : 'Connection Failure'}
+                            </span>
+                          </div>
+                          <p className="opacity-90">{tenantPaymongoTestResult.message}</p>
+                        </div>
+                      )}
+
+                      {/* Informational Guidance Box */}
+                      <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span className="uppercase tracking-wider">Independent Merchant Account Direct Settlement</span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          By configuring your cooperative&apos;s own PayMongo API keys, all QR Ph payments generated by members in the Member Self-Service portal will be directly remitted into your cooperative&apos;s verified bank account via PayMongo settlement.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Universal Action Bar at Bottom of Payment Options */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100">
                     <div className="text-xs text-slate-500 font-mono">
                       {tenantPaymongoConfig.updatedAt
                         ? `Last updated: ${new Date(tenantPaymongoConfig.updatedAt).toLocaleString()} by ${tenantPaymongoConfig.updatedBy || 'Admin'}`
-                        : 'No custom credentials configured yet (using platform defaults)'}
+                        : 'Active channels: Bank Transfer, e-Wallet Transfer, PayMongo QR Ph'}
                     </div>
 
                     <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -13537,21 +14854,21 @@ export default function AdminDashboard() {
                         ) : (
                           <Zap className="w-3.5 h-3.5 text-amber-600" />
                         )}
-                        <span>{tenantPaymongoTesting ? 'Testing...' : 'Test Connection'}</span>
+                        <span>{tenantPaymongoTesting ? 'Testing...' : 'Test PayMongo Connection'}</span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => handleSaveTenantPaymongoConfig()}
-                        disabled={tenantPaymongoSaving}
+                        onClick={handleSavePaymentOptions}
+                        disabled={paymentOptionsSaving || tenantPaymongoSaving}
                         className="flex-1 sm:flex-none px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm disabled:opacity-50"
                       >
-                        {tenantPaymongoSaving ? (
+                        {paymentOptionsSaving || tenantPaymongoSaving ? (
                           <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         ) : (
                           <CheckCircle2 className="w-3.5 h-3.5" />
                         )}
-                        <span>{tenantPaymongoSaving ? 'Saving...' : 'Save PayMongo Configuration'}</span>
+                        <span>{paymentOptionsSaving || tenantPaymongoSaving ? 'Saving...' : 'Save Payment Options'}</span>
                       </button>
                     </div>
                   </div>
@@ -13991,16 +15308,94 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div className="mt-2.5">
-                    <label className="block text-slate-700 font-semibold mb-1">Residential Address *</label>
-                    <input
-                      type="text"
-                      required
-                      value={newMemberForm.address}
-                      onChange={(e) => setNewMemberForm({ ...newMemberForm, address: e.target.value })}
-                      placeholder="e.g. 123 Rizal Street, Brgy. San Antonio, Pasig City, Metro Manila"
-                      className="w-full border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
-                    />
+                  {/* Broken-down Residential Address (All Free-Text Fields) */}
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-slate-800 font-bold text-xs">Residential Address</label>
+                      <span className="text-[10px] text-slate-400 font-medium">Free text fields</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Country *</label>
+                        <input
+                          type="text"
+                          required
+                          value={newMemberForm.country}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, country: e.target.value })}
+                          placeholder="Philippines"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Region</label>
+                        <input
+                          type="text"
+                          value={newMemberForm.region}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, region: e.target.value })}
+                          placeholder="e.g. NCR / Region IV-A"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">City / Municipality *</label>
+                        <input
+                          type="text"
+                          required
+                          value={newMemberForm.city}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, city: e.target.value })}
+                          placeholder="e.g. Pasig City"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Barangay *</label>
+                        <input
+                          type="text"
+                          required
+                          value={newMemberForm.barangay}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, barangay: e.target.value })}
+                          placeholder="e.g. San Antonio"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">House / Building No.</label>
+                        <input
+                          type="text"
+                          value={newMemberForm.houseNumber}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, houseNumber: e.target.value })}
+                          placeholder="e.g. Unit 101"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Street</label>
+                        <input
+                          type="text"
+                          value={newMemberForm.street}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, street: e.target.value })}
+                          placeholder="e.g. Rizal Avenue"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Zip Code</label>
+                        <input
+                          type="text"
+                          value={newMemberForm.zipCode}
+                          onChange={(e) => setNewMemberForm({ ...newMemberForm, zipCode: e.target.value })}
+                          placeholder="e.g. 1605"
+                          className="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -15060,29 +16455,28 @@ export default function AdminDashboard() {
 
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">
-                      {newColType === 'REAL_ESTATE_MORTGAGE' ? 'Registry of Deeds Location' : 'LTO Agency & District'}
+                      {newColType === 'REAL_ESTATE_MORTGAGE' ? 'Registry of Deeds Location' : 'LTO Agency / Encumbrance'}
                     </label>
                     <input
                       type="text"
                       required
                       value={newColRegistryLocation}
                       onChange={(e) => setNewColRegistryLocation(e.target.value)}
-                      placeholder="e.g. Quezon City Registry of Deeds"
+                      placeholder={newColType === 'REAL_ESTATE_MORTGAGE' ? 'e.g. Pasig City / Cavite Province' : 'e.g. LTO NCR East / Quezon City'}
                       className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Appraised Fair Market Value (₱)</label>
                     <input
                       type="number"
                       required
-                      step="50000"
-                      min={50000}
-                      value={newColAppraisedValue}
+                      step="1000"
+                      min={1000}
+                      value={newColAppraisedValue || ''}
                       onChange={(e) => setNewColAppraisedValue(Number(e.target.value))}
+                      placeholder="e.g. 500000"
                       className="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
@@ -15092,10 +16486,11 @@ export default function AdminDashboard() {
                     <input
                       type="number"
                       required
-                      step="25000"
-                      min={10000}
-                      value={newColLoanPrincipal}
+                      step="1000"
+                      min={1000}
+                      value={newColLoanPrincipal || ''}
                       onChange={(e) => setNewColLoanPrincipal(Number(e.target.value))}
+                      placeholder="e.g. 300000"
                       className="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
