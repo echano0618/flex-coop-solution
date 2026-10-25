@@ -51,6 +51,14 @@ import {
   EyeOff,
   KeyRound,
   Coins,
+  Store,
+  Target,
+  MessageSquare,
+  Send,
+  Upload,
+  ImageIcon,
+  Trash2,
+  Briefcase,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -769,10 +777,290 @@ export default function MemberPortalPage() {
     sharePaymentStatus: 'PARTIALLY_PAID',
     savingsBalance: 0,
     loanBalance: 0,
+    businessPage: null,
     idType: 'CDA Verified Associate Member PhilSys ID',
   };
 
   const isTestTenant = isTestCoopTenant(tenantInfo.slug);
+
+  // Member Business Page & Community Showcase State
+  const [selectedBusinessMember, setSelectedBusinessMember] = useState<any | null>(null);
+  const [businessPageData, setBusinessPageData] = useState<any | null>(null);
+  const [isLoadingBusinessPage, setIsLoadingBusinessPage] = useState<boolean>(false);
+  const [isEditingBusinessPage, setIsEditingBusinessPage] = useState<boolean>(false);
+
+  // Business Page Edit Form
+  const [bizFormName, setBizFormName] = useState<string>('');
+  const [bizFormNature, setBizFormNature] = useState<string>('Retail, Sari-Sari & Trading');
+  const [bizFormCustomNature, setBizFormCustomNature] = useState<string>('');
+  const [bizFormPictureUrl, setBizFormPictureUrl] = useState<string>('');
+  const [bizFormPicturePreview, setBizFormPicturePreview] = useState<string | null>(null);
+  const [bizFormNextGoal, setBizFormNextGoal] = useState<string>('');
+  const [bizFormDescription, setBizFormDescription] = useState<string>('');
+  const [bizFormContact, setBizFormContact] = useState<string>('');
+  const [bizFormLocation, setBizFormLocation] = useState<string>('');
+  const [isSavingBusinessPage, setIsSavingBusinessPage] = useState<boolean>(false);
+  const [bizSaveError, setBizSaveError] = useState<string | null>(null);
+  const [bizSaveSuccess, setBizSaveSuccess] = useState<string | null>(null);
+
+  // Business Page Comments
+  const [businessComments, setBusinessComments] = useState<any[]>([]);
+  const [newCommentText, setNewCommentText] = useState<string>('');
+  const [isSubmittingComment, setIsSubmittingComment] = useState<boolean>(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  // Open Business Page for a member
+  const handleOpenBusinessPage = async (member: any) => {
+    setSelectedBusinessMember(member);
+    setIsLoadingBusinessPage(true);
+    setCommentError(null);
+    setNewCommentText('');
+
+    if (member.businessPage) {
+      setBusinessPageData(member.businessPage);
+      setBusinessComments(member.businessPage.comments || []);
+    } else {
+      setBusinessPageData(null);
+      setBusinessComments([]);
+    }
+
+    try {
+      const slug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${slug.replace(/[-_]coop$/, '')}`;
+      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(member.id)}/business`, {
+        headers: {
+          'x-tenant-slug': slug,
+          'x-tenant-id': targetTenantId,
+        },
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setBusinessPageData(json.data);
+        setBusinessComments(json.data.comments || []);
+        setDirectoryMembers((prev) =>
+          prev.map((m) => (m.id === member.id ? { ...m, businessPage: json.data } : m))
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to fetch business page:', err);
+    } finally {
+      setIsLoadingBusinessPage(false);
+    }
+  };
+
+  // Launch Edit Modal for Own Business Page
+  const handleOpenEditBusinessPage = (existing?: any) => {
+    const biz = existing || businessPageData || (currentMember as any)?.businessPage;
+    setBizFormName(biz?.businessName || '');
+    const nature = biz?.natureOfBusiness || 'Retail, Sari-Sari & Trading';
+    const PRESETS = [
+      'Agriculture & Agribusiness',
+      'Retail, Sari-Sari & Trading',
+      'Food Service, Bakery & Catering',
+      'Transportation, Logistics & Hauling',
+      'Manufacturing, Crafts & Textiles',
+      'Services, Repair & Construction',
+      'Technology & Digital Services',
+      'Health, Beauty & Personal Care',
+    ];
+    if (PRESETS.includes(nature)) {
+      setBizFormNature(nature);
+      setBizFormCustomNature('');
+    } else {
+      setBizFormNature('Other');
+      setBizFormCustomNature(nature);
+    }
+    setBizFormPictureUrl(biz?.pictureUrl || '');
+    setBizFormPicturePreview(biz?.pictureUrl || null);
+    setBizFormNextGoal(biz?.nextGoal || '');
+    setBizFormDescription(biz?.description || '');
+    setBizFormContact(biz?.contactNumber || currentMember.phone || '');
+    setBizFormLocation(biz?.location || currentMember.address || '');
+    setBizSaveError(null);
+    setBizSaveSuccess(null);
+    setIsEditingBusinessPage(true);
+  };
+
+  // Handle Photo File Upload
+  const handleBusinessPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setBizSaveError('Photo size must be less than 5MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      setBizFormPicturePreview(base64);
+      setBizFormPictureUrl(base64);
+      setBizSaveError(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Save / Update Business Page
+  const handleSaveBusinessPage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bizFormName.trim()) {
+      setBizSaveError('Please enter your business name.');
+      return;
+    }
+    const finalNature = bizFormNature === 'Other' ? (bizFormCustomNature.trim() || 'Cooperative Enterprise') : bizFormNature;
+    if (!bizFormNextGoal.trim()) {
+      setBizSaveError('Please specify your next business goal or target milestone.');
+      return;
+    }
+
+    setIsSavingBusinessPage(true);
+    setBizSaveError(null);
+    try {
+      const slug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${slug.replace(/[-_]coop$/, '')}`;
+      const memberId = currentMember.id || currentMember.memberNumber || 'MEM-2026-0001';
+
+      const payload = {
+        businessName: bizFormName.trim(),
+        natureOfBusiness: finalNature,
+        pictureUrl: bizFormPictureUrl || bizFormPicturePreview || '',
+        nextGoal: bizFormNextGoal.trim(),
+        description: bizFormDescription.trim(),
+        contactNumber: bizFormContact.trim(),
+        location: bizFormLocation.trim(),
+        email: currentMember.email || '',
+      };
+
+      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(memberId)}/business`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': slug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to save business page.');
+      }
+
+      setBusinessPageData(json.data);
+      setBusinessComments(json.data.comments || []);
+      setCustomMember((prev: any) => ({
+        ...prev,
+        businessPage: json.data,
+      }));
+      setDirectoryMembers((prev) =>
+        prev.map((m) =>
+          m.id === memberId || m.memberNumber === currentMember.memberNumber
+            ? { ...m, businessPage: json.data }
+            : m
+        )
+      );
+
+      setBizSaveSuccess('Your Business Page has been successfully published!');
+      setTimeout(() => {
+        setIsEditingBusinessPage(false);
+        if (!selectedBusinessMember) {
+          setSelectedBusinessMember({
+            ...currentMember,
+            businessPage: json.data,
+          });
+        } else {
+          setSelectedBusinessMember((prev: any) => ({
+            ...prev,
+            businessPage: json.data,
+          }));
+        }
+      }, 700);
+    } catch (err: any) {
+      setBizSaveError(err.message || 'Network error while saving business page.');
+    } finally {
+      setIsSavingBusinessPage(false);
+    }
+  };
+
+  // Post Comment on Business Page
+  const handlePostBusinessComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCommentText.trim()) return;
+    if (!selectedBusinessMember) return;
+
+    setIsSubmittingComment(true);
+    setCommentError(null);
+
+    const tempComment = {
+      id: `comm_temp_${Date.now()}`,
+      memberId: currentMember.id || currentMember.memberNumber || 'guest',
+      memberName: currentMember.name || 'Coop Member',
+      memberNumber: currentMember.memberNumber || '',
+      avatarUrl: currentMember.selfieUrl || currentMember.selfiePreview || '',
+      text: newCommentText.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    setBusinessComments((prev) => [tempComment, ...prev]);
+    const commentToSend = newCommentText.trim();
+    setNewCommentText('');
+
+    try {
+      const slug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${slug.replace(/[-_]coop$/, '')}`;
+      const targetMemberId = selectedBusinessMember.id;
+
+      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(targetMemberId)}/business/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': slug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          text: commentToSend,
+          authorMemberId: currentMember.id || currentMember.memberNumber,
+          authorMemberName: currentMember.name,
+          authorMemberNumber: currentMember.memberNumber,
+          authorAvatarUrl: currentMember.selfieUrl || currentMember.selfiePreview || '',
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to post comment.');
+      }
+
+      if (json.comments) {
+        setBusinessComments(json.comments);
+      }
+    } catch (err: any) {
+      setCommentError(err.message || 'Failed to submit comment.');
+      setBusinessComments((prev) => prev.filter((c) => c.id !== tempComment.id));
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  };
+
+  // Delete Comment
+  const handleDeleteBusinessComment = async (commentId: string) => {
+    if (!selectedBusinessMember) return;
+    setBusinessComments((prev) => prev.filter((c) => c.id !== commentId));
+    try {
+      const slug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${slug.replace(/[-_]coop$/, '')}`;
+      const targetMemberId = selectedBusinessMember.id;
+
+      await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(targetMemberId)}/business/comments/${encodeURIComponent(commentId)}`, {
+        method: 'DELETE',
+        headers: {
+          'x-tenant-slug': slug,
+          'x-tenant-id': targetTenantId,
+        },
+      });
+    } catch (err) {
+      console.warn('Failed to delete comment:', err);
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
   const [memberLoanApplications, setMemberLoanApplications] = useState<any[]>([]);
@@ -1163,10 +1451,13 @@ export default function MemberPortalPage() {
   // Members Directory State (Showing strictly Selfie, First Name, Last Name sorted alphabetically)
   const [directoryMembers, setDirectoryMembers] = useState<Array<{
     id: string;
+    memberNumber?: string;
     firstName: string;
     lastName: string;
     selfieUrl?: string;
     selfiePreview?: string | null;
+    classification?: string;
+    businessPage?: any;
   }>>([]);
   const [isLoadingDirectory, setIsLoadingDirectory] = useState<boolean>(false);
   const [directorySearchQuery, setDirectorySearchQuery] = useState<string>('');
@@ -1511,9 +1802,13 @@ export default function MemberPortalPage() {
           }
           return {
             id: m.id || `${first}-${last}`,
+            memberNumber: m.memberNumber || m.memberNo || '',
             firstName: first || 'Member',
             lastName: last || '',
+            name: m.name || `${first} ${last}`.trim(),
             selfieUrl: m.selfieUrl || m.selfiePreview || m.avatarUrl || null,
+            classification: m.classification || 'REGULAR',
+            businessPage: m.businessPage || null,
           };
         });
         dirList.sort((a: any, b: any) => {
@@ -3241,6 +3536,33 @@ export default function MemberPortalPage() {
                   </span>
                   <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">Diminishing Rate</span>
                 </button>
+
+                {/* My Business Page Quick Action */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const myBiz = (currentMember as any)?.businessPage;
+                    if (myBiz?.businessName) {
+                      handleOpenBusinessPage({
+                        ...currentMember,
+                        firstName: currentMember.name?.split(' ')[0] || 'Member',
+                        lastName: currentMember.name?.split(' ').slice(1).join(' ') || '',
+                        businessPage: myBiz,
+                      });
+                    } else {
+                      handleOpenEditBusinessPage();
+                    }
+                  }}
+                  className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 bg-slate-50/70 transition-all text-center group"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-xs">
+                    <Store className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-tight">
+                    My Business
+                  </span>
+                  <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">Enterprise Page</span>
+                </button>
               </div>
             </div>
 
@@ -4046,12 +4368,23 @@ export default function MemberPortalPage() {
                 {filteredDirectoryMembers.map((mem) => {
                   const initials = `${(mem.firstName?.[0] || 'M')}${(mem.lastName?.[0] || '')}`.toUpperCase();
                   const photoUrl = mem.selfieUrl || mem.selfiePreview;
+                  const hasBusiness = Boolean(mem.businessPage?.businessName);
 
                   return (
                     <div
                       key={mem.id}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col items-center text-center shadow-xs hover:shadow-md hover:border-emerald-300 transition-all group"
+                      onClick={() => handleOpenBusinessPage(mem)}
+                      className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col items-center text-center shadow-xs hover:shadow-md hover:border-emerald-400 transition-all group cursor-pointer relative"
+                      title="Click to view Member's Business Page"
                     >
+                      {hasBusiness && (
+                        <div className="absolute top-2.5 right-2.5" title="Registered Cooperative Business">
+                          <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shadow-2xs border border-emerald-300">
+                            <Store className="w-3 h-3" />
+                          </span>
+                        </div>
+                      )}
+
                       {/* Selfie / Photo */}
                       <div className="relative mb-3">
                         {photoUrl ? (
@@ -4076,6 +4409,18 @@ export default function MemberPortalPage() {
                           {mem.lastName}
                         </p>
                       </div>
+
+                      {/* Business Badge */}
+                      {hasBusiness ? (
+                        <div className="mt-2.5 w-full pt-2 border-t border-slate-100 flex items-center justify-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50/70 rounded-lg py-1 px-1.5 truncate">
+                          <Store className="w-3 h-3 shrink-0 text-emerald-600" />
+                          <span className="truncate">{mem.businessPage.businessName}</span>
+                        </div>
+                      ) : (
+                        <div className="mt-2.5 w-full pt-2 border-t border-slate-100 text-[10px] text-slate-400 group-hover:text-emerald-600 transition-colors">
+                          View Business Page →
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -6369,6 +6714,45 @@ export default function MemberPortalPage() {
                   </div>
                   <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
                 </button>
+                {/* My Business Page */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const myBiz = (currentMember as any)?.businessPage;
+                    if (myBiz?.businessName) {
+                      handleOpenBusinessPage({
+                        ...currentMember,
+                        firstName: currentMember.name?.split(' ')[0] || 'Member',
+                        lastName: currentMember.name?.split(' ').slice(1).join(' ') || '',
+                        businessPage: myBiz,
+                      });
+                    } else {
+                      handleOpenEditBusinessPage();
+                    }
+                  }}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <Store className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                          My Business Page
+                        </h4>
+                        {(currentMember as any)?.businessPage?.businessName && (
+                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-1.5 py-0.2 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Showcase enterprise, upload photos, set goals & engage members</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
                 {/* My Loan Applications & Status */}
                 <button
                   type="button"
@@ -7907,6 +8291,589 @@ export default function MemberPortalPage() {
                         <span>Update Password</span>
                       </>
                     )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MEMBER BUSINESS PAGE & COMMUNITY COMMENTS MODAL */}
+        {/* ========================================================================= */}
+        {selectedBusinessMember && (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Modal Top Bar */}
+              <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-slate-950 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                <div className="flex items-center gap-3 min-w-0 pr-2">
+                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow shrink-0">
+                    <Store className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
+                        {businessPageData?.businessName || `${selectedBusinessMember.firstName || selectedBusinessMember.name}'s Business Page`}
+                      </h3>
+                      {businessPageData?.natureOfBusiness && (
+                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                          {businessPageData.natureOfBusiness}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                      Cooperative Member Enterprise Showcase & Community Inquiries
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* If viewing own page, show Edit Button */}
+                  {(selectedBusinessMember.id === currentMember.id ||
+                    selectedBusinessMember.memberNumber === currentMember.memberNumber ||
+                    selectedBusinessMember.id === currentMember.memberNumber) && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditBusinessPage(businessPageData)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer border border-emerald-500/50"
+                    >
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Edit Details</span>
+                      <span className="sm:hidden">Edit</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBusinessMember(null);
+                      setBusinessPageData(null);
+                      setBusinessComments([]);
+                    }}
+                    className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
+                    aria-label="Close modal"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-6 text-slate-800">
+                {isLoadingBusinessPage ? (
+                  <div className="py-16 text-center space-y-3">
+                    <RefreshCw className="w-8 h-8 animate-spin text-emerald-600 mx-auto" />
+                    <p className="text-xs text-slate-500 font-medium">Loading member business page & inquiries...</p>
+                  </div>
+                ) : !businessPageData?.businessName ? (
+                  /* No Business Page Published Yet */
+                  <div className="py-12 px-4 text-center max-w-md mx-auto space-y-4">
+                    <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
+                      <Store className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-base text-slate-900">
+                        No Business Page Published Yet
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                        {(selectedBusinessMember.id === currentMember.id ||
+                          selectedBusinessMember.memberNumber === currentMember.memberNumber ||
+                          selectedBusinessMember.id === currentMember.memberNumber)
+                          ? 'You have not set up your public business page yet. Showcase your enterprise, upload a business picture, and share your next business goal with fellow cooperative members!'
+                          : `${selectedBusinessMember.firstName || selectedBusinessMember.name} has not published a business page yet. When they launch their showcase, their enterprise details and next milestone will appear here.`}
+                      </p>
+                    </div>
+
+                    {(selectedBusinessMember.id === currentMember.id ||
+                      selectedBusinessMember.memberNumber === currentMember.memberNumber ||
+                      selectedBusinessMember.id === currentMember.memberNumber) && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditBusinessPage()}
+                        className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-md inline-flex items-center gap-2 cursor-pointer"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        <span>Set Up My Business Page Now</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  /* Published Business Page Showcase */
+                  <>
+                    {/* Business Photo / Hero Banner */}
+                    <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-xs group">
+                      {businessPageData.pictureUrl ? (
+                        <div className="relative h-48 sm:h-64 w-full overflow-hidden bg-slate-900">
+                          <img
+                            src={businessPageData.pictureUrl}
+                            alt={businessPageData.businessName}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent" />
+                          <div className="absolute bottom-3 left-4 right-4 text-white">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-600/90 text-white shadow-xs mb-1">
+                              {businessPageData.natureOfBusiness}
+                            </span>
+                            <h2 className="text-lg sm:text-xl font-black drop-shadow leading-tight">
+                              {businessPageData.businessName}
+                            </h2>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-40 sm:h-48 w-full bg-gradient-to-br from-emerald-800 via-teal-900 to-slate-900 text-white flex flex-col justify-end p-5">
+                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/20 text-emerald-200 w-fit mb-1.5 backdrop-blur-xs">
+                            {businessPageData.natureOfBusiness}
+                          </span>
+                          <h2 className="text-lg sm:text-xl font-black leading-tight">
+                            {businessPageData.businessName}
+                          </h2>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Member Proprietor Card */}
+                    <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/90 flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {selectedBusinessMember.selfieUrl ? (
+                          <img
+                            src={selectedBusinessMember.selfieUrl}
+                            alt={selectedBusinessMember.firstName || selectedBusinessMember.name}
+                            className="w-10 h-10 rounded-full object-cover border-2 border-emerald-500/40 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-black text-sm flex items-center justify-center shrink-0">
+                            {((selectedBusinessMember.firstName?.[0] || 'M') + (selectedBusinessMember.lastName?.[0] || '')).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-900 truncate">
+                              {selectedBusinessMember.name || `${selectedBusinessMember.firstName || ''} ${selectedBusinessMember.lastName || ''}`.trim()}
+                            </span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.2 rounded-full shrink-0">
+                              Proprietor
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            {selectedBusinessMember.memberNumber || 'Coop Member'} • {selectedBusinessMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {businessPageData.contactNumber && (
+                        <div className="text-right shrink-0">
+                          <span className="text-[10px] text-slate-400 block font-semibold">Contact / Orders</span>
+                          <span className="font-mono font-bold text-emerald-700 text-xs">
+                            {businessPageData.contactNumber}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Business Description (if provided) */}
+                    {businessPageData.description && (
+                      <div className="text-xs text-slate-600 bg-white p-4 rounded-xl border border-slate-200 leading-relaxed">
+                        <span className="font-bold text-slate-900 block text-xs mb-1">About the Business:</span>
+                        {businessPageData.description}
+                      </div>
+                    )}
+
+                    {/* NEXT BUSINESS GOAL (Highlighted Milestone Card) */}
+                    <div className="bg-gradient-to-br from-amber-500/10 via-amber-50 to-emerald-50/40 rounded-2xl p-4 sm:p-5 border border-amber-300/80 shadow-xs space-y-2">
+                      <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
+                        <Target className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Next Business Goal & Target Milestone</span>
+                      </div>
+                      <div className="bg-white/90 backdrop-blur-sm p-3.5 rounded-xl border border-amber-200/80 shadow-2xs">
+                        <p className="font-semibold text-slate-900 text-sm leading-snug">
+                          "{businessPageData.nextGoal}"
+                        </p>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">
+                        Supported by cooperative capital build-up, patronage dividends, and mutual community credit.
+                      </p>
+                    </div>
+
+                    {/* Location / Extra Info */}
+                    {businessPageData.location && (
+                      <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200">
+                        <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span><strong>Business Location:</strong> {businessPageData.location}</span>
+                      </div>
+                    )}
+
+                    {/* ================================================================= */}
+                    {/* COMMUNITY COMMENTS & RECOMMENDATIONS SECTION */}
+                    {/* ================================================================= */}
+                    <div className="pt-2 border-t border-slate-200 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-emerald-700" />
+                          <h4 className="font-bold text-sm text-slate-900">
+                            Member Comments & Recommendations
+                          </h4>
+                          <span className="bg-slate-100 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            {businessComments.length}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Comment Input Form */}
+                      <form onSubmit={handlePostBusinessComment} className="space-y-2.5">
+                        <div className="relative">
+                          <textarea
+                            value={newCommentText}
+                            onChange={(e) => setNewCommentText(e.target.value)}
+                            placeholder={`Leave a comment, review, or inquiry for ${businessPageData.businessName}...`}
+                            rows={2}
+                            maxLength={500}
+                            className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition text-slate-800 resize-none shadow-2xs"
+                          />
+                        </div>
+                        {commentError && (
+                          <p className="text-[11px] text-rose-600 font-medium">{commentError}</p>
+                        )}
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[11px] text-slate-400">
+                            Posting as <strong>{currentMember.name}</strong> ({currentMember.memberNumber || 'Member'})
+                          </span>
+                          <button
+                            type="submit"
+                            disabled={!newCommentText.trim() || isSubmittingComment}
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          >
+                            {isSubmittingComment ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Send className="w-3.5 h-3.5" />
+                            )}
+                            <span>Post Comment</span>
+                          </button>
+                        </div>
+                      </form>
+
+                      {/* Comments Feed */}
+                      <div className="space-y-2.5 pt-2">
+                        {businessComments.length === 0 ? (
+                          <div className="py-8 text-center bg-slate-50/80 rounded-xl border border-dashed border-slate-200">
+                            <MessageSquare className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
+                            <p className="text-xs text-slate-500 font-medium">No comments yet</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Be the first cooperative member to leave a comment or inquiry!
+                            </p>
+                          </div>
+                        ) : (
+                          businessComments.map((comm) => {
+                            const isMyComment =
+                              comm.memberId === currentMember.id ||
+                              comm.memberNumber === currentMember.memberNumber ||
+                              comm.memberId === currentMember.memberNumber;
+
+                            return (
+                              <div
+                                key={comm.id}
+                                className="p-3 sm:p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-1.5 text-xs hover:border-slate-300 transition"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                      {comm.avatarUrl ? (
+                                        <img src={comm.avatarUrl} alt={comm.memberName} className="w-full h-full rounded-full object-cover" />
+                                      ) : (
+                                        ((comm.memberName || 'M')[0]).toUpperCase()
+                                      )}
+                                    </div>
+                                    <span className="font-bold text-slate-900 truncate">
+                                      {comm.memberName}
+                                    </span>
+                                    {comm.memberNumber && (
+                                      <span className="font-mono text-[10px] text-slate-400 shrink-0">
+                                        #{comm.memberNumber}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[10px] text-slate-400">
+                                      {new Date(comm.createdAt).toLocaleDateString('en-PH', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric',
+                                      })}
+                                    </span>
+                                    {isMyComment && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteBusinessComment(comm.id)}
+                                        className="text-slate-400 hover:text-rose-600 transition p-1 cursor-pointer"
+                                        title="Delete your comment"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <p className="text-slate-700 leading-relaxed whitespace-pre-wrap pl-8">
+                                  {comm.text}
+                                </p>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* SET UP / EDIT MY BUSINESS PAGE MODAL */}
+        {/* ========================================================================= */}
+        {isEditingBusinessPage && (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-xl w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Modal Top Bar */}
+              <div className="bg-slate-900 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                <div className="flex items-center gap-3 min-w-0 pr-2">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow shrink-0">
+                    <Store className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
+                      {bizFormName ? `Edit ${bizFormName}` : 'Set Up Your Business Page'}
+                    </h3>
+                    <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                      Showcase your enterprise to fellow cooperative members
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingBusinessPage(false)}
+                  className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
+                  aria-label="Close modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Form Content */}
+              <form onSubmit={handleSaveBusinessPage} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+                {bizSaveError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{bizSaveError}</span>
+                  </div>
+                )}
+                {bizSaveSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{bizSaveSuccess}</span>
+                  </div>
+                )}
+
+                {/* 1. Business Name */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">
+                    Business Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={bizFormName}
+                    onChange={(e) => setBizFormName(e.target.value)}
+                    placeholder="e.g. Santos Organic Agri-Farms, Cruz Sari-Sari Store"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
+                  />
+                </div>
+
+                {/* 2. Nature of Business */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">
+                    Nature of Business <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={bizFormNature}
+                    onChange={(e) => setBizFormNature(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
+                  >
+                    <option value="Agriculture & Agribusiness">Agriculture & Agribusiness</option>
+                    <option value="Retail, Sari-Sari & Trading">Retail, Sari-Sari & Trading</option>
+                    <option value="Food Service, Bakery & Catering">Food Service, Bakery & Catering</option>
+                    <option value="Transportation, Logistics & Hauling">Transportation, Logistics & Hauling</option>
+                    <option value="Manufacturing, Crafts & Textiles">Manufacturing, Crafts & Textiles</option>
+                    <option value="Services, Repair & Construction">Services, Repair & Construction</option>
+                    <option value="Technology & Digital Services">Technology & Digital Services</option>
+                    <option value="Health, Beauty & Personal Care">Health, Beauty & Personal Care</option>
+                    <option value="Other">Other (Custom Specification)</option>
+                  </select>
+                  {bizFormNature === 'Other' && (
+                    <input
+                      type="text"
+                      value={bizFormCustomNature}
+                      onChange={(e) => setBizFormCustomNature(e.target.value)}
+                      placeholder="Specify your business line or industry..."
+                      className="w-full mt-1.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
+                    />
+                  )}
+                </div>
+
+                {/* 3. Picture of the Business */}
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 block">
+                    Picture of the Business (Photo / Storefront / Farm)
+                  </label>
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-3 sm:p-4 text-center bg-slate-50/60 hover:bg-slate-50 transition space-y-2">
+                    {bizFormPicturePreview ? (
+                      <div className="space-y-2">
+                        <div className="relative h-36 w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-900">
+                          <img
+                            src={bizFormPicturePreview}
+                            alt="Business Preview"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center gap-2">
+                          <label className="px-3 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold cursor-pointer text-[11px] transition">
+                            Change Image
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleBusinessPhotoUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBizFormPicturePreview(null);
+                              setBizFormPictureUrl('');
+                            }}
+                            className="px-3 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] transition cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 py-2">
+                        <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+                          <Upload className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <label className="text-emerald-700 font-bold hover:underline cursor-pointer">
+                            Click to upload photo
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleBusinessPhotoUpload}
+                              className="hidden"
+                            />
+                          </label>
+                          <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, or WEBP up to 5MB</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Or image URL */}
+                  <input
+                    type="url"
+                    value={bizFormPictureUrl}
+                    onChange={(e) => {
+                      setBizFormPictureUrl(e.target.value);
+                      setBizFormPicturePreview(e.target.value || null);
+                    }}
+                    placeholder="Or paste external image URL (https://...)"
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800 font-mono transition"
+                  />
+                </div>
+
+                {/* 4. Next Business Goal */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700 block">
+                      Next Business Goal / Target Milestone <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[10px] text-amber-700 font-semibold">Community Shared Goal</span>
+                  </div>
+                  <textarea
+                    required
+                    rows={2}
+                    value={bizFormNextGoal}
+                    onChange={(e) => setBizFormNextGoal(e.target.value)}
+                    placeholder="e.g. Procure a 5kVA solar inverter to power refrigerated seedling storage by November 2026."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition resize-none"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    What milestone is your enterprise aiming for next with the help of cooperative services?
+                  </p>
+                </div>
+
+                {/* 5. Business Description */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">
+                    Description & Offerings (Optional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={bizFormDescription}
+                    onChange={(e) => setBizFormDescription(e.target.value)}
+                    placeholder="Briefly describe what your business offers and what makes your enterprise unique..."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition resize-none"
+                  />
+                </div>
+
+                {/* 6. Contact & Location */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700 block">
+                      Contact Number for Inquiries
+                    </label>
+                    <input
+                      type="text"
+                      value={bizFormContact}
+                      onChange={(e) => setBizFormContact(e.target.value)}
+                      placeholder="e.g. +63 918 123 4567"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800 font-medium transition"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700 block">
+                      Physical Store / Farm Location
+                    </label>
+                    <input
+                      type="text"
+                      value={bizFormLocation}
+                      onChange={(e) => setBizFormLocation(e.target.value)}
+                      placeholder="e.g. Barangay Central, Quezon City"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800 font-medium transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Form Buttons */}
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingBusinessPage(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-bold transition text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingBusinessPage}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold transition text-xs shadow-md flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {isSavingBusinessPage ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>Publish Business Page</span>
                   </button>
                 </div>
               </form>

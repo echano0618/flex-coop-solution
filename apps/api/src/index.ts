@@ -2936,6 +2936,241 @@ app.delete('/api/v1/members/:id', async (req: Request, res: Response) => {
   }
 });
 
+// -------------------------------------------------------------
+// MEMBER BUSINESS PAGE & COMMUNITY COMMENTS
+// -------------------------------------------------------------
+export async function handleGetMemberBusinessPage(req: Request, res: Response) {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberId = req.params.id;
+
+    let member: any = null;
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      member = await fsService.getMember(tenantId, memberId);
+    } catch {}
+
+    if (!member) {
+      const mems = dbStore.members.get(tenantId) || [];
+      member = mems.find((m) => m.id === memberId || m.memberNumber === memberId || m.memberNo === memberId);
+    }
+
+    if (!member) {
+      return res.status(404).json({ success: false, error: 'Member not found' });
+    }
+
+    const memberSummary = {
+      id: member.id,
+      memberNumber: member.memberNumber || member.memberNo,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      name: member.name || `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Coop Member',
+      selfieUrl: member.selfieUrl || member.selfiePreview || null,
+      classification: member.classification,
+    };
+
+    res.json({
+      success: true,
+      data: member.businessPage || null,
+      member: memberSummary,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+export async function handleUpdateMemberBusinessPage(req: Request, res: Response) {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberId = req.params.id;
+    const {
+      businessName,
+      natureOfBusiness,
+      pictureUrl,
+      nextGoal,
+      description,
+      contactNumber,
+      email,
+      location,
+    } = req.body;
+
+    if (!businessName || !businessName.trim()) {
+      return res.status(400).json({ success: false, error: 'Business name is required.' });
+    }
+
+    let member: any = null;
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      member = await fsService.getMember(tenantId, memberId);
+    } catch {}
+
+    if (!member) {
+      const mems = dbStore.members.get(tenantId) || [];
+      member = mems.find((m) => m.id === memberId || m.memberNumber === memberId || m.memberNo === memberId);
+    }
+
+    if (!member) {
+      return res.status(404).json({ success: false, error: 'Member not found.' });
+    }
+
+    const existingComments = member.businessPage?.comments || [];
+    const updatedBusinessPage = {
+      businessName: businessName.trim(),
+      natureOfBusiness: (natureOfBusiness || 'General Enterprise').trim(),
+      pictureUrl: pictureUrl || member.businessPage?.pictureUrl || '',
+      nextGoal: (nextGoal || '').trim(),
+      description: (description || '').trim(),
+      contactNumber: (contactNumber || '').trim(),
+      email: (email || '').trim(),
+      location: (location || '').trim(),
+      comments: existingComments,
+      updatedAt: new Date().toISOString(),
+    };
+
+    member.businessPage = updatedBusinessPage;
+    member.updatedAt = new Date().toISOString();
+
+    // Persist to Firestore & memory
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveMember(tenantId, member);
+    } catch (fsErr) {
+      console.warn('Firestore saveMember business page fallback:', fsErr);
+    }
+
+    const mems = dbStore.members.get(tenantId) || [];
+    const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
+    if (idx !== -1) {
+      mems[idx] = member;
+    } else {
+      mems.push(member);
+    }
+    dbStore.members.set(tenantId, mems);
+
+    res.json({
+      success: true,
+      message: 'Business page successfully published and saved.',
+      data: updatedBusinessPage,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+export async function handleAddBusinessComment(req: Request, res: Response) {
+  try {
+    const tenantId = resolveTenantId(req);
+    const memberId = req.params.id;
+    const { text, authorMemberId, authorMemberName, authorMemberNumber, authorAvatarUrl } = req.body;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ success: false, error: 'Comment text cannot be empty.' });
+    }
+
+    let member: any = null;
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      member = await fsService.getMember(tenantId, memberId);
+    } catch {}
+
+    if (!member) {
+      const mems = dbStore.members.get(tenantId) || [];
+      member = mems.find((m) => m.id === memberId || m.memberNumber === memberId || m.memberNo === memberId);
+    }
+
+    if (!member) {
+      return res.status(404).json({ success: false, error: 'Member not found.' });
+    }
+
+    if (!member.businessPage) {
+      member.businessPage = {
+        businessName: `${member.firstName || 'Member'}'s Business`,
+        natureOfBusiness: 'Cooperative Enterprise',
+        nextGoal: 'Grow and expand cooperative trade',
+        comments: [],
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const newComment = {
+      id: `comm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      memberId: authorMemberId || 'guest',
+      memberName: authorMemberName || 'Coop Member',
+      memberNumber: authorMemberNumber || '',
+      avatarUrl: authorAvatarUrl || '',
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    member.businessPage.comments = [newComment, ...(member.businessPage.comments || [])];
+    member.updatedAt = new Date().toISOString();
+
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveMember(tenantId, member);
+    } catch (fsErr) {
+      console.warn('Firestore saveMember comment fallback:', fsErr);
+    }
+
+    const mems = dbStore.members.get(tenantId) || [];
+    const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
+    if (idx !== -1) mems[idx] = member;
+    dbStore.members.set(tenantId, mems);
+
+    res.status(201).json({
+      success: true,
+      message: 'Comment posted successfully.',
+      data: newComment,
+      comments: member.businessPage.comments,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+export async function handleDeleteBusinessComment(req: Request, res: Response) {
+  try {
+    const tenantId = resolveTenantId(req);
+    const { id: memberId, commentId } = req.params;
+
+    let member: any = null;
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      member = await fsService.getMember(tenantId, memberId);
+    } catch {}
+
+    if (!member) {
+      const mems = dbStore.members.get(tenantId) || [];
+      member = mems.find((m) => m.id === memberId || m.memberNumber === memberId || m.memberNo === memberId);
+    }
+
+    if (!member || !member.businessPage) {
+      return res.status(404).json({ success: false, error: 'Business page not found.' });
+    }
+
+    member.businessPage.comments = (member.businessPage.comments || []).filter((c: any) => c.id !== commentId);
+    member.updatedAt = new Date().toISOString();
+
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveMember(tenantId, member);
+    } catch {}
+
+    res.json({
+      success: true,
+      message: 'Comment deleted successfully.',
+      comments: member.businessPage.comments,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+app.get('/api/v1/members/:id/business', handleGetMemberBusinessPage);
+app.put('/api/v1/members/:id/business', handleUpdateMemberBusinessPage);
+app.post('/api/v1/members/:id/business/comments', handleAddBusinessComment);
+app.delete('/api/v1/members/:id/business/comments/:commentId', handleDeleteBusinessComment);
+
 app.get('/api/v1/system-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);

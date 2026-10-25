@@ -22,6 +22,10 @@ import {
   handleListBankTransferRequests,
   handleConfirmBankTransferRequest,
   handleRejectBankTransferRequest,
+  handleGetMemberBusinessPage,
+  handleUpdateMemberBusinessPage,
+  handleAddBusinessComment,
+  handleDeleteBusinessComment,
 } from '../index';
 import {
   Tenant,
@@ -3493,7 +3497,120 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 38 BANK TRANSFER VERIFICATION & GL POSTING TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 380+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37 & 38) PASSED SUCCESSFULLY!\n');
+  // --- 39. Member Business Page, Goals & Community Comments ---
+  {
+    console.log('\n--- 39. Member Business Page, Goals & Community Comments ---');
+    const bizTenantId = 'tenant_bayani_001';
+    const bizMemberId = 'MEM-2026-0001';
+
+    // Mock Express Request / Response helper for Section 39
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        body: reqData.body || {},
+        query: reqData.query || {},
+        params: reqData.params || {},
+        headers: {
+          'x-tenant-id': bizTenantId,
+          ...(reqData.headers || {}),
+        },
+      };
+      const res: any = {
+        status(code: number) {
+          statusCode = code;
+          return res;
+        },
+        json(data: any) {
+          responseBody = data;
+          return res;
+        },
+      };
+      return { req, res, getStatus: () => statusCode, getBody: () => responseBody };
+    };
+
+    // 39.1 Fetch Initial Business Page for Seeded Member (Juan Dela Cruz)
+    const getBizMock = makeMockHttp({
+      params: { id: 'MEM-2026-0002' },
+      headers: { 'x-tenant-id': bizTenantId },
+    });
+    await handleGetMemberBusinessPage(getBizMock.req, getBizMock.res);
+    assert(getBizMock.getStatus() === 200, 'Get business page responds with HTTP 200');
+    assert(getBizMock.getBody().success === true, 'Get business page response body success is true');
+    assert(getBizMock.getBody().data?.businessName === 'Dela Cruz Express Logistics & Cargo Services', 'Initial seeded business name matches');
+    assert(getBizMock.getBody().data?.natureOfBusiness === 'Transportation & Logistics', 'Nature of business matches');
+    assert(getBizMock.getBody().member?.firstName === 'Juan', 'Member summary returns owner name');
+
+    // 39.2 Unconfigured Business Page Returns Null Data (Placeholder Flow)
+    const getUnconfMock = makeMockHttp({
+      params: { id: 'MEM-2026-0001' },
+      headers: { 'x-tenant-id': bizTenantId },
+    });
+    await handleGetMemberBusinessPage(getUnconfMock.req, getUnconfMock.res);
+    assert(getUnconfMock.getStatus() === 200, 'Unconfigured business page query responds with HTTP 200');
+    assert(getUnconfMock.getBody().data === null, 'Unconfigured business page returns null data');
+
+    // 39.3 Validation: Business Name cannot be empty
+    const invalidPutMock = makeMockHttp({
+      params: { id: 'MEM-2026-0001' },
+      headers: { 'x-tenant-id': bizTenantId },
+      body: { businessName: '   ' },
+    });
+    await handleUpdateMemberBusinessPage(invalidPutMock.req, invalidPutMock.res);
+    assert(invalidPutMock.getStatus() === 400, 'Business page update rejects empty business name with HTTP 400');
+
+    // 39.4 Set Up Business Page details (Business name, nature, picture, next goal)
+    const updateBizMock = makeMockHttp({
+      params: { id: 'MEM-2026-0001' },
+      headers: { 'x-tenant-id': bizTenantId },
+      body: {
+        businessName: 'Echano Agribusiness & Renewable Solutions',
+        natureOfBusiness: 'Agriculture & Renewable Energy',
+        pictureUrl: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80',
+        nextGoal: 'Deploy solar water pumps across 10 partner cooperative agrarian reform communities in Luzon',
+        description: 'Providing sustainable solar micro-grids, drip irrigation equipment, and post-harvest drying facilities for agrarian cooperatives.',
+        contactNumber: '+63 917 888 2468',
+        location: 'Ortigas Center, Pasig City',
+      },
+    });
+    await handleUpdateMemberBusinessPage(updateBizMock.req, updateBizMock.res);
+    assert(updateBizMock.getStatus() === 200, 'Update business page responds with HTTP 200');
+    assert(updateBizMock.getBody().data?.businessName === 'Echano Agribusiness & Renewable Solutions', 'Updated business name saved');
+    assert(updateBizMock.getBody().data?.nextGoal === 'Deploy solar water pumps across 10 partner cooperative agrarian reform communities in Luzon', 'Updated next goal saved');
+
+    // 39.5 Post Community Comment
+    const commentMock = makeMockHttp({
+      params: { id: 'MEM-2026-0001' },
+      headers: { 'x-tenant-id': bizTenantId },
+      body: {
+        text: 'Mabuhay! Looking forward to partnering on the solar pump installations for our nursery.',
+        authorMemberId: 'mem_maria_santos',
+        authorMemberName: 'Maria Clara Santos',
+        authorMemberNumber: 'MEM-2026-0001',
+      },
+    });
+    await handleAddBusinessComment(commentMock.req, commentMock.res);
+    assert(commentMock.getStatus() === 201, 'Post business comment responds with HTTP 201 Created');
+    assert(commentMock.getBody().success === true, 'Comment response success is true');
+    const createdComment = commentMock.getBody().data;
+    assert(createdComment?.text.includes('solar pump installations'), 'Comment text matches payload');
+    assert(createdComment?.memberId === 'mem_maria_santos', 'Comment author member ID recorded');
+
+    // 39.6 Delete Business Comment
+    const deleteCommentMock = makeMockHttp({
+      params: { id: 'MEM-2026-0001', commentId: createdComment.id },
+      headers: { 'x-tenant-id': bizTenantId },
+    });
+    await handleDeleteBusinessComment(deleteCommentMock.req, deleteCommentMock.res);
+    assert(deleteCommentMock.getStatus() === 200, 'Delete comment responds with HTTP 200');
+    assert(deleteCommentMock.getBody().success === true, 'Delete comment response success is true');
+    const commentsAfterDelete = deleteCommentMock.getBody().comments;
+    assert(!commentsAfterDelete.some((c: any) => c.id === createdComment.id), 'Deleted comment is removed from business comments array');
+
+    console.log('  ✅ ALL SECTION 39 MEMBER BUSINESS PAGE & COMMUNITY COMMENTS TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 390+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38 & 39) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

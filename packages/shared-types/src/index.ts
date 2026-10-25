@@ -179,9 +179,33 @@ export interface Member {
   memberNo?: string;
   selfieUrl?: string;
   selfiePreview?: string | null;
+  businessPage?: MemberBusinessPage;
   joinedAt: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BusinessComment {
+  id: string;
+  memberId: string;
+  memberName: string;
+  memberNumber?: string;
+  avatarUrl?: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface MemberBusinessPage {
+  businessName: string;
+  natureOfBusiness: string;
+  pictureUrl?: string;
+  nextGoal: string;
+  description?: string;
+  contactNumber?: string;
+  email?: string;
+  location?: string;
+  comments?: BusinessComment[];
+  updatedAt?: string;
 }
 
 // Default Membership Registration Configurable Fields
