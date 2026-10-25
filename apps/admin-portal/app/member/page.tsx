@@ -3245,34 +3245,41 @@ export default function MemberPortalPage() {
             </div>
 
             {/* Active Loan Applications & Underwriting Pipeline (Dashboard Section) */}
-            {memberLoanApplications.length > 0 && (
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
-                      <ClipboardList className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900">
-                        My Submitted Loan Applications
-                      </h3>
-                      <p className="text-[11px] text-slate-500">
-                        Real-time underwriting evaluation &amp; approval status
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('applications')}
-                    className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 transition-colors"
-                  >
-                    <span>View All ({memberLoanApplications.length})</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+            {(() => {
+              const activeDashboardApplications = memberLoanApplications.filter((app) => {
+                const st = String(app.status || '').toUpperCase();
+                return st !== 'REJECTED' && st !== 'DISBURSED';
+              });
+              if (activeDashboardApplications.length === 0) return null;
 
-                <div className="space-y-3">
-                  {memberLoanApplications.slice(0, 3).map((app) => (
+              return (
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                        <ClipboardList className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">
+                          My Submitted Loan Applications
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          Real-time underwriting evaluation &amp; approval status
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('applications')}
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 transition-colors"
+                    >
+                      <span>View All ({activeDashboardApplications.length})</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {activeDashboardApplications.slice(0, 3).map((app) => (
                     <div
                       key={app.id}
                       className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition space-y-3"
@@ -3372,7 +3379,8 @@ export default function MemberPortalPage() {
                   ))}
                 </div>
               </div>
-            )}
+            );
+          })()}
           </div>
         )}
 
@@ -6368,25 +6376,13 @@ export default function MemberPortalPage() {
                   className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="relative w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
                       <ClipboardList className="w-5 h-5" />
-                      {memberLoanApplications.length > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-emerald-600 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
-                          {memberLoanApplications.length}
-                        </span>
-                      )}
                     </div>
                     <div>
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
-                          My Loan Applications
-                        </h4>
-                        {memberLoanApplications.length > 0 && (
-                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-1.5 py-0.2 rounded-full">
-                            {memberLoanApplications.length} Filed
-                          </span>
-                        )}
-                      </div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        My Loan Applications
+                      </h4>
                       <p className="text-[11px] text-slate-500">Track review pipeline, approvals &amp; status</p>
                     </div>
                   </div>
