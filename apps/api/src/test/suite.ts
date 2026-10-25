@@ -3607,6 +3607,23 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     const commentsAfterDelete = deleteCommentMock.getBody().comments;
     assert(!commentsAfterDelete.some((c: any) => c.id === createdComment.id), 'Deleted comment is removed from business comments array');
 
+    // 39.7 Query business page by email and by GM alias
+    const getBizByEmailMock = makeMockHttp({
+      params: { id: 'juan.delacruz@yahoo.com' },
+      headers: { 'x-tenant-id': bizTenantId },
+    });
+    await handleGetMemberBusinessPage(getBizByEmailMock.req, getBizByEmailMock.res);
+    assert(getBizByEmailMock.getStatus() === 200, 'Query business page by member email responds with HTTP 200');
+    assert(getBizByEmailMock.getBody().data?.businessName === 'Dela Cruz Express Logistics & Cargo Services', 'Business page resolved by email');
+
+    const getBizByAliasMock = makeMockHttp({
+      params: { id: 'mem_gm_0001' },
+      headers: { 'x-tenant-id': bizTenantId },
+    });
+    await handleGetMemberBusinessPage(getBizByAliasMock.req, getBizByAliasMock.res);
+    assert(getBizByAliasMock.getStatus() === 200, 'Query business page by GM alias responds with HTTP 200');
+    assert(getBizByAliasMock.getBody().data?.businessName === 'Echano Agribusiness & Renewable Solutions', 'Business page resolved by GM alias');
+
     console.log('  ✅ ALL SECTION 39 MEMBER BUSINESS PAGE & COMMUNITY COMMENTS TESTS PASSED!');
   }
 

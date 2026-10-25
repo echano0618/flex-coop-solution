@@ -231,22 +231,35 @@ export class FirestoreCoopService {
 
   public async getMember(tenantId: string, memberId: string): Promise<Member | null> {
     if (!this.isConfigured()) return null;
-    const doc = await this.membersCol(tenantId).doc(memberId).get();
+    const cleanId = (memberId || '').trim();
+    if (!cleanId) return null;
+
+    const doc = await this.membersCol(tenantId).doc(cleanId).get();
     if (doc.exists) return { ...(doc.data() as any), id: doc.id } as Member;
 
-    if (memberId === 'mem_gm_0001') {
+    if (cleanId === 'mem_gm_0001' || cleanId.toLowerCase() === 'admin' || cleanId.toLowerCase() === 'gm') {
       const gmDoc = await this.membersCol(tenantId).doc('MEM-2026-0001').get();
       if (gmDoc.exists) return { ...(gmDoc.data() as any), id: gmDoc.id } as Member;
     }
 
+    if (cleanId === 'MEM-2026-0001') {
+      const gmDoc2 = await this.membersCol(tenantId).doc('mem_gm_0001').get();
+      if (gmDoc2.exists) return { ...(gmDoc2.data() as any), id: gmDoc2.id } as Member;
+    }
+
     try {
-      const q1 = await this.membersCol(tenantId).where('memberNumber', '==', memberId).limit(1).get();
+      const q1 = await this.membersCol(tenantId).where('memberNumber', '==', cleanId).limit(1).get();
       if (!q1.empty) return { ...(q1.docs[0].data() as any), id: q1.docs[0].id } as Member;
     } catch {}
 
     try {
-      const q2 = await this.membersCol(tenantId).where('memberNo', '==', memberId).limit(1).get();
+      const q2 = await this.membersCol(tenantId).where('memberNo', '==', cleanId).limit(1).get();
       if (!q2.empty) return { ...(q2.docs[0].data() as any), id: q2.docs[0].id } as Member;
+    } catch {}
+
+    try {
+      const q3 = await this.membersCol(tenantId).where('email', '==', cleanId.toLowerCase()).limit(1).get();
+      if (!q3.empty) return { ...(q3.docs[0].data() as any), id: q3.docs[0].id } as Member;
     } catch {}
 
     return null;

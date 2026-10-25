@@ -530,6 +530,7 @@ export default function MemberPortalPage() {
             savingsBalance: auth.savingsBalance !== undefined ? Number(auth.savingsBalance) : 0,
             loanBalance: 0,
             idType: auth.idType || 'PhilSys Verified Member ID',
+            businessPage: auth.businessPage || null,
           };
         }
       } catch {}
@@ -578,7 +579,14 @@ export default function MemberPortalPage() {
                 savingsBalance: parsed.savingsBalance !== undefined ? Number(parsed.savingsBalance) : 0,
                 loanBalance: 0,
                 idType: parsed.idType || 'PhilSys Verified Member ID',
+                businessPage: parsed.businessPage || null,
               });
+              if (parsed.businessPage?.businessName) {
+                setBusinessPageData(parsed.businessPage);
+                if (parsed.businessPage.comments) {
+                  setBusinessComments(parsed.businessPage.comments);
+                }
+              }
             }
           } catch {}
         } else if (admin) {
@@ -653,7 +661,10 @@ export default function MemberPortalPage() {
                     id: m.id || `${first}-${last}`,
                     firstName: first || 'Member',
                     lastName: last || '',
+                    memberNumber: m.memberNumber || m.memberNo || '',
+                    email: m.email || '',
                     selfieUrl: m.selfieUrl || m.selfiePreview || m.avatarUrl || null,
+                    businessPage: m.businessPage || null,
                   };
                 });
                 dirList.sort((a: any, b: any) => {
@@ -706,6 +717,7 @@ export default function MemberPortalPage() {
                 const resolvedSavings = matched.savingsBalance !== undefined ? Number(matched.savingsBalance) : 0;
                 const classification = matched.classification || (matched.position === 'General Manager' ? 'REGULAR' : 'ASSOCIATE');
                 const isDividendEligible = matched.isDividendEligible !== undefined ? Boolean(matched.isDividendEligible) : (classification === 'REGULAR');
+                const resolvedBizPage = matched.businessPage || (auth as any)?.businessPage || null;
 
                 setCustomMember((prev: any) => ({
                   id: matched.id || prev?.id || 'MEM-2026-0001',
@@ -722,7 +734,16 @@ export default function MemberPortalPage() {
                   savingsBalance: resolvedSavings,
                   loanBalance: matched.loanBalance !== undefined ? Number(matched.loanBalance) : 0,
                   idType: matched.idType || 'PhilSys National ID (Verified Member)',
+                  businessPage: resolvedBizPage || prev?.businessPage || null,
                 }));
+
+                if (resolvedBizPage?.businessName) {
+                  setBusinessPageData(resolvedBizPage);
+                  if (resolvedBizPage.comments) {
+                    setBusinessComments(resolvedBizPage.comments);
+                  }
+                }
+
                 setSavingsBalance(resolvedSavings);
                 if (matched.loanBalance !== undefined) {
                   setLoanBalance(Number(matched.loanBalance));
@@ -737,9 +758,40 @@ export default function MemberPortalPage() {
                       sharesCount: matched.sharesCount !== undefined ? Number(matched.sharesCount) : auth.sharesCount,
                       subscribedShares: matched.subscribedShares !== undefined ? Number(matched.subscribedShares) : auth.subscribedShares,
                       sharePaymentStatus: matched.sharePaymentStatus || auth.sharePaymentStatus,
+                      businessPage: resolvedBizPage || auth.businessPage || null,
                     };
                     setTenantMemberSession(updatedAuth, info.slug, info.name);
                   } catch {}
+                }
+
+                // If business page is not yet populated from matched, query dedicated business endpoint
+                const queryMemberId = matched.id || matched.memberNumber || auth?.id || auth?.memberNumber;
+                if (!resolvedBizPage?.businessName && queryMemberId) {
+                  const targetTenantId = (matched as any)?.tenantId || `tenant_${info.slug.replace(/[-_]coop$/, '')}`;
+                  fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(queryMemberId)}/business`, {
+                    headers: {
+                      'x-tenant-slug': info.slug,
+                      'x-tenant-id': targetTenantId,
+                    },
+                  })
+                    .then((r) => r.json())
+                    .then((bRes) => {
+                      if (bRes.success && bRes.data && bRes.data.businessName) {
+                        setBusinessPageData(bRes.data);
+                        setBusinessComments(bRes.data.comments || []);
+                        setCustomMember((prev: any) => ({
+                          ...prev,
+                          businessPage: bRes.data,
+                        }));
+                        if (auth) {
+                          try {
+                            const updated = { ...auth, businessPage: bRes.data };
+                            setTenantMemberSession(updated, info.slug, info.name);
+                          } catch {}
+                        }
+                      }
+                    })
+                    .catch(() => {});
                 }
               }
             }
@@ -816,9 +868,20 @@ export default function MemberPortalPage() {
     setCommentError(null);
     setNewCommentText('');
 
-    if (member.businessPage) {
-      setBusinessPageData(member.businessPage);
-      setBusinessComments(member.businessPage.comments || []);
+    const isCurrent =
+      member.id === currentMember.id ||
+      (member.memberNumber && member.memberNumber === currentMember.memberNumber) ||
+      (member.email && currentMember.email && member.email.toLowerCase() === currentMember.email.toLowerCase()) ||
+      member.id === currentMember.memberNumber ||
+      member.memberNumber === currentMember.id;
+
+    const initialBiz =
+      member.businessPage ||
+      (isCurrent ? (businessPageData || (currentMember as any)?.businessPage) : null);
+
+    if (initialBiz?.businessName) {
+      setBusinessPageData(initialBiz);
+      setBusinessComments(initialBiz.comments || []);
     } else {
       setBusinessPageData(null);
       setBusinessComments([]);
@@ -827,7 +890,8 @@ export default function MemberPortalPage() {
     try {
       const slug = tenantInfo.slug || 'family-coop';
       const targetTenantId = (currentMember as any)?.tenantId || `tenant_${slug.replace(/[-_]coop$/, '')}`;
-      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(member.id)}/business`, {
+      const targetMemberId = member.id || member.memberNumber || member.email || currentMember.id || currentMember.memberNumber;
+      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(targetMemberId)}/business`, {
         headers: {
           'x-tenant-slug': slug,
           'x-tenant-id': targetTenantId,
@@ -837,12 +901,95 @@ export default function MemberPortalPage() {
       if (json.success && json.data) {
         setBusinessPageData(json.data);
         setBusinessComments(json.data.comments || []);
+        if (isCurrent) {
+          setCustomMember((prev: any) => ({
+            ...prev,
+            businessPage: json.data,
+          }));
+          try {
+            const auth = getTenantMemberSession(slug);
+            if (auth) {
+              setTenantMemberSession({ ...auth, businessPage: json.data }, slug, tenantInfo.name);
+            }
+          } catch {}
+        }
         setDirectoryMembers((prev) =>
-          prev.map((m) => (m.id === member.id ? { ...m, businessPage: json.data } : m))
+          prev.map((m) =>
+            m.id === member.id || (m.memberNumber && m.memberNumber === member.memberNumber)
+              ? { ...m, businessPage: json.data }
+              : m
+          )
         );
       }
     } catch (err) {
       console.warn('Failed to fetch business page:', err);
+    } finally {
+      setIsLoadingBusinessPage(false);
+    }
+  };
+
+  // Open Own Business Page or Launch Setup Modal
+  const handleOpenMyBusiness = async () => {
+    const authSess = typeof window !== 'undefined' ? getTenantMemberSession(tenantInfo.slug) : null;
+    const existingBiz =
+      (currentMember as any)?.businessPage ||
+      businessPageData ||
+      authSess?.businessPage;
+
+    const myMemberData = {
+      ...currentMember,
+      firstName: currentMember.firstName || currentMember.name?.split(' ')[0] || 'Member',
+      lastName: currentMember.lastName || currentMember.name?.split(' ').slice(1).join(' ') || '',
+      businessPage: existingBiz || null,
+    };
+
+    // If business page is already known locally, open the actual business page immediately!
+    if (existingBiz?.businessName) {
+      handleOpenBusinessPage(myMemberData);
+      return;
+    }
+
+    // Otherwise, check the backend first before redirecting to setup
+    setIsLoadingBusinessPage(true);
+    setSelectedBusinessMember(myMemberData);
+    try {
+      const slug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${slug.replace(/[-_]coop$/, '')}`;
+      const targetMemberId = currentMember.id || currentMember.memberNumber || currentMember.email || 'MEM-2026-0001';
+
+      const res = await fetch(`${getApiBaseUrl()}/members/${encodeURIComponent(targetMemberId)}/business`, {
+        headers: {
+          'x-tenant-slug': slug,
+          'x-tenant-id': targetTenantId,
+        },
+      });
+      const json = await res.json();
+      if (json.success && json.data && json.data.businessName) {
+        // Business page ALREADY exists on server -> open the actual Business Page!
+        setBusinessPageData(json.data);
+        setBusinessComments(json.data.comments || []);
+        setCustomMember((prev: any) => ({
+          ...prev,
+          businessPage: json.data,
+        }));
+        if (authSess) {
+          try {
+            setTenantMemberSession({ ...authSess, businessPage: json.data }, slug, tenantInfo.name);
+          } catch {}
+        }
+        setSelectedBusinessMember({
+          ...myMemberData,
+          businessPage: json.data,
+        });
+      } else {
+        // No business page created yet: close business modal and open the setup/edit modal
+        setSelectedBusinessMember(null);
+        handleOpenEditBusinessPage();
+      }
+    } catch (err) {
+      console.warn('Failed to verify business page:', err);
+      setSelectedBusinessMember(null);
+      handleOpenEditBusinessPage();
     } finally {
       setIsLoadingBusinessPage(false);
     }
@@ -951,6 +1098,12 @@ export default function MemberPortalPage() {
         ...prev,
         businessPage: json.data,
       }));
+      try {
+        const auth = getTenantMemberSession(slug);
+        if (auth) {
+          setTenantMemberSession({ ...auth, businessPage: json.data }, slug, tenantInfo.name);
+        }
+      } catch {}
       setDirectoryMembers((prev) =>
         prev.map((m) =>
           m.id === memberId || m.memberNumber === currentMember.memberNumber
@@ -3540,19 +3693,7 @@ export default function MemberPortalPage() {
                 {/* My Business Page Quick Action */}
                 <button
                   type="button"
-                  onClick={() => {
-                    const myBiz = (currentMember as any)?.businessPage;
-                    if (myBiz?.businessName) {
-                      handleOpenBusinessPage({
-                        ...currentMember,
-                        firstName: currentMember.name?.split(' ')[0] || 'Member',
-                        lastName: currentMember.name?.split(' ').slice(1).join(' ') || '',
-                        businessPage: myBiz,
-                      });
-                    } else {
-                      handleOpenEditBusinessPage();
-                    }
-                  }}
+                  onClick={handleOpenMyBusiness}
                   className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 bg-slate-50/70 transition-all text-center group"
                 >
                   <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-xs">
@@ -6717,19 +6858,7 @@ export default function MemberPortalPage() {
                 {/* My Business Page */}
                 <button
                   type="button"
-                  onClick={() => {
-                    const myBiz = (currentMember as any)?.businessPage;
-                    if (myBiz?.businessName) {
-                      handleOpenBusinessPage({
-                        ...currentMember,
-                        firstName: currentMember.name?.split(' ')[0] || 'Member',
-                        lastName: currentMember.name?.split(' ').slice(1).join(' ') || '',
-                        businessPage: myBiz,
-                      });
-                    } else {
-                      handleOpenEditBusinessPage();
-                    }
-                  }}
+                  onClick={handleOpenMyBusiness}
                   className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
                 >
                   <div className="flex items-center gap-3">
@@ -6741,7 +6870,7 @@ export default function MemberPortalPage() {
                         <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
                           My Business Page
                         </h4>
-                        {(currentMember as any)?.businessPage?.businessName && (
+                        {Boolean((currentMember as any)?.businessPage?.businessName || businessPageData?.businessName) && (
                           <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-1.5 py-0.2 rounded-full">
                             Active
                           </span>
@@ -8301,102 +8430,105 @@ export default function MemberPortalPage() {
         {/* ========================================================================= */}
         {/* MEMBER BUSINESS PAGE & COMMUNITY COMMENTS MODAL */}
         {/* ========================================================================= */}
-        {selectedBusinessMember && (
-          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
-            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-              {/* Modal Top Bar */}
-              <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-slate-950 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
-                <div className="flex items-center gap-3 min-w-0 pr-2">
-                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow shrink-0">
-                    <Store className="w-5 h-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
-                        {businessPageData?.businessName || `${selectedBusinessMember.firstName || selectedBusinessMember.name}'s Business Page`}
-                      </h3>
-                      {businessPageData?.natureOfBusiness && (
-                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
-                          {businessPageData.natureOfBusiness}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-300 truncate mt-0.5">
-                      Cooperative Member Enterprise Showcase & Community Inquiries
-                    </p>
-                  </div>
-                </div>
+        {selectedBusinessMember && (() => {
+          const isViewingOwn = Boolean(
+            selectedBusinessMember.id === currentMember.id ||
+            (selectedBusinessMember.memberNumber && selectedBusinessMember.memberNumber === currentMember.memberNumber) ||
+            (selectedBusinessMember.email && currentMember.email && selectedBusinessMember.email.toLowerCase() === currentMember.email.toLowerCase()) ||
+            selectedBusinessMember.id === currentMember.memberNumber ||
+            selectedBusinessMember.memberNumber === currentMember.id
+          );
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {/* If viewing own page, show Edit Button */}
-                  {(selectedBusinessMember.id === currentMember.id ||
-                    selectedBusinessMember.memberNumber === currentMember.memberNumber ||
-                    selectedBusinessMember.id === currentMember.memberNumber) && (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditBusinessPage(businessPageData)}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer border border-emerald-500/50"
-                    >
-                      <Briefcase className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Edit Details</span>
-                      <span className="sm:hidden">Edit</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedBusinessMember(null);
-                      setBusinessPageData(null);
-                      setBusinessComments([]);
-                    }}
-                    className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
-                    aria-label="Close modal"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Modal Body */}
-              <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-6 text-slate-800">
-                {isLoadingBusinessPage ? (
-                  <div className="py-16 text-center space-y-3">
-                    <RefreshCw className="w-8 h-8 animate-spin text-emerald-600 mx-auto" />
-                    <p className="text-xs text-slate-500 font-medium">Loading member business page & inquiries...</p>
-                  </div>
-                ) : !businessPageData?.businessName ? (
-                  /* No Business Page Published Yet */
-                  <div className="py-12 px-4 text-center max-w-md mx-auto space-y-4">
-                    <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
-                      <Store className="w-8 h-8" />
+          return (
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+              <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full my-auto max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                {/* Modal Top Bar */}
+                <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-slate-950 text-white p-4 sm:p-5 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0 border-b border-slate-800">
+                  <div className="flex items-center gap-3 min-w-0 pr-2">
+                    <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow shrink-0">
+                      <Store className="w-5 h-5" />
                     </div>
-                    <div>
-                      <h4 className="font-bold text-base text-slate-900">
-                        No Business Page Published Yet
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                        {(selectedBusinessMember.id === currentMember.id ||
-                          selectedBusinessMember.memberNumber === currentMember.memberNumber ||
-                          selectedBusinessMember.id === currentMember.memberNumber)
-                          ? 'You have not set up your public business page yet. Showcase your enterprise, upload a business picture, and share your next business goal with fellow cooperative members!'
-                          : `${selectedBusinessMember.firstName || selectedBusinessMember.name} has not published a business page yet. When they launch their showcase, their enterprise details and next milestone will appear here.`}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
+                          {businessPageData?.businessName || `${selectedBusinessMember.firstName || selectedBusinessMember.name}'s Business Page`}
+                        </h3>
+                        {businessPageData?.natureOfBusiness && (
+                          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                            {businessPageData.natureOfBusiness}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                        Cooperative Member Enterprise Showcase & Community Inquiries
                       </p>
                     </div>
+                  </div>
 
-                    {(selectedBusinessMember.id === currentMember.id ||
-                      selectedBusinessMember.memberNumber === currentMember.memberNumber ||
-                      selectedBusinessMember.id === currentMember.memberNumber) && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* If viewing own page, show Edit Button */}
+                    {isViewingOwn && (
                       <button
                         type="button"
-                        onClick={() => handleOpenEditBusinessPage()}
-                        className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-md inline-flex items-center gap-2 cursor-pointer"
+                        onClick={() => handleOpenEditBusinessPage(businessPageData)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer border border-emerald-500/50"
                       >
-                        <Sparkles className="w-4 h-4" />
-                        <span>Set Up My Business Page Now</span>
+                        <Briefcase className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Edit Details</span>
+                        <span className="sm:hidden">Edit</span>
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedBusinessMember(null);
+                        setBusinessPageData(null);
+                        setBusinessComments([]);
+                      }}
+                      className="p-2 -mr-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 border border-slate-700 shadow-sm cursor-pointer"
+                      aria-label="Close modal"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
-                ) : (
+                </div>
+
+                {/* Modal Body */}
+                <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-6 text-slate-800">
+                  {isLoadingBusinessPage ? (
+                    <div className="py-16 text-center space-y-3">
+                      <RefreshCw className="w-8 h-8 animate-spin text-emerald-600 mx-auto" />
+                      <p className="text-xs text-slate-500 font-medium">Loading member business page & inquiries...</p>
+                    </div>
+                  ) : !businessPageData?.businessName ? (
+                    /* No Business Page Published Yet */
+                    <div className="py-12 px-4 text-center max-w-md mx-auto space-y-4">
+                      <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
+                        <Store className="w-8 h-8" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-base text-slate-900">
+                          No Business Page Published Yet
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                          {isViewingOwn
+                            ? 'You have not set up your public business page yet. Showcase your enterprise, upload a business picture, and share your next business goal with fellow cooperative members!'
+                            : `${selectedBusinessMember.firstName || selectedBusinessMember.name} has not published a business page yet. When they launch their showcase, their enterprise details and next milestone will appear here.`}
+                        </p>
+                      </div>
+
+                      {isViewingOwn && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditBusinessPage()}
+                          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-md inline-flex items-center gap-2 cursor-pointer"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>Set Up My Business Page Now</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
                   /* Published Business Page Showcase */
                   <>
                     {/* Business Photo / Hero Banner */}
@@ -8627,7 +8759,8 @@ export default function MemberPortalPage() {
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* ========================================================================= */}
         {/* SET UP / EDIT MY BUSINESS PAGE MODAL */}
