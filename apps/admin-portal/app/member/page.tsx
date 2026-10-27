@@ -642,9 +642,20 @@ export default function MemberPortalPage() {
           .then((r) => r.json())
           .then((res) => {
             if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-              // Populate Member Directory strictly with Selfie, First Name, and Last Name sorted alphabetically
+              // Populate Member Directory strictly with verified, active members sorted alphabetically
               try {
-                const dirList = res.data.map((m: any) => {
+                const verifiedMembers = res.data.filter((m: any) => {
+                  const kyc = String(m.kycStatus || '').toUpperCase();
+                  const st = String(m.status || '').toUpperCase();
+                  return kyc === 'VERIFIED' && st !== 'INACTIVE' && st !== 'REJECTED' && st !== 'PENDING_APPROVAL' && st !== 'UNDER_REVIEW';
+                });
+                const seenMembers = new Set<string>();
+                const dirList: Array<any> = [];
+                for (const m of verifiedMembers) {
+                  const key = (m.memberNumber || m.memberNo || m.id || `${m.firstName}-${m.lastName}`).toUpperCase().trim();
+                  if (seenMembers.has(key)) continue;
+                  seenMembers.add(key);
+
                   let first = m.firstName || '';
                   let last = m.lastName || '';
                   if (!first && !last && m.name) {
@@ -657,7 +668,7 @@ export default function MemberPortalPage() {
                       last = '';
                     }
                   }
-                  return {
+                  dirList.push({
                     id: m.id || `${first}-${last}`,
                     firstName: first || 'Member',
                     lastName: last || '',
@@ -665,8 +676,8 @@ export default function MemberPortalPage() {
                     email: m.email || '',
                     selfieUrl: m.selfieUrl || m.selfiePreview || m.avatarUrl || null,
                     businessPage: m.businessPage || null,
-                  };
-                });
+                  });
+                }
                 dirList.sort((a: any, b: any) => {
                   const firstCmp = (a.firstName || '').localeCompare(b.firstName || '', undefined, { sensitivity: 'base' });
                   if (firstCmp !== 0) return firstCmp;
@@ -1596,7 +1607,7 @@ export default function MemberPortalPage() {
   const [depositModalType, setDepositModalType] = useState<'SHARES' | 'SAVINGS' | null>(null);
   const [depositSharesCount, setDepositSharesCount] = useState<number>(10); // 10 shares @ ₱100 = ₱1,000
   const [depositSavingsAmount, setDepositSavingsAmount] = useState<number>(1000);
-  const [depositChannel, setDepositChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
+  const [depositChannel, setDepositChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER' | 'EWALLET' | 'CASHIER'>('BANK_TRANSFER');
   const [bankReferenceInput, setBankReferenceInput] = useState<string>('');
   const [isSubmittingDirectShare, setIsSubmittingDirectShare] = useState<boolean>(false);
   const [coopPaymentOptions, setCoopPaymentOptions] = useState<any>(null);
@@ -1629,6 +1640,41 @@ export default function MemberPortalPage() {
       .catch(() => {});
   }, [tenantInfo.slug]);
 
+  // Synchronize active payment option with tied cooperative tenant configuration
+  useEffect(() => {
+    if (!depositModalType || !coopPaymentOptions) return;
+    const productConfig =
+      depositModalType === 'SHARES'
+        ? coopPaymentOptions?.products?.shareCapital
+        : coopPaymentOptions?.products?.depositSavings;
+    const isPaymongoEnabled = Boolean(
+      (productConfig?.paymongo?.enabled ?? (coopPaymentOptions?.paymongo?.enabled ?? true)) &&
+      (coopPaymentOptions?.paymongo?.enabled !== false)
+    );
+    const isBankEnabled = Boolean(
+      (productConfig?.bankTransfer?.enabled ?? (coopPaymentOptions?.bankTransfer?.enabled ?? true)) &&
+      (coopPaymentOptions?.bankTransfer?.enabled !== false)
+    );
+    const isEwalletEnabled = Boolean(
+      (productConfig?.ewalletTransfer?.enabled ?? (coopPaymentOptions?.ewalletTransfer?.enabled ?? false)) &&
+      (coopPaymentOptions?.ewalletTransfer?.enabled !== false)
+    );
+    const isCashierEnabled = Boolean(
+      (productConfig?.cashier?.enabled ?? (coopPaymentOptions?.cashier?.enabled ?? true)) &&
+      (coopPaymentOptions?.cashier?.enabled !== false)
+    );
+
+    const enabledList: Array<'PAYMONGO_QRPH' | 'BANK_TRANSFER' | 'EWALLET' | 'CASHIER'> = [];
+    if (isPaymongoEnabled) enabledList.push('PAYMONGO_QRPH');
+    if (isBankEnabled) enabledList.push('BANK_TRANSFER');
+    if (isEwalletEnabled) enabledList.push('EWALLET');
+    if (isCashierEnabled) enabledList.push('CASHIER');
+
+    if (enabledList.length > 0 && !enabledList.includes(depositChannel)) {
+      setDepositChannel(enabledList[0]);
+    }
+  }, [depositModalType, coopPaymentOptions, depositChannel]);
+
   const [depositSuccessResult, setDepositSuccessResult] = useState<{
     type: string;
     amount: number;
@@ -1650,6 +1696,7 @@ export default function MemberPortalPage() {
     principalAmount: number;
     convenienceFee: number;
     sharesCount: number;
+    type?: 'SHARES' | 'SAVINGS';
   } | null>(null);
   const [isGeneratingPaymongo, setIsGeneratingPaymongo] = useState<boolean>(false);
   const [isVerifyingPaymongo, setIsVerifyingPaymongo] = useState<boolean>(false);
@@ -1673,7 +1720,44 @@ export default function MemberPortalPage() {
       });
       const json = await res.json();
       if (res.ok && json.success && json.data) {
-        setPaymongoActivePayment(json.data);
+        setPaymongoActivePayment({
+          ...json.data,
+          type: 'SHARES',
+        });
+      } else {
+        alert(json.error || 'Failed to initialize PayMongo payment. Please try again.');
+      }
+    } catch (err: any) {
+      alert(`Network error connecting to PayMongo gateway: ${err.message}`);
+    } finally {
+      setIsGeneratingPaymongo(false);
+    }
+  };
+
+  const handleInitiatePaymongoSavings = async () => {
+    setIsGeneratingPaymongo(true);
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const res = await fetch(`${getApiBaseUrl()}/savings/paymongo/create-intent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          memberId: currentMember.id,
+          amount: depositSavingsAmount,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        setPaymongoActivePayment({
+          ...json.data,
+          sharesCount: 0,
+          type: 'SAVINGS',
+        });
       } else {
         alert(json.error || 'Failed to initialize PayMongo payment. Please try again.');
       }
@@ -1881,6 +1965,154 @@ export default function MemberPortalPage() {
     }
   };
 
+  const savingsVerifyInFlightRef = useRef(false);
+  const handleVerifyAndCompletePaymongoSavings = async () => {
+    if (!paymongoActivePayment || savingsVerifyInFlightRef.current) return;
+    savingsVerifyInFlightRef.current = true;
+    setIsVerifyingPaymongo(true);
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const res = await fetch(`${getApiBaseUrl()}/savings/paymongo/verify-and-complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          memberId: currentMember.id,
+          amount: paymongoActivePayment.principalAmount,
+          paymentIntentId: paymongoActivePayment.paymentIntentId,
+          checkoutLinkId: paymongoActivePayment.checkoutLinkId,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        const addedAmount = paymongoActivePayment.principalAmount;
+        const serverSavings = json.member?.savingsBalance;
+
+        if (serverSavings !== undefined && serverSavings !== null) {
+          setSavingsBalance(Number(serverSavings));
+          setCustomMember((prev: any) =>
+            prev ? { ...prev, savingsBalance: Number(serverSavings) } : prev
+          );
+        } else if (!json.duplicate) {
+          setSavingsBalance((prev) => prev + addedAmount);
+        }
+
+        try {
+          const auth = getTenantMemberSession(tenantInfo.slug);
+          if (auth) {
+            setTenantMemberSession({
+              ...auth,
+              savingsBalance: serverSavings !== undefined ? Number(serverSavings) : ((auth.savingsBalance || 0) + addedAmount),
+            }, tenantInfo.slug, tenantInfo.name);
+          }
+        } catch {}
+
+        setDepositSuccessResult({
+          type: 'Savings Deposit',
+          amount: addedAmount,
+          reference: json.receiptNumber || `OR-SAV-${Date.now().toString(36).toUpperCase()}`,
+          channel: 'PayMongo QR Ph / Online Gateway',
+        });
+        setPaymongoActivePayment(null);
+      } else {
+        alert(json.error || 'Payment has not been confirmed yet. Please complete the transaction in your banking or e-wallet app first.');
+      }
+    } catch (err: any) {
+      alert(`Network error verifying PayMongo payment: ${err.message}`);
+    } finally {
+      savingsVerifyInFlightRef.current = false;
+      setIsVerifyingPaymongo(false);
+    }
+  };
+
+  const handleEwalletDeposit = async () => {
+    if (!bankReferenceInput || !bankReferenceInput.trim()) {
+      alert('Please enter your E-Wallet Reference Number / Transaction ID for verification.');
+      return;
+    }
+    const productConfig =
+      depositModalType === 'SHARES'
+        ? coopPaymentOptions?.products?.shareCapital
+        : coopPaymentOptions?.products?.depositSavings;
+    const providerName =
+      productConfig?.ewalletTransfer?.provider ||
+      coopPaymentOptions?.ewalletTransfer?.provider ||
+      'GCash / Maya';
+
+    setIsSubmittingDirectShare(true);
+    try {
+      const targetTenantSlug = tenantInfo.slug || 'family-coop';
+      const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const amount = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
+
+      const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': targetTenantSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          type: depositModalType === 'SHARES' ? 'SHARE_PURCHASE' : 'SAVINGS_DEPOSIT',
+          memberId: currentMember.id,
+          memberNumber: currentMember.memberNumber,
+          memberName: currentMember.name,
+          amount,
+          sharesCount: depositModalType === 'SHARES' ? depositSharesCount : undefined,
+          bankName: `${providerName} Direct Transfer`,
+          referenceNumber: bankReferenceInput.trim(),
+          notes: depositModalType === 'SHARES' ? 'E-Wallet Capital Build-Up (Shares)' : 'E-Wallet Voluntary Savings Deposit',
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setDepositSuccessResult({
+          type: depositModalType === 'SHARES' ? 'Share Capital Purchase (Awaiting Confirmation)' : 'Savings Deposit (Awaiting Confirmation)',
+          amount,
+          reference: json.data?.referenceNumber || bankReferenceInput.trim(),
+          channel: `${providerName} Direct Transfer (Pending Admin Confirmation)`,
+          sharesAdded: depositModalType === 'SHARES' ? depositSharesCount : undefined,
+          isPendingConfirmation: true,
+        });
+        setBankReferenceInput('');
+      } else {
+        alert(json.error || 'Failed to submit e-wallet payment request.');
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setIsSubmittingDirectShare(false);
+    }
+  };
+
+  const handleCashierOrderSlip = () => {
+    const amount = depositModalType === 'SHARES' ? depositSharesCount * 100 : depositSavingsAmount;
+    const refNo = `OTC-${depositModalType === 'SHARES' ? 'CBU' : 'SAV'}-${Date.now().toString(36).toUpperCase()}`;
+    const productConfig =
+      depositModalType === 'SHARES'
+        ? coopPaymentOptions?.products?.shareCapital
+        : coopPaymentOptions?.products?.depositSavings;
+    const branch =
+      productConfig?.cashier?.branchAddress ||
+      coopPaymentOptions?.cashier?.branchAddress ||
+      (tenantInfo as any)?.address ||
+      'Cooperative Head Office Branch';
+
+    setDepositSuccessResult({
+      type: depositModalType === 'SHARES' ? 'Share Capital Over-The-Counter Order Slip' : 'Savings Deposit Over-The-Counter Order Slip',
+      amount,
+      reference: refNo,
+      channel: `In-Person Branch Cashier (${branch})`,
+      sharesAdded: depositModalType === 'SHARES' ? depositSharesCount : undefined,
+      isPendingConfirmation: true,
+    });
+  };
+
   const handleSubmitLoanBankTransfer = async () => {
     if (!loanBankReferenceInput || !loanBankReferenceInput.trim()) {
       alert('Please enter the Bank Transfer Reference / Trace Number for verification.');
@@ -1937,10 +2169,22 @@ export default function MemberPortalPage() {
     setIsLoadingDirectory(true);
     try {
       const slug = tenantInfo.slug || 'family-coop';
-      const res = await fetch(`${getApiBaseUrl()}/members?coop=${slug}`);
+      const res = await fetch(`${getApiBaseUrl()}/members?coop=${slug}&verified=true`);
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
-        const dirList = json.data.map((m: any) => {
+        // Strictly filter for verified, active members only (excluding unverified / pending / rejected / inactive members)
+        const verifiedMembers = json.data.filter((m: any) => {
+          const kyc = String(m.kycStatus || '').toUpperCase();
+          const st = String(m.status || '').toUpperCase();
+          return kyc === 'VERIFIED' && st !== 'INACTIVE' && st !== 'REJECTED' && st !== 'PENDING_APPROVAL' && st !== 'UNDER_REVIEW';
+        });
+        const seenMembers = new Set<string>();
+        const dirList: Array<any> = [];
+        for (const m of verifiedMembers) {
+          const key = (m.memberNumber || m.memberNo || m.id || `${m.firstName}-${m.lastName}`).toUpperCase().trim();
+          if (seenMembers.has(key)) continue;
+          seenMembers.add(key);
+
           let first = m.firstName || '';
           let last = m.lastName || '';
           if (!first && !last && m.name) {
@@ -1953,7 +2197,7 @@ export default function MemberPortalPage() {
               last = '';
             }
           }
-          return {
+          dirList.push({
             id: m.id || `${first}-${last}`,
             memberNumber: m.memberNumber || m.memberNo || '',
             firstName: first || 'Member',
@@ -1962,8 +2206,8 @@ export default function MemberPortalPage() {
             selfieUrl: m.selfieUrl || m.selfiePreview || m.avatarUrl || null,
             classification: m.classification || 'REGULAR',
             businessPage: m.businessPage || null,
-          };
-        });
+          });
+        }
         dirList.sort((a: any, b: any) => {
           const firstCmp = (a.firstName || '').localeCompare(b.firstName || '', undefined, { sensitivity: 'base' });
           if (firstCmp !== 0) return firstCmp;
@@ -2011,8 +2255,9 @@ export default function MemberPortalPage() {
         const targetTenantSlug = tenantInfo.slug || 'family-coop';
         const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
         const linkQuery = paymongoActivePayment.checkoutLinkId ? `?linkId=${paymongoActivePayment.checkoutLinkId}` : '';
+        const endpoint = paymongoActivePayment.type === 'SAVINGS' ? 'savings' : 'shares';
         const res = await fetch(
-          `${getApiBaseUrl()}/shares/paymongo/status/${paymongoActivePayment.paymentIntentId}${linkQuery}`,
+          `${getApiBaseUrl()}/${endpoint}/paymongo/status/${paymongoActivePayment.paymentIntentId}${linkQuery}`,
           {
             headers: {
               'x-tenant-slug': targetTenantSlug,
@@ -2023,7 +2268,11 @@ export default function MemberPortalPage() {
         const data = await res.json();
         if (!isDisposed && data.success && data.isPaid) {
           clearInterval(interval);
-          handleVerifyAndCompletePaymongoShares();
+          if (paymongoActivePayment.type === 'SAVINGS') {
+            handleVerifyAndCompletePaymongoSavings();
+          } else {
+            handleVerifyAndCompletePaymongoShares();
+          }
         }
       } catch (err) {
         // Polling retry
@@ -2827,7 +3076,7 @@ export default function MemberPortalPage() {
       setPassbookPayModal((prev) => ({
         ...prev,
         verificationError:
-          'PayMongo QR Ph payment session is still initializing or has not been paid yet. Please scan the PayMongo QR Ph code and complete your payment first.',
+          'QR PH payment session is still initializing or has not been paid yet. Please scan the QR PH code and complete your payment first.',
       }));
       return;
     }
@@ -3660,7 +3909,6 @@ export default function MemberPortalPage() {
                   type="button"
                   onClick={() => {
                     setDepositModalType('SHARES');
-                    setDepositChannel('PAYMONGO_QRPH');
                     setPaymongoActivePayment(null);
                     setDepositSuccessResult(null);
                   }}
@@ -4232,7 +4480,7 @@ export default function MemberPortalPage() {
                   </div>
 
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600">
-                    💡 <strong>Cooperative Security:</strong> Savings deposits can be directly top-up via PayMongo QR Ph (InstaPay/GCash/Maya) with instant credit and official electronic receipt.
+                    💡 <strong>Cooperative Security:</strong> Savings deposits can be directly top-up via QR PH (InstaPay/GCash/Maya) with instant credit and official electronic receipt.
                   </div>
                 </div>
               )}
@@ -5224,13 +5472,45 @@ export default function MemberPortalPage() {
                         monthlyAmortization: monthlyInstallment,
                         periodicInstallment: monthlyInstallment,
                         techFeeDeduction: memberTechFeeDeduction,
+                        techFeeAmount: techFeeAmount,
+                        isTechFeePassThrough: isTechFeePassThrough,
+                        coopFilingFeeEnabled: coopFilingFeeEnabled,
+                        coopFilingFeeRatePercent: coopFilingFeeRatePercent,
                         coopServiceFee: coopServiceFee,
                         advanceInterest: advanceInterest,
                         optionalFeesTotal: optionalFeesTotal,
+                        optionalFees: selectedProduct.optionalFees || [],
                         upfrontShareDeduction: upfrontShareDeductionAmount,
+                        isUpfrontShareDeduction: isUpfrontShareDeduction,
+                        isInstallmentSharePayment: isInstallmentSharePayment,
+                        mandatorySharePrice: mandatorySharePrice,
                         netProceeds: netProceeds,
                         effectiveInterestRate: eir,
+                        eirTenure: eirTenure,
                         totalInterest: totalInterest,
+                        deductionBreakdown: {
+                          principalAmount: loanAmount,
+                          techFeeAmount: techFeeAmount,
+                          isTechFeePassThrough: isTechFeePassThrough,
+                          techFeeDeduction: memberTechFeeDeduction,
+                          coopFilingFeeEnabled: coopFilingFeeEnabled,
+                          coopFilingFeeRatePercent: coopFilingFeeRatePercent,
+                          coopServiceFee: coopServiceFee,
+                          advanceInterest: advanceInterest,
+                          advanceInterestOption: selectedProduct.advanceInterestOption || 'NONE',
+                          optionalFeesTotal: optionalFeesTotal,
+                          isUpfrontShareDeduction: isUpfrontShareDeduction,
+                          mandatoryShareQty: mandatoryShareQty,
+                          mandatorySharePrice: mandatorySharePrice,
+                          mandatoryShareTotal: mandatoryShareTotal,
+                          netProceeds: netProceeds,
+                          monthlyInstallment: monthlyInstallment,
+                          isInstallmentSharePayment: isInstallmentSharePayment,
+                          shareAmortizationPerPeriod: shareAmortizationPerPeriod,
+                          totalInterest: totalInterest,
+                          eirTenure: eirTenure,
+                          settlementChannel: settlementChannel,
+                        },
                         coMakerId: requiresCoMaker ? coMakerMemberIdInput.trim() : undefined,
                         coMakerName: requiresCoMaker ? (coMaker || `Member (${coMakerMemberIdInput.trim()})`) : undefined,
                         coMakerNo: requiresCoMaker ? coMakerMemberIdInput.trim() : undefined,
@@ -5597,7 +5877,7 @@ export default function MemberPortalPage() {
               Back to More Services
             </button>
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Loan Repayment & PayMongo QR Ph Terminal</h2>
+              <h2 className="text-xl font-bold text-slate-900">Loan Repayment & QR PH Terminal</h2>
               <p className="text-xs text-slate-500">Fast, secure payments via QR Ph (GCash, Maya, Bank Apps) or Cooperative Bank Transfer.</p>
             </div>
 
@@ -5670,49 +5950,61 @@ export default function MemberPortalPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-2">Payment Method</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setRepayChannel('PAYMONGO_QRPH')}
-                        className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
-                          repayChannel === 'PAYMONGO_QRPH'
-                            ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <QrCode className="w-4 h-4 text-emerald-600" /> PayMongo QR Ph
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-normal">Pass-on convenience fee applies</div>
-                      </button>
+                  {(() => {
+                    const payLoanConfig = coopPaymentOptions?.products?.payLoan;
+                    const isPaymongoEnabled = payLoanConfig?.paymongo?.enabled ?? (coopPaymentOptions?.paymongo?.enabled ?? true);
+                    const isBankEnabled = payLoanConfig?.bankTransfer?.enabled ?? (coopPaymentOptions?.bankTransfer?.enabled ?? true);
 
-                      <button
-                        type="button"
-                        onClick={() => setRepayChannel('BANK_TRANSFER')}
-                        className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
-                          repayChannel === 'BANK_TRANSFER'
-                            ? 'border-blue-600 bg-blue-50/70 font-bold text-blue-950 ring-2 ring-blue-500/20'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <Landmark className="w-4 h-4 text-blue-600" /> Bank Transfer
+                    return (
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-2">Payment Method</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          {isPaymongoEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => setRepayChannel('PAYMONGO_QRPH')}
+                              className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
+                                repayChannel === 'PAYMONGO_QRPH'
+                                  ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <QrCode className="w-4 h-4 text-emerald-600" /> QR PH
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-normal">Instant settlement with dynamic QR</div>
+                            </button>
+                          )}
+
+                          {isBankEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => setRepayChannel('BANK_TRANSFER')}
+                              className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
+                                repayChannel === 'BANK_TRANSFER'
+                                  ? 'border-blue-600 bg-blue-50/70 font-bold text-blue-950 ring-2 ring-blue-500/20'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <Landmark className="w-4 h-4 text-blue-600" /> Bank Transfer
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-normal">Direct deposit with trace reference</div>
+                            </button>
+                          )}
                         </div>
-                        <div className="text-[11px] text-slate-500 font-normal">Admin verification required</div>
-                      </button>
-                    </div>
-                  </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
                     <div className="flex justify-between">
                       <span className="text-slate-600">Loan Credit:</span>
                       <span className="font-bold text-slate-900">₱{repayAmount.toFixed(2)}</span>
                     </div>
-                    {repayChannel === 'PAYMONGO_QRPH' && (
+                    {repayChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment !== 'OPEX' && passOnFee > 0 && (
                       <div className="flex justify-between text-amber-700">
-                        <span>Pass-On Gateway Fee:</span>
+                        <span>Convenience Fee:</span>
                         <span className="font-bold">+ ₱{passOnFee.toFixed(2)}</span>
                       </div>
                     )}
@@ -7204,120 +7496,55 @@ export default function MemberPortalPage() {
                 ) : (
                   <div className="p-4 sm:p-6 space-y-5 text-xs overflow-y-auto flex-1">
                   {depositModalType === 'SHARES' ? (
-                    /* Share Purchase Controls */
-                    <div className="space-y-3">
-                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900">
-                        <div className="font-bold flex items-center gap-1.5 text-xs">
-                          <BookOpen className="w-4 h-4 text-amber-700" /> Capital Build-Up (Common Stock)
-                        </div>
-                        <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
-                          Par value is fixed at <strong>₱100.00 / share</strong>. Purchasing shares increases your voting equity and annual dividend allocation under RA 9520.
-                        </p>
-                      </div>
-
-                      {/* Subscription Pledge Allocation Breakdown */}
-                      {(() => {
-                        const effectiveSub = Math.max(subscribedShares || 50, sharesCount || 0);
-                        const curUnpaidPledge = Math.max(0, (effectiveSub * 100) - paidUpCapital);
-                        const curUnpaidPledgeShares = Math.max(0, effectiveSub - sharesCount);
-                        const depositNum = depositSharesCount * 100;
-                        const appliedToPledge = Math.min(depositNum, curUnpaidPledge);
-                        const excessPledge = Math.max(0, depositNum - curUnpaidPledge);
-                        const appliedShares = Math.min(depositSharesCount, curUnpaidPledgeShares);
-                        const excessShares = Math.max(0, depositSharesCount - appliedShares);
-                        const remainingAfter = Math.max(0, curUnpaidPledge - appliedToPledge);
-
-                        return (
-                          <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] space-y-1.5 text-amber-950">
-                            <div className="font-bold flex items-center justify-between">
-                              <span className="flex items-center gap-1.5">
-                                <Landmark className="w-3.5 h-3.5 text-amber-700" />
-                                {curUnpaidPledge > 0 ? 'Pledge Pay-Down Priority (RA 9520)' : 'Additional Capital Build-Up'}
-                              </span>
-                              {curUnpaidPledge > 0 ? (
-                                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                                  ₱{curUnpaidPledge.toLocaleString()} Unpaid Pledge
-                                </span>
-                              ) : (
-                                <span className="bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                                  Pledge 100% Settled
-                                </span>
-                              )}
-                            </div>
-                            {curUnpaidPledge > 0 ? (
-                              <>
-                                <p className="text-slate-600">
-                                  Your deposit will <strong className="text-amber-900">prioritize paying down your unpaid subscription pledge first</strong> before expanding your total subscribed shares:
-                                </p>
-                                <div className="bg-white/80 rounded-lg p-2 border border-amber-200/60 font-mono space-y-1">
-                                  <div className="flex justify-between">
-                                    <span className="text-slate-600 font-sans">Applied to Unpaid Pledge:</span>
-                                    <strong className="text-emerald-700">₱{appliedToPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({appliedShares} shares)</strong>
-                                  </div>
-                                  {excessPledge > 0 && (
-                                    <div className="flex justify-between text-blue-700">
-                                      <span className="font-sans">New Additional Capital:</span>
-                                      <strong>+₱{excessPledge.toLocaleString('en-PH', { minimumFractionDigits: 2 })} ({excessShares} shares)</strong>
-                                    </div>
-                                  )}
-                                  <div className="flex justify-between text-slate-700 pt-1 border-t border-amber-100">
-                                    <span className="font-sans">Pledge Remaining After:</span>
-                                    <strong className={remainingAfter === 0 ? 'text-emerald-700 font-bold' : 'text-rose-700'}>
-                                      {remainingAfter === 0 ? '₱0.00 (100% Fully Paid!)' : `₱${remainingAfter.toLocaleString('en-PH', { minimumFractionDigits: 2 })} (${Math.floor(remainingAfter / 100)} shares)`}
-                                    </strong>
-                                  </div>
-                                </div>
-                                {curUnpaidPledgeShares > 0 && curUnpaidPledgeShares !== depositSharesCount && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setDepositSharesCount(curUnpaidPledgeShares)}
-                                    className="w-full mt-1 py-1 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[10px] transition"
-                                  >
-                                    Set to Pay Exactly Remaining Pledge ({curUnpaidPledgeShares} shares / ₱{curUnpaidPledge.toLocaleString()})
-                                  </button>
-                                )}
-                              </>
-                            ) : (
-                              <p className="text-slate-600">
-                                You have already fully settled your subscription pledge of {effectiveSub} shares. This deposit will build up additional voting equity and dividend entitlement.
-                              </p>
-                            )}
+                    /* Share Purchase Controls: Slider from 1 to 100 with no manual input */
+                    <div className="space-y-4">
+                      <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-800">
+                            Select Shares to Purchase:
+                          </label>
+                          <div className="text-right">
+                            <span className="text-lg font-black text-amber-700 font-mono">
+                              {depositSharesCount} {depositSharesCount === 1 ? 'Share' : 'Shares'}
+                            </span>
+                            <span className="text-xs font-bold text-slate-600 font-mono ml-2">
+                              (₱{(depositSharesCount * 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })})
+                            </span>
                           </div>
-                        );
-                      })()}
+                        </div>
 
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Select Shares to Purchase:
-                        </label>
-                        <div className="flex gap-2 mb-2">
-                          {[5, 10, 20, 50].map((num) => (
+                        <div className="space-y-1.5">
+                          <input
+                            type="range"
+                            min="1"
+                            max="100"
+                            step="1"
+                            value={depositSharesCount}
+                            onChange={(e) => setDepositSharesCount(Math.min(100, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                            className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-600"
+                          />
+                          <div className="flex justify-between text-[11px] font-bold text-slate-500 font-mono">
+                            <span>1 Share (₱100)</span>
+                            <span>50 Shares (₱5,000)</span>
+                            <span>100 Shares (₱10,000)</span>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 pt-1">
+                          {[5, 10, 20, 50, 100].map((num) => (
                             <button
                               key={num}
                               type="button"
                               onClick={() => setDepositSharesCount(num)}
-                              className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition ${
+                              className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
                                 depositSharesCount === num
                                   ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                               }`}
                             >
-                              +{num} shs
+                              {num} shs
                             </button>
                           ))}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="1"
-                            value={depositSharesCount}
-                            onChange={(e) => setDepositSharesCount(Math.max(1, Number(e.target.value)))}
-                            className="w-24 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
-                          />
-                          <span className="text-slate-500">shares × ₱100.00 =</span>
-                          <strong className="text-slate-900 font-mono text-sm">
-                            ₱{(depositSharesCount * 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                          </strong>
                         </div>
                       </div>
                     </div>
@@ -7372,7 +7599,7 @@ export default function MemberPortalPage() {
                       <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col items-center justify-center text-center space-y-3">
                         <div className="flex items-center gap-2 text-emerald-800 text-xs font-bold">
                           <QrCode className="w-4 h-4" />
-                          <span>Official PayMongo QR Ph Terminal</span>
+                          <span>Official QR PH Terminal</span>
                         </div>
 
                         <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-full border border-emerald-300">
@@ -7385,7 +7612,7 @@ export default function MemberPortalPage() {
                           {paymongoActivePayment.qrImageUrl ? (
                             <img
                               src={paymongoActivePayment.qrImageUrl}
-                              alt="PayMongo QR Ph"
+                              alt="QR PH"
                               className="w-full h-full object-contain"
                             />
                           ) : (
@@ -7405,18 +7632,35 @@ export default function MemberPortalPage() {
                         </div>
 
                         <div className="w-full bg-white/80 border border-emerald-200/80 rounded-xl p-3 text-left font-mono text-[11px] space-y-1 text-slate-700">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500 font-sans">Common Shares:</span>
-                            <strong>+{paymongoActivePayment.sharesCount} Shares (@ ₱100)</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500 font-sans">Capital Credit:</span>
-                            <strong>₱{paymongoActivePayment.principalAmount.toFixed(2)}</strong>
-                          </div>
-                          <div className="flex justify-between text-amber-700">
-                            <span className="font-sans">Gateway Fee (1.5%):</span>
-                            <span>+ ₱{paymongoActivePayment.convenienceFee.toFixed(2)}</span>
-                          </div>
+                          {paymongoActivePayment.type === 'SAVINGS' ? (
+                            <>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-sans">Deposit Destination:</span>
+                                <strong>Voluntary Member Savings</strong>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-sans">Savings Account Credit:</span>
+                                <strong className="text-emerald-700 font-bold">₱{paymongoActivePayment.principalAmount.toFixed(2)}</strong>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-sans">Common Shares:</span>
+                                <strong>+{paymongoActivePayment.sharesCount} Shares (@ ₱100)</strong>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-sans">Capital Credit:</span>
+                                <strong>₱{paymongoActivePayment.principalAmount.toFixed(2)}</strong>
+                              </div>
+                            </>
+                          )}
+                          {paymongoActivePayment.convenienceFee > 0 && paymongoFeeTreatment !== 'OPEX' && (
+                            <div className="flex justify-between text-amber-700">
+                              <span className="font-sans">Convenience Fee:</span>
+                              <span>+ ₱{paymongoActivePayment.convenienceFee.toFixed(2)}</span>
+                            </div>
+                          )}
                           <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-slate-900">
                             <span className="font-sans">Total Amount:</span>
                             <span className="text-emerald-700">₱{paymongoActivePayment.totalAmount.toFixed(2)}</span>
@@ -7449,7 +7693,7 @@ export default function MemberPortalPage() {
                         <button
                           type="button"
                           disabled={isVerifyingPaymongo}
-                          onClick={handleVerifyAndCompletePaymongoShares}
+                          onClick={paymongoActivePayment.type === 'SAVINGS' ? handleVerifyAndCompletePaymongoSavings : handleVerifyAndCompletePaymongoShares}
                           className="w-2/3 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
                         >
                           {isVerifyingPaymongo ? (
@@ -7463,91 +7707,297 @@ export default function MemberPortalPage() {
                     </div>
                   ) : (
                     <>
-                      {/* Payment Channel Choice */}
-                      <div>
-                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
-                          Available Payment Options:
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <button
-                            type="button"
-                            onClick={() => setDepositChannel('PAYMONGO_QRPH')}
-                            className={`p-3 border rounded-xl text-left transition ${
-                              depositChannel === 'PAYMONGO_QRPH'
-                                ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <QrCode className="w-4 h-4 text-emerald-600 shrink-0" />
-                              <span className="text-xs font-bold">PayMongo QR Ph</span>
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-normal leading-tight">
-                              Instant via GCash, Maya, ShopeePay, or bank apps.
-                            </div>
-                          </button>
+                      {/* Payment Channel Choice (Based strictly on tied coop tenant admin configuration) */}
+                      {(() => {
+                        const productConfig =
+                          depositModalType === 'SHARES'
+                            ? coopPaymentOptions?.products?.shareCapital
+                            : coopPaymentOptions?.products?.depositSavings;
+                        const isPaymongoEnabled = Boolean(
+                          (productConfig?.paymongo?.enabled ?? (coopPaymentOptions?.paymongo?.enabled ?? true)) &&
+                          (coopPaymentOptions?.paymongo?.enabled !== false)
+                        );
+                        const isBankEnabled = Boolean(
+                          (productConfig?.bankTransfer?.enabled ?? (coopPaymentOptions?.bankTransfer?.enabled ?? true)) &&
+                          (coopPaymentOptions?.bankTransfer?.enabled !== false)
+                        );
+                        const isEwalletEnabled = Boolean(
+                          (productConfig?.ewalletTransfer?.enabled ?? (coopPaymentOptions?.ewalletTransfer?.enabled ?? false)) &&
+                          (coopPaymentOptions?.ewalletTransfer?.enabled !== false)
+                        );
+                        const isCashierEnabled = Boolean(
+                          (productConfig?.cashier?.enabled ?? (coopPaymentOptions?.cashier?.enabled ?? true)) &&
+                          (coopPaymentOptions?.cashier?.enabled !== false)
+                        );
 
-                          <button
-                            type="button"
-                            onClick={() => setDepositChannel('BANK_TRANSFER')}
-                            className={`p-3 border rounded-xl text-left transition ${
-                              depositChannel === 'BANK_TRANSFER'
-                                ? 'border-blue-600 bg-blue-50/80 font-bold text-blue-950 ring-2 ring-blue-500/20'
-                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <Landmark className="w-4 h-4 text-blue-600 shrink-0" />
-                              <span className="text-xs font-bold">Bank Transfer</span>
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-normal leading-tight">
-                              Official transfer (Requires admin confirmation before posting).
-                            </div>
-                          </button>
-                        </div>
-                      </div>
+                        const availableOptionsCount = [isPaymongoEnabled, isBankEnabled, isEwalletEnabled, isCashierEnabled].filter(Boolean).length;
+
+                        return (
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                              Available Payment Options ({depositModalType === 'SHARES' ? 'Share Capital Purchase' : 'Deposit Savings'}):
+                            </label>
+                            {availableOptionsCount === 0 ? (
+                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                                <span>No payment channels are currently enabled for this product. Please contact cooperative administration.</span>
+                              </div>
+                            ) : (
+                              <div className={`grid grid-cols-1 ${availableOptionsCount > 2 ? 'sm:grid-cols-2' : availableOptionsCount === 2 ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
+                                {isPaymongoEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDepositChannel('PAYMONGO_QRPH')}
+                                    className={`p-3 border rounded-xl text-left transition ${
+                                      depositChannel === 'PAYMONGO_QRPH'
+                                        ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                      <QrCode className="w-4 h-4 text-emerald-600 shrink-0" />
+                                      <span className="text-xs font-bold">QR PH</span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                                      Instant via GCash, Maya, ShopeePay, or bank apps.
+                                    </div>
+                                  </button>
+                                )}
+
+                                {isBankEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDepositChannel('BANK_TRANSFER')}
+                                    className={`p-3 border rounded-xl text-left transition ${
+                                      depositChannel === 'BANK_TRANSFER'
+                                        ? 'border-blue-600 bg-blue-50/80 font-bold text-blue-950 ring-2 ring-blue-500/20'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                      <Landmark className="w-4 h-4 text-blue-600 shrink-0" />
+                                      <span className="text-xs font-bold">Bank Transfer</span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                                      Official transfer (Requires admin confirmation before posting).
+                                    </div>
+                                  </button>
+                                )}
+
+                                {isEwalletEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDepositChannel('EWALLET')}
+                                    className={`p-3 border rounded-xl text-left transition ${
+                                      depositChannel === 'EWALLET'
+                                        ? 'border-indigo-600 bg-indigo-50/80 font-bold text-indigo-950 ring-2 ring-indigo-500/20'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                      <Smartphone className="w-4 h-4 text-indigo-600 shrink-0" />
+                                      <span className="text-xs font-bold">
+                                        {productConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'GCash / Maya'} Direct
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                                      Direct mobile transfer with reference trace number.
+                                    </div>
+                                  </button>
+                                )}
+
+                                {isCashierEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDepositChannel('CASHIER')}
+                                    className={`p-3 border rounded-xl text-left transition ${
+                                      depositChannel === 'CASHIER'
+                                        ? 'border-amber-600 bg-amber-50/80 font-bold text-amber-950 ring-2 ring-amber-500/20'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                      <Building2 className="w-4 h-4 text-amber-600 shrink-0" />
+                                      <span className="text-xs font-bold">In-Person Cashier (OTC)</span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                                      Deposit at cooperative branch counter with cash/check.
+                                    </div>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Bank Details Display if Bank Transfer selected */}
-                      {depositChannel === 'BANK_TRANSFER' && (
-                        <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-900">
-                          <div className="font-bold flex items-center gap-1.5 text-blue-950">
-                            <Landmark className="w-4 h-4 text-blue-700" />
-                            <span>Cooperative Official Bank Account</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                      {depositChannel === 'BANK_TRANSFER' && (() => {
+                        const productConfig =
+                          depositModalType === 'SHARES'
+                            ? coopPaymentOptions?.products?.shareCapital
+                            : coopPaymentOptions?.products?.depositSavings;
+                        const defaultRef = depositModalType === 'SHARES' ? 'CBU-2026-0001' : 'SAV-2026-0001';
+                        const refPlaceholder = productConfig?.bankTransfer?.referenceFormat
+                          ? `e.g. ${productConfig.bankTransfer.referenceFormat.replace('[MemberNumber]', '2026-0001')}`
+                          : `e.g. ${defaultRef}`;
+
+                        return (
+                          <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-900">
+                            <div className="font-bold flex items-center justify-between text-blue-950">
+                              <div className="flex items-center gap-1.5">
+                                <Landmark className="w-4 h-4 text-blue-700" />
+                                <span>Cooperative Official Bank Account</span>
+                              </div>
+                              {productConfig?.bankTransfer?.referenceFormat && (
+                                <span className="text-[10px] bg-blue-200/80 text-blue-950 px-2 py-0.5 rounded font-mono font-bold">
+                                  Format: {productConfig.bankTransfer.referenceFormat}
+                                </span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                              <div>
+                                <span className="text-slate-500 block font-sans">Bank:</span>
+                                <strong>{productConfig?.bankTransfer?.bankName || coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines'}</strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-500 block font-sans">Account Number:</span>
+                                <strong className="text-blue-900">{productConfig?.bankTransfer?.accountNumber || coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-slate-500 block font-sans">Account Name:</span>
+                                <strong>{productConfig?.bankTransfer?.accountName || coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                              </div>
+                            </div>
+                            {productConfig?.bankTransfer?.instructions && (
+                              <div className="text-[11px] text-blue-800 bg-white/70 p-2 rounded-lg border border-blue-200">
+                                {productConfig.bankTransfer.instructions}
+                              </div>
+                            )}
                             <div>
-                              <span className="text-slate-500 block font-sans">Bank:</span>
-                              <strong>{coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines'}</strong>
+                              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                Transfer Reference / Trace No. (Required):
+                              </label>
+                              <input
+                                type="text"
+                                value={bankReferenceInput}
+                                onChange={(e) => setBankReferenceInput(e.target.value)}
+                                placeholder={refPlaceholder}
+                                className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-900 flex items-start gap-1.5">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                              <span>
+                                <strong>Admin Confirmation Required:</strong> A confirmation from the admin portal is necessary before posting this share purchase or savings deposit.
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* E-Wallet Details Display if E-Wallet selected */}
+                      {depositChannel === 'EWALLET' && (() => {
+                        const productConfig =
+                          depositModalType === 'SHARES'
+                            ? coopPaymentOptions?.products?.shareCapital
+                            : coopPaymentOptions?.products?.depositSavings;
+                        const providerName = productConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'GCash / Maya';
+                        const accountName = productConfig?.ewalletTransfer?.accountName || coopPaymentOptions?.ewalletTransfer?.accountName || tenantInfo.name;
+                        const accountNumber = productConfig?.ewalletTransfer?.accountNumber || coopPaymentOptions?.ewalletTransfer?.accountNumber || '+63 920 965 0618';
+                        const instructions = productConfig?.ewalletTransfer?.instructions || coopPaymentOptions?.ewalletTransfer?.instructions || `Send via Express Send to ${providerName}. State your Member Number in message note.`;
+
+                        return (
+                          <div className="p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2 text-xs text-indigo-950">
+                            <div className="font-bold flex items-center justify-between text-indigo-950">
+                              <div className="flex items-center gap-1.5">
+                                <Smartphone className="w-4 h-4 text-indigo-700" />
+                                <span>Cooperative Official {providerName} Account</span>
+                              </div>
+                              <span className="text-[10px] bg-indigo-200 text-indigo-950 px-2 py-0.5 rounded font-mono font-bold">
+                                {providerName} Direct
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                              <div>
+                                <span className="text-slate-500 block font-sans">Provider:</span>
+                                <strong>{providerName}</strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-500 block font-sans">Mobile / Account No:</span>
+                                <strong className="text-indigo-900">{accountNumber}</strong>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-slate-500 block font-sans">Account Name:</span>
+                                <strong>{accountName}</strong>
+                              </div>
+                            </div>
+                            {coopPaymentOptions?.ewalletTransfer?.qrCodeUrl && (
+                              <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-indigo-200">
+                                <img
+                                  src={coopPaymentOptions.ewalletTransfer.qrCodeUrl}
+                                  alt={`${providerName} QR Code`}
+                                  className="w-36 h-36 object-contain"
+                                />
+                                <span className="text-[10px] text-slate-500 mt-1">Scan QR Code using {providerName} app</span>
+                              </div>
+                            )}
+                            <div className="text-[11px] text-indigo-800 bg-white/70 p-2 rounded-lg border border-indigo-200">
+                              {instructions}
                             </div>
                             <div>
-                              <span className="text-slate-500 block font-sans">Account Number:</span>
-                              <strong className="text-blue-900">{coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                {providerName} Reference / Trace No. (Required):
+                              </label>
+                              <input
+                                type="text"
+                                value={bankReferenceInput}
+                                onChange={(e) => setBankReferenceInput(e.target.value)}
+                                placeholder="e.g. GCASH-10029384756"
+                                className="w-full px-3 py-1.5 bg-white border border-indigo-300 rounded-lg text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
                             </div>
-                            <div className="col-span-2">
-                              <span className="text-slate-500 block font-sans">Account Name:</span>
-                              <strong>{coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-900 flex items-start gap-1.5">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                              <span>
+                                <strong>Admin Confirmation Required:</strong> A confirmation from the admin portal is necessary before posting this e-wallet transfer.
+                              </span>
                             </div>
                           </div>
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                              Transfer Reference / Trace No. (Required):
-                            </label>
-                            <input
-                              type="text"
-                              value={bankReferenceInput}
-                              onChange={(e) => setBankReferenceInput(e.target.value)}
-                              placeholder="e.g. LBP-TRX-12345678"
-                              className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                            />
+                        );
+                      })()}
+
+                      {/* Cashier Details Display if Cashier selected */}
+                      {depositChannel === 'CASHIER' && (() => {
+                        const productConfig =
+                          depositModalType === 'SHARES'
+                            ? coopPaymentOptions?.products?.shareCapital
+                            : coopPaymentOptions?.products?.depositSavings;
+                        const branch = productConfig?.cashier?.branchAddress || coopPaymentOptions?.cashier?.branchAddress || (tenantInfo as any)?.address || 'Cooperative Head Office Branch Cashier Counter';
+                        const instructions = productConfig?.cashier?.instructions || coopPaymentOptions?.cashier?.instructions || 'Visit the cooperative branch cashier and present your Member ID / Application ID with cash payment.';
+
+                        return (
+                          <div className="p-3.5 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2 text-xs text-amber-950">
+                            <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                              <Building2 className="w-4 h-4 text-amber-700" />
+                              <span>In-Person Branch Cashier (Over-the-Counter)</span>
+                            </div>
+                            <div className="text-[11px] space-y-1">
+                              <div>
+                                <span className="text-slate-500 block font-sans">Cashier Counter / Branch Location:</span>
+                                <strong>{branch}</strong>
+                              </div>
+                              <div className="text-[11px] text-amber-900 bg-white/70 p-2 rounded-lg border border-amber-200 mt-1">
+                                {instructions}
+                              </div>
+                            </div>
+                            <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[10px] text-emerald-900 flex items-start gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                              <span>Click below to generate an Official Cashier Deposit Order Slip to present at the counter.</span>
+                            </div>
                           </div>
-                          <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-900 flex items-start gap-1.5">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                            <span>
-                              <strong>Admin Confirmation Required:</strong> A confirmation from the admin portal is necessary before posting this share purchase or savings deposit.
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Summary & Execution */}
                       {(() => {
@@ -7564,11 +8014,9 @@ export default function MemberPortalPage() {
                               <span className="text-slate-600">Net Deposit / Capital Credit:</span>
                               <strong className="text-slate-900 font-mono">₱{principal.toFixed(2)}</strong>
                             </div>
-                            {depositChannel === 'PAYMONGO_QRPH' && (
+                            {depositChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment !== 'OPEX' && passOn > 0 && (
                               <div className="flex justify-between text-amber-700">
-                                <span>
-                                  Gateway Convenience Fee ({paymongoFeeTreatment === 'OPEX' ? 'OPEX Absorbed' : '1.5% Pass-Through'}):
-                                </span>
+                                <span>Convenience Fee:</span>
                                 <span className="font-mono font-semibold">+ ₱{passOn.toFixed(2)}</span>
                               </div>
                             )}
@@ -7583,73 +8031,60 @@ export default function MemberPortalPage() {
                             )}
 
                             {depositChannel === 'PAYMONGO_QRPH' ? (
-                              depositModalType === 'SHARES' ? (
-                                <button
-                                  type="button"
-                                  disabled={isGeneratingPaymongo}
-                                  onClick={handleInitiatePaymongoShares}
-                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                                >
-                                  {isGeneratingPaymongo ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <QrCode className="w-4 h-4" />
-                                  )}
-                                  <span>
-                                    {isGeneratingPaymongo
-                                      ? 'Generating PayMongo QR Ph...'
-                                      : 'Pay with PayMongo (QR Ph / GCash / Maya)'}
-                                  </span>
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const refNo = `QR-TX-${Date.now().toString(36).toUpperCase()}`;
-                                    setSavingsBalance((prev) => prev + principal);
-                                    setDepositSuccessResult({
-                                      type: 'Savings Deposit',
-                                      amount: principal,
-                                      reference: refNo,
-                                      channel: 'PayMongo QR Ph (Instant Self-Service)',
-                                    });
-                                  }}
-                                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                                >
+                              <button
+                                type="button"
+                                disabled={isGeneratingPaymongo}
+                                onClick={depositModalType === 'SHARES' ? handleInitiatePaymongoShares : handleInitiatePaymongoSavings}
+                                className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                              >
+                                {isGeneratingPaymongo ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
                                   <QrCode className="w-4 h-4" />
-                                  <span>Simulate Instant QR Ph Settlement</span>
-                                </button>
-                              )
+                                )}
+                                <span>
+                                  {isGeneratingPaymongo
+                                    ? 'Generating QR PH...'
+                                    : 'Pay with QR PH'}
+                                </span>
+                              </button>
+                            ) : depositChannel === 'BANK_TRANSFER' ? (
+                              <button
+                                type="button"
+                                disabled={isSubmittingDirectShare}
+                                onClick={depositModalType === 'SHARES' ? handleBankTransferShareDeposit : handleBankTransferSavingsDeposit}
+                                className="w-full mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                              >
+                                {isSubmittingDirectShare ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Landmark className="w-4 h-4" />
+                                )}
+                                <span>{isSubmittingDirectShare ? 'Submitting Bank Transfer...' : 'Submit Bank Transfer for Admin Confirmation'}</span>
+                              </button>
+                            ) : depositChannel === 'EWALLET' ? (
+                              <button
+                                type="button"
+                                disabled={isSubmittingDirectShare}
+                                onClick={handleEwalletDeposit}
+                                className="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                              >
+                                {isSubmittingDirectShare ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Smartphone className="w-4 h-4" />
+                                )}
+                                <span>{isSubmittingDirectShare ? 'Submitting E-Wallet Transfer...' : 'Submit E-Wallet Transfer for Admin Confirmation'}</span>
+                              </button>
                             ) : (
-                              depositModalType === 'SHARES' ? (
-                                <button
-                                  type="button"
-                                  disabled={isSubmittingDirectShare}
-                                  onClick={handleBankTransferShareDeposit}
-                                  className="w-full mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                                >
-                                  {isSubmittingDirectShare ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Landmark className="w-4 h-4" />
-                                  )}
-                                  <span>{isSubmittingDirectShare ? 'Submitting Bank Transfer...' : 'Submit Bank Transfer for Admin Confirmation'}</span>
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={isSubmittingDirectShare}
-                                  onClick={handleBankTransferSavingsDeposit}
-                                  className="w-full mt-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                                >
-                                  {isSubmittingDirectShare ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Landmark className="w-4 h-4" />
-                                  )}
-                                  <span>{isSubmittingDirectShare ? 'Submitting Bank Transfer...' : 'Submit Bank Transfer for Admin Confirmation'}</span>
-                                </button>
-                              )
+                              <button
+                                type="button"
+                                onClick={handleCashierOrderSlip}
+                                className="w-full mt-2 bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                              >
+                                <Building2 className="w-4 h-4" />
+                                <span>Generate In-Person Cashier Deposit Slip</span>
+                              </button>
                             )}
                           </div>
                         );
@@ -7745,8 +8180,8 @@ export default function MemberPortalPage() {
                   <div className="min-w-0">
                     <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
                       {passbookPayModal.type === 'LOAN'
-                        ? 'PayMongo QR Ph Loan Installment Payment'
-                        : 'PayMongo QR Ph Repayment & Deposit'}
+                        ? 'QR PH Loan Installment Payment'
+                        : 'QR PH Repayment & Deposit'}
                     </h3>
                     <div className="text-[10px] sm:text-[11px] text-slate-300 truncate">
                       Cooperative Payment Terminal • <strong>{currentMember.name}</strong>
@@ -7887,14 +8322,9 @@ export default function MemberPortalPage() {
                           ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
-                      {fee > 0 && paymongoFeeEnabled && paymongoFeeTreatment === 'PASS_THROUGH' && (
+                      {fee > 0 && paymongoFeeEnabled && paymongoFeeTreatment !== 'OPEX' && (
                         <div className="flex justify-between text-amber-800">
-                          <span className="flex items-center gap-1 flex-wrap">
-                            <span>PayMongo QR Ph Gateway Fee (1.5%):</span>
-                            <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-bold">
-                              Pass-Through
-                            </span>
-                          </span>
+                          <span>Convenience Fee:</span>
                           <span className="font-mono font-bold">+ ₱{fee.toFixed(2)}</span>
                         </div>
                       )}
@@ -7914,18 +8344,18 @@ export default function MemberPortalPage() {
                     {passbookPayModal.isGeneratingQr ? (
                       <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
                         <RefreshCw className="w-6 h-6 animate-spin text-emerald-600" />
-                        <span className="text-[10px] font-bold">Generating Live PayMongo QR Ph...</span>
+                        <span className="text-[10px] font-bold">Generating Live QR PH...</span>
                       </div>
                     ) : passbookPayModal.qrImageUrl ? (
                       <img
                         src={passbookPayModal.qrImageUrl}
-                        alt="PayMongo QR Ph Code"
+                        alt="QR PH Code"
                         className="w-44 h-44 object-contain"
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center gap-2 p-2 text-center">
                         <QrCode className="w-10 h-10 text-emerald-600" />
-                        <span className="text-[11px] font-bold text-slate-700">Live PayMongo QR Ph</span>
+                        <span className="text-[11px] font-bold text-slate-700">Live QR PH</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -7944,7 +8374,7 @@ export default function MemberPortalPage() {
                           className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer"
                         >
                           <RefreshCw className="w-3 h-3" />
-                          <span>Generate PayMongo QR Ph</span>
+                          <span>Generate QR PH</span>
                         </button>
                       </div>
                     )}
@@ -7996,7 +8426,7 @@ export default function MemberPortalPage() {
                     ) : (
                       <>
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>Complete &amp; Record PayMongo QR Ph Payment</span>
+                        <span>Complete &amp; Record QR PH Payment</span>
                       </>
                     )}
                   </button>

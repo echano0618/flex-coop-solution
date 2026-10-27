@@ -844,18 +844,26 @@ export class FirestoreCoopService {
   // --------------------------------------------------------------------------
 
   public async saveSystemConfig(tenantId: string, config: any): Promise<void> {
-    await this.systemConfigDoc(tenantId).set(
-      {
-        ...config,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    if (!this.isConfigured()) return;
+    try {
+      await this.systemConfigDoc(tenantId).set(
+        {
+          ...config,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch {}
   }
 
   public async getSystemConfig(tenantId: string): Promise<any | null> {
-    const doc = await this.systemConfigDoc(tenantId).get();
-    return doc.exists ? doc.data() : null;
+    if (!this.isConfigured()) return null;
+    try {
+      const doc = await this.systemConfigDoc(tenantId).get();
+      return doc.exists ? doc.data() : null;
+    } catch {
+      return null;
+    }
   }
 
   // --------------------------------------------------------------------------

@@ -548,11 +548,11 @@ export class GeneralLedgerService {
       let netCredit = 0;
 
       if (normalBalance === 'DEBIT') {
-        const net = d - c;
+        const net = Math.round((d - c) * 100) / 100;
         if (net >= 0) netDebit = net;
         else netCredit = Math.abs(net);
       } else {
-        const net = c - d;
+        const net = Math.round((c - d) * 100) / 100;
         if (net >= 0) netCredit = net;
         else netDebit = Math.abs(net);
       }

@@ -4,6 +4,7 @@ import { MonetizationService } from '../modules/monetization/monetization.servic
 import { AmortizationService } from '../modules/lending/amortization.service';
 import { GeneralLedgerService } from '../modules/accounting/ledger.service';
 import { PaymentService } from '../modules/payments/payment.service';
+import { PayMongoService } from '../modules/payments/paymongo.service';
 import { PayMongoWebhookService, PayMongoWebhookPayload } from '../modules/payments/webhook.service';
 import { RegulatoryReportsService } from '../modules/reports/reports.service';
 import { CDAExportService } from '../modules/reports/cda_export.service';
@@ -26,6 +27,13 @@ import {
   handleUpdateMemberBusinessPage,
   handleAddBusinessComment,
   handleDeleteBusinessComment,
+  handleGetPaymentOptions,
+  handleSavePaymentOptions,
+  handleSavingsCreatePaymongoIntent,
+  handleSavingsPaymongoStatus,
+  handleSavingsVerifyAndCompletePaymongo,
+  handleMemberRegister,
+  handleMemberApplicationReview,
 } from '../index';
 import {
   Tenant,
@@ -730,6 +738,37 @@ console.log('\n--- 16. Annual Net Surplus Allocation & Patronage Refund (Art. 86
   const mariaVoucher = calculation.memberAllocations.find(v => v.memberId === 'mem_maria_santos');
   assert(mariaVoucher !== undefined, 'Maria Clara Santos surplus voucher found');
   assert(mariaVoucher!.interestOnShareCapital === 315000, `Maria Clara received 60% of ISC pool: ₱${mariaVoucher!.interestOnShareCapital}`);
+
+  // 16.2 Patronage Refund weighted by members actual loan availment (Article 86 RA 9520)
+  const calcWithAvailment = NetSurplusService.calculateNetSurplus({
+    fiscalYear: 2025,
+    grossRevenue: 4500000,
+    totalExpenses: 3250000,
+    shareCapitalInterestRatio: 0.60,
+    members: [
+      {
+        memberId: 'mem_maria_santos',
+        memberNumber: 'MEM-2026-0001',
+        memberName: 'Maria Clara Santos',
+        paidUpShareCapital: 15000,
+        actualLoanAvailment: 150000,
+      },
+      {
+        memberId: 'mem_juan_delacruz',
+        memberNumber: 'MEM-2026-0002',
+        memberName: 'Juan Perez Dela Cruz',
+        paidUpShareCapital: 10000,
+        actualLoanAvailment: 50000,
+      },
+    ],
+  });
+  const mariaVoucher2 = calcWithAvailment.memberAllocations.find((v) => v.memberId === 'mem_maria_santos')!;
+  const juanVoucher2 = calcWithAvailment.memberAllocations.find((v) => v.memberId === 'mem_juan_delacruz')!;
+  assert(mariaVoucher2.actualLoanAvailment === 150000, 'Maria actual loan availment recorded');
+  assert(mariaVoucher2.patronageWeight === 0.75, 'Maria received 75% patronage weight based on loan availment');
+  assert(mariaVoucher2.patronageRefund === 262500, `Maria received 75% of PR pool (₱262,500): ₱${mariaVoucher2.patronageRefund}`);
+  assert(juanVoucher2.patronageWeight === 0.25, 'Juan received 25% patronage weight based on loan availment');
+  assert(juanVoucher2.patronageRefund === 87500, `Juan received 25% of PR pool (₱87,500): ₱${juanVoucher2.patronageRefund}`);
 
   // Balanced CDA Double-Entry Voucher
   const jv = NetSurplusService.buildSurplusDistributionEntry(calculation, 'usr_acct_01');
@@ -3627,7 +3666,478 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 39 MEMBER BUSINESS PAGE & COMMUNITY COMMENTS TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 390+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38 & 39) PASSED SUCCESSFULLY!\n');
+  // 40. Cooperative Per-Product Payment Options Configuration (Share Capital, Deposit Savings, Pay Loan)
+  console.log('\n--- 40. Per-Product Payment Options Configuration (Share Capital, Savings, Loans) ---');
+  {
+    const poTenantId = 'tenant_bayani_001';
+
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        body: reqData.body || {},
+        query: reqData.query || {},
+        params: reqData.params || {},
+        headers: {
+          'x-tenant-id': poTenantId,
+          ...(reqData.headers || {}),
+        },
+      };
+      const res: any = {
+        status(code: number) {
+          statusCode = code;
+          return res;
+        },
+        json(data: any) {
+          responseBody = data;
+          return res;
+        },
+        send(data: any) {
+          responseBody = data;
+          return res;
+        },
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    // 40.1 Retrieve default payment options including products
+    const getOptionsMock = makeMockHttp({
+      headers: { 'x-tenant-id': poTenantId },
+    });
+    await handleGetPaymentOptions(getOptionsMock.req, getOptionsMock.res);
+    assert(getOptionsMock.getStatus() === 200, 'Get payment options responds with HTTP 200');
+    assert(getOptionsMock.getBody().success === true, 'Get payment options response is successful');
+    const poData = getOptionsMock.getBody().data;
+    assert(poData.products !== undefined, 'Payment options contains per-product configuration object');
+    assert(poData.products.shareCapital !== undefined, 'Product configuration contains shareCapital');
+    assert(poData.products.depositSavings !== undefined, 'Product configuration contains depositSavings');
+    assert(poData.products.payLoan !== undefined, 'Product configuration contains payLoan');
+    assert(poData.products.shareCapital.productName === 'Share Capital Purchase', 'Share Capital product name matches');
+    assert(poData.products.depositSavings.productName === 'Deposit Savings', 'Deposit Savings product name matches');
+    assert(poData.products.payLoan.productName === 'Pay Loan', 'Pay Loan product name matches');
+
+    // 40.2 Save custom per-product payment options
+    const saveOptionsMock = makeMockHttp({
+      headers: { 'x-tenant-id': poTenantId },
+      body: {
+        products: {
+          shareCapital: {
+            bankTransfer: { enabled: true, instructions: 'Use CBU reference code' },
+            ewalletTransfer: { enabled: true },
+            paymongo: { enabled: true },
+            cashier: { enabled: true },
+          },
+          depositSavings: {
+            bankTransfer: { enabled: true, instructions: 'Use SAV reference code' },
+            ewalletTransfer: { enabled: true },
+            paymongo: { enabled: true },
+            cashier: { enabled: true },
+          },
+          payLoan: {
+            bankTransfer: { enabled: true, instructions: 'Strictly input Loan ID in transfer reference' },
+            ewalletTransfer: { enabled: false }, // Loan repayments disable manual e-wallet
+            paymongo: { enabled: true },
+            cashier: { enabled: true },
+          },
+        },
+      },
+    });
+    await handleSavePaymentOptions(saveOptionsMock.req, saveOptionsMock.res);
+    assert(saveOptionsMock.getStatus() === 200, 'Save payment options responds with HTTP 200');
+    assert(saveOptionsMock.getBody().success === true, 'Save payment options response is successful');
+    const savedProducts = saveOptionsMock.getBody().data.products;
+    assert(savedProducts.payLoan.ewalletTransfer.enabled === false, 'Pay Loan ewalletTransfer successfully set to disabled');
+    assert(savedProducts.payLoan.bankTransfer.instructions === 'Strictly input Loan ID in transfer reference', 'Pay Loan custom bank instructions saved');
+
+    // 40.3 Verify persistence on subsequent GET
+    const verifyGetMock = makeMockHttp({
+      headers: { 'x-tenant-id': poTenantId },
+    });
+    await handleGetPaymentOptions(verifyGetMock.req, verifyGetMock.res);
+    const persistedProducts = verifyGetMock.getBody().data.products;
+    assert(persistedProducts.payLoan.ewalletTransfer.enabled === false, 'Pay loan ewallet disability persisted in store');
+    assert(persistedProducts.shareCapital.bankTransfer.instructions === 'Use CBU reference code', 'Share capital custom instructions persisted');
+
+    console.log('  ✅ ALL SECTION 40 PER-PRODUCT PAYMENT OPTIONS CONFIGURATION TESTS PASSED!');
+  }
+
+  // 41. Savings Deposit Multi-Channel Payment Flows (Bank Transfer Confirmation & PayMongo Endpoints)
+  console.log('\n--- 41. Savings Deposit Multi-Channel Payment Flows (Bank Transfer & PayMongo) ---');
+  {
+    const savTenantId = `tenant_sav_test_${Date.now()}`;
+    const savMemberId = 'mbr_sav_001';
+    const initialSavings = 1000.0;
+    const savMember: Member = {
+      id: savMemberId,
+      firstName: 'Elena',
+      lastName: 'Santos',
+      memberNumber: '2026-SAV-001',
+      email: 'elena.santos@testcoop.ph',
+      phone: '+63 920 123 4567',
+      birthdate: '1990-01-01',
+      gender: 'FEMALE',
+      civilStatus: 'SINGLE',
+      address: 'Quezon City',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: '2026-01-01T00:00:00Z',
+      paidUpCapital: 5000,
+      subscribedShares: 50,
+      sharesCount: 50,
+      savingsBalance: initialSavings,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    dbStore.members.set(savTenantId, [savMember]);
+    dbStore.journalEntries.set(savTenantId, []);
+
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let bodyData: any = null;
+      return {
+        req: {
+          body: reqData.body || {},
+          query: reqData.query || {},
+          params: reqData.params || {},
+          headers: {
+            'x-tenant-id': savTenantId,
+            ...(reqData.headers || {}),
+          },
+          header: (name: string) => {
+            const h: any = { 'x-tenant-id': savTenantId, ...(reqData.headers || {}) };
+            return h[name] || h[name.toLowerCase()];
+          },
+        } as any,
+        res: {
+          status: (code: number) => {
+            statusCode = code;
+            return {
+              json: (data: any) => {
+                bodyData = data;
+              },
+            };
+          },
+          json: (data: any) => {
+            bodyData = data;
+          },
+        } as any,
+        getStatus: () => statusCode,
+        getBody: () => bodyData,
+      };
+    };
+
+    // 41.1 Submit Bank Transfer Request for SAVINGS_DEPOSIT
+    console.log('  41.1 Member submits Bank Transfer for Savings Deposit...');
+    const submitSavMock = makeMockHttp({
+      headers: { 'x-tenant-id': savTenantId },
+      body: {
+        memberId: savMemberId,
+        type: 'SAVINGS_DEPOSIT',
+        amount: 1500,
+        bankName: 'Land Bank of the Philippines',
+        referenceNumber: 'LBP-SAV-2026-001',
+      },
+    });
+    await handleSubmitBankTransferRequest(submitSavMock.req, submitSavMock.res);
+    assert(submitSavMock.getStatus() === 200, 'Savings bank transfer submission responds with HTTP 200');
+    assert(submitSavMock.getBody().success === true, 'Savings bank transfer submission is successful');
+    const pendingSavReq = submitSavMock.getBody().data;
+    assert(pendingSavReq.status === 'PENDING_CONFIRMATION', 'Request status is PENDING_CONFIRMATION');
+    assert(pendingSavReq.type === 'SAVINGS_DEPOSIT', 'Request type is SAVINGS_DEPOSIT');
+
+    // Balance should still be initial
+    const mbrPreConfirm = (dbStore.members.get(savTenantId) || []).find((m) => m.id === savMemberId)!;
+    assert(mbrPreConfirm.savingsBalance === initialSavings, 'Member savings balance untouched prior to admin confirmation');
+
+    // 41.2 Admin Confirms Savings Deposit Bank Transfer
+    console.log('  41.2 Admin confirms Savings Deposit bank transfer and posts CDA GL voucher...');
+    const confirmSavMock = makeMockHttp({
+      params: { id: pendingSavReq.id },
+      body: {
+        confirmedByUserId: 'usr_cashier_sav',
+        confirmedByUserName: 'Ramon Cashier',
+      },
+    });
+    await handleConfirmBankTransferRequest(confirmSavMock.req, confirmSavMock.res);
+    assert(confirmSavMock.getStatus() === 200, 'Admin savings confirmation responds with HTTP 200');
+    assert(confirmSavMock.getBody().success === true, 'Admin savings confirmation is successful');
+    const confirmedSavReq = confirmSavMock.getBody().data;
+    assert(confirmedSavReq.status === 'CONFIRMED', 'Request status transitioned to CONFIRMED');
+    assert(Boolean(confirmedSavReq.receiptNumber), 'Official Receipt generated for confirmed savings deposit');
+
+    // Member savingsBalance should now be updated
+    const mbrPostConfirm = (dbStore.members.get(savTenantId) || []).find((m) => m.id === savMemberId)!;
+    assert(mbrPostConfirm.savingsBalance === 2500, 'Member savings balance increased by ₱1,500 to ₱2,500');
+
+    // GL Voucher should be posted: Debits 1-01-02 (Cash in Bank), Credits 2-01-02 (Voluntary Regular Savings)
+    const allEntries = dbStore.journalEntries.get(savTenantId) || [];
+    const savEntry = allEntries.find((e) => e.id === confirmedSavReq.journalEntryId);
+    assert(Boolean(savEntry), 'Savings deposit GL entry found in General Ledger');
+    const debitLine = savEntry?.lines.find((l) => l.accountCode === '1-01-02');
+    assert(debitLine?.debit === 1500, 'Savings deposit debits 1-01-02 Cash in Bank for ₱1,500.00');
+    const creditLine = savEntry?.lines.find((l) => l.accountCode === '2-01-02');
+    assert(creditLine?.credit === 1500, 'Savings deposit credits 2-01-02 Voluntary Regular Savings for ₱1,500.00');
+    assert(savEntry?.totalDebit === savEntry?.totalCredit, 'Savings deposit GL voucher is strictly balanced');
+
+    // 41.3 PayMongo Savings Create Intent validation & dynamic fee calculation
+    console.log('  41.3 PayMongo Savings Create Intent validation & fee handling...');
+    const badIntentMock = makeMockHttp({
+      headers: { 'x-tenant-id': savTenantId },
+      body: { memberId: savMemberId, amount: -500 },
+    });
+    await handleSavingsCreatePaymongoIntent(badIntentMock.req, badIntentMock.res);
+    assert(badIntentMock.getStatus() === 400, 'Create intent rejects negative amount with HTTP 400');
+
+    // Mock PayMongo methods for test isolation
+    const origCreateQr = PayMongoService.createQRPhPayment;
+    const origCreateLink = PayMongoService.createCheckoutLink;
+    const origCheckIntent = PayMongoService.checkPaymentIntentStatus;
+    const origCheckLink = PayMongoService.checkCheckoutLinkStatus;
+
+    PayMongoService.createQRPhPayment = async (params: any) => ({
+      paymentIntentId: 'pi_test_sav_mock_99',
+      clientKey: 'client_key_mock_99',
+      qrImageUrl: 'https://paymongo.com/qr/mock99.png',
+      expiresAt: new Date(Date.now() + 1800000).toISOString(),
+      status: 'awaiting_payment_method',
+      totalAmount: params.amount,
+    });
+    PayMongoService.createCheckoutLink = async (params: any) => ({
+      linkId: 'link_test_sav_mock_99',
+      checkoutUrl: 'https://checkout.paymongo.com/mock99',
+      referenceNumber: 'REF-SAV-MOCK99',
+      status: 'active',
+      amount: params.amount,
+    });
+
+    const goodIntentMock = makeMockHttp({
+      headers: { 'x-tenant-id': savTenantId },
+      body: { memberId: savMemberId, amount: 2000 },
+    });
+    await handleSavingsCreatePaymongoIntent(goodIntentMock.req, goodIntentMock.res);
+    assert(goodIntentMock.getStatus() === 200, 'Create intent responds with HTTP 200');
+    assert(goodIntentMock.getBody().success === true, 'Create intent payload success is true');
+    const intentData = goodIntentMock.getBody().data;
+    assert(intentData.paymentIntentId === 'pi_test_sav_mock_99', 'Returned mock paymentIntentId matches');
+    assert(intentData.principalAmount === 2000, 'Principal amount matches ₱2,000');
+    assert(intentData.convenienceFee === 30, 'Pass-on gateway fee calculates 1.5% (₱30.00)');
+    assert(intentData.totalAmount === 2030, 'Total amount calculates to ₱2,030.00');
+
+    // 41.4 PayMongo Status Polling
+    console.log('  41.4 PayMongo Savings status polling...');
+    PayMongoService.checkPaymentIntentStatus = async () => ({
+      status: 'paid',
+      isPaid: true,
+      paymentId: 'pay_test_sav_99',
+    });
+
+    const statusMock = makeMockHttp({
+      headers: { 'x-tenant-id': savTenantId },
+      params: { intentId: 'pi_test_sav_mock_99' },
+    });
+    await handleSavingsPaymongoStatus(statusMock.req, statusMock.res);
+    assert(statusMock.getStatus() === 200, 'Status endpoint responds with HTTP 200');
+    assert(statusMock.getBody().isPaid === true, 'Status endpoint detects payment as paid');
+    assert(statusMock.getBody().paymentId === 'pay_test_sav_99', 'Status endpoint returns payment ID');
+
+    // 41.5 PayMongo Verify and Complete Savings Deposit
+    console.log('  41.5 PayMongo Verify and Complete Savings Deposit...');
+    const verifySavMock = makeMockHttp({
+      headers: { 'x-tenant-id': savTenantId },
+      body: {
+        memberId: savMemberId,
+        amount: 2000,
+        paymentIntentId: 'pi_test_sav_mock_99',
+      },
+    });
+    await handleSavingsVerifyAndCompletePaymongo(verifySavMock.req, verifySavMock.res);
+    assert(verifySavMock.getStatus() === 200, 'Verify and complete responds with HTTP 200');
+    assert(verifySavMock.getBody().success === true, 'Verify and complete success is true');
+    assert(Boolean(verifySavMock.getBody().receiptNumber), 'Receipt number generated for PayMongo savings deposit');
+
+    // Verify member balance incremented by ₱2,000
+    const mbrPostPaymongo = (dbStore.members.get(savTenantId) || []).find((m) => m.id === savMemberId)!;
+    assert(mbrPostPaymongo.savingsBalance === 4500, 'Member savings balance increased by ₱2,000 to ₱4,500');
+
+    // Verify GL voucher debits 1-01-05 (Platform Float/Escrow) and credits 2-01-02 (Voluntary Savings)
+    const updatedEntries = dbStore.journalEntries.get(savTenantId) || [];
+    const paymongoEntry = updatedEntries.find((e: any) => e.receiptNumber === verifySavMock.getBody().receiptNumber);
+    assert(Boolean(paymongoEntry), 'PayMongo savings deposit journal entry posted');
+    assert(paymongoEntry?.channel === 'PAYMONGO_QRPH', 'Journal entry channel is PAYMONGO_QRPH');
+    const pmDebit = paymongoEntry?.lines.find((l) => l.accountCode === '1-01-05');
+    assert(pmDebit?.debit === 2000, 'Debits 1-01-05 Platform Float / Escrow for ₱2,000.00');
+    const pmCredit = paymongoEntry?.lines.find((l) => l.accountCode === '2-01-02');
+    assert(pmCredit?.credit === 2000, 'Credits 2-01-02 Voluntary Regular Savings for ₱2,000.00');
+    assert(paymongoEntry?.totalDebit === paymongoEntry?.totalCredit, 'PayMongo savings deposit GL voucher is balanced');
+
+    // 41.6 Idempotency Check: Calling verify again with same paymentIntentId does NOT double-credit
+    console.log('  41.6 Verifying PayMongo savings deposit idempotency...');
+    const dupVerifyMock = makeMockHttp({
+      headers: { 'x-tenant-id': savTenantId },
+      body: {
+        memberId: savMemberId,
+        amount: 2000,
+        paymentIntentId: 'pi_test_sav_mock_99',
+      },
+    });
+    await handleSavingsVerifyAndCompletePaymongo(dupVerifyMock.req, dupVerifyMock.res);
+    assert(dupVerifyMock.getStatus() === 200, 'Duplicate call returns HTTP 200');
+    assert(dupVerifyMock.getBody().duplicate === true, 'Duplicate response flagged with duplicate: true');
+    const mbrPostDup = (dbStore.members.get(savTenantId) || []).find((m) => m.id === savMemberId)!;
+    assert(mbrPostDup.savingsBalance === 4500, 'Member savings balance remains at ₱4,500 without double-crediting');
+
+    // Restore original methods
+    PayMongoService.createQRPhPayment = origCreateQr;
+    PayMongoService.createCheckoutLink = origCreateLink;
+    PayMongoService.checkPaymentIntentStatus = origCheckIntent;
+    PayMongoService.checkCheckoutLinkStatus = origCheckLink;
+
+    console.log('  ✅ ALL SECTION 41 SAVINGS DEPOSIT MULTI-CHANNEL FLOW TESTS PASSED!');
+  }
+
+  // =========================================================================
+  // SECTION 42: MEMBERSHIP APPLICANTS VS MEMBERS SEPARATION & ID FORMAT
+  // =========================================================================
+  {
+    console.log('\n--- SECTION 42: MEMBERSHIP APPLICANTS SEPARATION & AXXXXXXXX ID FORMAT ---');
+    const appTenantId = 'tenant_family';
+
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (payload: any) => {
+          responseBody = payload;
+          return res;
+        },
+      };
+      const req: any = {
+        headers: reqData.headers || {},
+        body: reqData.body || {},
+        query: reqData.query || {},
+        params: reqData.params || {},
+        get: (headerName: string) => reqData.headers?.[headerName.toLowerCase()] || reqData.headers?.[headerName] || undefined,
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    // 42.1 Online Applicant Registration receives AXXXXXXXX ID format and NO Member No
+    console.log('  42.1 Testing online applicant registration receives AXXXXXXXX ID and NO memberNumber...');
+    const applicantEmail = `applicant_test_${Date.now()}@example.com`;
+    const regMock = makeMockHttp({
+      headers: { 'x-tenant-id': appTenantId },
+      body: {
+        firstName: 'Emilio',
+        middleName: 'Del Pilar',
+        lastName: 'Aguinaldo',
+        email: applicantEmail,
+        birthdate: '1992-03-22',
+        completedPMES: true,
+        agreedToPrivacyPolicy: true,
+        initialStatus: 'UNDER_REVIEW', // Unapproved applicant
+        classification: 'REGULAR',
+        subscribedShares: 50,
+        parValuePerShare: 100,
+      },
+    });
+
+    await handleMemberRegister(regMock.req, regMock.res);
+    assert(regMock.getStatus() === 201, 'Registration returns HTTP 201 Created');
+    const regBody = regMock.getBody();
+    assert(regBody.success === true, 'Registration reports success: true');
+    assert(Boolean(regBody.applicationId), 'Application ID is returned');
+    assert(/^A\d{8}$/.test(regBody.applicationId), `Application ID (${regBody.applicationId}) matches format AXXXXXXXX`);
+    assert(regBody.applicantId === regBody.applicationId, 'applicantId matches applicationId');
+
+    // Verify member record has isApplicant: true and EMPTY memberNumber
+    assert(regBody.member.isApplicant === true, 'Member record flags isApplicant: true');
+    assert(regBody.member.memberNumber === '', 'Unapproved applicant does NOT have an assigned memberNumber (empty string)');
+    assert(regBody.member.memberNo === '', 'Unapproved applicant does NOT have an assigned memberNo (empty string)');
+
+    // Verify stored member in dbStore
+    const membersInDb = dbStore.members.get(appTenantId) || [];
+    const savedMember = membersInDb.find((m) => m.id === regBody.applicationId || (m as any).applicantId === regBody.applicationId);
+    assert(Boolean(savedMember), 'Applicant is stored in dbStore.members');
+    assert(savedMember?.memberNumber === '', 'Stored applicant has empty memberNumber');
+    assert(savedMember?.kycStatus === 'SUBMITTED', 'Stored applicant status is SUBMITTED');
+
+    // 42.2 Underwriting & Approval assigns official Member No
+    console.log('  42.2 Testing applicant review approval generates and assigns official Member No...');
+    const assignedSeqNo = `MEM-${new Date().getFullYear()}-8899`;
+    const reviewMock = makeMockHttp({
+      headers: { 'x-tenant-id': appTenantId },
+      params: { id: regBody.applicationId },
+      body: {
+        action: 'APPROVE',
+        memberNumber: assignedSeqNo,
+        notes: 'PMES certificate confirmed and identity documents validated by Committee.',
+        reviewedBy: 'Board Secretary & General Manager',
+      },
+    });
+
+    await handleMemberApplicationReview(reviewMock.req, reviewMock.res);
+    assert(reviewMock.getStatus() === 200, 'Review approval returns HTTP 200');
+    const reviewBody = reviewMock.getBody();
+    assert(reviewBody.success === true, 'Review approval reports success: true');
+    assert(reviewBody.memberNumber === assignedSeqNo, 'Approved response returns official assigned memberNumber');
+
+    // Verify member in dbStore now has official Member No, isApplicant: false, and VERIFIED status
+    const approvedMember = (dbStore.members.get(appTenantId) || []).find(
+      (m) => m.id === regBody.applicationId || (m as any).applicantId === regBody.applicationId
+    );
+    assert(approvedMember?.memberNumber === assignedSeqNo, 'Approved member record has official assigned memberNumber');
+    assert(approvedMember?.memberNo === assignedSeqNo, 'Approved member record has official assigned memberNo');
+    assert(approvedMember?.isApplicant === false, 'Approved member has isApplicant: false');
+    assert(approvedMember?.kycStatus === 'VERIFIED', 'Approved member kycStatus updated to VERIFIED');
+    assert(approvedMember?.status === 'ACTIVE', 'Approved member status updated to ACTIVE');
+
+    // 42.3 Direct Administrative Enrollment (initialStatus: 'ACTIVE') receives immediate Member No
+    console.log('  42.3 Testing administrative pre-approved member enrollment receives immediate Member No...');
+    const adminMbrEmail = `admin_approved_${Date.now()}@example.com`;
+    const adminRegMock = makeMockHttp({
+      headers: { 'x-tenant-id': appTenantId },
+      body: {
+        firstName: 'Josefa',
+        middleName: 'Llanes',
+        lastName: 'Escoda',
+        email: adminMbrEmail,
+        birthdate: '1898-09-20',
+        completedPMES: true,
+        agreedToPrivacyPolicy: true,
+        initialStatus: 'ACTIVE', // Direct verified admin enrollment
+        classification: 'REGULAR',
+        subscribedShares: 50,
+        parValuePerShare: 100,
+      },
+    });
+
+    await handleMemberRegister(adminRegMock.req, adminRegMock.res);
+    assert(adminRegMock.getStatus() === 201, 'Direct admin registration returns HTTP 201');
+    const adminRegBody = adminRegMock.getBody();
+    assert(adminRegBody.success === true, 'Direct admin registration reports success');
+    assert(adminRegBody.member.isApplicant === false, 'Directly enrolled member is NOT flagged as applicant');
+    assert(Boolean(adminRegBody.member.memberNumber), 'Directly enrolled member receives immediate Member No');
+    assert(/^MEM-\d{4}-\d+/.test(adminRegBody.member.memberNumber), `Directly enrolled memberNumber (${adminRegBody.member.memberNumber}) matches format MEM-YYYY-XXXX`);
+
+    console.log('  ✅ ALL SECTION 42 MEMBERSHIP APPLICANTS VS MEMBERS SEPARATION TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41 & 42) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

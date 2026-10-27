@@ -177,6 +177,11 @@ export interface Member {
   loanBalance?: number;
   sharePaymentStatus?: string;
   memberNo?: string;
+  applicantId?: string;
+  isApplicant?: boolean;
+  reviewedBy?: string;
+  reviewNotes?: string;
+  reviewDate?: string;
   selfieUrl?: string;
   selfiePreview?: string | null;
   businessPage?: MemberBusinessPage;
@@ -667,6 +672,9 @@ export interface JournalEntry {
   channel?: string;
   createdByUserId: string;
   postedAt: string;
+  receiptNumber?: string;
+  paymentIntentId?: string;
+  checkoutLinkId?: string;
 }
 
 // ==========================================
@@ -802,6 +810,9 @@ export interface MemberSurplusVoucher {
   memberName: string;
   paidUpShareCapital: number;
   interestPaidOnLoans: number;
+  actualLoanAvailment?: number;
+  loanAvailment?: number;
+  patronageWeight?: number;
   interestOnShareCapital: number; // Dividend
   patronageRefund: number;
   totalSurplusPayable: number;
@@ -904,5 +915,71 @@ export interface BankTransferPaymentRequest {
   rejectionReason?: string;
   journalEntryId?: string;
   receiptNumber?: string;
+}
+
+// ==========================================
+// 13. COOPERATIVE PER-PRODUCT PAYMENT OPTIONS CONFIGURATION
+// ==========================================
+export type CoopPaymentProductId = 'shareCapital' | 'depositSavings' | 'payLoan';
+
+export interface ProductChannelConfig {
+  enabled: boolean;
+  instructions?: string;
+  accountName?: string;
+  accountNumber?: string;
+  bankName?: string;
+  provider?: string;
+  feeTreatment?: 'PASS_THROUGH' | 'OPEX';
+}
+
+export interface ProductPaymentOptionsConfig {
+  productId: CoopPaymentProductId;
+  productName: string; // 'Share Capital Purchase' | 'Deposit Savings' | 'Pay Loan'
+  description: string;
+  bankTransfer: ProductChannelConfig;
+  ewalletTransfer: ProductChannelConfig;
+  paymongo: ProductChannelConfig;
+  cashier: ProductChannelConfig;
+}
+
+export interface CoopPaymentOptions {
+  bankTransfer: {
+    enabled: boolean;
+    bankName: string;
+    accountName: string;
+    accountNumber: string;
+    branch?: string;
+    instructions?: string;
+  };
+  ewalletTransfer: {
+    enabled: boolean;
+    provider: string;
+    accountName: string;
+    accountNumber: string;
+    qrCodeUrl?: string;
+    instructions?: string;
+  };
+  paymongo: {
+    enabled: boolean;
+    environment: 'test' | 'live';
+    publicKey?: string;
+    secretKey?: string;
+    webhookSecret?: string;
+    feeTreatment: 'PASS_THROUGH' | 'OPEX';
+    channels?: string[];
+    label?: string;
+  };
+  cashier: {
+    enabled: boolean;
+    label: string;
+    branchAddress?: string;
+    instructions?: string;
+  };
+  products: {
+    shareCapital: ProductPaymentOptionsConfig;
+    depositSavings: ProductPaymentOptionsConfig;
+    payLoan: ProductPaymentOptionsConfig;
+  };
+  updatedAt?: string;
 }
 

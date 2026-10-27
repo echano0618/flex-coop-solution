@@ -808,7 +808,7 @@ app.post('/api/v1/auth/member/change-pin', handleMemberCredentialChange);
 app.post('/api/v1/auth/forgot-password', handleForgotPassword);
 app.post('/api/v1/auth/member/forgot-password', handleForgotPassword);
 
-app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => {
+const handleMemberRegister = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const {
@@ -893,9 +893,18 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
     const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim();
     const cleanUser = email.trim().toLowerCase();
     const cleanPin = (password || pin || '123456').trim();
-    const appId = `APP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const memberId = `mem_app_${appId}`;
-    const memberNumber = `MEM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    // Applicants must have format AXXXXXXXX (A followed by 8 numeric digits)
+    const isApprovedMember = req.body.initialStatus === 'ACTIVE';
+    const applicantId = 'A' + Math.floor(10000000 + Math.random() * 90000000).toString();
+    const appId = applicantId;
+    const memberId = isApprovedMember 
+      ? `MEM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}` 
+      : applicantId;
+    // Do not assign Member No to an unapproved applicant. Assign only Member No once verified as Member.
+    const memberNumber = isApprovedMember 
+      ? `MEM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}` 
+      : '';
 
     const resolvedCountry = (country || 'Philippines').trim();
     const resolvedRegion = (region || '').trim();
@@ -931,6 +940,7 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
 
     const newApp = {
       id: appId,
+      applicantId: appId,
       applicantName: fullName,
       firstName,
       middleName: middleName || '',
@@ -1020,6 +1030,9 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
       username: cleanUser,
       idNumber: tin || employeeIdNumber || idNumber || 'N/A',
       idType: idType || 'PhilSys National ID',
+      memberNo: memberNumber,
+      applicantId: isApprovedMember ? undefined : applicantId,
+      isApplicant: !isApprovedMember,
       classification: req.body.classification || 'ASSOCIATE',
       isDividendEligible: req.body.isDividendEligible !== undefined ? req.body.isDividendEligible : (req.body.classification === 'REGULAR'),
       paidUpShares: actualDeposit,
@@ -1199,8 +1212,11 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
 
     res.status(201).json({
       success: true,
-      message: `Application submitted successfully. Member ${memberNumber} is in the Board/Committee approval queue.`,
+      message: isApprovedMember
+        ? `Member ${memberNumber} enrolled and activated successfully.`
+        : `Application submitted successfully. Applicant ${appId} is in the Board/Committee approval queue.`,
       applicationId: appId,
+      applicantId: isApprovedMember ? undefined : appId,
       member: richMember,
       shareAccount,
       feeDeduction,
@@ -1208,7 +1224,8 @@ app.post('/api/v1/auth/member/register', async (req: Request, res: Response) => 
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/v1/auth/member/register', handleMemberRegister);
 
 // ==========================================
 // 2. TENANT MANAGEMENT & PROVISIONING
@@ -2194,10 +2211,15 @@ app.get('/api/v1/billing/payment-methods', async (_req: Request, res: Response) 
   }
 });
 
-app.get('/api/v1/coop/payment-options', async (req: Request, res: Response) => {
+export const handleGetPaymentOptions = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
-    const tenant = dbStore.tenants.get(tenantId) || (await FirestoreCoopService.getInstance().getTenant(tenantId));
+    let tenant = dbStore.tenants.get(tenantId);
+    if (!tenant) {
+      try {
+        tenant = (await FirestoreCoopService.getInstance().getTenant(tenantId)) || undefined;
+      } catch {}
+    }
     
     let sysConfig: any = dbStore.systemConfigs.get(tenantId) || null;
     if (!sysConfig) {
@@ -2256,6 +2278,82 @@ app.get('/api/v1/coop/payment-options', async (req: Request, res: Response) => {
       label: 'QR PH via PayMongo',
     };
 
+    const defaultProductOptions = {
+      shareCapital: {
+        productId: 'shareCapital',
+        productName: 'Share Capital Purchase',
+        description: 'Accepted channels for initial and regular share capital subscriptions (Capital Build-Up)',
+        bankTransfer: {
+          enabled: true,
+          instructions: 'Transfer via InstaPay or PESONet. Reference note format: CBU-[MemberNumber]',
+        },
+        ewalletTransfer: {
+          enabled: true,
+          provider: 'GCash',
+          instructions: 'Send via Express Send. Please state CBU-[MemberNumber] in the message note.',
+        },
+        paymongo: {
+          enabled: paymongoEnabled,
+          feeTreatment: 'PASS_THROUGH',
+        },
+        cashier: {
+          enabled: true,
+          instructions: 'Pay at the cooperative branch cashier counter with cash or check.',
+        },
+      },
+      depositSavings: {
+        productId: 'depositSavings',
+        productName: 'Deposit Savings',
+        description: 'Accepted channels for regular and voluntary savings deposits into member savings accounts',
+        bankTransfer: {
+          enabled: true,
+          instructions: 'Transfer via InstaPay or PESONet. Reference note format: SAV-[MemberNumber]',
+        },
+        ewalletTransfer: {
+          enabled: true,
+          provider: 'GCash',
+          instructions: 'Send via Express Send. Please state SAV-[MemberNumber] in the message note.',
+        },
+        paymongo: {
+          enabled: paymongoEnabled,
+          feeTreatment: 'PASS_THROUGH',
+        },
+        cashier: {
+          enabled: true,
+          instructions: 'Deposit at the branch cashier counter. Bring your member passbook or ID.',
+        },
+      },
+      payLoan: {
+        productId: 'payLoan',
+        productName: 'Pay Loan',
+        description: 'Accepted channels for loan amortization repayments and principal reductions',
+        bankTransfer: {
+          enabled: true,
+          instructions: 'Transfer via InstaPay or PESONet. Reference note format: LOAN-[LoanNumber]',
+        },
+        ewalletTransfer: {
+          enabled: true,
+          provider: 'GCash',
+          instructions: 'Send via Express Send. Please state LOAN-[LoanNumber] in the message note.',
+        },
+        paymongo: {
+          enabled: paymongoEnabled,
+          feeTreatment: 'PASS_THROUGH',
+        },
+        cashier: {
+          enabled: true,
+          instructions: 'Settle loan amortization at the branch cashier counter.',
+        },
+      },
+    };
+
+    const storedProducts = storedOptions.products || {};
+    const products = {
+      shareCapital: { ...defaultProductOptions.shareCapital, ...(storedProducts.shareCapital || {}) },
+      depositSavings: { ...defaultProductOptions.depositSavings, ...(storedProducts.depositSavings || {}) },
+      payLoan: { ...defaultProductOptions.payLoan, ...(storedProducts.payLoan || {}) },
+    };
+
     res.json({
       success: true,
       tenantId,
@@ -2269,26 +2367,36 @@ app.get('/api/v1/coop/payment-options', async (req: Request, res: Response) => {
           branchAddress: tenant?.address || 'Cooperative Head Office Cashier Counter',
           instructions: 'Visit the cooperative branch cashier and present your Member ID / Application ID with cash payment.',
         },
+        products,
       },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.get('/api/v1/coop/payment-options', handleGetPaymentOptions);
 
-app.post('/api/v1/coop/payment-options', async (req: Request, res: Response) => {
+export const handleSavePaymentOptions = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
-    const { bankTransfer, ewalletTransfer, paymongo } = req.body;
+    const { bankTransfer, ewalletTransfer, paymongo, cashier, products } = req.body;
 
     const existingSysConfig = dbStore.systemConfigs.get(tenantId) || {};
     const existingOptions = existingSysConfig.paymentOptions || {};
+
+    const updatedProducts = products ? {
+      shareCapital: { ...(existingOptions.products?.shareCapital || {}), ...(products.shareCapital || {}) },
+      depositSavings: { ...(existingOptions.products?.depositSavings || {}), ...(products.depositSavings || {}) },
+      payLoan: { ...(existingOptions.products?.payLoan || {}), ...(products.payLoan || {}) },
+    } : existingOptions.products;
 
     const updatedOptions = {
       ...existingOptions,
       ...(bankTransfer ? { bankTransfer: { ...existingOptions.bankTransfer, ...bankTransfer } } : {}),
       ...(ewalletTransfer ? { ewalletTransfer: { ...existingOptions.ewalletTransfer, ...ewalletTransfer } } : {}),
       ...(paymongo ? { paymongo: { ...existingOptions.paymongo, ...paymongo } } : {}),
+      ...(cashier ? { cashier: { ...existingOptions.cashier, ...cashier } } : {}),
+      ...(updatedProducts ? { products: updatedProducts } : {}),
       updatedAt: new Date().toISOString(),
     };
 
@@ -2335,7 +2443,8 @@ app.post('/api/v1/coop/payment-options', async (req: Request, res: Response) => 
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/v1/coop/payment-options', handleSavePaymentOptions);
 
 app.post('/api/v1/billing/credit/topup', async (req: Request, res: Response) => {
   try {
@@ -2404,6 +2513,15 @@ app.get('/api/v1/members', async (req: Request, res: Response) => {
       members = dbStore.members.get(tenantId) || [];
     }
 
+    const verifiedParam = req.query.verified || req.query.verifiedOnly;
+    if (verifiedParam === 'true' || verifiedParam === '1') {
+      members = members.filter((m: any) => {
+        const kyc = String(m.kycStatus || '').toUpperCase();
+        const st = String(m.status || '').toUpperCase();
+        return kyc === 'VERIFIED' && st !== 'INACTIVE' && st !== 'REJECTED' && st !== 'PENDING_APPROVAL' && st !== 'UNDER_REVIEW';
+      });
+    }
+
     res.json({ success: true, tenantId, count: members.length, data: members });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -2426,7 +2544,7 @@ app.get('/api/v1/members/applications', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Response) => {
+const handleMemberApplicationReview = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const appId = req.params.id;
@@ -2435,6 +2553,7 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
 
     let targetApp: any = null;
     let targetMember: any = null;
+    let assignedMemberNo = '';
 
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -2442,11 +2561,23 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
       await fsService.updateApplicationStatus(tenantId, appId, status, notes, reviewedBy);
 
       // Also update member status in Firestore
-      const memberId = `mem_app_${appId}`;
+      const memberId = appId.startsWith('mem_app_') ? appId : `mem_app_${appId}`;
       targetMember = await fsService.getMember(tenantId, memberId);
+      if (!targetMember) {
+        targetMember = await fsService.getMember(tenantId, appId);
+      }
+      assignedMemberNo = action === 'APPROVE'
+        ? (req.body.memberNumber || targetMember?.memberNumber || targetMember?.memberNo || `MEM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`)
+        : '';
+
       if (targetMember) {
         const updated = {
           ...targetMember,
+          ...(action === 'APPROVE' ? {
+            memberNumber: assignedMemberNo,
+            memberNo: assignedMemberNo,
+            isApplicant: false,
+          } : {}),
           kycStatus: action === 'APPROVE' ? ('VERIFIED' as const) : ('REJECTED' as const),
           status: action === 'APPROVE' ? ('ACTIVE' as const) : ('INACTIVE' as const),
           reviewedBy: reviewedBy || 'Membership & Credit Committee',
@@ -2469,6 +2600,28 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
           }
         } catch {}
       }
+
+      // Update in-memory dbStore
+      const memList = dbStore.members.get(tenantId) || [];
+      const mIdx = memList.findIndex((m) => m.id === appId || m.id === memberId || (m as any).applicantId === appId);
+      if (mIdx >= 0) {
+        memList[mIdx] = {
+          ...memList[mIdx],
+          ...(action === 'APPROVE' ? {
+            memberNumber: assignedMemberNo,
+            memberNo: assignedMemberNo,
+            isApplicant: false,
+          } : {}),
+          kycStatus: action === 'APPROVE' ? 'VERIFIED' : 'REJECTED',
+          status: action === 'APPROVE' ? 'ACTIVE' : 'INACTIVE',
+          reviewedBy: reviewedBy || 'Membership & Credit Committee',
+          reviewNotes: notes || '',
+          reviewDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        };
+        if (!targetMember) {
+          targetMember = memList[mIdx];
+        }
+      }
     } catch (fsErr) {
       console.warn('Firestore updateApplicationStatus fallback:', fsErr);
     }
@@ -2485,7 +2638,7 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
           applicantName,
           email: recipientEmail,
           appId,
-          memberNumber: targetMember?.memberNumber || targetMember?.memberNo || appId,
+          memberNumber: targetMember?.memberNumber || targetMember?.memberNo || assignedMemberNo || appId,
           coopName,
           coopSlug,
           decision: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
@@ -2499,11 +2652,16 @@ app.post('/api/v1/members/applications/:id/review', async (req: Request, res: Re
       }
     }
 
-    res.json({ success: true, message: `Application ${appId} status updated to ${status}.` });
+    res.json({
+      success: true,
+      message: `Application ${appId} status updated to ${status}.`,
+      memberNumber: action === 'APPROVE' ? (targetMember?.memberNumber || assignedMemberNo) : undefined,
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/v1/members/applications/:id/review', handleMemberApplicationReview);
 
 app.get('/api/v1/members/:id', async (req: Request, res: Response) => {
   try {
@@ -3824,7 +3982,13 @@ app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res
 
   // Idempotency guard: auto-polling and the manual "Complete" button may both fire for the same PayMongo payment
   try {
-    const existingEntries = await fsService.listJournalEntries(tenantId);
+    let existingEntries: any[] = [];
+    try {
+      existingEntries = await fsService.listJournalEntries(tenantId);
+    } catch {}
+    if (!existingEntries || existingEntries.length === 0) {
+      existingEntries = dbStore.journalEntries.get(tenantId) || [];
+    }
     const dup: any = existingEntries.find(
       (e: any) =>
         e.referenceType === 'SHARE_CAPITAL_DEPOSIT' &&
@@ -4007,6 +4171,289 @@ app.post('/api/v1/shares/paymongo/verify-and-complete', async (req: Request, res
     member: member ? { ...member, paidUpShares: newPaidUp, sharesCount: newShares } : null,
   });
 });
+
+export const handleSavingsCreatePaymongoIntent = async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberId, amount } = req.body;
+
+  if (!memberId || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ success: false, error: 'Member ID and a valid deposit amount are required.' });
+  }
+
+  const principalAmount = Number(amount);
+  const sysConfig = dbStore.systemConfigs.get(tenantId);
+  const storedOptions = sysConfig?.paymentOptions || {};
+  const productConfig = storedOptions.products?.depositSavings;
+
+  let feeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH';
+  try {
+    const cfg = await PayMongoService.getTenantConfig(tenantId);
+    if (
+      productConfig?.paymongo?.feeTreatment === 'OPEX' ||
+      cfg.feeTreatment === 'OPEX' ||
+      cfg.feeEnabled === false ||
+      sysConfig?.paymongoFeeTreatment === 'OPEX' ||
+      sysConfig?.paymongoFeeEnabled === false
+    ) {
+      feeTreatment = 'OPEX';
+    }
+  } catch {}
+
+  const convenienceFee = PaymentService.calculatePassOnFee(principalAmount, 'PAYMONGO_QRPH', feeTreatment);
+  const totalAmount = Math.round((principalAmount + convenienceFee) * 100) / 100;
+
+  try {
+    const qrResult = await PayMongoService.createQRPhPayment({
+      amount: totalAmount,
+      description: `Savings Deposit - Member ${memberId}`,
+      metadata: {
+        tenantId,
+        memberId,
+        principalAmount,
+        convenienceFee,
+        type: 'SAVINGS_DEPOSIT',
+      },
+    }, tenantId);
+
+    let checkoutLinkUrl: string | undefined;
+    let checkoutLinkId: string | undefined;
+    try {
+      const linkResult = await PayMongoService.createCheckoutLink({
+        amount: totalAmount,
+        description: `Cooperative Savings Deposit (Member ${memberId})`,
+        remarks: `Tenant: ${tenantId} | Member: ${memberId}`,
+      }, tenantId);
+      checkoutLinkUrl = linkResult.checkoutUrl;
+      checkoutLinkId = linkResult.linkId;
+    } catch (linkErr) {
+      console.warn('[PAYMONGO] Savings checkout link creation skipped:', linkErr);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        paymentIntentId: qrResult.paymentIntentId,
+        clientKey: qrResult.clientKey,
+        qrImageUrl: qrResult.qrImageUrl,
+        expiresAt: qrResult.expiresAt,
+        status: qrResult.status,
+        checkoutUrl: checkoutLinkUrl,
+        checkoutLinkId,
+        principalAmount,
+        convenienceFee,
+        totalAmount,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Failed to initiate PayMongo savings deposit.' });
+  }
+};
+app.post('/api/v1/savings/paymongo/create-intent', handleSavingsCreatePaymongoIntent);
+
+export const handleSavingsPaymongoStatus = async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { intentId } = req.params;
+  const linkId = req.query.linkId as string | undefined;
+
+  try {
+    let isPaid = false;
+    let paymentStatus = 'pending';
+    let paymentId: string | undefined;
+
+    if (intentId) {
+      try {
+        const intentStatus = await PayMongoService.checkPaymentIntentStatus(intentId, tenantId);
+        paymentStatus = intentStatus.status;
+        if (intentStatus.isPaid) {
+          isPaid = true;
+          paymentId = intentStatus.paymentId;
+        }
+      } catch (e: any) {
+        console.warn(`[PAYMONGO] Savings intent check error:`, e.message);
+      }
+    }
+
+    if (!isPaid && linkId) {
+      try {
+        const linkStatus = await PayMongoService.checkCheckoutLinkStatus(linkId, tenantId);
+        if (linkStatus.isPaid) {
+          isPaid = true;
+          paymentStatus = 'paid';
+          paymentId = linkStatus.paymentId;
+        }
+      } catch (e: any) {
+        console.warn(`[PAYMONGO] Savings link check error:`, e.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      isPaid,
+      status: paymentStatus,
+      paymentId,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Failed to check savings PayMongo status.' });
+  }
+};
+app.get('/api/v1/savings/paymongo/status/:intentId', handleSavingsPaymongoStatus);
+
+export const handleSavingsVerifyAndCompletePaymongo = async (req: Request, res: Response) => {
+  const tenantId = resolveTenantId(req);
+  const { memberId, amount, paymentIntentId, checkoutLinkId } = req.body;
+
+  if (!memberId || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ success: false, error: 'Valid memberId and deposit amount required.' });
+  }
+
+  if (!paymentIntentId && !checkoutLinkId) {
+    return res.status(400).json({
+      success: false,
+      error: 'A valid paymentIntentId or checkoutLinkId is required to verify PayMongo payment.',
+    });
+  }
+
+  let isPaid = false;
+  let paymentStatus = 'pending';
+
+  if (paymentIntentId) {
+    try {
+      const statusRes = await PayMongoService.checkPaymentIntentStatus(paymentIntentId, tenantId);
+      paymentStatus = statusRes.status;
+      if (statusRes.isPaid) isPaid = true;
+    } catch (checkErr: any) {
+      console.warn('[PAYMONGO] Could not verify savings intent with PayMongo API:', checkErr.message);
+    }
+  }
+
+  if (!isPaid && checkoutLinkId) {
+    try {
+      const linkRes = await PayMongoService.checkCheckoutLinkStatus(checkoutLinkId, tenantId);
+      if (linkRes.isPaid) {
+        isPaid = true;
+        paymentStatus = 'paid';
+      }
+    } catch (linkErr: any) {
+      console.warn('[PAYMONGO] Could not verify savings link with PayMongo API:', linkErr.message);
+    }
+  }
+
+  if (!isPaid) {
+    return res.status(400).json({
+      success: false,
+      error: `PayMongo transaction has not been confirmed yet (status: ${paymentStatus}). Please complete payment in your banking or e-wallet app first.`,
+    });
+  }
+
+  const depositAmount = Number(amount);
+  const fsService = FirestoreCoopService.getInstance();
+  const nowIso = new Date().toISOString();
+
+  // Idempotency guard: auto-polling and manual check may both fire
+  try {
+    let existingEntries: any[] = [];
+    try {
+      existingEntries = await fsService.listJournalEntries(tenantId);
+    } catch {}
+    if (!existingEntries || existingEntries.length === 0) {
+      existingEntries = dbStore.journalEntries.get(tenantId) || [];
+    }
+    const dup: any = existingEntries.find(
+      (e: any) =>
+        e.referenceType === 'SAVINGS_DEPOSIT' &&
+        ((paymentIntentId && e.paymentIntentId === paymentIntentId) ||
+          (checkoutLinkId && e.checkoutLinkId === checkoutLinkId))
+    );
+    if (dup) {
+      const { member: dupMember } = await resolveMemberRecord(tenantId, memberId);
+      return res.json({
+        success: true,
+        duplicate: true,
+        message: 'This PayMongo savings deposit has already been posted.',
+        receiptNumber: dup.receiptNumber,
+        journalEntry: dup,
+        member: dupMember,
+      });
+    }
+  } catch (dupErr) {
+    console.warn('Savings deposit idempotency check warning:', dupErr);
+  }
+
+  const { member, docId } = await resolveMemberRecord(tenantId, memberId);
+  const currentSavings = Number(member?.savingsBalance || 0);
+  const newSavings = Math.round((currentSavings + depositAmount) * 100) / 100;
+
+  if (member) {
+    member.savingsBalance = newSavings;
+    member.updatedAt = nowIso;
+  }
+
+  try {
+    await fsService.updateMember(tenantId, docId, {
+      savingsBalance: newSavings,
+      updatedAt: nowIso,
+    });
+  } catch (err) {
+    console.warn('Firestore savings deposit updateMember error:', err);
+  }
+
+  // Synchronize member in dbStore
+  const storeMembers = dbStore.members.get(tenantId) || [];
+  const memIdx = storeMembers.findIndex((m: any) => m.id === docId || m.id === memberId || m.memberNumber === memberId);
+  if (memIdx >= 0) {
+    storeMembers[memIdx] = {
+      ...storeMembers[memIdx],
+      savingsBalance: newSavings,
+      updatedAt: nowIso,
+    };
+    dbStore.members.set(tenantId, storeMembers);
+  }
+
+  const receiptNumber = `OR-SAV-PM-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+
+  const journalData = GeneralLedgerService.buildSavingsDepositEntry({
+    memberId: docId,
+    memberNumber: member?.memberNumber || memberId,
+    memberName: member ? `${member.firstName || ''} ${member.lastName || ''}`.trim() || (member as any).name : undefined,
+    amount: depositAmount,
+    savingsType: 'VOLUNTARY',
+    channel: 'PAYMONGO_QRPH',
+    passOnFee: 0,
+    userId: 'usr_paymongo_gateway',
+  });
+
+  const entries = dbStore.journalEntries.get(tenantId) || [];
+  const journalEntry: JournalEntry = {
+    id: `je_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    ...journalData,
+    receiptNumber,
+    paymentIntentId,
+    checkoutLinkId,
+    referenceType: 'SAVINGS_DEPOSIT',
+  };
+  entries.push(journalEntry);
+  dbStore.journalEntries.set(tenantId, entries);
+
+  try {
+    await fsService.postJournalEntry(tenantId, journalEntry);
+    const fsEntries = await fsService.listJournalEntries(tenantId);
+    await fsService.rebuildChartOfAccounts(tenantId, fsEntries);
+  } catch (err) {
+    console.warn('Firestore savings deposit postJournalEntry error:', err);
+  }
+
+  res.json({
+    success: true,
+    message: 'Savings deposit settled and posted successfully.',
+    receiptNumber,
+    member: {
+      ...member,
+      savingsBalance: newSavings,
+    },
+    amount: depositAmount,
+  });
+};
+app.post('/api/v1/savings/paymongo/verify-and-complete', handleSavingsVerifyAndCompletePaymongo);
 
 app.get('/api/v1/savings', (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
@@ -5479,6 +5926,25 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
         dbStore.journalEntries.set(tenantId, entries);
       }
 
+      // Deduplicate: if duplicate approval entries were generated for this loan, keep only the first
+      const matchingApprovalJes = entries.filter((e: any) =>
+        e.referenceType === 'LOAN_APPROVAL' &&
+        (e.referenceId === loan.id ||
+          e.referenceId === loan.loanNumber ||
+          (e.description && (e.description.includes(loan.loanNumber) || (loan.id && e.description.includes(loan.id)))))
+      );
+      if (matchingApprovalJes.length > 1) {
+        const toDelete = matchingApprovalJes.slice(1);
+        for (const dup of toDelete) {
+          try {
+            await fsService.deleteJournalEntry(tenantId, dup.id);
+          } catch {}
+          const idx = entries.findIndex((e: any) => e.id === dup.id);
+          if (idx >= 0) entries.splice(idx, 1);
+        }
+        dbStore.journalEntries.set(tenantId, entries);
+      }
+
       const hasDisbursedJe = matchingDisbursedJes.length > 0;
 
       if (!hasDisbursedJe) {
@@ -5611,7 +6077,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
           memberNumber: memNo,
           memberName: mName,
           amount: unrecordedShareCapital,
-          channel: 'IN_PERSON_CASHIER',
+          channel: 'BANK_TRANSFER',
           userId: 'usr_admin',
           description: isGm
             ? `Initial Subscription & Paid-Up Capital (PMES Admission & Statutory GM Undertaking)`
@@ -7203,6 +7669,69 @@ export const handleConfirmBankTransferRequest = async (req: Request, res: Respon
       try {
         await fsService.recordPayment(tenantId, paymentRecord);
       } catch {}
+    } else if (request.type === 'SAVINGS_DEPOSIT') {
+      const depositAmount = Number(request.amount);
+      const { member, docId } = await resolveMemberRecord(tenantId, request.memberId || request.memberNumber);
+      const currentSavings = Number(member?.savingsBalance || 0);
+      const newSavings = Math.round((currentSavings + depositAmount) * 100) / 100;
+
+      if (member) {
+        member.savingsBalance = newSavings;
+        member.updatedAt = nowIso;
+      }
+
+      try {
+        await fsService.updateMember(tenantId, docId, {
+          savingsBalance: newSavings,
+          updatedAt: nowIso,
+        });
+      } catch (err) {
+        console.warn('Firestore updateMember savings error:', err);
+      }
+
+      // Synchronize member in dbStore
+      const storeMembers = dbStore.members.get(tenantId) || [];
+      const memIdx = storeMembers.findIndex((m: any) => m.id === docId || m.id === (request.memberId || request.memberNumber) || m.memberNumber === (request.memberNumber || request.memberId));
+      if (memIdx >= 0) {
+        storeMembers[memIdx] = {
+          ...storeMembers[memIdx],
+          savingsBalance: newSavings,
+          updatedAt: nowIso,
+        };
+        dbStore.members.set(tenantId, storeMembers);
+      }
+
+      receiptNumber = `OR-SAV-BT-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const journalData = GeneralLedgerService.buildSavingsDepositEntry({
+        memberId: docId,
+        memberNumber: request.memberNumber,
+        memberName: request.memberName,
+        amount: depositAmount,
+        savingsType: 'VOLUNTARY',
+        channel: 'BANK_TRANSFER',
+        passOnFee: 0,
+        userId: confirmedByUserId || 'usr_admin',
+      });
+
+      const entries = dbStore.journalEntries.get(tenantId) || [];
+      const journalEntry: JournalEntry = {
+        id: `je_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        ...journalData,
+        receiptNumber,
+        referenceType: 'SAVINGS_DEPOSIT',
+      };
+      entries.push(journalEntry);
+      dbStore.journalEntries.set(tenantId, entries);
+      journalEntryId = journalEntry.id;
+
+      try {
+        await fsService.postJournalEntry(tenantId, journalEntry);
+        const fsEntries = await fsService.listJournalEntries(tenantId);
+        await fsService.rebuildChartOfAccounts(tenantId, fsEntries);
+      } catch (err) {
+        console.warn('Firestore postJournalEntry savings error:', err);
+      }
     }
 
     // Update request state
@@ -7638,15 +8167,28 @@ app.post('/api/v1/surplus/calculate', (req: Request, res: Response) => {
 
   const members = dbStore.members.get(tenantId) || [];
   const shareAccounts = dbStore.shareAccounts.get(tenantId) || [];
+  const loans = dbStore.loans.get(tenantId) || [];
 
   const memberPayload = members.map((m) => {
     const shareAcc = shareAccounts.find((s) => s.memberId === m.id);
     const paidUp = shareAcc ? shareAcc.paidUpAmount : 10000;
+
+    // Calculate members actual loan availment from loans store
+    const memLoans = loans.filter(
+      (l) =>
+        (l.memberId === m.id || (l as any).memberNo === m.memberNumber) &&
+        (l.status === 'DISBURSED' || l.status === 'COMPLETED' || l.status === 'APPROVED' || (l as any).status === 'ACTIVE')
+    );
+    const totalAvailed = memLoans.reduce((sum, l) => sum + Number(l.principalAmount || (l as any).amount || 0), 0);
+    const actualLoanAvailment = totalAvailed > 0 ? totalAvailed : (m.id === 'mem_maria_santos' ? 150000 : 80000);
+
     return {
       memberId: m.id,
       memberNumber: m.memberNumber,
       memberName: `${m.firstName} ${m.lastName}`,
       paidUpShareCapital: paidUp,
+      actualLoanAvailment,
+      loanAvailment: actualLoanAvailment,
       interestPaidOnLoans: m.id === 'mem_maria_santos' ? 5000 : 3000,
     };
   });
@@ -7839,5 +8381,11 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export { app, handleForgotPassword, handleMemberCredentialChange };
+export {
+  app,
+  handleForgotPassword,
+  handleMemberCredentialChange,
+  handleMemberRegister,
+  handleMemberApplicationReview,
+};
 

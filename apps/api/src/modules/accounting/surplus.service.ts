@@ -14,13 +14,16 @@ export interface SurplusCalculationInput {
     memberNumber: string;
     memberName: string;
     paidUpShareCapital: number;
-    interestPaidOnLoans: number;
+    interestPaidOnLoans?: number;
+    actualLoanAvailment?: number;
+    loanAvailment?: number;
   }>;
 }
 
 export class NetSurplusService {
   /**
    * Calculates statutory net surplus distribution according to Article 86 of RA 9520 (Philippine Cooperative Code)
+   * Patronage weight is strictly based on members actual loan availment.
    */
   public static calculateNetSurplus(input: SurplusCalculationInput): SurplusDistributionResult {
     const netSurplus = Math.max(0, Math.round((input.grossRevenue - input.totalExpenses) * 100) / 100);
@@ -48,7 +51,11 @@ export class NetSurplusService {
     const totalPatronageRefund = Math.round((distributableSurplus - totalInterestOnShareCapital) * 100) / 100;
 
     const totalPaidUpCapital = input.members.reduce((acc, m) => acc + m.paidUpShareCapital, 0);
-    const totalInterestPaid = input.members.reduce((acc, m) => acc + m.interestPaidOnLoans, 0);
+    // Statutory Patronage weight based on members actual loan availment (Article 86 RA 9520)
+    const totalLoanAvailment = input.members.reduce((acc, m) => {
+      const availment = m.actualLoanAvailment ?? m.loanAvailment ?? m.interestPaidOnLoans ?? 0;
+      return acc + availment;
+    }, 0);
 
     const memberAllocations: MemberSurplusVoucher[] = input.members.map((m) => {
       const isc =
@@ -56,9 +63,11 @@ export class NetSurplusService {
           ? Math.round(((m.paidUpShareCapital / totalPaidUpCapital) * totalInterestOnShareCapital) * 100) / 100
           : 0;
 
+      const memberAvailment = m.actualLoanAvailment ?? m.loanAvailment ?? m.interestPaidOnLoans ?? 0;
+      const patronageWeight = totalLoanAvailment > 0 ? memberAvailment / totalLoanAvailment : 0;
       const pr =
-        totalInterestPaid > 0
-          ? Math.round(((m.interestPaidOnLoans / totalInterestPaid) * totalPatronageRefund) * 100) / 100
+        totalLoanAvailment > 0
+          ? Math.round((patronageWeight * totalPatronageRefund) * 100) / 100
           : 0;
 
       return {
@@ -66,7 +75,10 @@ export class NetSurplusService {
         memberNumber: m.memberNumber,
         memberName: m.memberName,
         paidUpShareCapital: m.paidUpShareCapital,
-        interestPaidOnLoans: m.interestPaidOnLoans,
+        interestPaidOnLoans: m.interestPaidOnLoans ?? 0,
+        actualLoanAvailment: memberAvailment,
+        loanAvailment: memberAvailment,
+        patronageWeight: Math.round(patronageWeight * 10000) / 10000,
         interestOnShareCapital: isc,
         patronageRefund: pr,
         totalSurplusPayable: Math.round((isc + pr) * 100) / 100,

@@ -692,7 +692,7 @@ export default function AdminDashboard() {
     { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator, category: 'Lending' },
     { id: 'amortization_schedules', label: 'Amortization Schedules', icon: Calendar, category: 'Lending' },
     { id: 'collateral', label: 'Collateral & Chattel Registry', icon: Scale, category: 'Lending' },
-    { id: 'cashier', label: 'Cashier & PayMongo QR Ph', icon: QrCode, category: 'Treasury' },
+    { id: 'cashier', label: 'Cashier & QR PH', icon: QrCode, category: 'Treasury' },
     { id: 'accounting', label: 'CDA General Ledger', icon: BookOpen, category: 'Finance' },
     { id: 'surplus', label: 'Net Surplus & Patronage (Art. 86)', icon: PieChart, category: 'Finance' },
     { id: 'invoices', label: 'Tax & BIR Compliance (RA 9520)', icon: FileText, category: 'Finance' },
@@ -1546,6 +1546,142 @@ export default function AdminDashboard() {
   const [paymentOptionsSaving, setPaymentOptionsSaving] = useState<boolean>(false);
   const [paymentOptionsNotification, setPaymentOptionsNotification] = useState<string | null>(null);
 
+  // Per-Product Payment Options: Share Capital Purchase, Deposit Savings, Pay Loan
+  const defaultProductPaymentOptions = {
+    shareCapital: {
+      productId: 'shareCapital' as const,
+      productName: 'Share Capital Purchase',
+      description: 'Accepted channels for initial & regular share capital subscriptions (Capital Build-Up)',
+      bankTransfer: {
+        enabled: true,
+        referenceFormat: 'CBU-[MemberNumber]',
+        instructions: 'Transfer via InstaPay or PESONet. Reference note format: CBU-[MemberNumber]',
+      },
+      ewalletTransfer: {
+        enabled: true,
+        provider: 'GCash',
+        referenceFormat: 'CBU-[MemberNumber]',
+        instructions: 'Send via Express Send. State CBU-[MemberNumber] in the message note.',
+      },
+      paymongo: {
+        enabled: true,
+        feeTreatment: 'PASS_THROUGH' as const,
+      },
+      cashier: {
+        enabled: true,
+        instructions: 'Pay at the cooperative branch cashier counter with cash or check.',
+      },
+    },
+    depositSavings: {
+      productId: 'depositSavings' as const,
+      productName: 'Deposit Savings',
+      description: 'Accepted channels for regular and voluntary savings deposits into member savings accounts',
+      bankTransfer: {
+        enabled: true,
+        referenceFormat: 'SAV-[MemberNumber]',
+        instructions: 'Transfer via InstaPay or PESONet. Reference note format: SAV-[MemberNumber]',
+      },
+      ewalletTransfer: {
+        enabled: true,
+        provider: 'GCash',
+        referenceFormat: 'SAV-[MemberNumber]',
+        instructions: 'Send via Express Send. State SAV-[MemberNumber] in the message note.',
+      },
+      paymongo: {
+        enabled: true,
+        feeTreatment: 'PASS_THROUGH' as const,
+      },
+      cashier: {
+        enabled: true,
+        instructions: 'Deposit at the branch cashier counter. Bring your member passbook or ID.',
+      },
+    },
+    payLoan: {
+      productId: 'payLoan' as const,
+      productName: 'Pay Loan',
+      description: 'Accepted channels for loan amortization repayments and principal reductions',
+      bankTransfer: {
+        enabled: true,
+        referenceFormat: 'LOAN-[LoanNumber]',
+        instructions: 'Transfer via InstaPay or PESONet. Reference note format: LOAN-[LoanNumber]',
+      },
+      ewalletTransfer: {
+        enabled: true,
+        provider: 'GCash',
+        referenceFormat: 'LOAN-[LoanNumber]',
+        instructions: 'Send via Express Send. State LOAN-[LoanNumber] in the message note.',
+      },
+      paymongo: {
+        enabled: true,
+        feeTreatment: 'PASS_THROUGH' as const,
+      },
+      cashier: {
+        enabled: true,
+        instructions: 'Settle loan amortization at the branch cashier with Official Receipt.',
+      },
+    },
+  };
+
+  const [productPaymentOptions, setProductPaymentOptions] = useState(() => {
+    let initial = defaultProductPaymentOptions;
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_product_payment_options_${tenant.slug}`);
+        if (cached) {
+          initial = { ...initial, ...JSON.parse(cached) };
+        }
+      } catch {}
+    }
+    return initial;
+  });
+
+  const [paymentOptionsViewMode, setPaymentOptionsViewMode] = useState<
+    'matrix' | 'shareCapital' | 'depositSavings' | 'payLoan' | 'credentials'
+  >('matrix');
+
+  const handleToggleProductChannel = (
+    productKey: 'shareCapital' | 'depositSavings' | 'payLoan',
+    channelKey: 'bankTransfer' | 'ewalletTransfer' | 'paymongo' | 'cashier'
+  ) => {
+    setProductPaymentOptions((prev) => {
+      const prod = prev[productKey];
+      const channel = (prod as any)[channelKey] || { enabled: false };
+      return {
+        ...prev,
+        [productKey]: {
+          ...prod,
+          [channelKey]: {
+            ...channel,
+            enabled: !channel.enabled,
+          },
+        },
+      };
+    });
+  };
+
+  const handleUpdateProductChannel = (
+    productKey: 'shareCapital' | 'depositSavings' | 'payLoan',
+    channelKey: 'bankTransfer' | 'ewalletTransfer' | 'paymongo' | 'cashier',
+    field: string,
+    value: any
+  ) => {
+    setProductPaymentOptions((prev) => {
+      const prod = prev[productKey];
+      const channel = (prod as any)[channelKey] || { enabled: false };
+      return {
+        ...prev,
+        [productKey]: {
+          ...prod,
+          [channelKey]: {
+            ...channel,
+            [field]: value,
+          },
+        },
+      };
+    });
+  };
+
   const fetchPaymentOptionsConfig = async () => {
     try {
       const tenant = resolveTenantCoop();
@@ -1580,6 +1716,15 @@ export default function AdminDashboard() {
             feeTreatment: data.data.paymongo.feeTreatment || 'PASS_THROUGH',
           }));
         }
+        if (data.data.products) {
+          setProductPaymentOptions((prev) => ({
+            ...prev,
+            ...data.data.products,
+          }));
+          try {
+            localStorage.setItem(`flexcoop_product_payment_options_${tenant.slug}`, JSON.stringify(data.data.products));
+          } catch {}
+        }
       }
     } catch (err) {
       console.warn('Failed to load payment options config:', err);
@@ -1599,6 +1744,7 @@ export default function AdminDashboard() {
         localStorage.setItem(`flexcoop_ewallet_transfer_${tenant.slug}`, JSON.stringify(ewalletTransferConfig));
         localStorage.setItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`, tenantPaymongoConfig.feeTreatment);
         localStorage.setItem(`flexcoop_paymongo_fee_enabled_${tenant.slug}`, String(tenantPaymongoConfig.isEnabled));
+        localStorage.setItem(`flexcoop_product_payment_options_${tenant.slug}`, JSON.stringify(productPaymentOptions));
       } catch {}
 
       const headers = {
@@ -1618,6 +1764,7 @@ export default function AdminDashboard() {
           webhookSecret: tenantPaymongoConfig.webhookSecret,
           feeTreatment: tenantPaymongoConfig.feeTreatment,
         },
+        products: productPaymentOptions,
       };
 
       const res = await fetch(`${getApiBaseUrl()}/coop/payment-options`, {
@@ -1632,7 +1779,9 @@ export default function AdminDashboard() {
       } catch {}
 
       if (res.ok && data.success) {
-        setPaymentOptionsNotification('All payment options (Bank Transfer, e-Wallet Transfer, and QR PH via PayMongo) were saved successfully!');
+        setPaymentOptionsNotification(
+          'Payment options and per-product configurations (Share Capital Purchase, Deposit Savings, and Pay Loan) saved successfully!'
+        );
         setTimeout(() => setPaymentOptionsNotification(null), 5000);
       } else {
         alert(data.error || 'Failed to save payment options.');
@@ -1668,7 +1817,13 @@ export default function AdminDashboard() {
       feeTreatment: 'PASS_THROUGH',
       environment: 'test',
     }));
-    setPaymentOptionsNotification('Payment options reset to defaults. Click "Save Payment Options" to commit changes.');
+    setProductPaymentOptions(defaultProductPaymentOptions);
+    try {
+      localStorage.setItem(`flexcoop_product_payment_options_${tenant.slug}`, JSON.stringify(defaultProductPaymentOptions));
+    } catch {}
+    setPaymentOptionsNotification(
+      'Payment options and per-product configurations reset to defaults. Click "Save Payment Options" to commit changes.'
+    );
     setTimeout(() => setPaymentOptionsNotification(null), 4000);
   };
 
@@ -2029,6 +2184,27 @@ export default function AdminDashboard() {
     mandatoryShareAmount?: number;
     mandatoryShareQuantity?: number;
     mandatorySharePaymentTreatment?: 'UPFRONT_DEDUCTION' | 'INCLUDED_IN_LOAN_PAYMENT';
+    techFeeDeduction?: number;
+    techFeeAmount?: number;
+    isTechFeePassThrough?: boolean;
+    coopFilingFeeEnabled?: boolean;
+    coopFilingFeeRatePercent?: number;
+    coopServiceFee?: number;
+    advanceInterest?: number;
+    optionalFeesTotal?: number;
+    optionalFees?: any[];
+    upfrontShareDeduction?: number;
+    isUpfrontShareDeduction?: boolean;
+    isInstallmentSharePayment?: boolean;
+    mandatorySharePrice?: number;
+    netProceeds?: number;
+    monthlyAmortization?: number;
+    periodicInstallment?: number;
+    shareAmortizationPerPeriod?: number;
+    totalInterest?: number;
+    effectiveInterestRate?: number;
+    eirTenure?: number;
+    deductionBreakdown?: any;
   } | null>(null);
 
   // Load Loan Applications from localStorage and Backend API
@@ -2100,6 +2276,26 @@ export default function AdminDashboard() {
             mandatoryShareAmount: l.mandatoryShareAmount,
             mandatoryShareQuantity: l.mandatoryShareQuantity,
             mandatorySharePaymentTreatment: l.mandatorySharePaymentTreatment,
+            techFeeDeduction: l.techFeeDeduction !== undefined ? l.techFeeDeduction : (l.platformFee || 0),
+            techFeeAmount: l.techFeeAmount !== undefined ? l.techFeeAmount : (l.platformFee || Math.round((l.principalAmount || l.amount || 50000) * 0.01 * 100) / 100),
+            isTechFeePassThrough: l.isTechFeePassThrough !== undefined ? l.isTechFeePassThrough : (l.techFeeDeduction > 0 || l.platformFee > 0),
+            coopFilingFeeEnabled: l.coopFilingFeeEnabled !== undefined ? l.coopFilingFeeEnabled : (Boolean(l.coopServiceFee) && l.coopServiceFee > 0),
+            coopFilingFeeRatePercent: l.coopFilingFeeRatePercent !== undefined ? l.coopFilingFeeRatePercent : 2,
+            coopServiceFee: l.coopServiceFee !== undefined ? l.coopServiceFee : 0,
+            advanceInterest: l.advanceInterest || 0,
+            optionalFeesTotal: l.optionalFeesTotal || 0,
+            upfrontShareDeduction: l.upfrontShareDeduction !== undefined ? l.upfrontShareDeduction : (l.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION' ? (l.mandatoryShareAmount || 0) : 0),
+            isUpfrontShareDeduction: l.isUpfrontShareDeduction !== undefined ? l.isUpfrontShareDeduction : (l.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION'),
+            isInstallmentSharePayment: l.isInstallmentSharePayment !== undefined ? l.isInstallmentSharePayment : (l.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT'),
+            mandatorySharePrice: l.mandatorySharePrice !== undefined ? l.mandatorySharePrice : (l.deductionBreakdown?.mandatorySharePrice || 100),
+            netProceeds: l.netProceeds !== undefined ? l.netProceeds : (l.netProceedsDisbursed !== undefined ? l.netProceedsDisbursed : undefined),
+            monthlyAmortization: l.monthlyAmortization || l.periodicInstallment || (l.schedule?.[0]?.totalInstallment),
+            periodicInstallment: l.periodicInstallment || l.monthlyAmortization || (l.schedule?.[0]?.totalInstallment),
+            shareAmortizationPerPeriod: l.shareAmortizationPerPeriod || (l.schedule?.[0]?.mandatoryShareAmount || 0),
+            totalInterest: l.totalInterest !== undefined ? l.totalInterest : (l.totalInterestExpected || 0),
+            effectiveInterestRate: l.effectiveInterestRate !== undefined ? l.effectiveInterestRate : (l.annualRate || l.interestRateAnnual || 0.12),
+            eirTenure: l.eirTenure,
+            deductionBreakdown: l.deductionBreakdown,
           }));
 
           setLoanApplications(formatted);
@@ -2487,6 +2683,8 @@ export default function AdminDashboard() {
     sharePaymentStatus?: 'UNPAID' | 'PAID_OTC' | 'PAID_QRPH' | string;
     savingsBalance: number;
     loanBalance: number;
+    actualLoanAvailment?: number;
+    loanAvailment?: number;
     npcConsent: string;
     pmesStatus?: 'COMPLETED' | 'PENDING' | string;
     pmesCertNo?: string | null;
@@ -2499,13 +2697,52 @@ export default function AdminDashboard() {
     remarks?: string | null;
     idFrontPreview?: string | null;
     selfiePreview?: string | null;
+    applicantId?: string;
+    isApplicant?: boolean;
+    memberNumber?: string;
   }
 
   const [memberSearchQuery, setMemberSearchQuery] = useState<string>('');
   const [memberClassificationFilter, setMemberClassificationFilter] = useState<string>('ALL');
   const [memberStatusFilter, setMemberStatusFilter] = useState<string>('ALL');
+  const [directoryTab, setDirectoryTab] = useState<'MEMBERS' | 'APPLICANTS'>('MEMBERS');
 
   const [members, setMembers] = useState<MemberRecord[]>([]);
+
+  // Net Surplus Patronage Weight: Helper to calculate member's actual loan availment
+  const getMemberLoanAvailment = useCallback(
+    (m: MemberRecord): number => {
+      const memberLoans = loanApplications.filter((a) => {
+        const matchesId =
+          a.memberId === m.id ||
+          a.memberNo === m.memberNo ||
+          (a.memberName && m.name && a.memberName.toLowerCase().trim() === m.name.toLowerCase().trim());
+        const isAvailment =
+          a.status === 'DISBURSED' ||
+          a.status === 'COMPLETED' ||
+          a.status === 'APPROVED' ||
+          a.status === 'ACTIVE';
+        return matchesId && isAvailment;
+      });
+      if (memberLoans.length > 0) {
+        return memberLoans.reduce(
+          (sum, a) => sum + (Number(a.amount) || Number(a.principalAmount) || 0),
+          0
+        );
+      }
+      if ((m as any).actualLoanAvailment !== undefined && Number((m as any).actualLoanAvailment) > 0) {
+        return Number((m as any).actualLoanAvailment);
+      }
+      if ((m as any).loanAvailment !== undefined && Number((m as any).loanAvailment) > 0) {
+        return Number((m as any).loanAvailment);
+      }
+      if (Number(m.loanBalance) > 0) {
+        return Number(m.loanBalance);
+      }
+      return 0;
+    },
+    [loanApplications]
+  );
 
   // Admin Edit Member Modal State
   const [editingMember, setEditingMember] = useState<MemberRecord | null>(null);
@@ -2867,23 +3104,52 @@ export default function AdminDashboard() {
         if (appsData.success && Array.isArray(appsData.data)) {
           appsData.data.forEach((onlineApp: any) => {
             if (onlineApp.applicantName === gm.name) return;
-            const appId = `mem_app_${onlineApp.id}`;
+
+            // Generate or format applicant ID in AXXXXXXXX format (A followed by 8 alphanumeric/digit chars)
+            const rawId = onlineApp.applicantId || onlineApp.id || '';
+            let formattedApplicantId = '';
+            if (/^A[0-9A-Z]{8}$/i.test(rawId)) {
+              formattedApplicantId = rawId.toUpperCase();
+            } else {
+              const digits = rawId.replace(/\D/g, '');
+              if (digits.length >= 8) {
+                formattedApplicantId = `A${digits.slice(-8)}`;
+              } else {
+                let hash = 0;
+                for (let i = 0; i < rawId.length; i++) {
+                  hash = (hash << 5) - hash + rawId.charCodeAt(i);
+                  hash |= 0;
+                }
+                formattedApplicantId = `A${String(10000000 + (Math.abs(hash) % 90000000))}`;
+              }
+            }
+
+            const isApproved = onlineApp.status === 'APPROVED';
+            const appId = formattedApplicantId;
             const existingIdx = list.findIndex(
-              (m) => m.id === appId || (onlineApp.email && m.email?.toLowerCase() === onlineApp.email.toLowerCase())
+              (m) => m.id === appId || (m as any).applicantId === formattedApplicantId || (onlineApp.email && m.email?.toLowerCase() === onlineApp.email.toLowerCase())
             );
 
             const actualSubShares = onlineApp.subscribedShares !== undefined ? Number(onlineApp.subscribedShares) : 0;
             const actualDeposit = onlineApp.initialDeposit !== undefined ? Number(onlineApp.initialDeposit) : 0;
             const actualPledge = onlineApp.totalSubscribedAmount !== undefined ? Number(onlineApp.totalSubscribedAmount) : 0;
             const paymentStatus = actualDeposit > 0 ? (onlineApp.paymentMethod === 'CASHIER' ? 'PENDING_OTC_PAYMENT' : 'PENDING_VERIFICATION') : 'UNPAID';
-            const appKycStatus = onlineApp.status === 'APPROVED' ? 'VERIFIED' : (onlineApp.status === 'INACTIVE' || onlineApp.status === 'REJECTED') ? 'INACTIVE' : 'PENDING_REVIEW';
+            const appKycStatus = isApproved ? 'VERIFIED' : (onlineApp.status === 'INACTIVE' || onlineApp.status === 'REJECTED') ? 'INACTIVE' : 'PENDING_REVIEW';
+
+            // Do not assign Member No to an unapproved applicant. Assign only Member No once verified as Member.
+            const recordMemberNo = isApproved
+              ? (onlineApp.memberNumber || onlineApp.memberNo || (existingIdx >= 0 && list[existingIdx].memberNo ? list[existingIdx].memberNo : `MEM-2026-${String(list.length + 1).padStart(4, '0')}`))
+              : '';
 
             const recordData: MemberRecord = {
               id: appId,
-              memberNo: existingIdx >= 0 ? list[existingIdx].memberNo : `MEM-2026-${String(list.length + 1).padStart(4, '0')}`,
+              applicantId: formattedApplicantId,
+              isApplicant: !isApproved,
+              memberNo: recordMemberNo,
+              memberNumber: recordMemberNo,
               name: onlineApp.applicantName,
               email: onlineApp.email,
-              classification: 'REGULAR',
+              classification: onlineApp.classification || 'REGULAR',
               kycStatus: existingIdx >= 0 ? list[existingIdx].kycStatus : appKycStatus,
               idType: onlineApp.idType || 'PhilSys National ID',
               idNumber: onlineApp.tin || onlineApp.idNumber || 'N/A',
@@ -2897,7 +3163,7 @@ export default function AdminDashboard() {
               loanBalance: 0,
               npcConsent: 'Agreed (Republic Act No. 10173)',
               pmesStatus: 'COMPLETED',
-              pmesCertNo: `CERT-PMES-${onlineApp.id || 'SYNC'}`,
+              pmesCertNo: `CERT-PMES-${formattedApplicantId}`,
               pmesDate: new Date(onlineApp.dateSubmitted || Date.now()).toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -2919,6 +3185,9 @@ export default function AdminDashboard() {
             if (existingIdx >= 0) {
               list[existingIdx] = {
                 ...list[existingIdx],
+                applicantId: formattedApplicantId,
+                isApplicant: !isApproved,
+                memberNo: isApproved ? (list[existingIdx].memberNo || recordMemberNo) : '',
                 kycStatus: recordData.kycStatus,
                 reviewedBy: recordData.reviewedBy,
                 reviewDate: recordData.reviewDate,
@@ -2937,18 +3206,22 @@ export default function AdminDashboard() {
         const memsData = await memsRes.value.json();
         if (memsData.success && Array.isArray(memsData.data)) {
           memsData.data.forEach((onlineMem: any) => {
+            const isApproved = onlineMem.kycStatus === 'VERIFIED' || onlineMem.status === 'ACTIVE' || Boolean(onlineMem.memberNumber || onlineMem.memberNo);
             const idx = list.findIndex(
               (m) =>
                 m.id === onlineMem.id ||
-                m.memberNo === onlineMem.memberNumber ||
-                m.memberNo === onlineMem.memberNo ||
+                (onlineMem.applicantId && m.applicantId === onlineMem.applicantId) ||
+                (onlineMem.memberNumber && m.memberNo === onlineMem.memberNumber) ||
+                (onlineMem.memberNo && m.memberNo === onlineMem.memberNo) ||
                 m.id === onlineMem.memberNumber ||
                 (onlineMem.email && m.email?.toLowerCase() === onlineMem.email.toLowerCase())
             );
             const normalizedMem = {
               ...onlineMem,
               id: onlineMem.id || onlineMem.memberNumber || onlineMem.memberNo,
-              memberNo: onlineMem.memberNumber || onlineMem.memberNo || onlineMem.id,
+              applicantId: onlineMem.applicantId,
+              isApplicant: !isApproved,
+              memberNo: isApproved ? (onlineMem.memberNumber || onlineMem.memberNo || onlineMem.id) : '',
             };
             if (idx >= 0) {
               list[idx] = { ...list[idx], ...normalizedMem };
@@ -3180,10 +3453,17 @@ export default function AdminDashboard() {
   };
 
   const filteredMembers = members.filter((m) => {
+    // Separate applicants from members:
+    const isApplicant = m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId));
+    if (directoryTab === 'MEMBERS' && isApplicant) return false;
+    if (directoryTab === 'APPLICANTS' && !isApplicant) return false;
+
     const q = memberSearchQuery.toLowerCase().trim();
     const matchesQuery =
       !q ||
-      m.memberNo.toLowerCase().includes(q) ||
+      (m.memberNo && m.memberNo.toLowerCase().includes(q)) ||
+      (m.applicantId && m.applicantId.toLowerCase().includes(q)) ||
+      (m.id && m.id.toLowerCase().includes(q)) ||
       m.name.toLowerCase().includes(q) ||
       (m.email && m.email.toLowerCase().includes(q));
     const matchesClass =
@@ -3228,11 +3508,26 @@ export default function AdminDashboard() {
     if (!memberConfirmModal) return;
     const { action, member, notes } = memberConfirmModal;
 
+    // Platform Billing Model: Free for first 15 members, ₱50 for every new member after first 15 members
+    const previouslyApprovedCount = members.filter((m) => !m.isApplicant && m.kycStatus === 'VERIFIED').length;
+    const currentMemberSequence = previouslyApprovedCount + 1;
+    const isFreeTier = currentMemberSequence <= 15;
+    const onboardingFee = isFreeTier ? 0.0 : 50.0;
+    const vatOnboarding = isFreeTier ? 0.0 : 5.36;
+    const netOnboarding = isFreeTier ? 0.0 : 44.64;
+
+    // Assign official Member No only once verified as Member
+    const assignedMemberNo = (member.memberNo && member.memberNo.startsWith('MEM-'))
+      ? member.memberNo
+      : `MEM-${new Date().getFullYear()}-${String(currentMemberSequence).padStart(4, '0')}`;
+
     // Sync review decision online to Cloud Firestore via Cloud Run API
     try {
-      const targetAppId = (member.id || '').startsWith('mem_app_')
-        ? member.id.replace('mem_app_', '')
-        : member.id;
+      const targetAppId = member.applicantId || (
+        (member.id || '').startsWith('mem_app_')
+          ? member.id.replace('mem_app_', '')
+          : member.id
+      );
       if (targetAppId) {
         const tenantInfo = resolveTenantCoop();
         await fetch(`${getApiBaseUrl()}/members/applications/${targetAppId}/review`, {
@@ -3243,6 +3538,7 @@ export default function AdminDashboard() {
           },
           body: JSON.stringify({
             action: action === 'APPROVE' ? 'APPROVE' : 'REJECT',
+            memberNumber: action === 'APPROVE' ? assignedMemberNo : undefined,
             notes: notes || (action === 'APPROVE' ? 'Application approved.' : 'Declined / Requires document re-submission.'),
             reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
           }),
@@ -3253,17 +3549,9 @@ export default function AdminDashboard() {
     }
 
     if (action === 'APPROVE') {
-      // Platform Billing Model: Free for first 15 members, ₱50 for every new member after first 15 members
-      const previouslyApprovedCount = members.filter((m) => m.kycStatus === 'VERIFIED').length;
-      const currentMemberSequence = previouslyApprovedCount + 1;
-      const isFreeTier = currentMemberSequence <= 15;
-      const onboardingFee = isFreeTier ? 0.0 : 50.0;
-      const vatOnboarding = isFreeTier ? 0.0 : 5.36;
-      const netOnboarding = isFreeTier ? 0.0 : 44.64;
-
       const newInvoice = {
         id: `INV-ONB-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-        memberNo: member.memberNo,
+        memberNo: assignedMemberNo,
         memberName: member.name,
         description: isFreeTier
           ? `Member Onboarding (Free Tier: Member #${currentMemberSequence} of first 15 free members)`
@@ -3282,10 +3570,14 @@ export default function AdminDashboard() {
       setOnboardingInvoices((prev) => [newInvoice, ...prev]);
 
       const updatedMembers = members.map((m) =>
-        m.id === member.id
+        m.id === member.id || (member.applicantId && m.applicantId === member.applicantId)
           ? {
               ...m,
+              memberNo: assignedMemberNo,
+              memberNumber: assignedMemberNo,
+              isApplicant: false,
               kycStatus: 'VERIFIED' as const,
+              status: 'ACTIVE' as const,
               sharePaymentStatus: 'UNPAID', // Unpaid until member pays via OTC or QR
               reviewedBy: `${currentStaff.name} (${currentStaff.roleTitle})`,
               reviewDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
@@ -3296,11 +3588,11 @@ export default function AdminDashboard() {
       setMembers(updatedMembers);
 
       setMemberActionNotification(
-        `Member ${member.memberNo} (${member.name}) APPROVED! ${isFreeTier ? `Free onboarding tier (Member #${currentMemberSequence} of 15 free).` : `Coop charged ₱50.00 onboarding fee (Member #${currentMemberSequence}, Invoice ${newInvoice.id}).`} Member can now pay initial Share Capital (₱${(member.initialPledge || 3000).toLocaleString()}) via OTC (₱0 fee) or QR Ph (1.5% fee).`
+        `Applicant ${member.applicantId || member.id} (${member.name}) APPROVED! Assigned Official Member No: ${assignedMemberNo}. ${isFreeTier ? `Free onboarding tier (Member #${currentMemberSequence} of 15 free).` : `Coop charged ₱50.00 onboarding fee (Member #${currentMemberSequence}, Invoice ${newInvoice.id}).`} Record moved to Verified Members directory.`
       );
     } else {
       const updatedMembers = members.map((m) =>
-        m.id === member.id
+        m.id === member.id || (member.applicantId && m.applicantId === member.applicantId)
           ? {
               ...m,
               kycStatus: 'INACTIVE' as const,
@@ -3313,7 +3605,7 @@ export default function AdminDashboard() {
       setMembers(updatedMembers);
 
       setMemberActionNotification(
-        `Member ${member.memberNo} (${member.name}) application set to INACTIVE / Returned for correction.`
+        `Applicant ${member.applicantId || member.id} (${member.name}) application set to INACTIVE / Returned for correction.`
       );
     }
 
@@ -4724,27 +5016,6 @@ export default function AdminDashboard() {
                   </div>
                 )}
               </div>
-
-              {/* Direct Switch to Member Portal (Single Sign-On) */}
-              <Link
-                href={`/member?coop=${tenantSlug}`}
-                title="Switch to your personal Member Passbook & Portal"
-                className="hidden sm:flex items-center space-x-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors shadow-xs"
-              >
-                <Users className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Member Portal</span>
-              </Link>
-
-              {/* Header Sign Out Button */}
-              <button
-                type="button"
-                onClick={handleAdminSignOut}
-                title="Sign out of Admin Portal"
-                className="flex items-center space-x-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors shadow-xs cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
             </div>
           </div>
         </header>
@@ -5108,57 +5379,39 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Top Statutory & Financial Escrow KPI Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* Top Statutory Membership & Applicants KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-slate-700" /> Total Members
+                  <Users className="w-3.5 h-3.5 text-slate-700" /> Verified Members
                 </div>
-                <div className="text-xl font-black text-slate-900">{members.length}</div>
-                <div className="text-[10px] text-slate-500">Regular & Associate</div>
+                <div className="text-xl font-black text-slate-900">
+                  {members.filter((m) => !(m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId)))).length}
+                </div>
+                <div className="text-[10px] text-slate-500">Regular &amp; Associate (Official Member No)</div>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+              <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-3.5 space-y-1">
                 <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Active Verified
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Active in Good Standing
                 </div>
                 <div className="text-xl font-black text-emerald-800">
-                  {members.filter((m) => m.kycStatus === 'VERIFIED').length}
+                  {members.filter((m) => !(m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))) && m.kycStatus === 'VERIFIED' && m.status !== 'INACTIVE').length}
                 </div>
-                <div className="text-[10px] text-emerald-700">Underwritten & good standing</div>
+                <div className="text-[10px] text-emerald-700">Underwritten &amp; dividend-eligible</div>
               </div>
 
               <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3.5 space-y-1">
                 <div className="text-[10px] font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" /> Pending Review
+                  <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" /> Membership Applicants
                 </div>
                 <div className="text-xl font-black text-amber-900 flex items-center gap-1.5">
-                  {members.filter((m) => m.kycStatus === 'PENDING_REVIEW').length}
-                  {members.filter((m) => m.kycStatus === 'PENDING_REVIEW').length > 0 && (
+                  {members.filter((m) => m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))).length}
+                  {members.filter((m) => m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))).length > 0 && (
                     <span className="text-[10px] font-bold bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded">Action Req</span>
                   )}
                 </div>
-                <div className="text-[10px] text-amber-700">Requires 4-item manual check</div>
-              </div>
-
-              <div className="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3.5 space-y-1">
-                <div className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <Wallet className="w-3.5 h-3.5 text-indigo-600" /> Platform Escrow
-                </div>
-                <div className="text-xl font-black text-indigo-950 font-mono">
-                  ₱{coopPlatformEscrowBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                </div>
-                <div className="text-[10px] text-indigo-700">Coop Float (GL 1-01-05)</div>
-              </div>
-
-              <div className="bg-rose-50/60 border border-rose-200 rounded-xl p-3.5 space-y-1">
-                <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <Receipt className="w-3.5 h-3.5 text-rose-600" /> Billed Onboarding
-                </div>
-                <div className="text-xl font-black text-rose-950 font-mono">
-                  ₱{coopOnboardingFeesTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                </div>
-                <div className="text-[10px] text-rose-700">₱50.00 billed per new member after first 15 free</div>
+                <div className="text-[10px] text-amber-700">Pending review (AXXXXXXXX ID format)</div>
               </div>
             </div>
 
@@ -5179,17 +5432,63 @@ export default function AdminDashboard() {
               </div>
             )}
 
+            {/* Directory Navigation: Separate Members from Applicants */}
+            <div className="flex border-b border-slate-200 gap-2">
+              <button
+                type="button"
+                onClick={() => setDirectoryTab('MEMBERS')}
+                className={`pb-3 px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+                  directoryTab === 'MEMBERS'
+                    ? 'border-emerald-600 text-emerald-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Users className="w-4 h-4 text-emerald-700" />
+                <span>Cooperative Members</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  directoryTab === 'MEMBERS'
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {members.filter((m) => !(m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId)))).length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDirectoryTab('APPLICANTS')}
+                className={`pb-3 px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+                  directoryTab === 'APPLICANTS'
+                    ? 'border-amber-600 text-amber-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Clock className="w-4 h-4 text-amber-600" />
+                <span>Applicants Queue (eKYC &amp; Review)</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  directoryTab === 'APPLICANTS'
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {members.filter((m) => m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))).length}
+                </span>
+              </button>
+            </div>
+
             {/* Search and Filters Bar */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-                {/* Search via Member No or Full Name */}
+                {/* Search via Member No, Applicant ID, or Full Name */}
                 <div className="sm:col-span-5 relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={memberSearchQuery}
                     onChange={(e) => setMemberSearchQuery(e.target.value)}
-                    placeholder="Search by Member No, Full Name, or Email..."
+                    placeholder={
+                      directoryTab === 'MEMBERS'
+                        ? 'Search by Member No, Full Name, or Email...'
+                        : 'Search by Applicant ID (AXXXXXXXX), Full Name, or Email...'
+                    }
                     className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                   {memberSearchQuery && (
@@ -5223,10 +5522,18 @@ export default function AdminDashboard() {
                     onChange={(e) => setMemberStatusFilter(e.target.value)}
                     className="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
                   >
-                    <option value="ALL">All Statuses (Verified, Pending, Inactive)</option>
-                    <option value="VERIFIED">VERIFIED / Active</option>
-                    <option value="PENDING_REVIEW">PENDING eKYC Review</option>
-                    <option value="INACTIVE">INACTIVE</option>
+                    <option value="ALL">All Statuses</option>
+                    {directoryTab === 'MEMBERS' ? (
+                      <>
+                        <option value="VERIFIED">VERIFIED / Active</option>
+                        <option value="INACTIVE">INACTIVE</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="PENDING_REVIEW">PENDING eKYC Review</option>
+                        <option value="INACTIVE">INACTIVE</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
@@ -5247,7 +5554,7 @@ export default function AdminDashboard() {
                     </button>
                   ) : (
                     <span className="text-[11px] text-slate-400 font-mono">
-                      {filteredMembers.length}/{members.length}
+                      {filteredMembers.length}
                     </span>
                   )}
                 </div>
@@ -5255,7 +5562,7 @@ export default function AdminDashboard() {
 
               <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
                 <span>
-                  Showing <strong>{filteredMembers.length}</strong> of <strong>{members.length}</strong> registered members
+                  Showing <strong>{filteredMembers.length}</strong> {directoryTab === 'MEMBERS' ? 'verified members' : 'membership applicants'}
                 </span>
                 {(memberSearchQuery || memberClassificationFilter !== 'ALL' || memberStatusFilter !== 'ALL') && (
                   <span className="text-emerald-700 font-medium">
@@ -5269,25 +5576,49 @@ export default function AdminDashboard() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-semibold">
                   <tr>
-                    <th className="p-3">Member No</th>
-                    <th className="p-3">Full Name</th>
-                    <th className="p-3">Classification</th>
-                    <th className="p-3">eKYC & SPI ID</th>
-                    <th className="p-3 text-right">Paid-Up Shares (₱)</th>
-                    <th className="p-3">NPC Consent</th>
-                    <th className="p-3 text-center">Status</th>
-                    <th className="p-3 text-right">Actions</th>
+                    {directoryTab === 'APPLICANTS' ? (
+                      <>
+                        <th className="p-3">Applicant ID</th>
+                        <th className="p-3">Member No</th>
+                        <th className="p-3">Applicant Name</th>
+                        <th className="p-3">Classification</th>
+                        <th className="p-3">Submitted ID &amp; eKYC</th>
+                        <th className="p-3 text-right">Subscription Pledge (₱)</th>
+                        <th className="p-3">NPC Consent</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-right">Actions</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="p-3">Member No</th>
+                        <th className="p-3">Full Name</th>
+                        <th className="p-3">Classification</th>
+                        <th className="p-3">eKYC &amp; SPI ID</th>
+                        <th className="p-3 text-right">Paid-Up Shares (₱)</th>
+                        <th className="p-3">NPC Consent</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-right">Actions</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {filteredMembers.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-slate-500">
+                      <td colSpan={directoryTab === 'APPLICANTS' ? 9 : 8} className="p-8 text-center text-slate-500">
                         <div className="flex flex-col items-center justify-center space-y-2">
-                          <Users className="w-8 h-8 text-slate-300" />
-                          <span className="font-semibold text-slate-700">No members match your search and filter criteria.</span>
+                          {directoryTab === 'APPLICANTS' ? (
+                            <Clock className="w-8 h-8 text-amber-400" />
+                          ) : (
+                            <Users className="w-8 h-8 text-slate-300" />
+                          )}
+                          <span className="font-semibold text-slate-700">
+                            {directoryTab === 'APPLICANTS'
+                              ? 'No applicants in the review queue match your criteria.'
+                              : 'No cooperative members match your search and filter criteria.'}
+                          </span>
                           <p className="text-xs text-slate-400 max-w-sm">
-                            Try adjusting the search query, classification, or KYC status filter to locate member records.
+                            Try adjusting the search query, classification, or status filter.
                           </p>
                           <button
                             type="button"
@@ -5304,93 +5635,63 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ) : (
-                    filteredMembers.map((m) => (
-                      <tr key={m.id} className="hover:bg-slate-50 transition">
-                        <td className="p-3 font-mono font-medium text-slate-900">{m.memberNo}</td>
-                        <td className="p-3">
-                          <div className="font-semibold text-slate-900">{m.name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">{m.email}</div>
-                        </td>
-                        <td className="p-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
-                              m.classification === 'REGULAR'
-                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                : 'bg-amber-50 text-amber-800 border-amber-200'
-                            }`}
-                          >
-                            {m.classification}
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex items-center gap-1.5 text-slate-700 font-medium">
-                            {m.kycStatus === 'VERIFIED' ? (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            ) : m.kycStatus === 'PENDING_REVIEW' ? (
-                              <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            ) : (
-                              <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            )}
-                            <span className="truncate max-w-[200px]" title={m.idType}>{m.idType}</span>
-                          </div>
-                        </td>
-                        <td className="p-3 text-right">
-                          {(!m.paidUpShares || Number(m.paidUpShares) === 0) ? (
-                            <div>
-                              <div className="font-semibold text-amber-700 font-mono">₱0.00</div>
-                              <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-200 font-bold px-1.5 py-0.5 rounded inline-block mt-0.5">
-                                UNPAID (₱{(m.initialPledge || (m.subscribedShares ? m.subscribedShares * 100 : 5000)).toLocaleString()} Pledged)
-                              </span>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="font-semibold text-slate-900 font-mono">
-                                ₱{Number(m.paidUpShares).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                              </div>
-                              <div className="text-[10px] mt-0.5">
-                                {m.sharePaymentStatus === 'PARTIALLY_PAID' || (Number(m.paidUpShares) < ((m.subscribedShares || 50) * 100)) ? (
-                                  <span className="text-amber-800 font-semibold inline-flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                    ₱{Math.max(0, ((m.subscribedShares || 50) * 100) - Number(m.paidUpShares)).toLocaleString()} Pledge Left
-                                  </span>
-                                ) : (
-                                  <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Fully Paid
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-3 text-slate-500 font-mono text-[11px]">{m.npcConsent}</td>
-                        <td className="p-3 text-center">
-                          {m.kycStatus === 'VERIFIED' && (
-                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> VERIFIED
+                    filteredMembers.map((m) =>
+                      directoryTab === 'APPLICANTS' ? (
+                        <tr key={m.id} className="hover:bg-slate-50 transition">
+                          <td className="p-3">
+                            <span className="font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded text-[11px]">
+                              {m.applicantId || `A${String(m.id).replace(/\D/g, '').padEnd(8, '0').slice(-8)}`}
                             </span>
-                          )}
-                          {m.kycStatus === 'PENDING_REVIEW' && (
+                          </td>
+                          <td className="p-3 font-mono text-[11px] text-slate-400 italic">
+                            — (Pending Approval)
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-900">{m.name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">{m.email}</div>
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                                m.classification === 'REGULAR'
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}
+                            >
+                              {m.classification}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                              <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span className="truncate max-w-[200px]" title={m.idType}>{m.idType}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">
+                            <div className="font-semibold text-slate-900 font-mono">
+                              ₱{(m.initialPledge || (m.subscribedShares ? m.subscribedShares * 100 : 5000)).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </div>
+                            <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 font-medium px-1.5 py-0.5 rounded inline-block mt-0.5">
+                              Deferred until Approval
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-500 font-mono text-[11px]">{m.npcConsent}</td>
+                          <td className="p-3 text-center">
                             <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span> PENDING REVIEW
                             </span>
-                          )}
-                          {m.kycStatus === 'INACTIVE' && (
-                            <span className="bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> INACTIVE
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditMember(m)}
-                              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-indigo-200 transition"
-                              title="Edit Member Profile & eKYC Details"
-                            >
-                              <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
-                              Edit
-                            </button>
-                            {m.kycStatus === 'PENDING_REVIEW' ? (
+                          </td>
+                          <td className="p-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditMember(m)}
+                                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-indigo-200 transition"
+                                title="Edit Applicant Profile"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
+                                Edit
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -5404,41 +5705,120 @@ export default function AdminDashboard() {
                                 className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1.5 shadow-sm transition"
                               >
                                 <Eye className="w-3.5 h-3.5" />
-                                Review & Underwrite
+                                Review &amp; Underwrite
                               </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={m.id} className="hover:bg-slate-50 transition">
+                          <td className="p-3 font-mono font-medium text-slate-900">{m.memberNo}</td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-900">{m.name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">{m.email}</div>
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                                m.classification === 'REGULAR'
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}
+                            >
+                              {m.classification}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                              {m.kycStatus === 'VERIFIED' ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              ) : (
+                                <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              )}
+                              <span className="truncate max-w-[200px]" title={m.idType}>{m.idType}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">
+                            {(!m.paidUpShares || Number(m.paidUpShares) === 0) ? (
+                              <div>
+                                <div className="font-semibold text-amber-700 font-mono">₱0.00</div>
+                                <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-200 font-bold px-1.5 py-0.5 rounded inline-block mt-0.5">
+                                  UNPAID (₱{(m.initialPledge || (m.subscribedShares ? m.subscribedShares * 100 : 5000)).toLocaleString()} Pledged)
+                                </span>
+                              </div>
                             ) : (
-                              <>
-                                {m.kycStatus === 'VERIFIED' && m.sharePaymentStatus === 'UNPAID' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSharePaymentMember(m);
-                                      setShowSharePaymentModal(true);
-                                    }}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 shadow-sm transition"
-                                  >
-                                    <CreditCard className="w-3.5 h-3.5" />
-                                    Collect Share Capital
-                                  </button>
-                                )}
+                              <div>
+                                <div className="font-semibold text-slate-900 font-mono">
+                                  ₱{Number(m.paidUpShares).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-[10px] mt-0.5">
+                                  {m.sharePaymentStatus === 'PARTIALLY_PAID' || (Number(m.paidUpShares) < ((m.subscribedShares || 50) * 100)) ? (
+                                    <span className="text-amber-800 font-semibold inline-flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                      ₱{Math.max(0, ((m.subscribedShares || 50) * 100) - Number(m.paidUpShares)).toLocaleString()} Pledge Left
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Fully Paid
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-500 font-mono text-[11px]">{m.npcConsent}</td>
+                          <td className="p-3 text-center">
+                            {m.kycStatus === 'VERIFIED' && (
+                              <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> VERIFIED
+                              </span>
+                            )}
+                            {m.kycStatus !== 'VERIFIED' && (
+                              <span className="bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-0.5 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> INACTIVE
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditMember(m)}
+                                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-indigo-200 transition"
+                                title="Edit Member Profile &amp; eKYC Details"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
+                                Edit
+                              </button>
+                              {m.kycStatus === 'VERIFIED' && m.sharePaymentStatus === 'UNPAID' && (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setSelectedMemberForReview(m);
-                                    setReviewChecks({ pmes: true, ekyc: true, amla: true, capitalBuild: true });
-                                    setMemberReviewNotes(m.reviewNotes || '');
+                                    setSharePaymentMember(m);
+                                    setShowSharePaymentModal(true);
                                   }}
-                                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-slate-200 transition"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 shadow-sm transition"
                                 >
-                                  <Eye className="w-3.5 h-3.5 text-slate-500" />
-                                  View Dossier
+                                  <CreditCard className="w-3.5 h-3.5" />
+                                  Collect Share Capital
                                 </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedMemberForReview(m);
+                                  setReviewChecks({ pmes: true, ekyc: true, amla: true, capitalBuild: true });
+                                  setMemberReviewNotes(m.reviewNotes || '');
+                                }}
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] inline-flex items-center gap-1 border border-slate-200 transition"
+                              >
+                                <Eye className="w-3.5 h-3.5 text-slate-500" />
+                                View Dossier
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    )
                   )}
                 </tbody>
               </table>
@@ -5452,9 +5832,20 @@ export default function AdminDashboard() {
                   <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 text-white flex justify-between items-start">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
-                          {selectedMemberForReview.memberNo}
-                        </span>
+                        {Boolean(selectedMemberForReview.memberNo) && !selectedMemberForReview.isApplicant && selectedMemberForReview.kycStatus !== 'PENDING_REVIEW' ? (
+                          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
+                            Member No: {selectedMemberForReview.memberNo}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
+                              Applicant ID: {selectedMemberForReview.applicantId || `A${String(selectedMemberForReview.id).replace(/\D/g, '').padEnd(8, '0').slice(-8)}`}
+                            </span>
+                            <span className="bg-slate-700/60 text-slate-300 border border-slate-600/40 text-[10px] font-mono px-2 py-0.5 rounded italic">
+                              Member No: (Assigned upon Approval)
+                            </span>
+                          </>
+                        )}
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                             selectedMemberForReview.classification === 'REGULAR'
@@ -5462,7 +5853,7 @@ export default function AdminDashboard() {
                               : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           }`}
                         >
-                          {selectedMemberForReview.classification} MEMBER
+                          {selectedMemberForReview.classification} {selectedMemberForReview.isApplicant || selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? 'APPLICANT' : 'MEMBER'}
                         </span>
                         {selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? (
                           <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded animate-pulse">
@@ -6069,7 +6460,9 @@ export default function AdminDashboard() {
                           : 'Decline / Return Member Application'}
                       </h3>
                       <p className="text-xs text-slate-500 font-mono">
-                        {memberConfirmModal.member.memberNo} • {memberConfirmModal.member.name}
+                        {(memberConfirmModal.member.isApplicant || memberConfirmModal.member.kycStatus === 'PENDING_REVIEW' || !memberConfirmModal.member.memberNo)
+                          ? `Applicant ID: ${memberConfirmModal.member.applicantId || `A${String(memberConfirmModal.member.id).replace(/\D/g, '').padEnd(8, '0').slice(-8)}`}`
+                          : memberConfirmModal.member.memberNo} • {memberConfirmModal.member.name}
                       </p>
                     </div>
                   </div>
@@ -6237,7 +6630,7 @@ export default function AdminDashboard() {
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <QrCode className="w-4 h-4 text-emerald-700" />
-                          <span className="text-xs font-bold text-slate-900">PayMongo QR Ph</span>
+                          <span className="text-xs font-bold text-slate-900">QR PH</span>
                         </div>
                         <div className="text-[11px] text-slate-500">1.5% convenience fee</div>
                       </button>
@@ -7629,6 +8022,167 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
+              {/* Transparent Upfront Deduction Breakdown for Underwriters, Reviewers & Approvers */}
+              {(() => {
+                const appPrincipal = Number(activeLoanApplication.amount || 0);
+                const isPassThrough = activeLoanApplication.isTechFeePassThrough !== undefined
+                  ? activeLoanApplication.isTechFeePassThrough
+                  : (activeLoanApplication.techFeeDeduction !== undefined ? activeLoanApplication.techFeeDeduction > 0 : techFeeTreatment === 'PASS_THROUGH');
+                const appTechFee = activeLoanApplication.techFeeAmount !== undefined
+                  ? Number(activeLoanApplication.techFeeAmount)
+                  : Math.round(appPrincipal * 0.01 * 100) / 100;
+                const appTechDeduction = isPassThrough ? appTechFee : 0;
+
+                const appCoopServiceFee = activeLoanApplication.coopServiceFee !== undefined
+                  ? Number(activeLoanApplication.coopServiceFee)
+                  : (activeLoanApplication.coopFilingFeeEnabled ?? coopFilingFeeEnabled)
+                  ? Math.round(appPrincipal * ((activeLoanApplication.coopFilingFeeRatePercent ?? coopFilingFeeRatePercent) / 100) * 100) / 100
+                  : 0;
+
+                const appAdvanceInterest = Number(activeLoanApplication.advanceInterest || 0);
+                const appOptionalFees = Number(activeLoanApplication.optionalFeesTotal || 0);
+                const isUpfrontShare = activeLoanApplication.isUpfrontShareDeduction !== undefined
+                  ? activeLoanApplication.isUpfrontShareDeduction
+                  : activeLoanApplication.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION';
+                const appShareDeduction = isUpfrontShare
+                  ? Number(activeLoanApplication.upfrontShareDeduction || activeLoanApplication.mandatoryShareAmount || 0)
+                  : 0;
+
+                const totalDeductions = appTechDeduction + appCoopServiceFee + appAdvanceInterest + appOptionalFees + appShareDeduction;
+                const appNetProceeds = activeLoanApplication.netProceeds !== undefined
+                  ? Number(activeLoanApplication.netProceeds)
+                  : Math.max(0, appPrincipal - totalDeductions);
+
+                const appTermUnit = activeLoanApplication.termUnit || 'MONTHS';
+                const isWeeks = appTermUnit === 'WEEKS';
+                const isBiWeekly = activeLoanApplication.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
+                const appMonthlyAmortization = Number(activeLoanApplication.monthlyAmortization || activeLoanApplication.periodicInstallment || 0);
+                const appTotalInterest = Number(activeLoanApplication.totalInterest || 0);
+                const appEir = Number(activeLoanApplication.eirTenure || activeLoanApplication.effectiveInterestRate || (activeLoanApplication.annualRate ? activeLoanApplication.annualRate * 100 : 12));
+                const isInstallmentShare = activeLoanApplication.isInstallmentSharePayment !== undefined
+                  ? activeLoanApplication.isInstallmentSharePayment
+                  : activeLoanApplication.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT';
+                const shareInstallment = Number(activeLoanApplication.shareAmortizationPerPeriod || 0);
+
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-emerald-700" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                          Transparent Upfront Deduction Breakdown (Members Portal Loan Simulation)
+                        </h4>
+                      </div>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
+                        RA 3765 Truth in Lending Disclosure
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 text-xs">
+                      {/* Left: Upfront Deductions */}
+                      <div className="space-y-2.5 bg-white p-4 rounded-xl border border-slate-200">
+                        <div className="text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1">
+                          Upfront Deductions from Gross Principal
+                        </div>
+
+                        <div className="flex justify-between py-1 border-b border-slate-100">
+                          <span className="text-slate-600 font-medium">Requested Principal Amount:</span>
+                          <span className="font-bold text-slate-900">₱{appPrincipal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        </div>
+
+                        <div className="flex justify-between text-emerald-800 py-0.5">
+                          <span>Technology Fee (1%){!isPassThrough ? ' (Coop OPEX Absorbed)' : ''}:</span>
+                          <span className="font-bold">
+                            {isPassThrough ? `- ₱${appTechFee.toFixed(2)}` : '₱0.00 (Coop OPEX)'}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between text-slate-600 py-0.5">
+                          <span>Coop Filing &amp; Service Fee ({appCoopServiceFee > 0 ? `${activeLoanApplication.coopFilingFeeRatePercent || 2}%` : 'Waived/Disabled'}):</span>
+                          <span className="font-bold">
+                            {appCoopServiceFee > 0 ? `- ₱${appCoopServiceFee.toFixed(2)}` : '₱0.00 (Waived)'}
+                          </span>
+                        </div>
+
+                        {appAdvanceInterest > 0 && (
+                          <div className="flex justify-between text-blue-800 font-semibold py-0.5">
+                            <span>Advance Interest ({activeLoanApplication.advanceInterestOption === 'FIRST_YEAR' ? '1st Year' : 'Entire Loan'}):</span>
+                            <span className="font-bold">- ₱{appAdvanceInterest.toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        {appOptionalFees > 0 && (
+                          <div className="flex justify-between text-slate-600 py-0.5">
+                            <span>Pass-Through Optional Fees:</span>
+                            <span className="font-bold">- ₱{appOptionalFees.toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        {isUpfrontShare && appShareDeduction > 0 && (
+                          <div className="flex justify-between text-purple-800 font-semibold py-0.5">
+                            <span>Mandatory Share Capital ({activeLoanApplication.mandatoryShareQuantity || Math.round(appShareDeduction / 100)} shares @ ₱{activeLoanApplication.mandatorySharePrice || 100}):</span>
+                            <span className="font-bold">- ₱{appShareDeduction.toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        <div className="border-t border-emerald-200 mt-2 pt-2.5 flex justify-between items-center bg-emerald-50/80 p-3 rounded-xl border">
+                          <div>
+                            <div className="text-[11px] font-bold text-emerald-950 uppercase">Net Disbursed Proceeds</div>
+                            <div className="text-[10px] text-emerald-700">
+                              Credited via {String(activeLoanApplication.settlement?.channel || 'BANK_TRANSFER').replace(/_/g, ' ')}
+                            </div>
+                          </div>
+                          <div className="text-xl font-black text-emerald-950">
+                            ₱{appNetProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Servicing Terms & Statutory Compliance */}
+                      <div className="space-y-3 flex flex-col justify-between">
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2.5">
+                          <div className="text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1">
+                            Amortization &amp; Servicing Schedule
+                          </div>
+
+                          <div className="flex justify-between py-1 border-b border-slate-100">
+                            <span className="text-slate-600 font-medium">
+                              {isWeeks ? (isBiWeekly ? 'Bi-Weekly Installment:' : 'Weekly Installment:') : 'Monthly Amortization:'}
+                            </span>
+                            <span className="font-bold text-slate-900">
+                              ₱{appMonthlyAmortization.toFixed(2)} / {isWeeks ? (isBiWeekly ? '2 wks' : 'wk') : 'month'}
+                            </span>
+                          </div>
+
+                          {isInstallmentShare && shareInstallment > 0 && (
+                            <div className="text-[11px] text-purple-700 flex justify-between bg-purple-50 p-2 rounded-lg border border-purple-200">
+                              <span>Includes Share Capital installment:</span>
+                              <span className="font-semibold">+ ₱{shareInstallment.toFixed(2)} / period</span>
+                            </div>
+                          )}
+
+                          <div className="flex justify-between text-slate-600 py-0.5">
+                            <span>Total Interest Charge:</span>
+                            <span className="font-semibold text-slate-800">₱{appTotalInterest.toFixed(2)}</span>
+                          </div>
+
+                          <div className="flex justify-between text-slate-600 py-0.5">
+                            <span>Effective Interest Rate (EIR):</span>
+                            <span className="font-bold text-emerald-700">
+                              {appEir.toFixed(2)}% ({isWeeks ? `${activeLoanApplication.termWeeks || activeLoanApplication.termMonths * 4} Wks` : `${activeLoanApplication.termMonths} Mos`} Tenure)
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 bg-emerald-50/50 p-3 rounded-xl border border-emerald-200/60 leading-relaxed">
+                          💡 <strong>CDA Statutory Compliance:</strong> All upfront deductions are accounted for under the CDA Standard Chart of Accounts (Account 4-01-02 for Service Fees, Account 2-02-02 for Technology Processing, and Account 3-01-03 for Share Capital). BIR Electronic Official Sales Invoices with 12% Output VAT are generated automatically upon disbursement execution.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Stepper Pipeline with 5 Steps: Co-Maker -> LO -> CreCom -> BOD -> Disbursement */}
               <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                 {/* Step 0: Co-Maker Endorsement */}
@@ -8053,7 +8607,33 @@ export default function AdminDashboard() {
                       <span className="text-slate-500">Requested Principal:</span>
                       <span className="font-bold text-slate-900">₱{(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                     </div>
-                    <div className="flex justify-between">
+                    {activeLoanApplication && (() => {
+                      const prin = Number(activeLoanApplication.amount || 0);
+                      const isPass = activeLoanApplication.isTechFeePassThrough !== undefined
+                        ? activeLoanApplication.isTechFeePassThrough
+                        : (activeLoanApplication.techFeeDeduction !== undefined ? activeLoanApplication.techFeeDeduction > 0 : techFeeTreatment === 'PASS_THROUGH');
+                      const tech = isPass ? (activeLoanApplication.techFeeAmount !== undefined ? Number(activeLoanApplication.techFeeAmount) : Math.round(prin * 0.01 * 100) / 100) : 0;
+                      const coopFee = Number(activeLoanApplication.coopServiceFee || 0);
+                      const advInt = Number(activeLoanApplication.advanceInterest || 0);
+                      const optFees = Number(activeLoanApplication.optionalFeesTotal || 0);
+                      const isUp = activeLoanApplication.isUpfrontShareDeduction ?? (activeLoanApplication.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION');
+                      const shr = isUp ? Number(activeLoanApplication.upfrontShareDeduction || activeLoanApplication.mandatoryShareAmount || 0) : 0;
+                      const totDed = tech + coopFee + advInt + optFees + shr;
+                      const netP = activeLoanApplication.netProceeds !== undefined ? Number(activeLoanApplication.netProceeds) : Math.max(0, prin - totDed);
+                      return (
+                        <>
+                          <div className="flex justify-between text-slate-600">
+                            <span>Upfront Deductions Total:</span>
+                            <span className="font-mono font-semibold">- ₱{totDed.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-emerald-900 bg-emerald-100/70 p-2 rounded-lg border border-emerald-200">
+                            <span className="uppercase text-[11px]">Net Disbursed Proceeds:</span>
+                            <span className="font-mono text-sm">₱{netP.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                    <div className="flex justify-between pt-1">
                       <span className="text-slate-500">Authorizing Officer:</span>
                       <span className="font-semibold text-emerald-800">{currentStaff.name} ({currentStaff.roleTitle})</span>
                     </div>
@@ -8107,17 +8687,37 @@ export default function AdminDashboard() {
                   </div>
 
                   {(() => {
-                    const principal = activeLoanApplication?.amount || 50000;
-                    const isPassThrough = techFeeTreatment === 'PASS_THROUGH';
-                    const techFee = Math.round(principal * 0.01 * 100) / 100;
+                    const principal = Number(activeLoanApplication?.amount || 50000);
+                    const isPassThrough = activeLoanApplication?.isTechFeePassThrough !== undefined
+                      ? activeLoanApplication.isTechFeePassThrough
+                      : (activeLoanApplication?.techFeeDeduction !== undefined ? activeLoanApplication.techFeeDeduction > 0 : techFeeTreatment === 'PASS_THROUGH');
+                    const techFee = activeLoanApplication?.techFeeAmount !== undefined
+                      ? Number(activeLoanApplication.techFeeAmount)
+                      : Math.round(principal * 0.01 * 100) / 100;
                     const techFeeDeduction = isPassThrough ? techFee : 0;
-                    const coopServiceFee = coopFilingFeeEnabled
-                      ? Math.round(principal * (coopFilingFeeRatePercent / 100) * 100) / 100
+                    const coopServiceFee = activeLoanApplication?.coopServiceFee !== undefined
+                      ? Number(activeLoanApplication.coopServiceFee)
+                      : (activeLoanApplication?.coopFilingFeeEnabled ?? coopFilingFeeEnabled)
+                      ? Math.round(principal * ((activeLoanApplication?.coopFilingFeeRatePercent ?? coopFilingFeeRatePercent) / 100) * 100) / 100
                       : 0;
-                    const netProceeds = principal - techFeeDeduction - coopServiceFee;
+                    const advanceInterest = Number(activeLoanApplication?.advanceInterest || 0);
+                    const optionalFees = Number(activeLoanApplication?.optionalFeesTotal || 0);
+                    const isUpfrontShare = activeLoanApplication?.isUpfrontShareDeduction !== undefined
+                      ? activeLoanApplication.isUpfrontShareDeduction
+                      : activeLoanApplication?.mandatorySharePaymentTreatment === 'UPFRONT_DEDUCTION';
+                    const shareDeduction = isUpfrontShare
+                      ? Number(activeLoanApplication?.upfrontShareDeduction || activeLoanApplication?.mandatoryShareAmount || 0)
+                      : 0;
+                    const totalDeductions = techFeeDeduction + coopServiceFee + advanceInterest + optionalFees + shareDeduction;
+                    const netProceeds = activeLoanApplication?.netProceeds !== undefined
+                      ? Number(activeLoanApplication.netProceeds)
+                      : Math.max(0, principal - totalDeductions);
                     const borrowerName = activeLoanApplication?.memberName || 'MARIA CLARA SANTOS';
                     const memberNo = activeLoanApplication?.memberNo || 'MEM-2026-0001';
-                    const term = activeLoanApplication?.termMonths || 12;
+                    const termText = activeLoanApplication?.termUnit === 'WEEKS'
+                      ? `${activeLoanApplication?.termWeeks || (activeLoanApplication?.termMonths ? activeLoanApplication.termMonths * 4 : 4)} equal weekly installments`
+                      : `${activeLoanApplication?.termMonths || 12} equal monthly installments`;
+                    const eir = Number(activeLoanApplication?.eirTenure || activeLoanApplication?.effectiveInterestRate || (activeLoanApplication?.annualRate ? activeLoanApplication.annualRate * 100 : (isPassThrough ? 14.85 : 13.75)));
 
                     return (
                       <>
@@ -8130,31 +8730,49 @@ export default function AdminDashboard() {
                             <span className="font-semibold">1. Loan Principal:</span>
                             <span className="font-bold text-slate-900">₱{principal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                           </div>
-                          <div className="border-t border-slate-200 pt-2 space-y-1 pl-4">
+                          <div className="border-t border-slate-200 pt-2 space-y-1.5 pl-4">
                             <div className="flex justify-between text-slate-600">
                               <span>a. Technology Fee (1%){!isPassThrough ? ' [Coop OPEX Absorbed]' : ''}:</span>
                               <span className={!isPassThrough ? 'text-emerald-700 font-semibold' : 'font-mono'}>
-                                {isPassThrough ? `₱${techFee.toFixed(2)}` : '₱0.00 (Coop OPEX)'}
+                                {isPassThrough ? `- ₱${techFee.toFixed(2)}` : '₱0.00 (Coop OPEX)'}
                               </span>
                             </div>
                             <div className="flex justify-between text-slate-600">
-                              <span>b. Coop Service and Filing Fee ({coopFilingFeeEnabled ? `${coopFilingFeeRatePercent}%` : 'Disabled'}):</span>
-                              <span className="font-mono">₱{coopServiceFee.toFixed(2)}</span>
+                              <span>b. Coop Service and Filing Fee ({coopServiceFee > 0 ? `${activeLoanApplication?.coopFilingFeeRatePercent || 2}%` : 'Disabled'}):</span>
+                              <span className="font-mono">{coopServiceFee > 0 ? `- ₱${coopServiceFee.toFixed(2)}` : '₱0.00 (Waived)'}</span>
                             </div>
+                            {advanceInterest > 0 && (
+                              <div className="flex justify-between text-blue-800 font-semibold">
+                                <span>c. Advance Interest ({activeLoanApplication?.advanceInterestOption === 'FIRST_YEAR' ? '1st Year' : 'Entire Loan'}):</span>
+                                <span className="font-mono">- ₱{advanceInterest.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {optionalFees > 0 && (
+                              <div className="flex justify-between text-slate-600">
+                                <span>d. Pass-Through Optional Fees:</span>
+                                <span className="font-mono">- ₱{optionalFees.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {isUpfrontShare && shareDeduction > 0 && (
+                              <div className="flex justify-between text-purple-800 font-semibold">
+                                <span>e. Mandatory Share Capital ({activeLoanApplication?.mandatoryShareQuantity || Math.round(shareDeduction / 100)} shares):</span>
+                                <span className="font-mono">- ₱{shareDeduction.toFixed(2)}</span>
+                              </div>
+                            )}
                           </div>
-                          <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-emerald-900">
-                            <span>2. Net Disbursed Proceeds (1 minus Deductions):</span>
-                            <span className="text-emerald-800 text-sm font-mono">₱{netProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                          <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-emerald-900 bg-emerald-100/60 p-2.5 rounded-lg border border-emerald-200">
+                            <span>2. Net Disbursed Proceeds (Principal minus Deductions):</span>
+                            <span className="text-emerald-900 text-sm font-mono">₱{netProceeds.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                           </div>
-                          <div className="flex justify-between">
+                          <div className="flex justify-between pt-1">
                             <span className="font-semibold">3. Effective Interest Rate (EIR):</span>
-                            <span>{isPassThrough ? '14.85%' : '13.75%'} per annum</span>
+                            <span className="font-bold text-slate-900">{eir.toFixed(2)}% per annum</span>
                           </div>
                         </div>
 
                         <div className="p-4 bg-slate-100 rounded-lg text-xs font-mono text-slate-700 leading-relaxed border border-slate-200">
                           <div className="font-bold mb-1 uppercase">Promissory Note &amp; Loan Agreement Summary</div>
-                          &quot;FOR VALUE RECEIVED, I promise to pay to the order of THE COOPERATIVE the sum of PESOS {principal.toLocaleString('en-PH')} (PHP {principal.toFixed(2)}) in {term} equal monthly installments. Default in payment incurs 3% monthly surcharge. Joint and solidary liability acknowledged pursuant to the Cooperative Code.&quot;
+                          &quot;FOR VALUE RECEIVED, I promise to pay to the order of THE COOPERATIVE the sum of PESOS {principal.toLocaleString('en-PH')} (PHP {principal.toFixed(2)}) in {termText}. Default in payment incurs 3% monthly surcharge. Joint and solidary liability acknowledged pursuant to the Cooperative Code.&quot;
                         </div>
 
                         <div className="flex justify-end pt-2">
@@ -10106,7 +10724,7 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2 mb-1">
                         <QrCode className="w-4 h-4 text-emerald-600" /> Customer-Facing QR Ph
                       </div>
-                      <div className="text-slate-500 font-normal">Generate PayMongo QR Ph for member scan</div>
+                      <div className="text-slate-500 font-normal">Generate QR PH for member scan</div>
                     </button>
                   </div>
                 </div>
@@ -12108,17 +12726,47 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Member Pro-Rata Allocations Table */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <div className="bg-slate-100 p-3 border-b border-slate-200 font-bold text-xs text-slate-700 flex justify-between items-center">
-                  <span>Pro-Rata Member Surplus Allocation Roster (Fiscal Year 2025)</span>
-                  <span className="font-normal text-slate-500">
-                    Total Share Capital: ₱{members.reduce((s, m) => s + (m.paidUpShares || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} Common
+              {/* Statutory Note on Patronage Weighting pursuant to Art. 86 RA 9520 */}
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 text-xs">
+                <div className="flex items-start gap-2.5 text-emerald-950">
+                  <Scale className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block text-emerald-900 font-bold text-xs">
+                      Article 86, RA 9520 Dual-Weight Statutory Engine
+                    </strong>
+                    <span className="text-[11px] text-emerald-800 leading-relaxed block mt-0.5">
+                      <strong>Interest on Share Capital (ISC):</strong> Allocated in proportion to member <em>Paid-Up Share Capital</em>. <br />
+                      <strong>Patronage Refund (PR):</strong> Allocated in proportion to member <em>Actual Loan Availment (Borrowings & Patronage Volume)</em>.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <span className="bg-white border border-emerald-200 px-3 py-1.5 rounded-lg font-mono text-[11px] text-emerald-950 font-bold shadow-xs">
+                    Total Loan Availment: ₱{members.reduce((s, m) => s + getMemberLoanAvailment(m), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
-                {members.filter((m) => (m.paidUpShares || 0) > 0).length === 0 ? (
+              </div>
+
+              {/* Member Pro-Rata Allocations Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                <div className="bg-slate-100 p-3.5 border-b border-slate-200 font-bold text-xs text-slate-700 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <PieChart className="w-4 h-4 text-emerald-600" />
+                    <span>Pro-Rata Member Surplus Allocation Roster (Fiscal Year 2025)</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] font-normal text-slate-600 font-mono">
+                    <span>
+                      Total Capital: <strong>₱{members.reduce((s, m) => s + (m.paidUpShares || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                    </span>
+                    <span>•</span>
+                    <span>
+                      Total Availment: <strong>₱{members.reduce((s, m) => s + getMemberLoanAvailment(m), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                    </span>
+                  </div>
+                </div>
+                {members.filter((m) => (m.paidUpShares || 0) > 0 || getMemberLoanAvailment(m) > 0).length === 0 ? (
                   <div className="p-8 text-center text-slate-500 text-xs">
-                    No member share capital subscriptions have been registered or closed for statutory dividend distribution in this fiscal period.
+                    No member share capital subscriptions or loan availments have been recorded for statutory dividend distribution in this fiscal period.
                   </div>
                 ) : (
                     <table className="w-full text-left text-xs">
@@ -12126,6 +12774,7 @@ export default function AdminDashboard() {
                         <tr>
                           <th className="p-3">Member Details</th>
                           <th className="p-3 text-right">Paid-Up Capital</th>
+                          <th className="p-3 text-right">Actual Loan Availment</th>
                           <th className="p-3 text-right">Interest on Capital (ISC)</th>
                           <th className="p-3 text-right">Patronage Refund (PR)</th>
                           <th className="p-3 text-right">Total Net Dividend</th>
@@ -12133,25 +12782,56 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-800">
-                        {members.filter((m) => (m.paidUpShares || 0) > 0).map((m) => {
-                          const totalCap = members.reduce((s, x) => s + (x.paidUpShares || 0), 0) || 1;
-                          const weight = (m.paidUpShares || 0) / totalCap;
-                          const mIsc = Math.round(computedIscPool * weight);
-                          const mPr = Math.round(computedPrPool * weight);
-                          return (
-                            <tr key={m.id}>
-                              <td className="p-3">
-                                <div className="font-semibold text-slate-900">{m.name}</div>
-                                <div className="text-[11px] text-slate-500 font-mono">{m.memberNo} ({(weight * 100).toFixed(1)}% Capital Weight)</div>
-                              </td>
-                              <td className="p-3 text-right font-mono font-medium">₱{(m.paidUpShares || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                              <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                              <td className="p-3 text-right font-mono font-bold text-slate-900">₱{mPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                              <td className="p-3 text-right font-mono font-black text-emerald-700 text-sm">₱{(mIsc + mPr).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                              <td className="p-3 text-emerald-700 font-semibold text-[11px]">Credited to Savings (2-01-01)</td>
-                            </tr>
-                          );
-                        })}
+                        {members
+                          .filter((m) => (m.paidUpShares || 0) > 0 || getMemberLoanAvailment(m) > 0)
+                          .map((m) => {
+                            const totalCap = members.reduce((s, x) => s + (x.paidUpShares || 0), 0) || 1;
+                            const totalAvailment = members.reduce((s, x) => s + getMemberLoanAvailment(x), 0);
+                            const memberAvailment = getMemberLoanAvailment(m);
+
+                            const capWeight = totalCap > 0 ? (m.paidUpShares || 0) / totalCap : 0;
+                            const patronageWeight = totalAvailment > 0 ? memberAvailment / totalAvailment : 0;
+
+                            const mIsc = Math.round(computedIscPool * capWeight);
+                            const mPr = Math.round(computedPrPool * patronageWeight);
+                            const mTotal = mIsc + mPr;
+
+                            return (
+                              <tr key={m.id} className="hover:bg-slate-50/70 transition-colors">
+                                <td className="p-3">
+                                  <div className="font-semibold text-slate-900">{m.name}</div>
+                                  <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2 mt-0.5 flex-wrap">
+                                    <span>{m.memberNo}</span>
+                                    <span className="text-slate-300">•</span>
+                                    <span className="text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded text-[10px] font-bold">
+                                      {(capWeight * 100).toFixed(1)}% Capital Wt
+                                    </span>
+                                    <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded text-[10px] font-bold">
+                                      {(patronageWeight * 100).toFixed(1)}% Patronage Wt
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-3 text-right font-mono font-medium">
+                                  ₱{(m.paidUpShares || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-3 text-right font-mono font-bold text-emerald-800 bg-emerald-50/30">
+                                  ₱{memberAvailment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-3 text-right font-mono font-bold text-slate-900">
+                                  ₱{mIsc.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-3 text-right font-mono font-bold text-emerald-700 bg-emerald-50/40">
+                                  ₱{mPr.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-3 text-right font-mono font-black text-emerald-800 text-sm">
+                                  ₱{mTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-3 text-emerald-700 font-semibold text-[11px]">
+                                  Credited to Savings (2-01-01)
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   )}
@@ -14328,72 +15008,95 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Channel Sub-Tab Filter */}
+                  {/* Payment Options View Selector: Matrix vs Product-Specific Setup vs Master Credentials */}
                   <div className="flex items-center gap-2 border-b border-slate-100 pb-3 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => setPaymentOptionsActiveSubTab('all')}
+                      onClick={() => setPaymentOptionsViewMode('matrix')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                        paymentOptionsActiveSubTab === 'all'
+                        paymentOptionsViewMode === 'matrix'
                           ? 'bg-slate-900 text-white shadow-xs'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
                       <Layers className="w-3.5 h-3.5" />
-                      <span>All Payment Options (3)</span>
+                      <span>Product Channels Matrix (Overview)</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => setPaymentOptionsActiveSubTab('bank')}
+                      onClick={() => setPaymentOptionsViewMode('shareCapital')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                        paymentOptionsActiveSubTab === 'bank'
+                        paymentOptionsViewMode === 'shareCapital'
                           ? 'bg-blue-600 text-white shadow-xs'
                           : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
                       }`}
                     >
-                      <Landmark className="w-3.5 h-3.5" />
-                      <span>Bank Transfer</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                        bankTransferConfig.enabled ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-slate-700'
-                      }`}>
-                        {bankTransferConfig.enabled ? 'Enabled' : 'Off'}
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>Share Capital Purchase</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-blue-100 text-blue-900">
+                        {[
+                          productPaymentOptions.shareCapital?.bankTransfer?.enabled,
+                          productPaymentOptions.shareCapital?.ewalletTransfer?.enabled,
+                          productPaymentOptions.shareCapital?.paymongo?.enabled,
+                          productPaymentOptions.shareCapital?.cashier?.enabled,
+                        ].filter(Boolean).length}/4 Channels
                       </span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => setPaymentOptionsActiveSubTab('ewallet')}
+                      onClick={() => setPaymentOptionsViewMode('depositSavings')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                        paymentOptionsActiveSubTab === 'ewallet'
-                          ? 'bg-purple-600 text-white shadow-xs'
-                          : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                        paymentOptionsViewMode === 'depositSavings'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
                       }`}
                     >
-                      <Wallet className="w-3.5 h-3.5" />
-                      <span>e-Wallet Transfer</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                        ewalletTransferConfig.enabled ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-slate-700'
-                      }`}>
-                        {ewalletTransferConfig.enabled ? ewalletTransferConfig.provider : 'Off'}
+                      <PiggyBank className="w-3.5 h-3.5" />
+                      <span>Deposit Savings</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-100 text-amber-900">
+                        {[
+                          productPaymentOptions.depositSavings?.bankTransfer?.enabled,
+                          productPaymentOptions.depositSavings?.ewalletTransfer?.enabled,
+                          productPaymentOptions.depositSavings?.paymongo?.enabled,
+                          productPaymentOptions.depositSavings?.cashier?.enabled,
+                        ].filter(Boolean).length}/4 Channels
                       </span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => setPaymentOptionsActiveSubTab('paymongo')}
+                      onClick={() => setPaymentOptionsViewMode('payLoan')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                        paymentOptionsActiveSubTab === 'paymongo'
+                        paymentOptionsViewMode === 'payLoan'
                           ? 'bg-emerald-700 text-white shadow-xs'
                           : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                       }`}
                     >
                       <CreditCard className="w-3.5 h-3.5" />
-                      <span>QR PH via PayMongo</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                        tenantPaymongoConfig.isEnabled ? 'bg-emerald-500 text-white' : 'bg-rose-400 text-white'
-                      }`}>
-                        {tenantPaymongoConfig.isEnabled ? 'Enabled' : 'Off'}
+                      <span>Pay Loan</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-100 text-emerald-900">
+                        {[
+                          productPaymentOptions.payLoan?.bankTransfer?.enabled,
+                          productPaymentOptions.payLoan?.ewalletTransfer?.enabled,
+                          productPaymentOptions.payLoan?.paymongo?.enabled,
+                          productPaymentOptions.payLoan?.cashier?.enabled,
+                        ].filter(Boolean).length}/4 Channels
                       </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentOptionsViewMode('credentials')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        paymentOptionsViewMode === 'credentials'
+                          ? 'bg-purple-700 text-white shadow-xs'
+                          : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                      }`}
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Global Accounts &amp; PayMongo API</span>
                     </button>
                   </div>
 
@@ -14417,333 +15120,998 @@ export default function AdminDashboard() {
                     </div>
                   )}
 
-                  {/* OPTION 1: BANK TRANSFER SETUP */}
-                  {(paymentOptionsActiveSubTab === 'all' || paymentOptionsActiveSubTab === 'bank') && (
-                    <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/20 space-y-4">
-                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-blue-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
-                            <Landmark className="w-4 h-4" />
-                          </div>
+                  {/* VIEW 1: PRODUCT CHANNELS MATRIX OVERVIEW */}
+                  {paymentOptionsViewMode === 'matrix' && (
+                    <div className="space-y-6">
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <Sliders className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                           <div>
-                            <h4 className="text-sm font-black text-slate-900 tracking-tight">Direct Bank Transfer (InstaPay / PESONet)</h4>
-                            <p className="text-[11px] text-slate-500">
-                              Allow members to transfer directly to the cooperative commercial bank account with deposit trace reference.
+                            <strong className="text-slate-900 block font-bold">Per-Product Payment Option Control</strong>
+                            <p className="text-slate-500 text-[11px] mt-0.5">
+                              Individually toggle and configure payment channels per product: <strong>Share Capital Purchase</strong> (Capital Build-Up), <strong>Deposit Savings</strong> (Regular &amp; Voluntary), and <strong>Pay Loan</strong> (Amortization Repayments).
                             </p>
                           </div>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setBankTransferConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
-                            bankTransferConfig.enabled
-                              ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span className={`w-2 h-2 rounded-full ${bankTransferConfig.enabled ? 'bg-white' : 'bg-slate-400'}`} />
-                          <span>{bankTransferConfig.enabled ? 'Bank Transfer Enabled' : 'Bank Transfer Disabled'}</span>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        {/* Bank Name Selector / Input */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Bank Name</label>
-                          <input
-                            type="text"
-                            list="philippine-banks-list"
-                            value={bankTransferConfig.bankName}
-                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, bankName: e.target.value }))}
-                            placeholder="e.g. Land Bank of the Philippines"
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          />
-                          <datalist id="philippine-banks-list">
-                            <option value="Land Bank of the Philippines" />
-                            <option value="BDO Unibank, Inc." />
-                            <option value="Bank of the Philippine Islands (BPI)" />
-                            <option value="Metropolitan Bank & Trust Co. (Metrobank)" />
-                            <option value="Union Bank of the Philippines" />
-                            <option value="Rizal Commercial Banking Corp (RCBC)" />
-                            <option value="Philippine National Bank (PNB)" />
-                            <option value="Security Bank Corporation" />
-                            <option value="China Banking Corporation" />
-                            <option value="Development Bank of the Philippines (DBP)" />
-                            <option value="Asia United Bank (AUB)" />
-                            <option value="EastWest Bank" />
-                          </datalist>
-                          <p className="text-[11px] text-slate-500">Commercial depository institution where the coop maintains funds.</p>
-                        </div>
-
-                        {/* Bank Account Name */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Account Name</label>
-                          <input
-                            type="text"
-                            value={bankTransferConfig.accountName}
-                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, accountName: e.target.value }))}
-                            placeholder="e.g. Family Multi-Purpose Cooperative General Account"
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">Official registered cooperative bank account name.</p>
-                        </div>
-
-                        {/* Bank Account Number */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Account Number</label>
-                          <input
-                            type="text"
-                            value={bankTransferConfig.accountNumber}
-                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, accountNumber: e.target.value }))}
-                            placeholder="e.g. 0012-9981-22"
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">Account number where member transfers will be credited.</p>
-                        </div>
-
-                        {/* Branch / Clearing Location */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Branch / Location</label>
-                          <input
-                            type="text"
-                            value={bankTransferConfig.branch}
-                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, branch: e.target.value }))}
-                            placeholder="e.g. Head Office Branch / Pasig City"
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">Cooperative bank branch assignment.</p>
-                        </div>
-
-                        {/* Instructions */}
-                        <div className="md:col-span-2 space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Member Transfer Instructions</label>
-                          <textarea
-                            rows={2}
-                            value={bankTransferConfig.instructions}
-                            onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, instructions: e.target.value }))}
-                            placeholder="Transfer via InstaPay or PESONet. Use your Member Number / Name as the transfer reference note."
-                            className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">
-                            Clear directions displayed to members in the Member Portal before submitting deposit slip/trace reference.
-                          </p>
+                        <div className="text-[11px] text-slate-500 font-mono bg-white px-2.5 py-1 border border-slate-200 rounded-lg shrink-0">
+                          3 Products • 4 Payment Rails
                         </div>
                       </div>
 
-                      <div className="p-3 bg-blue-100/50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                        <span>
-                          <strong>Admin Verification Workflow:</strong> Direct bank transfers are queued in the Admin Treasury module for staff to verify the electronic trace reference or receipt before ledger crediting.
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                      {/* 3 Product Setup Cards */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                        {/* PRODUCT 1: SHARE CAPITAL PURCHASE */}
+                        <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/20 space-y-4 flex flex-col justify-between">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
+                                <Coins className="w-3 h-3 text-blue-600" />
+                                <span>Capital Build-Up</span>
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">product: shareCapital</span>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900">Share Capital Purchase</h4>
+                              <p className="text-[11px] text-slate-500 mt-1">
+                                Accepted channels for initial and regular member share capital subscriptions.
+                              </p>
+                            </div>
 
-                  {/* OPTION 2: E-WALLET TRANSFER SETUP */}
-                  {(paymentOptionsActiveSubTab === 'all' || paymentOptionsActiveSubTab === 'ewallet') && (
-                    <div className="p-5 rounded-2xl border border-purple-200 bg-purple-50/20 space-y-4">
-                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-purple-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0">
-                            <Wallet className="w-4 h-4" />
+                            {/* Channel Quick Toggles */}
+                            <div className="pt-2 border-t border-blue-100 space-y-2 text-xs">
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Landmark className="w-3.5 h-3.5 text-blue-600" /> Bank Transfer
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('shareCapital', 'bankTransfer')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.shareCapital?.bankTransfer?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.shareCapital?.bankTransfer?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Wallet className="w-3.5 h-3.5 text-purple-600" /> e-Wallet Transfer
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('shareCapital', 'ewalletTransfer')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.shareCapital?.ewalletTransfer?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.shareCapital?.ewalletTransfer?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <QrCode className="w-3.5 h-3.5 text-emerald-600" /> QR PH
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('shareCapital', 'paymongo')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.shareCapital?.paymongo?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.shareCapital?.paymongo?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Building2 className="w-3.5 h-3.5 text-amber-600" /> Cashier OTC
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('shareCapital', 'cashier')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.shareCapital?.cashier?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.shareCapital?.cashier?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900 tracking-tight">e-Wallet Transfer (GCash, Maya, ShopeePay)</h4>
-                            <p className="text-[11px] text-slate-500">
-                              Allow members to transfer directly via Philippine e-Wallets or scan official cooperative QR code.
-                            </p>
+
+                          <div className="pt-3 border-t border-blue-100">
+                            <button
+                              type="button"
+                              onClick={() => setPaymentOptionsViewMode('shareCapital')}
+                              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                            >
+                              <span>Configure Share Capital Details</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => setEwalletTransferConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
-                            ewalletTransferConfig.enabled
-                              ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
-                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span className={`w-2 h-2 rounded-full ${ewalletTransferConfig.enabled ? 'bg-white' : 'bg-slate-400'}`} />
-                          <span>{ewalletTransferConfig.enabled ? 'e-Wallet Enabled' : 'e-Wallet Disabled'}</span>
-                        </button>
-                      </div>
+                        {/* PRODUCT 2: DEPOSIT SAVINGS */}
+                        <div className="p-5 rounded-2xl border border-amber-200 bg-amber-50/20 space-y-4 flex flex-col justify-between">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200 flex items-center gap-1">
+                                <PiggyBank className="w-3 h-3 text-amber-600" />
+                                <span>Member Savings</span>
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">product: depositSavings</span>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900">Deposit Savings</h4>
+                              <p className="text-[11px] text-slate-500 mt-1">
+                                Accepted channels for regular and voluntary savings deposits into member accounts.
+                              </p>
+                            </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        {/* Provider */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">e-Wallet Provider</label>
-                          <select
-                            value={ewalletTransferConfig.provider}
-                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, provider: e.target.value }))}
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
-                          >
-                            <option value="GCash">GCash</option>
-                            <option value="Maya">Maya (PayMaya)</option>
-                            <option value="ShopeePay">ShopeePay</option>
-                            <option value="GrabPay">GrabPay</option>
-                            <option value="Other e-Wallet">Other e-Wallet</option>
-                          </select>
-                          <p className="text-[11px] text-slate-500">Primary e-Wallet brand configured for receiving deposits.</p>
-                        </div>
+                            {/* Channel Quick Toggles */}
+                            <div className="pt-2 border-t border-amber-100 space-y-2 text-xs">
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Landmark className="w-3.5 h-3.5 text-blue-600" /> Bank Transfer
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('depositSavings', 'bankTransfer')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.depositSavings?.bankTransfer?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.depositSavings?.bankTransfer?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
 
-                        {/* Account Name */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Account / Recipient Name</label>
-                          <input
-                            type="text"
-                            value={ewalletTransferConfig.accountName}
-                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, accountName: e.target.value }))}
-                            placeholder="e.g. Family Multi-Purpose Cooperative Official Finance"
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">Name registered with the e-Wallet merchant account.</p>
-                        </div>
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Wallet className="w-3.5 h-3.5 text-purple-600" /> e-Wallet Transfer
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('depositSavings', 'ewalletTransfer')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.depositSavings?.ewalletTransfer?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.depositSavings?.ewalletTransfer?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
 
-                        {/* Mobile Number */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Mobile / Account Number</label>
-                          <input
-                            type="text"
-                            value={ewalletTransferConfig.accountNumber}
-                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, accountNumber: e.target.value }))}
-                            placeholder="e.g. 0917-888-2468"
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">Official registered mobile number for express send transfers.</p>
-                        </div>
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <QrCode className="w-3.5 h-3.5 text-emerald-600" /> QR PH
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('depositSavings', 'paymongo')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.depositSavings?.paymongo?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.depositSavings?.paymongo?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
 
-                        {/* QR Code Image URL */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Official QR Code Image URL (Optional)</label>
-                          <input
-                            type="text"
-                            value={ewalletTransferConfig.qrCodeUrl}
-                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, qrCodeUrl: e.target.value }))}
-                            placeholder="https://... or data:image/png;base64,..."
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">Direct image link to cooperative merchant QR code for member scanning.</p>
-                        </div>
-
-                        {/* Instructions */}
-                        <div className="md:col-span-2 space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Member e-Wallet Instructions</label>
-                          <textarea
-                            rows={2}
-                            value={ewalletTransferConfig.instructions}
-                            onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, instructions: e.target.value }))}
-                            placeholder="Send via Express Send or Scan QR. Please input your Member Number in the message note."
-                            className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">
-                            Clear guidelines shown to members paying through GCash, Maya, or ShopeePay.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="p-3 bg-purple-100/50 border border-purple-200 rounded-xl text-[11px] text-purple-900 flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-                        <span>
-                          <strong>Member Portal Integration:</strong> When enabled, members will see the option to transfer via {ewalletTransferConfig.provider} and can submit their GCash/Maya reference number.
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* OPTION 3: PAYMONGO QR PH GATEWAY SETUP */}
-                  {(paymentOptionsActiveSubTab === 'all' || paymentOptionsActiveSubTab === 'paymongo') && (
-                    <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 space-y-5">
-                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-emerald-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                            <CreditCard className="w-4 h-4" />
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Building2 className="w-3.5 h-3.5 text-amber-600" /> Cashier OTC
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('depositSavings', 'cashier')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.depositSavings?.cashier?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.depositSavings?.cashier?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900 tracking-tight">QR PH via PayMongo (Instant Automated Settlement)</h4>
-                            <p className="text-[11px] text-slate-500">
-                              Generate dynamic BSP National QR Ph codes for instant real-time settlement without manual receipt verification.
-                            </p>
+
+                          <div className="pt-3 border-t border-amber-100">
+                            <button
+                              type="button"
+                              onClick={() => setPaymentOptionsViewMode('depositSavings')}
+                              className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                            >
+                              <span>Configure Savings Details</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold uppercase border ${
-                            tenantPaymongoConfig.environment === 'live'
-                              ? 'bg-amber-50 text-amber-800 border-amber-200'
-                              : 'bg-blue-50 text-blue-700 border-blue-200'
-                          }`}>
-                            {tenantPaymongoConfig.environment === 'live' ? 'Live Production' : 'Sandbox Test Mode'}
+                        {/* PRODUCT 3: PAY LOAN */}
+                        <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 space-y-4 flex flex-col justify-between">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200 flex items-center gap-1">
+                                <CreditCard className="w-3 h-3 text-emerald-600" />
+                                <span>Credit &amp; Lending</span>
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">product: payLoan</span>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900">Pay Loan (Amortizations)</h4>
+                              <p className="text-[11px] text-slate-500 mt-1">
+                                Accepted channels for loan installment repayments and principal reductions.
+                              </p>
+                            </div>
+
+                            {/* Channel Quick Toggles */}
+                            <div className="pt-2 border-t border-emerald-100 space-y-2 text-xs">
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Landmark className="w-3.5 h-3.5 text-blue-600" /> Bank Transfer
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('payLoan', 'bankTransfer')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.payLoan?.bankTransfer?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.payLoan?.bankTransfer?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Wallet className="w-3.5 h-3.5 text-purple-600" /> e-Wallet Transfer
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('payLoan', 'ewalletTransfer')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.payLoan?.ewalletTransfer?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.payLoan?.ewalletTransfer?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <QrCode className="w-3.5 h-3.5 text-emerald-600" /> QR PH
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('payLoan', 'paymongo')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.payLoan?.paymongo?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.payLoan?.paymongo?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200">
+                                <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                                  <Building2 className="w-3.5 h-3.5 text-amber-600" /> Cashier OTC
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProductChannel('payLoan', 'cashier')}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition ${
+                                    productPaymentOptions.payLoan?.cashier?.enabled
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {productPaymentOptions.payLoan?.cashier?.enabled ? 'Active' : 'Disabled'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-3 border-t border-emerald-100">
+                            <button
+                              type="button"
+                              onClick={() => setPaymentOptionsViewMode('payLoan')}
+                              className="w-full py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                            >
+                              <span>Configure Loan Payment Details</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Side-by-side Matrix Table */}
+                      <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                        <div className="bg-slate-100 p-3 border-b border-slate-200 font-bold text-xs text-slate-700 flex justify-between items-center">
+                          <span>Product Payment Channels Cross-Reference Matrix</span>
+                          <span className="text-[11px] font-normal text-slate-500 font-mono">
+                            Active in Member Self-Service Portal
                           </span>
+                        </div>
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                            <tr>
+                              <th className="p-3">Financial Product</th>
+                              <th className="p-3">Bank Transfer</th>
+                              <th className="p-3">e-Wallet Transfer</th>
+                              <th className="p-3">QR PH</th>
+                              <th className="p-3">Branch Cashier</th>
+                              <th className="p-3 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-800">
+                            <tr>
+                              <td className="p-3">
+                                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                  <Coins className="w-3.5 h-3.5 text-blue-600" /> Share Capital Purchase
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">Ref: {productPaymentOptions.shareCapital?.bankTransfer?.referenceFormat || 'CBU-[MemberNumber]'}</div>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.shareCapital?.bankTransfer?.enabled
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.shareCapital?.bankTransfer?.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.shareCapital?.ewalletTransfer?.enabled
+                                    ? 'bg-purple-100 text-purple-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.shareCapital?.ewalletTransfer?.enabled ? (productPaymentOptions.shareCapital?.ewalletTransfer?.provider || 'GCash') : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.shareCapital?.paymongo?.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.shareCapital?.paymongo?.enabled ? 'QR Ph Active' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.shareCapital?.cashier?.enabled
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.shareCapital?.cashier?.enabled ? 'OTC Active' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setPaymentOptionsViewMode('shareCapital')}
+                                  className="text-blue-600 hover:text-blue-800 font-bold text-xs"
+                                >
+                                  Configure →
+                                </button>
+                              </td>
+                            </tr>
+
+                            <tr>
+                              <td className="p-3">
+                                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                  <PiggyBank className="w-3.5 h-3.5 text-amber-600" /> Deposit Savings
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">Ref: {productPaymentOptions.depositSavings?.bankTransfer?.referenceFormat || 'SAV-[MemberNumber]'}</div>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.depositSavings?.bankTransfer?.enabled
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.depositSavings?.bankTransfer?.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.depositSavings?.ewalletTransfer?.enabled
+                                    ? 'bg-purple-100 text-purple-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.depositSavings?.ewalletTransfer?.enabled ? (productPaymentOptions.depositSavings?.ewalletTransfer?.provider || 'GCash') : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.depositSavings?.paymongo?.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.depositSavings?.paymongo?.enabled ? 'QR Ph Active' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.depositSavings?.cashier?.enabled
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.depositSavings?.cashier?.enabled ? 'OTC Active' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setPaymentOptionsViewMode('depositSavings')}
+                                  className="text-amber-700 hover:text-amber-900 font-bold text-xs"
+                                >
+                                  Configure →
+                                </button>
+                              </td>
+                            </tr>
+
+                            <tr>
+                              <td className="p-3">
+                                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                  <CreditCard className="w-3.5 h-3.5 text-emerald-600" /> Pay Loan
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">Ref: {productPaymentOptions.payLoan?.bankTransfer?.referenceFormat || 'LOAN-[LoanNumber]'}</div>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.payLoan?.bankTransfer?.enabled
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.payLoan?.bankTransfer?.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.payLoan?.ewalletTransfer?.enabled
+                                    ? 'bg-purple-100 text-purple-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.payLoan?.ewalletTransfer?.enabled ? (productPaymentOptions.payLoan?.ewalletTransfer?.provider || 'GCash') : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.payLoan?.paymongo?.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.payLoan?.paymongo?.enabled ? 'QR Ph Active' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  productPaymentOptions.payLoan?.cashier?.enabled
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {productPaymentOptions.payLoan?.cashier?.enabled ? 'OTC Active' : 'Disabled'}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setPaymentOptionsViewMode('payLoan')}
+                                  className="text-emerald-700 hover:text-emerald-900 font-bold text-xs"
+                                >
+                                  Configure →
+                                </button>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 2, 3, 4: PER-PRODUCT DETAILED CONFIGURATION */}
+                  {(paymentOptionsViewMode === 'shareCapital' ||
+                    paymentOptionsViewMode === 'depositSavings' ||
+                    paymentOptionsViewMode === 'payLoan') && (
+                    <div className="space-y-5">
+                      {/* Product Header */}
+                      {(() => {
+                        const prodKey = paymentOptionsViewMode;
+                        const prod = productPaymentOptions[prodKey];
+                        const prodTitle =
+                          prodKey === 'shareCapital'
+                            ? 'Share Capital Purchase (Capital Build-Up)'
+                            : prodKey === 'depositSavings'
+                            ? 'Deposit Savings (Regular & Voluntary Deposits)'
+                            : 'Pay Loan (Loan Amortization Repayments)';
+                        const prodColor =
+                          prodKey === 'shareCapital'
+                            ? 'blue'
+                            : prodKey === 'depositSavings'
+                            ? 'amber'
+                            : 'emerald';
+
+                        return (
+                          <div className={`p-5 rounded-2xl border bg-${prodColor}-50/20 border-${prodColor}-200 space-y-4`}>
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-100">
+                              <div className="flex items-center gap-2.5">
+                                <div className={`w-8 h-8 rounded-xl bg-${prodColor}-600 text-white flex items-center justify-center shrink-0`}>
+                                  {prodKey === 'shareCapital' ? (
+                                    <Coins className="w-4 h-4" />
+                                  ) : prodKey === 'depositSavings' ? (
+                                    <PiggyBank className="w-4 h-4" />
+                                  ) : (
+                                    <CreditCard className="w-4 h-4" />
+                                  )}
+                                </div>
+                                <div>
+                                  <h4 className="text-sm font-black text-slate-900 tracking-tight">{prodTitle}</h4>
+                                  <p className="text-[11px] text-slate-500">
+                                    Configure which payment methods are accepted specifically when members perform this transaction.
+                                  </p>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setPaymentOptionsViewMode('matrix')}
+                                className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 self-start sm:self-auto"
+                              >
+                                <span>← Back to All Products Matrix</span>
+                              </button>
+                            </div>
+
+                            {/* Product-Specific Channels Form */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                              {/* CHANNEL 1: DIRECT BANK TRANSFER */}
+                              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                  <div className="flex items-center gap-2 font-bold text-slate-900">
+                                    <Landmark className="w-4 h-4 text-blue-600" />
+                                    <span>Direct Bank Transfer</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleProductChannel(prodKey, 'bankTransfer')}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition ${
+                                      prod.bankTransfer?.enabled
+                                        ? 'bg-blue-600 text-white shadow-xs'
+                                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                    }`}
+                                  >
+                                    {prod.bankTransfer?.enabled ? 'Active for this Product' : 'Disabled'}
+                                  </button>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="font-bold text-slate-700 block">Reference Code Format</label>
+                                  <input
+                                    type="text"
+                                    value={prod.bankTransfer?.referenceFormat || ''}
+                                    onChange={(e) =>
+                                      handleUpdateProductChannel(prodKey, 'bankTransfer', 'referenceFormat', e.target.value)
+                                    }
+                                    placeholder={prodKey === 'shareCapital' ? 'CBU-[MemberNumber]' : prodKey === 'depositSavings' ? 'SAV-[MemberNumber]' : 'LOAN-[LoanNumber]'}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono font-bold"
+                                  />
+                                  <p className="text-[10px] text-slate-400">Pattern instructions for member deposit trace references.</p>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="font-bold text-slate-700 block">Custom Transfer Instructions</label>
+                                  <textarea
+                                    rows={2}
+                                    value={prod.bankTransfer?.instructions || ''}
+                                    onChange={(e) =>
+                                      handleUpdateProductChannel(prodKey, 'bankTransfer', 'instructions', e.target.value)
+                                    }
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* CHANNEL 2: E-WALLET TRANSFER */}
+                              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                  <div className="flex items-center gap-2 font-bold text-slate-900">
+                                    <Wallet className="w-4 h-4 text-purple-600" />
+                                    <span>e-Wallet Transfer (GCash / Maya)</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleProductChannel(prodKey, 'ewalletTransfer')}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition ${
+                                      prod.ewalletTransfer?.enabled
+                                        ? 'bg-purple-600 text-white shadow-xs'
+                                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                    }`}
+                                  >
+                                    {prod.ewalletTransfer?.enabled ? 'Active for this Product' : 'Disabled'}
+                                  </button>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="font-bold text-slate-700 block">Preferred e-Wallet Provider</label>
+                                  <select
+                                    value={prod.ewalletTransfer?.provider || 'GCash'}
+                                    onChange={(e) =>
+                                      handleUpdateProductChannel(prodKey, 'ewalletTransfer', 'provider', e.target.value)
+                                    }
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold"
+                                  >
+                                    <option value="GCash">GCash</option>
+                                    <option value="Maya">Maya</option>
+                                    <option value="ShopeePay">ShopeePay</option>
+                                    <option value="GrabPay">GrabPay</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="font-bold text-slate-700 block">Custom e-Wallet Message Note</label>
+                                  <textarea
+                                    rows={2}
+                                    value={prod.ewalletTransfer?.instructions || ''}
+                                    onChange={(e) =>
+                                      handleUpdateProductChannel(prodKey, 'ewalletTransfer', 'instructions', e.target.value)
+                                    }
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* CHANNEL 3: PAYMONGO QR PH */}
+                              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                  <div className="flex items-center gap-2 font-bold text-slate-900">
+                                    <QrCode className="w-4 h-4 text-emerald-600" />
+                                    <span>PayMongo Dynamic QR Ph</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleProductChannel(prodKey, 'paymongo')}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition ${
+                                      prod.paymongo?.enabled
+                                        ? 'bg-emerald-600 text-white shadow-xs'
+                                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                    }`}
+                                  >
+                                    {prod.paymongo?.enabled ? 'Active for this Product' : 'Disabled'}
+                                  </button>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="font-bold text-slate-700 block">Gateway Fee Treatment for {prod.productName}</label>
+                                  <select
+                                    value={prod.paymongo?.feeTreatment || 'PASS_THROUGH'}
+                                    onChange={(e) =>
+                                      handleUpdateProductChannel(prodKey, 'paymongo', 'feeTreatment', e.target.value)
+                                    }
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold"
+                                  >
+                                    <option value="PASS_THROUGH">Pass-Through to Member (Exact 1.5% added to invoice)</option>
+                                    <option value="OPEX">Cooperative OPEX (Absorbed by Coop - ₱0 Member Fee)</option>
+                                  </select>
+                                  <p className="text-[10px] text-slate-400">
+                                    Product-level override for the 1.5% PayMongo gateway transaction fee.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* CHANNEL 4: CASHIER OTC COUNTER */}
+                              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                  <div className="flex items-center gap-2 font-bold text-slate-900">
+                                    <Building2 className="w-4 h-4 text-amber-600" />
+                                    <span>Branch Cashier Counter (OTC)</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleProductChannel(prodKey, 'cashier')}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition ${
+                                      prod.cashier?.enabled
+                                        ? 'bg-amber-600 text-white shadow-xs'
+                                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                    }`}
+                                  >
+                                    {prod.cashier?.enabled ? 'Active for this Product' : 'Disabled'}
+                                  </button>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="font-bold text-slate-700 block">Branch Cashier Instructions</label>
+                                  <textarea
+                                    rows={2}
+                                    value={prod.cashier?.instructions || ''}
+                                    onChange={(e) =>
+                                      handleUpdateProductChannel(prodKey, 'cashier', 'instructions', e.target.value)
+                                    }
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs"
+                                  />
+                                  <p className="text-[10px] text-slate-400">
+                                    Instructions displayed to members who choose to settle over-the-counter at branch cashiers.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* VIEW 5: MASTER ACCOUNTS & PAYMONGO CREDENTIALS */}
+                  {paymentOptionsViewMode === 'credentials' && (
+                    <div className="space-y-6">
+                      {/* OPTION 1: BANK TRANSFER SETUP */}
+                      <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/20 space-y-4">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-blue-100">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                              <Landmark className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900 tracking-tight">Cooperative Depository Bank Account</h4>
+                              <p className="text-[11px] text-slate-500">
+                                Master depository account details inherited across all enabled products for InstaPay / PESONet transfers.
+                              </p>
+                            </div>
+                          </div>
 
                           <button
                             type="button"
-                            onClick={() => {
-                              const nextEnabled = !tenantPaymongoConfig.isEnabled;
-                              const nextTreatment = nextEnabled ? tenantPaymongoConfig.feeTreatment : 'OPEX';
-                              setTenantPaymongoConfig((prev) => ({
-                                ...prev,
-                                isEnabled: nextEnabled,
-                                feeTreatment: nextTreatment,
-                              }));
-                            }}
+                            onClick={() => setBankTransferConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
                             className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
-                              tenantPaymongoConfig.isEnabled
-                                ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                              bankTransferConfig.enabled
+                                ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
                                 : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
                             }`}
                           >
-                            <span className={`w-2 h-2 rounded-full ${tenantPaymongoConfig.isEnabled ? 'bg-white' : 'bg-slate-400'}`} />
-                            <span>{tenantPaymongoConfig.isEnabled ? 'PayMongo Active' : 'PayMongo Disabled'}</span>
+                            <span className={`w-2 h-2 rounded-full ${bankTransferConfig.enabled ? 'bg-white' : 'bg-slate-400'}`} />
+                            <span>{bankTransferConfig.enabled ? 'Master Bank Rail Active' : 'Bank Rail Disabled'}</span>
                           </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                          {/* Bank Name */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Bank Name</label>
+                            <input
+                              type="text"
+                              list="philippine-banks-list"
+                              value={bankTransferConfig.bankName}
+                              onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, bankName: e.target.value }))}
+                              placeholder="e.g. Land Bank of the Philippines"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                            />
+                            <datalist id="philippine-banks-list">
+                              <option value="Land Bank of the Philippines" />
+                              <option value="BDO Unibank, Inc." />
+                              <option value="Bank of the Philippine Islands (BPI)" />
+                              <option value="Metropolitan Bank & Trust Co. (Metrobank)" />
+                              <option value="Union Bank of the Philippines" />
+                              <option value="Rizal Commercial Banking Corp (RCBC)" />
+                              <option value="Philippine National Bank (PNB)" />
+                              <option value="Security Bank Corporation" />
+                              <option value="China Banking Corporation" />
+                              <option value="Development Bank of the Philippines (DBP)" />
+                            </datalist>
+                          </div>
+
+                          {/* Account Name */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Account Name</label>
+                            <input
+                              type="text"
+                              value={bankTransferConfig.accountName}
+                              onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, accountName: e.target.value }))}
+                              placeholder="e.g. Family Multi-Purpose Cooperative General Account"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                            />
+                          </div>
+
+                          {/* Account Number */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Account Number</label>
+                            <input
+                              type="text"
+                              value={bankTransferConfig.accountNumber}
+                              onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                              placeholder="e.g. 0012-9981-22"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                            />
+                          </div>
+
+                          {/* Branch */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Branch / Clearing Location</label>
+                            <input
+                              type="text"
+                              value={bankTransferConfig.branch}
+                              onChange={(e) => setBankTransferConfig((prev) => ({ ...prev, branch: e.target.value }))}
+                              placeholder="e.g. Pasig Head Office Branch"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                            />
+                          </div>
                         </div>
                       </div>
 
-                      {/* API Credentials Configuration Form */}
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
-                        {/* Secret Key Input */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
-                              <Key className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>PayMongo Secret Key (sk_live_ / sk_test_)</span>
-                            </span>
-                            <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
-                          </label>
-                          <div className="relative">
-                            <input
-                              type={showPaymongoSecretKey ? 'text' : 'password'}
-                              value={tenantPaymongoConfig.secretKey}
-                              onChange={(e) =>
-                                setTenantPaymongoConfig((prev) => ({ ...prev, secretKey: e.target.value.trim() }))
-                              }
-                              placeholder="sk_live_... or sk_test_..."
-                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPaymongoSecretKey(!showPaymongoSecretKey)}
-                              className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
-                            >
-                              {showPaymongoSecretKey ? 'Hide' : 'Show'}
-                            </button>
+                      {/* OPTION 2: E-WALLET TRANSFER SETUP */}
+                      <div className="p-5 rounded-2xl border border-purple-200 bg-purple-50/20 space-y-4">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-purple-100">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0">
+                              <Wallet className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900 tracking-tight">Cooperative Merchant e-Wallet Account</h4>
+                              <p className="text-[11px] text-slate-500">
+                                Default e-Wallet account and mobile number for peer-to-peer or express send payments.
+                              </p>
+                            </div>
                           </div>
-                          <p className="text-[11px] text-slate-500">
-                            Confidential API key used to securely create payment intents and verify QR Ph settlement.
-                          </p>
+
+                          <button
+                            type="button"
+                            onClick={() => setEwalletTransferConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                              ewalletTransferConfig.enabled
+                                ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
+                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${ewalletTransferConfig.enabled ? 'bg-white' : 'bg-slate-400'}`} />
+                            <span>{ewalletTransferConfig.enabled ? 'Master e-Wallet Rail Active' : 'e-Wallet Disabled'}</span>
+                          </button>
                         </div>
 
-                        {/* Public Key Input */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>PayMongo Public Key (pk_live_ / pk_test_)</span>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Default Provider</label>
+                            <select
+                              value={ewalletTransferConfig.provider}
+                              onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, provider: e.target.value }))}
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                            >
+                              <option value="GCash">GCash</option>
+                              <option value="Maya">Maya (PayMaya)</option>
+                              <option value="ShopeePay">ShopeePay</option>
+                              <option value="GrabPay">GrabPay</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Recipient / Account Name</label>
+                            <input
+                              type="text"
+                              value={ewalletTransferConfig.accountName}
+                              onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, accountName: e.target.value }))}
+                              placeholder="e.g. Family Multi-Purpose Cooperative Official Finance"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Mobile / Account Number</label>
+                            <input
+                              type="text"
+                              value={ewalletTransferConfig.accountNumber}
+                              onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                              placeholder="e.g. 0917-888-2468"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Static QR Code URL (Optional)</label>
+                            <input
+                              type="text"
+                              value={ewalletTransferConfig.qrCodeUrl}
+                              onChange={(e) => setEwalletTransferConfig((prev) => ({ ...prev, qrCodeUrl: e.target.value }))}
+                              placeholder="https://... or data:image/png;base64,..."
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* OPTION 3: PAYMONGO API CREDENTIALS */}
+                      <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 space-y-4">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-emerald-100">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                              <CreditCard className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-slate-900 tracking-tight">PayMongo QR Ph Automated Gateway</h4>
+                              <p className="text-[11px] text-slate-500">
+                                Dynamic BSP National QR Ph settlement keys for real-time instant member clearing.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold uppercase border ${
+                              tenantPaymongoConfig.environment === 'live'
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}>
+                              {tenantPaymongoConfig.environment === 'live' ? 'Live Production' : 'Sandbox Test Mode'}
                             </span>
-                            <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
-                          </label>
-                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTenantPaymongoConfig((prev) => ({
+                                  ...prev,
+                                  isEnabled: !prev.isEnabled,
+                                }));
+                              }}
+                              className={`px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                                tenantPaymongoConfig.isEnabled
+                                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span className={`w-2 h-2 rounded-full ${tenantPaymongoConfig.isEnabled ? 'bg-white' : 'bg-slate-400'}`} />
+                              <span>{tenantPaymongoConfig.isEnabled ? 'PayMongo Active' : 'PayMongo Disabled'}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                          {/* Secret Key Input */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <Key className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>PayMongo Secret Key (sk_live_ / sk_test_)</span>
+                              </span>
+                              <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={showPaymongoSecretKey ? 'text' : 'password'}
+                                value={tenantPaymongoConfig.secretKey}
+                                onChange={(e) =>
+                                  setTenantPaymongoConfig((prev) => ({ ...prev, secretKey: e.target.value.trim() }))
+                                }
+                                placeholder="sk_live_... or sk_test_..."
+                                className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowPaymongoSecretKey(!showPaymongoSecretKey)}
+                                className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
+                              >
+                                {showPaymongoSecretKey ? 'Hide' : 'Show'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Public Key Input */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>PayMongo Public Key (pk_live_ / pk_test_)</span>
+                              </span>
+                              <span className="text-[10px] text-rose-600 font-semibold">*Required</span>
+                            </label>
                             <input
                               type="text"
                               value={tenantPaymongoConfig.publicKey}
@@ -14751,177 +16119,65 @@ export default function AdminDashboard() {
                                 setTenantPaymongoConfig((prev) => ({ ...prev, publicKey: e.target.value.trim() }))
                               }
                               placeholder="pk_live_... or pk_test_..."
-                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono pr-16 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
                             />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(tenantPaymongoConfig.publicKey);
-                                alert('Public key copied to clipboard!');
-                              }}
-                              className="absolute right-2.5 top-2.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition"
-                            >
-                              Copy
-                            </button>
                           </div>
-                          <p className="text-[11px] text-slate-500">
-                            Safe public identifier used by the Member Portal payment interface.
-                          </p>
+
+                          {/* Webhook Secret */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Webhook Secret (whsec_...)</label>
+                            <input
+                              type="text"
+                              value={tenantPaymongoConfig.webhookSecret}
+                              onChange={(e) =>
+                                setTenantPaymongoConfig((prev) => ({ ...prev, webhookSecret: e.target.value.trim() }))
+                              }
+                              placeholder="whsec_..."
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                            />
+                          </div>
+
+                          {/* Environment */}
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-700 block">Gateway Environment</label>
+                            <select
+                              value={tenantPaymongoConfig.environment}
+                              onChange={(e) =>
+                                setTenantPaymongoConfig((prev) => ({
+                                  ...prev,
+                                  environment: e.target.value as 'test' | 'live',
+                                }))
+                              }
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                            >
+                              <option value="test">Sandbox Test Mode</option>
+                              <option value="live">Live Production</option>
+                            </select>
+                          </div>
                         </div>
 
-                        {/* Webhook Secret Input */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 flex items-center justify-between">
-                            <span>PayMongo Webhook Signing Secret (whsec_...)</span>
-                            <span className="text-[10px] text-slate-400 font-semibold">Optional</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={tenantPaymongoConfig.webhookSecret}
-                            onChange={(e) =>
-                              setTenantPaymongoConfig((prev) => ({ ...prev, webhookSecret: e.target.value.trim() }))
-                            }
-                            placeholder="whsec_..."
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-                          />
-                          <p className="text-[11px] text-slate-500">
-                            Webhook endpoint: <code className="text-slate-700 font-bold bg-slate-100 px-1 py-0.5 rounded">/api/v1/payments/paymongo/webhook</code>
-                          </p>
-                        </div>
-
-                        {/* Environment */}
-                        <div className="space-y-1.5">
-                          <label className="font-bold text-slate-700 block">Gateway Environment</label>
-                          <select
-                            value={tenantPaymongoConfig.environment}
-                            onChange={(e) =>
-                              setTenantPaymongoConfig((prev) => ({
-                                ...prev,
-                                environment: e.target.value as 'test' | 'live',
-                              }))
-                            }
-                            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                        {/* Test Connection Results Card */}
+                        {tenantPaymongoTestResult && (
+                          <div
+                            className={`p-4 rounded-xl border text-xs space-y-1 ${
+                              tenantPaymongoTestResult.success
+                                ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
+                                : 'bg-rose-50/70 border-rose-300 text-rose-950'
+                            }`}
                           >
-                            <option value="test">Sandbox Test Mode</option>
-                            <option value="live">Live Production</option>
-                          </select>
-                          <p className="text-[11px] text-slate-500">
-                            Toggle between PayMongo Sandbox simulation and Live settlement.
-                          </p>
-                        </div>
-
-                        {/* Fee Treatment Policy: Pass-Through vs OPEX */}
-                        <div className="md:col-span-2 p-4 bg-white border border-slate-200 rounded-2xl space-y-3">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <div>
-                              <label className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                                <Percent className="w-4 h-4 text-emerald-600" />
-                                <span>PayMongo Gateway Fee Treatment Policy (1.5% QR Ph Fee — No Minimum ₱15 Floor)</span>
-                              </label>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
-                                Choose whether the 1.5% PayMongo QR Ph gateway fee is passed through to the paying member or absorbed by the cooperative as an operating expense (OPEX).
-                              </p>
+                            <div className="flex items-center gap-2 font-bold">
+                              {tenantPaymongoTestResult.success ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              ) : (
+                                <AlertCircle className="w-4 h-4 text-rose-600" />
+                              )}
+                              <span>
+                                {tenantPaymongoTestResult.success ? 'PayMongo API Connection Successful' : 'Connection Failure'}
+                              </span>
                             </div>
-                            <span
-                              className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 border ${
-                                tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
-                                  ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
-                                  : 'bg-amber-100 text-amber-900 border-amber-300'
-                              }`}
-                            >
-                              {tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
-                                ? 'Active: Cooperative OPEX (₱0 Member Fee)'
-                                : 'Active: Member Pass-Through (1.5% Exact)'}
-                            </span>
+                            <p className="opacity-90">{tenantPaymongoTestResult.message}</p>
                           </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTenantPaymongoConfig((prev) => ({
-                                  ...prev,
-                                  isEnabled: true,
-                                  feeTreatment: 'PASS_THROUGH',
-                                }));
-                              }}
-                              className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                                tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled
-                                  ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20 shadow-xs'
-                                  : 'border-slate-200 bg-white hover:bg-slate-50'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-slate-900">Pass-Through to Member (1.5%)</span>
-                                {tenantPaymongoConfig.feeTreatment !== 'OPEX' && tenantPaymongoConfig.isEnabled && (
-                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                )}
-                              </div>
-                              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                                Exact 1.5% gateway fee (no ₱15 minimum floor) is added on top of the member&apos;s due amount so the cooperative receives 100% net settlement.
-                              </p>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTenantPaymongoConfig((prev) => ({
-                                  ...prev,
-                                  feeTreatment: 'OPEX',
-                                }));
-                              }}
-                              className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                                tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled
-                                  ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20 shadow-xs'
-                                  : 'border-slate-200 bg-white hover:bg-slate-50'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-slate-900">Cooperative OPEX (Absorbed)</span>
-                                {(tenantPaymongoConfig.feeTreatment === 'OPEX' || !tenantPaymongoConfig.isEnabled) && (
-                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                )}
-                              </div>
-                              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                                Member pays the exact base due amount with <strong>₱0.00 gateway fee</strong>. The 1.5% fee is recorded under Cooperative Operating Expense (5-02-14).
-                              </p>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Test Connection Results Card */}
-                      {tenantPaymongoTestResult && (
-                        <div
-                          className={`p-4 rounded-xl border text-xs space-y-1 ${
-                            tenantPaymongoTestResult.success
-                              ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
-                              : 'bg-rose-50/70 border-rose-300 text-rose-950'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 font-bold">
-                            {tenantPaymongoTestResult.success ? (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            ) : (
-                              <AlertCircle className="w-4 h-4 text-rose-600" />
-                            )}
-                            <span>
-                              {tenantPaymongoTestResult.success ? 'PayMongo API Connection Successful' : 'Connection Failure'}
-                            </span>
-                          </div>
-                          <p className="opacity-90">{tenantPaymongoTestResult.message}</p>
-                        </div>
-                      )}
-
-                      {/* Informational Guidance Box */}
-                      <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2">
-                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
-                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                          <span className="uppercase tracking-wider">Independent Merchant Account Direct Settlement</span>
-                        </div>
-                        <p className="text-xs text-slate-300 leading-relaxed">
-                          By configuring your cooperative&apos;s own PayMongo API keys, all QR Ph payments generated by members in the Member Self-Service portal will be directly remitted into your cooperative&apos;s verified bank account via PayMongo settlement.
-                        </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -14931,7 +16187,7 @@ export default function AdminDashboard() {
                     <div className="text-xs text-slate-500 font-mono">
                       {tenantPaymongoConfig.updatedAt
                         ? `Last updated: ${new Date(tenantPaymongoConfig.updatedAt).toLocaleString()} by ${tenantPaymongoConfig.updatedBy || 'Admin'}`
-                        : 'Active channels: Bank Transfer, e-Wallet Transfer, PayMongo QR Ph'}
+                        : 'Active configuration: Per-Product Rails (Share Capital, Savings, Loans)'}
                     </div>
 
                     <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -14946,7 +16202,7 @@ export default function AdminDashboard() {
                         ) : (
                           <Zap className="w-3.5 h-3.5 text-amber-600" />
                         )}
-                        <span>{tenantPaymongoTesting ? 'Testing...' : 'Test PayMongo Connection'}</span>
+                        <span>{tenantPaymongoTesting ? 'Testing...' : 'Test PayMongo API'}</span>
                       </button>
 
                       <button
@@ -14960,7 +16216,7 @@ export default function AdminDashboard() {
                         ) : (
                           <CheckCircle2 className="w-3.5 h-3.5" />
                         )}
-                        <span>{paymentOptionsSaving || tenantPaymongoSaving ? 'Saving...' : 'Save Payment Options'}</span>
+                        <span>{paymentOptionsSaving || tenantPaymongoSaving ? 'Saving...' : 'Save All Payment Options & Product Setups'}</span>
                       </button>
                     </div>
                   </div>
