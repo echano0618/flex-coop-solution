@@ -3709,15 +3709,17 @@ export default function MemberPortalPage() {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-xl font-bold truncate text-white">{currentMember.name}</h2>
                   <div className="text-xs text-slate-300 font-mono mt-0.5">
-                    {currentMember.memberNumber}
+                    {currentMember.memberNumber || (currentMember.applicantId ? `Applicant ID: ${currentMember.applicantId}` : '— (Pending Approval)')}
                   </div>
                 </div>
                 <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 border ${
-                  currentMember.classification === 'REGULAR'
+                  !currentMember.memberNumber || currentMember.isApplicant
+                    ? 'bg-amber-500/30 text-amber-100 border-amber-400/40'
+                    : currentMember.classification === 'REGULAR'
                     ? 'bg-emerald-500/30 text-emerald-100 border-emerald-400/40'
                     : 'bg-amber-500/30 text-amber-100 border-amber-400/40'
                 }`}>
-                  {currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'}
+                  {!currentMember.memberNumber || currentMember.isApplicant ? 'Membership Applicant' : (currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member')}
                 </span>
               </div>
 

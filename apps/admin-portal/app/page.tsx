@@ -3206,7 +3206,12 @@ export default function AdminDashboard() {
         const memsData = await memsRes.value.json();
         if (memsData.success && Array.isArray(memsData.data)) {
           memsData.data.forEach((onlineMem: any) => {
-            const isApproved = onlineMem.kycStatus === 'VERIFIED' || onlineMem.status === 'ACTIVE' || Boolean(onlineMem.memberNumber || onlineMem.memberNo);
+            const isApproved =
+              onlineMem.isApplicant !== true &&
+              onlineMem.status !== 'PENDING_APPROVAL' &&
+              onlineMem.status !== 'SUBMITTED' &&
+              onlineMem.status !== 'UNDER_REVIEW' &&
+              (onlineMem.kycStatus === 'VERIFIED' || onlineMem.status === 'ACTIVE');
             const idx = list.findIndex(
               (m) =>
                 m.id === onlineMem.id ||
@@ -3218,10 +3223,11 @@ export default function AdminDashboard() {
             );
             const normalizedMem = {
               ...onlineMem,
-              id: onlineMem.id || onlineMem.memberNumber || onlineMem.memberNo,
-              applicantId: onlineMem.applicantId,
+              id: onlineMem.id || onlineMem.applicantId || onlineMem.memberNumber || onlineMem.memberNo,
+              applicantId: onlineMem.applicantId || (!isApproved ? (onlineMem.id?.startsWith('A') ? onlineMem.id : undefined) : undefined),
               isApplicant: !isApproved,
               memberNo: isApproved ? (onlineMem.memberNumber || onlineMem.memberNo || onlineMem.id) : '',
+              memberNumber: isApproved ? (onlineMem.memberNumber || onlineMem.memberNo || onlineMem.id) : '',
             };
             if (idx >= 0) {
               list[idx] = { ...list[idx], ...normalizedMem };
@@ -3452,9 +3458,18 @@ export default function AdminDashboard() {
     setTimeout(() => setLosNotification(null), 6000);
   };
 
+  const isApplicantRecord = (m: MemberRecord | any) => {
+    if (!m) return false;
+    if (m.isApplicant === true) return true;
+    if (m.status === 'PENDING_APPROVAL' || m.status === 'SUBMITTED' || m.status === 'UNDER_REVIEW') return true;
+    if (m.kycStatus === 'PENDING_REVIEW' || m.kycStatus === 'SUBMITTED') return true;
+    if (m.applicantId && !m.memberNo) return true;
+    return false;
+  };
+
   const filteredMembers = members.filter((m) => {
     // Separate applicants from members:
-    const isApplicant = m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId));
+    const isApplicant = isApplicantRecord(m);
     if (directoryTab === 'MEMBERS' && isApplicant) return false;
     if (directoryTab === 'APPLICANTS' && !isApplicant) return false;
 
@@ -5386,7 +5401,7 @@ export default function AdminDashboard() {
                   <Users className="w-3.5 h-3.5 text-slate-700" /> Verified Members
                 </div>
                 <div className="text-xl font-black text-slate-900">
-                  {members.filter((m) => !(m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId)))).length}
+                  {members.filter((m) => !isApplicantRecord(m)).length}
                 </div>
                 <div className="text-[10px] text-slate-500">Regular &amp; Associate (Official Member No)</div>
               </div>
@@ -5396,7 +5411,7 @@ export default function AdminDashboard() {
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Active in Good Standing
                 </div>
                 <div className="text-xl font-black text-emerald-800">
-                  {members.filter((m) => !(m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))) && m.kycStatus === 'VERIFIED' && m.status !== 'INACTIVE').length}
+                  {members.filter((m) => !isApplicantRecord(m) && m.kycStatus === 'VERIFIED' && m.status !== 'INACTIVE').length}
                 </div>
                 <div className="text-[10px] text-emerald-700">Underwritten &amp; dividend-eligible</div>
               </div>
@@ -5406,8 +5421,8 @@ export default function AdminDashboard() {
                   <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" /> Membership Applicants
                 </div>
                 <div className="text-xl font-black text-amber-900 flex items-center gap-1.5">
-                  {members.filter((m) => m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))).length}
-                  {members.filter((m) => m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))).length > 0 && (
+                  {members.filter(isApplicantRecord).length}
+                  {members.filter(isApplicantRecord).length > 0 && (
                     <span className="text-[10px] font-bold bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded">Action Req</span>
                   )}
                 </div>
@@ -5450,7 +5465,7 @@ export default function AdminDashboard() {
                     ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                     : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {members.filter((m) => !(m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId)))).length}
+                  {members.filter((m) => !isApplicantRecord(m)).length}
                 </span>
               </button>
               <button
@@ -5469,7 +5484,7 @@ export default function AdminDashboard() {
                     ? 'bg-amber-100 text-amber-900 border border-amber-300'
                     : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {members.filter((m) => m.isApplicant === true || m.kycStatus === 'PENDING_REVIEW' || (!m.memberNo && Boolean(m.applicantId))).length}
+                  {members.filter(isApplicantRecord).length}
                 </span>
               </button>
             </div>
@@ -5832,7 +5847,7 @@ export default function AdminDashboard() {
                   <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 text-white flex justify-between items-start">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        {Boolean(selectedMemberForReview.memberNo) && !selectedMemberForReview.isApplicant && selectedMemberForReview.kycStatus !== 'PENDING_REVIEW' ? (
+                        {Boolean(selectedMemberForReview.memberNo) && !isApplicantRecord(selectedMemberForReview) ? (
                           <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
                             Member No: {selectedMemberForReview.memberNo}
                           </span>
@@ -5853,7 +5868,7 @@ export default function AdminDashboard() {
                               : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           }`}
                         >
-                          {selectedMemberForReview.classification} {selectedMemberForReview.isApplicant || selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? 'APPLICANT' : 'MEMBER'}
+                          {selectedMemberForReview.classification} {isApplicantRecord(selectedMemberForReview) ? 'APPLICANT' : 'MEMBER'}
                         </span>
                         {selectedMemberForReview.kycStatus === 'PENDING_REVIEW' ? (
                           <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded animate-pulse">
@@ -6460,7 +6475,7 @@ export default function AdminDashboard() {
                           : 'Decline / Return Member Application'}
                       </h3>
                       <p className="text-xs text-slate-500 font-mono">
-                        {(memberConfirmModal.member.isApplicant || memberConfirmModal.member.kycStatus === 'PENDING_REVIEW' || !memberConfirmModal.member.memberNo)
+                        {isApplicantRecord(memberConfirmModal.member)
                           ? `Applicant ID: ${memberConfirmModal.member.applicantId || `A${String(memberConfirmModal.member.id).replace(/\D/g, '').padEnd(8, '0').slice(-8)}`}`
                           : memberConfirmModal.member.memberNo} • {memberConfirmModal.member.name}
                       </p>
