@@ -82,6 +82,8 @@ export class AppDataStore {
   public creditTopupRequests: PlatformCreditTopupRequest[] = [];
   public memberCredentials: Map<string, Map<string, any>> = new Map(); // tenantId -> (identifier -> cred)
   public bankTransferRequests: Map<string, BankTransferPaymentRequest[]> = new Map(); // tenantId -> requests
+  public announcements: Map<string, any[]> = new Map(); // tenantId -> announcements
+  public deletedAnnouncements: Map<string, Set<string>> = new Map(); // tenantId -> Set<annId>
 
   constructor() {
     this.seedDefaultPaymentMethods();

@@ -124,6 +124,10 @@ export class FirestoreCoopService {
     return this.tenantDoc(tenantId).collection('amlc_alerts');
   }
 
+  public announcementsCol(tenantId: string) {
+    return this.tenantDoc(tenantId).collection('announcements');
+  }
+
   public operatorsCol() {
     return this.db.collection('operators');
   }
@@ -380,6 +384,55 @@ export class FirestoreCoopService {
   public async deleteLoanProduct(tenantId: string, productId: string): Promise<void> {
     if (!this.isConfigured()) return;
     await this.loanProductsCol(tenantId).doc(productId).delete();
+  }
+
+  // --------------------------------------------------------------------------
+  // News & Announcements (Persisted in /tenants/{tenantId}/announcements)
+  // --------------------------------------------------------------------------
+
+  public async saveAnnouncement(tenantId: string, item: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    const annId = item.id || `ann_${Date.now()}`;
+    await this.announcementsCol(tenantId).doc(annId).set(
+      {
+        ...item,
+        id: annId,
+        tenantId,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  public async getAnnouncement(tenantId: string, id: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    const doc = await this.announcementsCol(tenantId).doc(id).get();
+    if (!doc.exists) return null;
+    const data = doc.data() as any;
+    if (data?.isDeleted === true || data?.status === 'DELETED') return null;
+    return data;
+  }
+
+  public async listAnnouncements(tenantId: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    const snapshot = await this.announcementsCol(tenantId).get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
+  }
+
+  public async deleteAnnouncement(tenantId: string, id: string): Promise<void> {
+    if (!this.isConfigured()) return;
+    // Persist soft-deletion marker in Firestore so the ID is never re-seeded or resurrected
+    await this.announcementsCol(tenantId).doc(id).set(
+      {
+        id,
+        tenantId,
+        isDeleted: true,
+        status: 'DELETED',
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -837,6 +890,101 @@ export class FirestoreCoopService {
     }
 
     return null;
+  }
+
+  public async listStaffCredentials(tenantId: string): Promise<any[]> {
+    const results: any[] = [];
+    const seenIds = new Set<string>();
+
+    // 1. Collect from in-memory cache
+    const memCreds = dbStore.memberCredentials.get(tenantId);
+    if (memCreds) {
+      for (const cred of Array.from(memCreds.values())) {
+        if (cred && cred.isStaff) {
+          const key = (cred.id || cred.email || '').toLowerCase();
+          if (!seenIds.has(key)) {
+            seenIds.add(key);
+            results.push(cred);
+          }
+        }
+      }
+    }
+
+    // 2. Query Firestore if configured
+    if (this.isConfigured()) {
+      try {
+        const snap = await this.credentialsCol(tenantId).where('isStaff', '==', true).get();
+        snap.forEach((doc) => {
+          const data = doc.data();
+          const key = (data.id || data.email || doc.id).toLowerCase();
+          if (!seenIds.has(key)) {
+            seenIds.add(key);
+            results.push(data);
+          }
+        });
+      } catch (err) {
+        // Fallback gracefully
+      }
+    }
+
+    return results;
+  }
+
+  public async updateStaffCredentialStatus(tenantId: string, userId: string, status: 'ACTIVE' | 'INACTIVE'): Promise<boolean> {
+    const cleanId = (userId || '').trim().toLowerCase();
+    let updated = false;
+
+    // 1. Update in-memory dbStore
+    const memCreds = dbStore.memberCredentials.get(tenantId);
+    if (memCreds) {
+      for (const [key, val] of Array.from(memCreds.entries())) {
+        if (
+          val.id?.toLowerCase() === cleanId ||
+          val.email?.toLowerCase() === cleanId ||
+          val.username?.toLowerCase() === cleanId ||
+          key.toLowerCase() === cleanId
+        ) {
+          val.status = status;
+          val.updatedAt = new Date().toISOString();
+          updated = true;
+        }
+      }
+    }
+
+    // 2. Update in Firestore
+    if (this.isConfigured()) {
+      try {
+        const col = this.credentialsCol(tenantId);
+        // By document ID
+        const docRef = col.doc(cleanId);
+        const docSnap = await docRef.get();
+        if (docSnap.exists) {
+          await docRef.update({ status, updatedAt: new Date().toISOString() });
+          updated = true;
+        } else {
+          // Query by id field
+          const byId = await col.where('id', '==', userId).get();
+          if (!byId.empty) {
+            for (const d of byId.docs) {
+              await d.ref.update({ status, updatedAt: new Date().toISOString() });
+              updated = true;
+            }
+          }
+          // Query by email field
+          const byEmail = await col.where('email', '==', cleanId).get();
+          if (!byEmail.empty) {
+            for (const d of byEmail.docs) {
+              await d.ref.update({ status, updatedAt: new Date().toISOString() });
+              updated = true;
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback gracefully
+      }
+    }
+
+    return updated;
   }
 
   // --------------------------------------------------------------------------

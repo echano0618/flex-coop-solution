@@ -17,6 +17,7 @@ import {
 import { dbStore, PlatformPaymentMethod, PlatformCreditTopupRequest } from '../../core/store';
 import { MailerService } from '../../core/mailer.service';
 import { FirestoreCoopService } from '../../core/firestore.service';
+import { AuthService } from '../../core/auth';
 
 export class OperatorService {
   private static isInitialized = false;
@@ -501,6 +502,23 @@ export class OperatorService {
         fsService.saveMember(tenantId, gmMember).catch(() => {});
       } catch {}
     }
+
+    // Provision ONLY the Primary Administrator from coop-register as the initial staff user
+    const adminFullName = [reg.adminFirstName, reg.adminMiddleName, reg.adminLastName].filter(Boolean).join(' ') || reg.adminFirstName || 'Primary Administrator';
+    const adminEmail = (reg.adminEmail || reg.contactEmail).trim().toLowerCase();
+    const adminUsername = adminEmail.split('@')[0] || 'admin';
+    const adminUserId = `usr_admin_${reg.slug}_01`;
+
+    AuthService.addStaffAccount({
+      id: adminUserId,
+      email: adminEmail,
+      fullName: adminFullName,
+      role: 'GENERAL_MANAGER',
+      tenantId: tenant.id,
+      roleTitle: 'General Manager / Primary Administrator',
+      status: 'ACTIVE',
+      username: adminUsername,
+    });
 
     // Initial Share Capital and Savings Account for the General Manager
     dbStore.shareAccounts.set(tenantId, [
@@ -1329,6 +1347,28 @@ https://tuntongtech.com`;
       if (gmMember) {
         await fs.saveMember(res.tenant.id, gmMember);
       }
+
+      // 5. Provision Primary Administrator staff credential in Firestore
+      const adminFullName = [res.registration.adminFirstName, res.registration.adminMiddleName, res.registration.adminLastName].filter(Boolean).join(' ') || res.registration.adminFirstName || 'Primary Administrator';
+      const adminEmail = (res.registration.adminEmail || res.registration.contactEmail).trim().toLowerCase();
+      const adminUsername = adminEmail.split('@')[0] || 'admin';
+      const adminUserId = `usr_admin_${res.registration.slug}_01`;
+
+      await fs.saveMemberCredential(res.tenant.id, {
+        id: adminUserId,
+        tenantId: res.tenant.id,
+        fullName: adminFullName,
+        email: adminEmail,
+        username: adminUsername,
+        password: res.registration.oneTimePassword,
+        pin: '123456',
+        role: 'GENERAL_MANAGER',
+        roleTitle: 'General Manager / Primary Administrator',
+        isStaff: true,
+        status: 'ACTIVE',
+        kycStatus: 'VERIFIED',
+        createdAt: new Date().toISOString(),
+      });
     } catch (err) {
       console.warn('[OPERATOR] approveRegistrationAsync firestore provisioning warning:', err);
     }

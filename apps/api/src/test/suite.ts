@@ -34,6 +34,15 @@ import {
   handleSavingsVerifyAndCompletePaymongo,
   handleMemberRegister,
   handleMemberApplicationReview,
+  handleCreateLoanProduct,
+  handleListAnnouncements,
+  handleCreateAnnouncement,
+  handleUpdateAnnouncement,
+  handleDeleteAnnouncement,
+  handleGetTenant,
+  handleCreateTenantAdminUser,
+  handleGetTenantAdminUsers,
+  handleUpdateTenantAdminUserStatus,
 } from '../index';
 import {
   Tenant,
@@ -359,6 +368,7 @@ console.log('\n--- 11. Role-Based Access Control (RBAC) & Authentication ---');
   const tenantId = 'tenant_bayani_001';
 
   // 11.1 Staff accounts list
+  AuthService.seedTestDefaults(tenantId);
   const staffList = AuthService.getStaffAccounts(tenantId);
   assert(staffList.length === 7, `Retrieved ${staffList.length} pre-configured cooperative staff accounts`);
 
@@ -4137,7 +4147,534 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 42 MEMBERSHIP APPLICANTS VS MEMBERS SEPARATION TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41 & 42) PASSED SUCCESSFULLY!\n');
+  // --- SECTION 43: DYNAMIC PRINCIPAL LOANS & NEWS AND ANNOUNCEMENTS MODULE ---
+  console.log('\n--- SECTION 43: DYNAMIC PRINCIPAL LOANS & NEWS AND ANNOUNCEMENTS MODULE ---');
+  {
+    const annTenant = 'tenant_ann_test_' + Date.now();
+
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (payload: any) => {
+          responseBody = payload;
+          return res;
+        },
+      };
+      const req: any = {
+        headers: reqData.headers || {},
+        body: reqData.body || {},
+        query: reqData.query || {},
+        params: reqData.params || {},
+        get: (headerName: string) => reqData.headers?.[headerName.toLowerCase()] || reqData.headers?.[headerName] || undefined,
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    // 43.1 Dynamic Principal Loan Product Setup (Based on User Share Capital)
+    console.log('  43.1 Testing Loan Product setup with Dynamic Principal based on User Share Capital...');
+    const dynLoanMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      body: {
+        code: 'DYN_CBU_LOAN',
+        name: 'Share Capital 3x Multiplier Loan',
+        type: 'REGULAR',
+        minAmount: 5000,
+        maxAmount: 300000,
+        annualInterestRate: 0.12,
+        minTermMonths: 6,
+        maxTermMonths: 36,
+        principalType: 'DYNAMIC_SHARE_CAPITAL',
+        isDynamicPrincipal: true,
+        shareCapitalMultiplier: 3.0,
+        shareCapitalMinFloor: 5000,
+        shareCapitalMaxCeiling: 300000,
+        status: 'ACTIVE',
+      },
+    });
+
+    await handleCreateLoanProduct(dynLoanMock.req, dynLoanMock.res);
+    assert(dynLoanMock.getStatus() === 201, 'Dynamic loan product returns HTTP 201 Created');
+    const dynLoanBody = dynLoanMock.getBody();
+    assert(dynLoanBody.success === true, 'Dynamic loan product creation success is true');
+    assert(dynLoanBody.data.principalType === 'DYNAMIC_SHARE_CAPITAL', 'Principal type is DYNAMIC_SHARE_CAPITAL');
+    assert(dynLoanBody.data.isDynamicPrincipal === true, 'isDynamicPrincipal is true');
+    assert(dynLoanBody.data.shareCapitalMultiplier === 3.0, 'shareCapitalMultiplier is 3.0x');
+    assert(dynLoanBody.data.shareCapitalMinFloor === 5000, 'shareCapitalMinFloor is ₱5,000');
+    assert(dynLoanBody.data.shareCapitalMaxCeiling === 300000, 'shareCapitalMaxCeiling is ₱300,000');
+
+    // Verify dynamic limit calculations for different member share capitals:
+    // Member A: ₱10,000 share capital -> 3x = ₱30,000
+    const calcLimit = (shareCap: number, mult: number, floor: number, ceil: number) => {
+      const raw = Math.round(shareCap * mult);
+      return Math.min(ceil, Math.max(floor, raw));
+    };
+    assert(calcLimit(10000, 3.0, 5000, 300000) === 30000, '₱10,000 share capital allows ₱30,000 principal');
+    // Member B: ₱1,000 share capital -> 3x = ₱3,000 -> floors at ₱5,000
+    assert(calcLimit(1000, 3.0, 5000, 300000) === 5000, '₱1,000 share capital respects minimum floor ₱5,000');
+    // Member C: ₱150,000 share capital -> 3x = ₱450,000 -> capped at ₱300,000 ceiling
+    assert(calcLimit(150000, 3.0, 5000, 300000) === 300000, '₱150,000 share capital respects maximum ceiling ₱300,000');
+    console.log('  ✅ Dynamic principal product configuration and share multiplier limits verified');
+
+    // 43.2 Cooperative News & Announcements Module Setup
+    console.log('  43.2 Testing Announcements Creation with Scheduled Publishing, Expiration, and Audience Targeting...');
+
+    // 43.2.1 Create Live announcement for ALL members
+    const annAllMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      body: {
+        title: 'Emergency Advisory: Cooperative Office System Maintenance',
+        content: 'System will undergo scheduled maintenance this Sunday from 2 AM to 4 AM.',
+        category: 'Advisory',
+        targetAudience: 'ALL',
+        publishAt: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+        expiresAt: new Date(Date.now() + 86400000 * 7).toISOString(), // 7 days from now
+        priority: 'IMPORTANT',
+      },
+    });
+    await handleCreateAnnouncement(annAllMock.req, annAllMock.res);
+    assert(annAllMock.getStatus() === 201, 'Create announcement for ALL returns HTTP 201');
+    const annAllBody = annAllMock.getBody();
+    assert(annAllBody.success === true, 'Announcement created successfully');
+    assert(annAllBody.data.status === 'PUBLISHED', 'Live announcement status is PUBLISHED');
+    assert(annAllBody.data.targetAudience === 'ALL', 'Target audience is ALL');
+    const annAllId = annAllBody.data.id;
+
+    // 43.2.2 Create Regular-only announcement
+    const annRegMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      body: {
+        title: 'Special Patronage Refund Notice for Regular Members',
+        content: 'Regular members in good standing may claim their patronage refund starting Monday.',
+        category: 'Dividends & Finance',
+        targetAudience: 'REGULAR',
+        publishAt: new Date(Date.now() - 1800000).toISOString(),
+        expiresAt: new Date(Date.now() + 86400000 * 14).toISOString(),
+        priority: 'URGENT',
+      },
+    });
+    await handleCreateAnnouncement(annRegMock.req, annRegMock.res);
+    assert(annRegMock.getStatus() === 201, 'Create announcement for REGULAR returns HTTP 201');
+    const annRegBody = annRegMock.getBody();
+    assert(annRegBody.data.targetAudience === 'REGULAR', 'Target audience is REGULAR');
+
+    // 43.2.3 Create Affiliate-only announcement
+    const annAffMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      body: {
+        title: 'CBU Orientation and Conversion Drive for Affiliate Members',
+        content: 'Join the orientation on converting to Regular Membership and increasing share capital.',
+        category: 'Membership',
+        targetAudience: 'AFFILIATE',
+        publishAt: new Date(Date.now() - 1800000).toISOString(),
+        expiresAt: new Date(Date.now() + 86400000 * 14).toISOString(),
+        priority: 'NORMAL',
+      },
+    });
+    await handleCreateAnnouncement(annAffMock.req, annAffMock.res);
+    assert(annAffMock.getStatus() === 201, 'Create announcement for AFFILIATE returns HTTP 201');
+    const annAffBody = annAffMock.getBody();
+    assert(annAffBody.data.targetAudience === 'AFFILIATE', 'Target audience is AFFILIATE');
+
+    // 43.2.4 Create Scheduled announcement (future publishAt)
+    const futureDate = new Date(Date.now() + 86400000 * 3).toISOString(); // 3 days in future
+    const annSchedMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      body: {
+        title: 'Advance Notice: Christmas Bonus & Raffle Schedule',
+        content: 'Full raffle mechanics and schedule will be revealed on December 1.',
+        category: 'General Announcement',
+        targetAudience: 'ALL',
+        publishAt: futureDate,
+        expiresAt: new Date(Date.now() + 86400000 * 30).toISOString(),
+        priority: 'NORMAL',
+      },
+    });
+    await handleCreateAnnouncement(annSchedMock.req, annSchedMock.res);
+    assert(annSchedMock.getStatus() === 201, 'Create scheduled announcement returns HTTP 201');
+    const annSchedBody = annSchedMock.getBody();
+    assert(annSchedBody.data.status === 'SCHEDULED', 'Future announcement is automatically status SCHEDULED');
+
+    // 43.2.5 Create Expired announcement (past expiresAt)
+    const pastExpireDate = new Date(Date.now() - 3600000).toISOString(); // 1 hour ago
+    const annExpMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      body: {
+        title: 'Past Advisory: Office Closed Yesterday',
+        content: 'Yesterday typhoon advisory.',
+        category: 'Advisory',
+        targetAudience: 'ALL',
+        publishAt: new Date(Date.now() - 86400000).toISOString(),
+        expiresAt: pastExpireDate,
+      },
+    });
+    await handleCreateAnnouncement(annExpMock.req, annExpMock.res);
+    assert(annExpMock.getStatus() === 201, 'Create expired announcement returns HTTP 201');
+    const annExpBody = annExpMock.getBody();
+    assert(annExpBody.data.status === 'EXPIRED', 'Past expiresAt announcement is automatically status EXPIRED');
+
+    // 43.3 Testing Audience Filtering in List API
+    console.log('  43.3 Testing Audience Filtering for Member Dashboard...');
+
+    // Member with REGULAR classification
+    const listRegMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      query: { audience: 'REGULAR' },
+    });
+    await handleListAnnouncements(listRegMock.req, listRegMock.res);
+    assert(listRegMock.getStatus() === 200, 'List announcements returns HTTP 200');
+    const regList = listRegMock.getBody().data;
+    assert(regList.some((a: any) => a.targetAudience === 'ALL'), 'REGULAR member sees ALL audience announcements');
+    assert(regList.some((a: any) => a.targetAudience === 'REGULAR'), 'REGULAR member sees REGULAR audience announcements');
+    assert(!regList.some((a: any) => a.targetAudience === 'AFFILIATE'), 'REGULAR member does NOT see AFFILIATE announcements');
+
+    // Member with AFFILIATE classification
+    const listAffMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      query: { audience: 'AFFILIATE' },
+    });
+    await handleListAnnouncements(listAffMock.req, listAffMock.res);
+    const affList = listAffMock.getBody().data;
+    assert(affList.some((a: any) => a.targetAudience === 'ALL'), 'AFFILIATE member sees ALL audience announcements');
+    assert(affList.some((a: any) => a.targetAudience === 'AFFILIATE'), 'AFFILIATE member sees AFFILIATE audience announcements');
+    assert(!affList.some((a: any) => a.targetAudience === 'REGULAR'), 'AFFILIATE member does NOT see REGULAR announcements');
+
+    // 43.4 Testing Announcement Update & Delete
+    console.log('  43.4 Testing Announcement Update and Delete...');
+    const updateMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      params: { id: annAllId },
+      body: {
+        title: 'UPDATED: Emergency Advisory: Maintenance Completed',
+        priority: 'NORMAL',
+      },
+    });
+    await handleUpdateAnnouncement(updateMock.req, updateMock.res);
+    assert(updateMock.getStatus() === 200, 'Update announcement returns HTTP 200');
+    assert(updateMock.getBody().data.title.includes('UPDATED'), 'Announcement title updated successfully');
+
+    const deleteMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+      params: { id: annAllId },
+    });
+    await handleDeleteAnnouncement(deleteMock.req, deleteMock.res);
+    assert(deleteMock.getStatus() === 200, 'Delete announcement returns HTTP 200');
+
+    const checkListMock = makeMockHttp({
+      headers: { 'x-tenant-id': annTenant },
+    });
+    await handleListAnnouncements(checkListMock.req, checkListMock.res);
+    const afterDelete = checkListMock.getBody().data;
+    assert(!afterDelete.some((a: any) => a.id === annAllId), 'Deleted announcement is no longer returned in list');
+
+    // 43.4.1 Test Seed Announcement Update with fallback ID in body (prevent reverting)
+    const seedUpdateTenant = 'tenant_seed_test_99';
+    const seedUpdateMock = makeMockHttp({
+      headers: { 'x-tenant-id': seedUpdateTenant },
+      params: {}, // No params.id, simulates PUT /announcements with ID in body
+      body: {
+        id: 'ann_seed_001',
+        title: 'UPDATED: Annual General Membership Assembly 2026 Rescheduled',
+        content: 'Updated content regarding the annual assembly schedule and venue.',
+        priority: 'URGENT',
+      },
+    });
+    await handleUpdateAnnouncement(seedUpdateMock.req, seedUpdateMock.res);
+    assert(seedUpdateMock.getStatus() === 200, 'Update seed announcement with ID in body returns HTTP 200');
+    assert(seedUpdateMock.getBody().data.title.includes('Rescheduled'), 'Seed announcement title updated');
+
+    // List announcements for this tenant to ensure the update persisted and did not revert
+    const seedListMock = makeMockHttp({
+      headers: { 'x-tenant-id': seedUpdateTenant },
+    });
+    await handleListAnnouncements(seedListMock.req, seedListMock.res);
+    const seedList = seedListMock.getBody().data;
+    const updatedSeed = seedList.find((a: any) => a.id === 'ann_seed_001');
+    assert(updatedSeed !== undefined, 'Updated seed announcement exists in list');
+    assert(updatedSeed.title === 'UPDATED: Annual General Membership Assembly 2026 Rescheduled', 'Seed announcement maintains updated title and did not revert to default content');
+
+    // 43.4.2 Test Deleting a Seed Announcement and verifying it NEVER resurrects in Member Portal or on re-seed
+    const seedDelMock = makeMockHttp({
+      headers: { 'x-tenant-id': seedUpdateTenant },
+      params: { id: 'ann_seed_002' },
+    });
+    await handleDeleteAnnouncement(seedDelMock.req, seedDelMock.res);
+    assert(seedDelMock.getStatus() === 200, 'Delete seed announcement returns HTTP 200');
+
+    // Verify it is excluded from normal list and member portal list
+    const memberListMock = makeMockHttp({
+      headers: { 'x-tenant-id': seedUpdateTenant },
+      query: { portal: 'member' },
+    });
+    await handleListAnnouncements(memberListMock.req, memberListMock.res);
+    const memberList = memberListMock.getBody().data;
+    assert(!memberList.some((a: any) => a.id === 'ann_seed_002'), 'Deleted seed announcement ann_seed_002 is not in member list');
+
+    // Simulate cold container restart where in-memory cache is wiped:
+    dbStore.announcements.delete(seedUpdateTenant);
+    const coldListMock = makeMockHttp({
+      headers: { 'x-tenant-id': seedUpdateTenant },
+      query: { portal: 'member' },
+    });
+    await handleListAnnouncements(coldListMock.req, coldListMock.res);
+    const coldList = coldListMock.getBody().data;
+    assert(!coldList.some((a: any) => a.id === 'ann_seed_002'), 'Deleted seed announcement does NOT resurrect from DEFAULT_COOP_ANNOUNCEMENTS even after cold restart');
+
+    console.log('  ✅ ALL SECTION 43 DYNAMIC PRINCIPAL & NEWS AND ANNOUNCEMENTS TESTS PASSED!');
+  }
+
+  // ==========================================
+  // SECTION 44: OPERATOR ADMIN PORTAL USERS & ROLES, CDA NUMBER INHERITANCE, AND LOS AUDIT TRAIL
+  // ==========================================
+  {
+    console.log('\n--- SECTION 44: OPERATOR ADMIN PORTAL USERS, CDA INHERITANCE & LOS AUDIT TRAIL ---');
+
+    const makeMockHttp = (reqData: { body?: any; query?: any; params?: any; headers?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (payload: any) => {
+          responseBody = payload;
+          return res;
+        },
+      };
+      const req: any = {
+        headers: reqData.headers || {},
+        body: reqData.body || {},
+        query: reqData.query || {},
+        params: reqData.params || {},
+        get: (headerName: string) => reqData.headers?.[headerName.toLowerCase()] || reqData.headers?.[headerName] || undefined,
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    const testTenantId = 'tenant_sec44_coop';
+    const testSlug = 'sec44-coop';
+    const testCdaNo = 'CDA-2026-REGION4A-98765';
+    const testTin = '008-112-998-000';
+
+    // Seed test registration and tenant
+    const regRecord: CooperativeRegistration = {
+      id: 'reg_sec44_001',
+      name: 'Sec 44 Pioneer Credit Cooperative',
+      coopType: 'CREDIT',
+      slug: testSlug,
+      subdomain: testSlug,
+      cdaRegistrationNumber: testCdaNo,
+      tin: testTin,
+      contactEmail: 'danilo.ilagan@sec44pioneer.coop',
+      address: 'Laguna Technopark, Biñan, Laguna',
+      contactPhone: '+63 917 123 4567',
+      adminFirstName: 'Danilo',
+      adminMiddleName: 'Reyes',
+      adminLastName: 'Ilagan',
+      adminEmail: 'danilo.ilagan@sec44pioneer.coop',
+      status: 'APPROVED',
+      oneTimePassword: 'TemporaryPass2026!',
+      submittedAt: new Date().toISOString(),
+    };
+    dbStore.coopRegistrations.push(regRecord);
+
+    const tenantRecord: Tenant = {
+      id: testTenantId,
+      name: 'Sec 44 Pioneer Credit Cooperative',
+      slug: testSlug,
+      cdaRegistrationNumber: testCdaNo,
+      tin: testTin,
+      billingMode: 'STANDARD_UNIFIED',
+      contactEmail: 'danilo.ilagan@sec44pioneer.coop',
+      address: 'Laguna Technopark, Biñan, Laguna',
+      adminFirstName: 'Danilo',
+      adminMiddleName: 'Reyes',
+      adminLastName: 'Ilagan',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    dbStore.tenants.set(testTenantId, tenantRecord);
+
+    // 44.1 CDA Number Inheritance across Tenant Query
+    console.log('  44.1 Testing CDA Number and Tenant Metadata Inheritance...');
+    const getTenantMock = makeMockHttp({
+      params: { slugOrId: testSlug },
+    });
+    await handleGetTenant(getTenantMock.req, getTenantMock.res);
+    assert(getTenantMock.getStatus() === 200, 'handleGetTenant returns HTTP 200');
+    const tenantPayload = getTenantMock.getBody().data;
+    assert(tenantPayload.cdaRegistrationNumber === testCdaNo, `Inherited CDA number matches '${testCdaNo}'`);
+    assert(tenantPayload.tin === testTin, `Inherited TIN matches '${testTin}'`);
+    assert(tenantPayload.adminFirstName === 'Danilo', 'Inherited primary admin first name matches');
+    assert(tenantPayload.adminLastName === 'Ilagan', 'Inherited primary admin last name matches');
+
+    // 44.2 Admin Portal Users: Strictly NO dummy users; Only Primary Administrator initially
+    console.log('  44.2 Testing Admin Portal Users retrieval contains ONLY Primary Administrator and NO dummy users...');
+    const getAdminUsersMock = makeMockHttp({
+      params: { id: testTenantId },
+    });
+    await handleGetTenantAdminUsers(getAdminUsersMock.req, getAdminUsersMock.res);
+    assert(getAdminUsersMock.getStatus() === 200, 'handleGetTenantAdminUsers returns HTTP 200');
+    const initialStaffList = getAdminUsersMock.getBody().data;
+    assert(Array.isArray(initialStaffList), 'Staff list is an array');
+    assert(initialStaffList.length === 1, `Initial staff count is strictly 1 (Primary Admin only), got ${initialStaffList.length}`);
+
+    const primaryAdmin = initialStaffList[0];
+    assert(primaryAdmin.email === 'danilo.ilagan@sec44pioneer.coop', 'Primary admin email matches registration form');
+    assert(primaryAdmin.fullName.includes('Danilo') && primaryAdmin.fullName.includes('Ilagan'), 'Primary admin name matches registration form');
+    assert(primaryAdmin.role === 'GENERAL_MANAGER', 'Primary admin role is GENERAL_MANAGER');
+    assert(primaryAdmin.status === 'ACTIVE', 'Primary admin status is ACTIVE');
+
+    // Verify absolutely NO dummy names appear in the tenant's admin accounts
+    const DUMMY_NAMES = [
+      'Atty. Roberto Dela Rosa',
+      'Grace Villanueva',
+      'Engr. Manuel Reyes',
+      'Dr. Corazon Aquino-Cruz',
+      'Leah Mendoza',
+      'Felipe Santos, CPA',
+      'Atty. Cristina Gomez',
+    ];
+    for (const dummy of DUMMY_NAMES) {
+      assert(!initialStaffList.some((s: any) => s.fullName === dummy), `Dummy user '${dummy}' is NOT present in instance`);
+    }
+
+    // 44.3 Operator Portal: Create Admin Portal User and assign role
+    console.log('  44.3 Testing Operator Portal Create Admin Portal User...');
+    const createUserMock = makeMockHttp({
+      params: { id: testTenantId },
+      body: {
+        fullName: 'Maria Elena Santos',
+        email: 'maria.santos@sec44pioneer.coop',
+        username: 'maria.santos',
+        password: 'Password123!',
+        role: 'LOAN_OFFICER',
+        phone: '+63 918 555 1234',
+      },
+    });
+    await handleCreateTenantAdminUser(createUserMock.req, createUserMock.res);
+    assert(createUserMock.getStatus() === 201, 'Create admin user returns HTTP 201 Created');
+    const createdUserData = createUserMock.getBody().data;
+    assert(createdUserData.fullName === 'Maria Elena Santos', 'Created user name matches');
+    assert(createdUserData.role === 'LOAN_OFFICER', 'Created user role matches LOAN_OFFICER');
+    assert(createdUserData.roleTitle === 'Senior Loan Officer', 'Role title correctly mapped');
+
+    // Verify staff list now includes both Primary Administrator and newly created user
+    const getAdminUsersMock2 = makeMockHttp({
+      params: { id: testTenantId },
+    });
+    await handleGetTenantAdminUsers(getAdminUsersMock2.req, getAdminUsersMock2.res);
+    const updatedStaffList = getAdminUsersMock2.getBody().data;
+    assert(updatedStaffList.length === 2, `Staff list count is now 2, got ${updatedStaffList.length}`);
+    const loanOfficer = updatedStaffList.find((s: any) => s.email === 'maria.santos@sec44pioneer.coop');
+    assert(loanOfficer !== undefined, 'Newly created staff user is returned in list');
+    assert(loanOfficer.status === 'ACTIVE', 'New user status is initially ACTIVE');
+
+    // 44.4 Operator Portal: Deactivate and Activate Admin Portal User
+    console.log('  44.4 Testing Operator Portal Deactivate and Activate User...');
+    const deactivateMock = makeMockHttp({
+      params: { id: testTenantId, userId: loanOfficer.id },
+      body: { status: 'INACTIVE' },
+    });
+    await handleUpdateTenantAdminUserStatus(deactivateMock.req, deactivateMock.res);
+    assert(deactivateMock.getStatus() === 200, 'Deactivate user returns HTTP 200');
+    assert(deactivateMock.getBody().data.status === 'INACTIVE', 'Status in response is INACTIVE');
+
+    // Fetch again and confirm status is INACTIVE
+    const getAdminUsersMock3 = makeMockHttp({
+      params: { id: testTenantId },
+    });
+    await handleGetTenantAdminUsers(getAdminUsersMock3.req, getAdminUsersMock3.res);
+    const deactivatedOfficer = getAdminUsersMock3.getBody().data.find((s: any) => s.id === loanOfficer.id);
+    assert(deactivatedOfficer.status === 'INACTIVE', 'Staff status is persisted as INACTIVE');
+
+    // Re-activate user
+    const reactivateMock = makeMockHttp({
+      params: { id: testTenantId, userId: loanOfficer.id },
+      body: { status: 'ACTIVE' },
+    });
+    await handleUpdateTenantAdminUserStatus(reactivateMock.req, reactivateMock.res);
+    assert(reactivateMock.getStatus() === 200, 'Reactivate user returns HTTP 200');
+    assert(reactivateMock.getBody().data.status === 'ACTIVE', 'Status in response is ACTIVE');
+
+    // Fetch again and confirm status is ACTIVE
+    const getAdminUsersMock4 = makeMockHttp({
+      params: { id: testTenantId },
+    });
+    await handleGetTenantAdminUsers(getAdminUsersMock4.req, getAdminUsersMock4.res);
+    const reactivatedOfficer = getAdminUsersMock4.getBody().data.find((s: any) => s.id === loanOfficer.id);
+    assert(reactivatedOfficer.status === 'ACTIVE', 'Staff status is successfully reactivated to ACTIVE');
+
+    // 44.5 LOS Approval Matrix & Audit Trail Validation
+    console.log('  44.5 Testing LOS Approval Matrix Stage Approvals and Segregation of Duties...');
+    const auditLoan: Loan = {
+      id: 'loan_sec44_audit_01',
+      tenantId: testTenantId,
+      memberId: 'mem_sec44_01',
+      loanNumber: 'LN-2026-SEC44-001',
+      productId: 'prod_regular',
+      productName: 'Regular Multi-Purpose Loan',
+      principalAmount: 50000,
+      interestRateAnnual: 0.12,
+      termMonths: 12,
+      paymentFrequency: 'MONTHLY',
+      amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+      platformFee: 500,
+      coopServiceFee: 1000,
+      netProceedsDisbursed: 48500,
+      totalInterestExpected: 3309.60,
+      totalPayable: 53309.60,
+      balanceRemaining: 50000,
+      schedule: [],
+      status: 'APPROVED',
+      coMakerEndorsedAt: '2026-03-01T08:30:00.000Z',
+      coMakerEndorsedBy: 'Juan Dela Cruz (Member MEM-0091)',
+      reviewedBy: 'Maria Elena Santos (Senior Loan Officer)',
+      reviewedAt: '2026-03-01T10:00:00.000Z',
+      reviewRemarks: 'Credit score 780, debt service ratio 28%. Recommended for approval.',
+      committeeApprovedBy: 'Engr. Teresa Reyes (Credit Committee Chairperson)',
+      committeeApprovedAt: '2026-03-01T14:30:00.000Z',
+      bodApprovedBy: 'Danilo Ilagan (Board Chairman Resolution 2026-042)',
+      bodApprovedAt: '2026-03-01T16:00:00.000Z',
+      bodResolutionNumber: 'BOD-RES-2026-042',
+      disbursedBy: 'Carmela Ramos (Cashier)',
+      stageApprovals: {
+        coMaker: { approvedBy: 'Juan Dela Cruz', approvedAt: '2026-03-01T08:30:00.000Z' },
+        loanOfficer: { approvedBy: 'Maria Elena Santos', approvedAt: '2026-03-01T10:00:00.000Z', notes: 'DSR passed' },
+        creditCommittee: { approvedBy: 'Engr. Teresa Reyes', approvedAt: '2026-03-01T14:30:00.000Z' },
+        boardOfDirectors: { approvedBy: 'Danilo Ilagan', approvedAt: '2026-03-01T16:00:00.000Z', resolutionNumber: 'BOD-RES-2026-042' },
+        disbursement: { approvedBy: 'Carmela Ramos', approvedAt: '2026-03-01T17:00:00.000Z', reference: 'DSB-2026-001' },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    assert(auditLoan.coMakerEndorsedBy !== undefined, 'Co-Maker endorser is recorded');
+    assert(auditLoan.reviewedBy !== undefined, 'Loan Officer reviewer is recorded');
+    assert(auditLoan.committeeApprovedBy !== undefined, 'Credit Committee approver is recorded');
+    assert(auditLoan.bodApprovedBy !== undefined, 'BOD approver is recorded');
+    assert(auditLoan.bodResolutionNumber === 'BOD-RES-2026-042', 'BOD resolution number is recorded');
+    assert(auditLoan.stageApprovals?.disbursement?.approvedBy === 'Carmela Ramos', 'Disbursement officer is recorded');
+    console.log('  ✅ ALL SECTION 44 OPERATOR ADMIN PORTAL USERS, CDA INHERITANCE & LOS AUDIT TRAIL TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43 & 44) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

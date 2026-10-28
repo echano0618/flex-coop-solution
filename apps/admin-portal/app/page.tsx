@@ -79,6 +79,9 @@ import {
   AlertCircle,
   Megaphone,
   Tag,
+  Banknote,
+  History,
+  Archive,
 } from 'lucide-react';
 import {
   MemberRegistrationFieldConfig,
@@ -115,6 +118,7 @@ type TabType =
   | 'overview'
   | 'members'
   | 'products'
+  | 'announcements'
   | 'los'
   | 'calculator'
   | 'amortization_schedules'
@@ -142,11 +146,12 @@ interface StaffAccount {
 }
 
 const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
-  SYSTEM_ADMIN: ['overview', 'iam', 'rbac', 'system_config', 'platform_usage', 'reports'],
+  SYSTEM_ADMIN: ['overview', 'announcements', 'iam', 'rbac', 'system_config', 'platform_usage', 'reports'],
   GENERAL_MANAGER: [
     'overview',
     'members',
     'products',
+    'announcements',
     'los',
     'calculator',
     'amortization_schedules',
@@ -161,12 +166,12 @@ const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, TabType[]> = {
     'system_config',
     'platform_usage',
   ],
-  LOAN_OFFICER: ['overview', 'members', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
-  CREDIT_COMMITTEE: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
-  BOD: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
-  CASHIER: ['overview', 'los', 'amortization_schedules', 'cashier'],
+  LOAN_OFFICER: ['overview', 'members', 'products', 'announcements', 'los', 'calculator', 'amortization_schedules', 'collateral'],
+  CREDIT_COMMITTEE: ['overview', 'products', 'announcements', 'los', 'calculator', 'amortization_schedules', 'collateral'],
+  BOD: ['overview', 'products', 'announcements', 'los', 'calculator', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
+  CASHIER: ['overview', 'announcements', 'los', 'amortization_schedules', 'cashier'],
   ACCOUNTANT: ['overview', 'products', 'accounting', 'surplus', 'invoices', 'reports', 'calculator', 'amortization_schedules'],
-  COMPLIANCE_OFFICER: ['overview', 'members', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
+  COMPLIANCE_OFFICER: ['overview', 'members', 'announcements', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
 };
 
 const STAFF_ACCOUNTS: StaffAccount[] = [
@@ -182,6 +187,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
       'overview',
       'members',
       'products',
+      'announcements',
       'los',
       'calculator',
       'amortization_schedules',
@@ -207,6 +213,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     description: 'Cooperative internal IT user administration, access control provisioning, and system configuration management.',
     allowedTabs: [
       'overview',
+      'announcements',
       'iam',
       'rbac',
       'system_config',
@@ -222,7 +229,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'LO',
     color: 'bg-blue-600',
     description: 'Underwrites member applications, verifies credit & co-makers, calculates amortizations.',
-    allowedTabs: ['overview', 'members', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
+    allowedTabs: ['overview', 'members', 'products', 'announcements', 'los', 'calculator', 'amortization_schedules', 'collateral'],
   },
   {
     id: 'usr_crecom_01',
@@ -232,7 +239,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CC',
     color: 'bg-amber-600',
     description: 'Reviews loan appraisals, verifies collateral, endorses to Board.',
-    allowedTabs: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral'],
+    allowedTabs: ['overview', 'products', 'announcements', 'los', 'calculator', 'amortization_schedules', 'collateral'],
   },
   {
     id: 'usr_bod_01',
@@ -242,7 +249,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'BD',
     color: 'bg-purple-600',
     description: 'Authorizes credit facilities requiring Board policy resolutions.',
-    allowedTabs: ['overview', 'products', 'los', 'calculator', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
+    allowedTabs: ['overview', 'products', 'announcements', 'los', 'calculator', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
   },
   {
     id: 'usr_cashier_01',
@@ -252,7 +259,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CS',
     color: 'bg-emerald-600',
     description: 'Executes approved cash disbursements, processes over-the-counter payments & receipts.',
-    allowedTabs: ['overview', 'los', 'amortization_schedules', 'cashier'],
+    allowedTabs: ['overview', 'announcements', 'los', 'amortization_schedules', 'cashier'],
   },
   {
     id: 'usr_acct_01',
@@ -272,7 +279,7 @@ const STAFF_ACCOUNTS: StaffAccount[] = [
     initials: 'CO',
     color: 'bg-rose-600',
     description: 'Audits NPC Data Privacy, AMLA covered transactions, and CDA/CIC statutory reports.',
-    allowedTabs: ['overview', 'members', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
+    allowedTabs: ['overview', 'members', 'announcements', 'amortization_schedules', 'collateral', 'surplus', 'reports'],
   },
 ];
 
@@ -469,10 +476,84 @@ const DEFAULT_LOAN_PRODUCTS = [
     requiresCollateral: false,
     isActive: true,
     status: 'ACTIVE',
+    principalType: 'FIXED',
     optionalFees: [
       { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
       { id: 'opt_fee_2', name: 'Student Assistance Insurance', type: 'FIXED', value: 350 },
     ],
+  },
+  {
+    id: 'prod_share_multiplier',
+    code: 'SHARE_MULTIPLIER_LOAN',
+    name: 'Share Capital Multiplier Livelihood Facility',
+    type: 'LIVELIHOOD',
+    minAmount: 5000,
+    maxAmount: 200000,
+    annualInterestRate: 0.09,
+    minTermMonths: 6,
+    maxTermMonths: 36,
+    principalType: 'DYNAMIC_SHARE_CAPITAL',
+    isDynamicPrincipal: true,
+    shareCapitalMultiplier: 3.0,
+    shareCapitalMinFloor: 5000,
+    shareCapitalMaxCeiling: 200000,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
+    serviceFeeRate: 0.015,
+    finesRateMonthly: 0.02,
+    requiresCoMaker: false,
+    minCoMakers: 0,
+    coMakerRuleDescription: 'Dynamic principal limit up to 3.0x borrower paid-up share capital. No co-maker required if loan principal is backed by member share equity.',
+    requiresCollateral: false,
+    isActive: true,
+    status: 'ACTIVE',
+    optionalFees: [
+      { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
+    ],
+  },
+];
+
+const DEFAULT_COOP_ANNOUNCEMENTS = [
+  {
+    id: 'ann_seed_001',
+    title: '2026 Annual General Assembly & Election of Officers',
+    category: 'General Assembly',
+    content: 'Notice is hereby given to all cooperative members that the 2026 Annual General Assembly will be held on December 5, 2026, at 9:00 AM at the Cooperative Main Auditorium and via secure Zoom teleconference. Registration starts at 7:30 AM. Attendance is strictly monitored for dividend eligibility and quorum requirements.',
+    targetAudience: 'ALL',
+    publishAt: '2026-10-15T08:00',
+    expiresAt: '2026-12-06T18:00',
+    priority: 'IMPORTANT',
+    authorName: 'Cooperative Board Secretary',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-15T08:00:00.000Z',
+  },
+  {
+    id: 'ann_seed_002',
+    title: 'Capital Build-Up (CBU) Incentive Drive for Affiliate Members',
+    category: 'Membership',
+    content: 'Calling all Affiliate/Associate members! Upgrade your membership to Regular status before November 30, 2026 to enjoy full dividend sharing, voting rights, and up to 3x share capital borrowing privileges. Attend the Saturday PMES refresher session and complete your required paid-up capital of ₱10,000.',
+    targetAudience: 'AFFILIATE',
+    publishAt: '2026-10-20T08:00',
+    expiresAt: '2026-11-30T23:59',
+    priority: 'NORMAL',
+    authorName: 'Education & Membership Committee',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-20T08:00:00.000Z',
+  },
+  {
+    id: 'ann_seed_003',
+    title: 'Special Dividend Distribution & Patronage Refund Release',
+    category: 'Dividends & Finance',
+    content: 'The Board of Directors is pleased to announce the approved release of the mid-year interest on share capital and patronage refunds for all Regular Members in good standing. Credited directly to your digital passbook savings account on October 31, 2026.',
+    targetAudience: 'REGULAR',
+    publishAt: '2026-10-25T08:00',
+    expiresAt: '2026-11-15T23:59',
+    priority: 'URGENT',
+    authorName: 'Audit & Inventory Committee',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-25T08:00:00.000Z',
   },
 ];
 
@@ -482,7 +563,23 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [coopName, setCoopName] = useState<string>(() => resolveTenantCoop().name);
   const [tenantSlug, setTenantSlug] = useState<string>(() => resolveTenantCoop().slug);
+  const [tenantCdaNo, setTenantCdaNo] = useState<string>(() => resolveTenantCoop().registrationNumber || 'CDA Registered');
+  const [tenantTin, setTenantTin] = useState<string>(() => resolveTenantCoop().tin || '009-887-123-000');
   const isTestTenant = isTestCoopTenant(tenantSlug);
+
+  useEffect(() => {
+    const info = resolveTenantCoop();
+    fetch(`${getApiBaseUrl()}/tenants/${encodeURIComponent(info.slug)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          if (json.data.name) setCoopName(json.data.name);
+          if (json.data.cdaRegistrationNumber) setTenantCdaNo(json.data.cdaRegistrationNumber);
+          if (json.data.tin) setTenantTin(json.data.tin);
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -688,6 +785,7 @@ export default function AdminDashboard() {
     { id: 'overview', label: 'Executive Dashboard', icon: Landmark, category: 'Core' },
     { id: 'members', label: 'Members & eKYC', icon: Users, category: 'Membership' },
     { id: 'products', label: 'Loan Products & Offers', icon: Sliders, category: 'Lending' },
+    { id: 'announcements', label: 'News & Announcements', icon: Megaphone, category: 'Communications' },
     { id: 'los', label: 'LOS Approval Matrix', icon: CreditCard, category: 'Lending' },
     { id: 'calculator', label: 'Loan Calculator & Fees', icon: Calculator, category: 'Lending' },
     { id: 'amortization_schedules', label: 'Amortization Schedules', icon: Calendar, category: 'Lending' },
@@ -2131,6 +2229,79 @@ export default function AdminDashboard() {
   // Loan product catalog active/inactive display filter (default: ACTIVE)
   const [productFilterStatus, setProductFilterStatus] = useState<'ACTIVE' | 'INACTIVE' | 'ALL'>('ACTIVE');
 
+  // Dynamic Principal state for loan product configuration
+  const [newProductPrincipalMode, setNewProductPrincipalMode] = useState<'FIXED' | 'DYNAMIC_SHARE_CAPITAL'>('FIXED');
+  const [newProductShareMultiplier, setNewProductShareMultiplier] = useState<number>(3.0);
+  const [newProductMinFloor, setNewProductMinFloor] = useState<number>(5000);
+  const [newProductMaxCeiling, setNewProductMaxCeiling] = useState<number>(150000);
+
+  // Cooperative News & Announcements Module State
+  const [announcements, setAnnouncements] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_announcements_${tenant.slug}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return DEFAULT_COOP_ANNOUNCEMENTS;
+  });
+  const [announcementFilterStatus, setAnnouncementFilterStatus] = useState<'ALL' | 'ACTIVE' | 'SCHEDULED' | 'EXPIRED'>('ALL');
+  const [announcementFilterAudience, setAnnouncementFilterAudience] = useState<'ALL' | 'ALL_MEMBERS' | 'AFFILIATE' | 'REGULAR'>('ALL');
+  const [announcementSearchQuery, setAnnouncementSearchQuery] = useState<string>('');
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState<boolean>(false);
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState<string | null>(null);
+  const [announcementFormTitle, setAnnouncementFormTitle] = useState<string>('');
+  const [announcementFormCategory, setAnnouncementFormCategory] = useState<string>('General Announcement');
+  const [announcementFormContent, setAnnouncementFormContent] = useState<string>('');
+  const [announcementFormAudience, setAnnouncementFormAudience] = useState<'ALL' | 'AFFILIATE' | 'REGULAR'>('ALL');
+  const [announcementFormPublishImmediate, setAnnouncementFormPublishImmediate] = useState<boolean>(true);
+  const [announcementFormPublishDate, setAnnouncementFormPublishDate] = useState<string>('');
+  const [announcementFormHasExpiration, setAnnouncementFormHasExpiration] = useState<boolean>(false);
+  const [announcementFormExpireDate, setAnnouncementFormExpireDate] = useState<string>('');
+  const [announcementFormPriority, setAnnouncementFormPriority] = useState<'NORMAL' | 'IMPORTANT' | 'URGENT'>('NORMAL');
+  const [announcementNotification, setAnnouncementNotification] = useState<string | null>(null);
+  const [previewAnnouncementModal, setPreviewAnnouncementModal] = useState<any | null>(null);
+
+  // Load persisted announcements from backend API with offline cache
+  useEffect(() => {
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_announcements_${tenantInfo.slug}`;
+    const deletedKey = `flexcoop_deleted_announcements_${tenantInfo.slug}`;
+
+    try {
+      const rawDel = localStorage.getItem(deletedKey);
+      const deletedIds = new Set<string>(rawDel ? JSON.parse(rawDel) : []);
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setAnnouncements(parsed.filter((a: any) => !deletedIds.has(a.id) && a.status !== 'DELETED' && !a.isDeleted));
+        }
+      }
+    } catch {}
+
+    fetch(`${getApiBaseUrl()}/announcements?coop=${tenantInfo.slug}`, {
+      headers: { 'x-tenant-slug': tenantInfo.slug },
+    })
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData && resData.success && Array.isArray(resData.data)) {
+          const rawDel = localStorage.getItem(deletedKey);
+          const deletedIds = new Set<string>(rawDel ? JSON.parse(rawDel) : []);
+          const cleanData = resData.data.filter((a: any) => !deletedIds.has(a.id) && a.status !== 'DELETED' && !a.isDeleted);
+          setAnnouncements(cleanData);
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(cleanData));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Walk-In Loan Application State for Staff / Loan Officer
   const [showWalkInLoanModal, setShowWalkInLoanModal] = useState<boolean>(false);
   const [walkInMemberId, setWalkInMemberId] = useState<string>('mem_gm_0001');
@@ -2205,7 +2376,53 @@ export default function AdminDashboard() {
     effectiveInterestRate?: number;
     eirTenure?: number;
     deductionBreakdown?: any;
+    coMakerEndorsedAt?: string;
+    coMakerEndorsedBy?: string;
+    reviewedBy?: string;
+    reviewedAt?: string;
+    reviewRemarks?: string;
+    committeeApprovedBy?: string;
+    committeeApprovedAt?: string;
+    bodApprovedBy?: string;
+    bodApprovedAt?: string;
+    bodResolutionNumber?: string;
+    disbursedBy?: string;
+    disbursedAt?: string;
+    disbursementReference?: string;
+    rejectedBy?: string;
+    rejectedAt?: string;
+    rejectionRemarks?: string;
+    cancelledBy?: string;
+    cancelledAt?: string;
+    cancellationRemarks?: string;
+    stageApprovals?: any;
+    schedule?: any[];
+    balanceRemaining?: number;
   } | null>(null);
+
+  // View mode for LOS Applications: 'UNDERWRITING' (Review & Approval queue) vs 'AUDIT_HISTORY' (Disbursed & Rejected archive)
+  const [losQueueView, setLosQueueView] = useState<'UNDERWRITING' | 'AUDIT_HISTORY'>('UNDERWRITING');
+  const [auditFilterStatus, setAuditFilterStatus] = useState<'ALL' | 'DISBURSED' | 'REJECTED' | 'CANCELLED'>('ALL');
+  const [auditSearchQuery, setAuditSearchQuery] = useState<string>('');
+
+  const formatApprovalTimestamp = (isoStr?: string) => {
+    if (!isoStr) return null;
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return isoStr;
+      return d.toLocaleString('en-PH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      return isoStr;
+    }
+  };
 
   // Load Loan Applications from localStorage and Backend API
   const fetchLoanApplications = () => {
@@ -2296,6 +2513,28 @@ export default function AdminDashboard() {
             effectiveInterestRate: l.effectiveInterestRate !== undefined ? l.effectiveInterestRate : (l.annualRate || l.interestRateAnnual || 0.12),
             eirTenure: l.eirTenure,
             deductionBreakdown: l.deductionBreakdown,
+            coMakerEndorsedAt: l.coMakerEndorsedAt || l.coMaker?.acceptedAt,
+            coMakerEndorsedBy: l.coMakerEndorsedBy || l.coMaker?.coMakerName,
+            reviewedBy: l.reviewedBy,
+            reviewedAt: l.reviewedAt,
+            reviewRemarks: l.reviewRemarks,
+            committeeApprovedBy: l.committeeApprovedBy,
+            committeeApprovedAt: l.committeeApprovedAt,
+            bodApprovedBy: l.bodApprovedBy,
+            bodApprovedAt: l.bodApprovedAt,
+            bodResolutionNumber: l.bodResolutionNumber,
+            disbursedBy: l.disbursedBy,
+            disbursedAt: l.disbursedAt,
+            disbursementReference: l.disbursementReference,
+            rejectedBy: l.rejectedBy,
+            rejectedAt: l.rejectedAt,
+            rejectionRemarks: l.rejectionRemarks,
+            cancelledBy: l.cancelledBy,
+            cancelledAt: l.cancelledAt,
+            cancellationRemarks: l.cancellationRemarks,
+            stageApprovals: l.stageApprovals,
+            schedule: l.schedule,
+            balanceRemaining: l.balanceRemaining,
           }));
 
           setLoanApplications(formatted);
@@ -2312,9 +2551,12 @@ export default function AdminDashboard() {
                   return refreshed;
                 }
               }
-              setLoanStatus(formatted[0].status);
-              if (formatted[0].firstDueDate) setLosFirstDueDate(formatted[0].firstDueDate);
-              return formatted[0];
+              // Prefer selecting an active underwriting application if one exists
+              const firstUnderwriting = formatted.find((f: any) => !['DISBURSED', 'REJECTED', 'CANCELLED'].includes(f.status));
+              const selected = firstUnderwriting || formatted[0];
+              setLoanStatus(selected.status);
+              if (selected.firstDueDate) setLosFirstDueDate(selected.firstDueDate);
+              return selected;
             });
           } else {
             setActiveLoanApplication(null);
@@ -2333,13 +2575,22 @@ export default function AdminDashboard() {
     const cleanCode = newProductCode.toUpperCase().replace(/\s+/g, '_');
     const existing = loanProducts.find((p) => p.code?.toUpperCase() === cleanCode);
 
+    const isDynamic = newProductPrincipalMode === 'DYNAMIC_SHARE_CAPITAL';
+    const effectiveMin = isDynamic ? Number(newProductMinFloor) : Number(newProductMinAmount);
+    const effectiveMax = isDynamic ? Number(newProductMaxCeiling) : Number(newProductMaxAmount);
+
     const createdProduct = {
       id: existing ? existing.id : `prod_${Date.now()}`,
       code: cleanCode,
       name: newProductName,
       type: newProductType as any,
-      minAmount: Number(newProductMinAmount),
-      maxAmount: Number(newProductMaxAmount),
+      minAmount: effectiveMin,
+      maxAmount: effectiveMax,
+      principalType: newProductPrincipalMode,
+      isDynamicPrincipal: isDynamic,
+      shareCapitalMultiplier: isDynamic ? Number(newProductShareMultiplier) : 1.0,
+      shareCapitalMinFloor: isDynamic ? effectiveMin : undefined,
+      shareCapitalMaxCeiling: isDynamic ? effectiveMax : undefined,
       annualInterestRate: Number(newProductRate) / 100,
       minTermMonths: Number(newProductMinTerm),
       maxTermMonths: Number(newProductMaxTerm),
@@ -2464,6 +2715,195 @@ export default function AdminDashboard() {
       }`
     );
     setTimeout(() => setProductSaveNotification(null), 5000);
+  };
+
+  // Cooperative News & Announcement Action Handlers
+  const handleOpenCreateAnnouncement = () => {
+    setEditingAnnouncementId(null);
+    setAnnouncementFormTitle('');
+    setAnnouncementFormCategory('General Announcement');
+    setAnnouncementFormContent('');
+    setAnnouncementFormAudience('ALL');
+    setAnnouncementFormPublishImmediate(true);
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const nowIsoLocal = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    setAnnouncementFormPublishDate(nowIsoLocal);
+    setAnnouncementFormHasExpiration(false);
+    const nextMonth = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+    const nextMonthLocal = `${nextMonth.getFullYear()}-${pad(nextMonth.getMonth() + 1)}-${pad(nextMonth.getDate())}T${pad(nextMonth.getHours())}:${pad(nextMonth.getMinutes())}`;
+    setAnnouncementFormExpireDate(nextMonthLocal);
+    setAnnouncementFormPriority('NORMAL');
+    setShowAnnouncementModal(true);
+  };
+
+  const handleOpenEditAnnouncement = (ann: any) => {
+    setEditingAnnouncementId(ann.id);
+    setAnnouncementFormTitle(ann.title || '');
+    setAnnouncementFormCategory(ann.category || 'General Announcement');
+    setAnnouncementFormContent(ann.content || '');
+    setAnnouncementFormAudience(ann.targetAudience || 'ALL');
+    setAnnouncementFormPublishImmediate(false);
+    if (ann.publishAt) {
+      try {
+        const d = new Date(ann.publishAt);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        setAnnouncementFormPublishDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+      } catch {
+        setAnnouncementFormPublishDate(ann.publishAt);
+      }
+    }
+    if (ann.expiresAt) {
+      setAnnouncementFormHasExpiration(true);
+      try {
+        const d = new Date(ann.expiresAt);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        setAnnouncementFormExpireDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+      } catch {
+        setAnnouncementFormExpireDate(ann.expiresAt);
+      }
+    } else {
+      setAnnouncementFormHasExpiration(false);
+    }
+    setAnnouncementFormPriority(ann.priority || 'NORMAL');
+    setShowAnnouncementModal(true);
+  };
+
+  const handleSaveAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!announcementFormTitle.trim() || !announcementFormContent.trim()) {
+      alert('Please provide announcement title and full content.');
+      return;
+    }
+
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_announcements_${tenantInfo.slug}`;
+    const annId = editingAnnouncementId || `ann_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const nowIso = new Date().toISOString();
+    const resolvedPublishAt = announcementFormPublishImmediate
+      ? nowIso
+      : (announcementFormPublishDate ? new Date(announcementFormPublishDate).toISOString() : nowIso);
+    const resolvedExpiresAt = announcementFormHasExpiration && announcementFormExpireDate
+      ? new Date(announcementFormExpireDate).toISOString()
+      : null;
+
+    // Determine status based on schedule
+    const nowTime = Date.now();
+    const pubTime = new Date(resolvedPublishAt).getTime();
+    const expTime = resolvedExpiresAt ? new Date(resolvedExpiresAt).getTime() : Infinity;
+    let computedStatus: 'PUBLISHED' | 'SCHEDULED' | 'EXPIRED' = 'PUBLISHED';
+    if (nowTime < pubTime) {
+      computedStatus = 'SCHEDULED';
+    } else if (nowTime > expTime) {
+      computedStatus = 'EXPIRED';
+    }
+
+    const payload = {
+      id: annId,
+      tenantId: tenantInfo.slug,
+      title: announcementFormTitle.trim(),
+      content: announcementFormContent.trim(),
+      category: announcementFormCategory,
+      targetAudience: announcementFormAudience, // 'ALL' | 'AFFILIATE' | 'REGULAR'
+      publishAt: resolvedPublishAt,
+      expiresAt: resolvedExpiresAt,
+      priority: announcementFormPriority,
+      authorName: currentStaff.name || 'Cooperative Administration',
+      authorRole: currentStaff.roleTitle || 'Admin',
+      status: computedStatus,
+      updatedAt: nowIso,
+      createdAt: editingAnnouncementId
+        ? (announcements.find((a) => a.id === editingAnnouncementId)?.createdAt || nowIso)
+        : nowIso,
+    };
+
+    const updated = editingAnnouncementId
+      ? announcements.map((a) => (a.id === editingAnnouncementId ? { ...a, ...payload } : a))
+      : [payload, ...announcements];
+
+    setAnnouncements(updated);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+    } catch {}
+
+    try {
+      const endpoint = editingAnnouncementId
+        ? `${getApiBaseUrl()}/announcements/${editingAnnouncementId}?coop=${tenantInfo.slug}`
+        : `${getApiBaseUrl()}/announcements?coop=${tenantInfo.slug}`;
+      const res = await fetch(endpoint, {
+        method: editingAnnouncementId ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+        },
+        body: JSON.stringify(payload),
+      });
+      const resData = await res.json().catch(() => null);
+      if (resData && resData.success && resData.data) {
+        const serverItem = resData.data;
+        const synced = editingAnnouncementId
+          ? announcements.map((a) => (a.id === editingAnnouncementId ? { ...a, ...serverItem } : a))
+          : [serverItem, ...announcements.filter((a) => a.id !== serverItem.id)];
+        setAnnouncements(synced);
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(synced));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('API announcement sync:', err);
+    }
+
+    setAnnouncementNotification(
+      editingAnnouncementId
+        ? `Announcement "${payload.title}" updated successfully.`
+        : `Announcement "${payload.title}" published with status: ${computedStatus}.`
+    );
+    setTimeout(() => setAnnouncementNotification(null), 5000);
+    setShowAnnouncementModal(false);
+    setEditingAnnouncementId(null);
+  };
+
+  const handleDeleteAnnouncement = async (annId: string) => {
+    const target = announcements.find((a) => a.id === annId);
+    if (!target) return;
+    if (!confirm(`Are you sure you want to delete announcement "${target.title}"?`)) return;
+
+    const tenantInfo = resolveTenantCoop();
+    const storageKey = `flexcoop_announcements_${tenantInfo.slug}`;
+    const deletedKey = `flexcoop_deleted_announcements_${tenantInfo.slug}`;
+    const normSlug = normalizeCoopSlug(tenantInfo.slug);
+    const normDelKey = `flexcoop_deleted_announcements_${normSlug}`;
+
+    const updated = announcements.filter((a) => a.id !== annId);
+    setAnnouncements(updated);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      const recordDel = (k: string) => {
+        const raw = localStorage.getItem(k);
+        const list = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(list) && !list.includes(annId)) {
+          list.push(annId);
+          localStorage.setItem(k, JSON.stringify(list));
+        }
+      };
+      recordDel(deletedKey);
+      recordDel(normDelKey);
+    } catch {}
+
+    try {
+      await fetch(`${getApiBaseUrl()}/announcements/${annId}?coop=${tenantInfo.slug}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': tenantInfo.slug,
+        },
+        body: JSON.stringify({ id: annId }),
+      });
+    } catch {}
+
+    setAnnouncementNotification(`Announcement "${target.title}" removed.`);
+    setTimeout(() => setAnnouncementNotification(null), 4000);
   };
 
   // Collaterals & Chattel Mortgages State (Starting balance strictly 0 on production tenants; zero dummy records)
@@ -3085,7 +3525,7 @@ export default function AdminDashboard() {
         reviewedBy: 'Cooperative Development Authority (CDA)',
         reviewDate: 'Jan 15, 2026',
         reviewNotes: 'Declared General Manager registered as Member #1 upon cooperative accreditation pursuant to RA 9520.',
-        selfiePreview: '/avatars/MEM-2026-0001.jpg',
+        selfiePreview: null,
       };
 
       const list: MemberRecord[] = [gmMember];
@@ -3748,8 +4188,94 @@ export default function AdminDashboard() {
     const appId = targetApp?.id || 'LN-2026-00001';
     const rawId = (targetApp as any)?.rawId || appId;
 
+    const approverIdentity = `${currentStaff.name} (${currentStaff.roleTitle || currentStaff.role})`;
+    const nowIso = new Date().toISOString();
+
     if (activeLoanApplication) {
-      const updatedApp = { ...activeLoanApplication, status: targetStatus };
+      const updatedApp: any = { ...activeLoanApplication, status: targetStatus };
+
+      if (targetStatus === 'UNDER_CREDIT_REVIEW') {
+        updatedApp.reviewedBy = approverIdentity;
+        updatedApp.reviewedAt = nowIso;
+        updatedApp.reviewRemarks = 'Endorsed by Loan Officer to Credit Committee.';
+        updatedApp.stageApprovals = {
+          ...(updatedApp.stageApprovals || {}),
+          loanOfficer: {
+            approvedBy: approverIdentity,
+            approvedAt: nowIso,
+            status: 'REVIEWED',
+            role: currentStaff.roleTitle || currentStaff.role,
+            notes: updatedApp.reviewRemarks,
+          },
+        };
+      } else if (targetStatus === 'BOD_APPROVAL' || (targetStatus === 'APPROVED' && losConfirmModal.stageTitle.includes('Committee'))) {
+        updatedApp.committeeApprovedBy = approverIdentity;
+        updatedApp.committeeApprovedAt = nowIso;
+        updatedApp.stageApprovals = {
+          ...(updatedApp.stageApprovals || {}),
+          creditCommittee: {
+            approvedBy: approverIdentity,
+            approvedAt: nowIso,
+            status: 'APPROVED',
+            role: currentStaff.roleTitle || currentStaff.role,
+            notes: 'Approved by Credit Committee',
+          },
+        };
+      } else if (targetStatus === 'APPROVED') {
+        updatedApp.bodApprovedBy = approverIdentity;
+        updatedApp.bodApprovedAt = nowIso;
+        updatedApp.stageApprovals = {
+          ...(updatedApp.stageApprovals || {}),
+          boardOfDirectors: {
+            approvedBy: approverIdentity,
+            approvedAt: nowIso,
+            status: 'APPROVED',
+            role: currentStaff.roleTitle || currentStaff.role,
+            notes: 'Approved by Board of Directors',
+          },
+        };
+      } else if (targetStatus === 'DISBURSED') {
+        updatedApp.disbursedBy = approverIdentity;
+        updatedApp.disbursedAt = nowIso;
+        updatedApp.disbursementReference = updatedApp.disbursementReference || `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
+        updatedApp.stageApprovals = {
+          ...(updatedApp.stageApprovals || {}),
+          disbursement: {
+            approvedBy: approverIdentity,
+            approvedAt: nowIso,
+            status: 'DISBURSED',
+            role: currentStaff.roleTitle || currentStaff.role,
+            reference: updatedApp.disbursementReference,
+            notes: 'Net proceeds disbursed to borrower.',
+          },
+        };
+      } else if (targetStatus === 'REJECTED') {
+        updatedApp.rejectedBy = approverIdentity;
+        updatedApp.rejectedAt = nowIso;
+        updatedApp.rejectionRemarks = losConfirmModal.statutoryDetail || 'Loan rejected by cooperative administration.';
+        updatedApp.stageApprovals = {
+          ...(updatedApp.stageApprovals || {}),
+          rejection: {
+            stage: losConfirmModal.stageTitle,
+            rejectedBy: approverIdentity,
+            rejectedAt: nowIso,
+            remarks: updatedApp.rejectionRemarks,
+          },
+        };
+      } else if (targetStatus === 'CANCELLED') {
+        updatedApp.cancelledBy = approverIdentity;
+        updatedApp.cancelledAt = nowIso;
+        updatedApp.cancellationRemarks = losConfirmModal.statutoryDetail || 'Formally cancelled by cooperative administration.';
+        updatedApp.stageApprovals = {
+          ...(updatedApp.stageApprovals || {}),
+          cancellation: {
+            cancelledBy: approverIdentity,
+            cancelledAt: nowIso,
+            remarks: updatedApp.cancellationRemarks,
+          },
+        };
+      }
+
       setActiveLoanApplication(updatedApp);
       const updatedList = loanApplications.map((a) =>
         a.id === updatedApp.id || (a as any).rawId === rawId ? updatedApp : a
@@ -3785,13 +4311,21 @@ export default function AdminDashboard() {
             approved: true,
             remarks: 'Endorsed by Loan Officer to Credit Committee.',
             firstDueDate: losFirstDueDate || undefined,
+            reviewedBy: approverIdentity,
+            approverName: currentStaff.name,
+            approverRole: currentStaff.roleTitle,
           }),
         });
       } else if (targetStatus === 'BOD_APPROVAL' || (targetStatus === 'APPROVED' && losConfirmModal.stageTitle.includes('Committee'))) {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/committee-approve?coop=${tenantInfo.slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
-          body: JSON.stringify({ approved: true }),
+          body: JSON.stringify({
+            approved: true,
+            approvedBy: approverIdentity,
+            approverName: currentStaff.name,
+            approverRole: currentStaff.roleTitle,
+          }),
         });
         if (targetStatus === 'APPROVED') {
           try {
@@ -3804,7 +4338,12 @@ export default function AdminDashboard() {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/bod-approve?coop=${tenantInfo.slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
-          body: JSON.stringify({ approved: true }),
+          body: JSON.stringify({
+            approved: true,
+            approvedBy: approverIdentity,
+            approverName: currentStaff.name,
+            approverRole: currentStaff.roleTitle,
+          }),
         });
         try {
           await loadAccountingData();
@@ -3815,6 +4354,11 @@ export default function AdminDashboard() {
         await fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(rawId)}/disburse?coop=${tenantInfo.slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
+          body: JSON.stringify({
+            disbursedBy: approverIdentity,
+            cashierName: currentStaff.name,
+            cashierRole: currentStaff.roleTitle,
+          }),
         });
 
         // 1. Immediately reload platform credit to reflect tech fee auto-deduction
@@ -3854,7 +4398,9 @@ export default function AdminDashboard() {
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
           body: JSON.stringify({
             remarks: losConfirmModal.statutoryDetail || 'Loan rejected by cooperative administration.',
-            rejectedBy: currentStaff.name || currentStaff.role,
+            rejectedBy: approverIdentity,
+            rejectorName: currentStaff.name,
+            rejectorRole: currentStaff.roleTitle,
           }),
         });
       } else if (targetStatus === 'CANCELLED') {
@@ -3863,7 +4409,8 @@ export default function AdminDashboard() {
           headers: { 'Content-Type': 'application/json', 'x-tenant-slug': tenantInfo.slug },
           body: JSON.stringify({
             remarks: losConfirmModal.statutoryDetail || 'Formally cancelled by cooperative administration.',
-            cancelledBy: currentStaff.name || currentStaff.role,
+            cancelledBy: approverIdentity,
+            cancellerName: currentStaff.name,
           }),
         });
       }
@@ -6889,6 +7436,12 @@ export default function AdminDashboard() {
                                       All Members
                                     </span>
                                   )}
+                                  {(p.isDynamicPrincipal || p.principalType === 'DYNAMIC_SHARE_CAPITAL') && (
+                                    <span className="bg-purple-100 text-purple-800 border border-purple-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <Sparkles className="w-3 h-3 text-purple-600" />
+                                      Dynamic ({p.shareCapitalMultiplier || 3}x Share Capital)
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
                                   {p.code}
@@ -6901,9 +7454,20 @@ export default function AdminDashboard() {
                               </p>
 
                               <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-xs">
-                                <div className="flex justify-between">
-                                  <span className="text-slate-500">Principal Range:</span>
-                                  <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
+                                <div className="flex justify-between items-start">
+                                  <span className="text-slate-500">Principal Limit:</span>
+                                  {p.isDynamicPrincipal || p.principalType === 'DYNAMIC_SHARE_CAPITAL' ? (
+                                    <div className="text-right">
+                                      <span className="font-bold text-purple-700 block">
+                                        Up to {p.shareCapitalMultiplier || 3}x Share Capital
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 block font-mono">
+                                        Floor: ₱{(p.minAmount || 5000).toLocaleString()} • Cap: ₱{(p.maxAmount || 200000).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="font-semibold text-slate-900">₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}</span>
+                                  )}
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-slate-500">Annual Interest:</span>
@@ -7083,44 +7647,178 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Loan Category</label>
+                      <select
+                        value={newProductType}
+                        onChange={(e) => setNewProductType(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                      >
+                        <option value="REGULAR">REGULAR</option>
+                        <option value="EMERGENCY">EMERGENCY</option>
+                        <option value="EDUCATIONAL">EDUCATIONAL</option>
+                        <option value="LIVELIHOOD">LIVELIHOOD</option>
+                        <option value="MICROFINANCE">MICROFINANCE</option>
+                        <option value="APPLIANCE">APPLIANCE</option>
+                      </select>
+                    </div>
+
+                    {/* Principal Determination Mode (Fixed vs Dynamic based on Member Share Capital) */}
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Loan Category</label>
-                        <select
-                          value={newProductType}
-                          onChange={(e) => setNewProductType(e.target.value)}
-                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                        <span className="font-bold text-slate-900 block">Principal Determination Mode</span>
+                        <p className="text-[11px] text-slate-500">
+                          Configure whether the loan principal has fixed limits or is dynamically determined based on the user's paid-up share capital.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setNewProductPrincipalMode('FIXED')}
+                          className={`p-2.5 rounded-lg border text-left transition-all ${
+                            newProductPrincipalMode === 'FIXED'
+                              ? 'border-emerald-600 bg-white font-bold text-emerald-950 shadow-xs ring-1 ring-emerald-500'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
                         >
-                          <option value="REGULAR">REGULAR</option>
-                          <option value="EMERGENCY">EMERGENCY</option>
-                          <option value="EDUCATIONAL">EDUCATIONAL</option>
-                          <option value="LIVELIHOOD">LIVELIHOOD</option>
-                          <option value="MICROFINANCE">MICROFINANCE</option>
-                          <option value="APPLIANCE">APPLIANCE</option>
-                        </select>
+                          <div className="text-xs flex items-center gap-1.5 font-bold">
+                            <Banknote className="w-3.5 h-3.5 text-slate-600" />
+                            Fixed Principal Range
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-normal">Pre-set minimum and maximum loan principal</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewProductPrincipalMode('DYNAMIC_SHARE_CAPITAL')}
+                          className={`p-2.5 rounded-lg border text-left transition-all ${
+                            newProductPrincipalMode === 'DYNAMIC_SHARE_CAPITAL'
+                              ? 'border-purple-600 bg-purple-50/70 font-bold text-purple-950 shadow-xs ring-1 ring-purple-500'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="text-xs flex items-center gap-1.5 font-bold text-purple-900">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                            Dynamic Principal (Share Capital)
+                          </div>
+                          <div className="text-[10px] text-purple-700 font-normal">Dynamic credit limit based on user share capital</div>
+                        </button>
                       </div>
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Min Principal (₱)</label>
-                        <input
-                          type="number"
-                          required
-                          min={1000}
-                          value={newProductMinAmount}
-                          onChange={(e) => setNewProductMinAmount(Number(e.target.value))}
-                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Max Principal (₱)</label>
-                        <input
-                          type="number"
-                          required
-                          min={5000}
-                          value={newProductMaxAmount}
-                          onChange={(e) => setNewProductMaxAmount(Number(e.target.value))}
-                          className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
-                        />
-                      </div>
+
+                      {newProductPrincipalMode === 'FIXED' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Min Principal (₱)</label>
+                            <input
+                              type="number"
+                              required
+                              min={1000}
+                              value={newProductMinAmount}
+                              onChange={(e) => setNewProductMinAmount(Number(e.target.value))}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">Max Principal (₱)</label>
+                            <input
+                              type="number"
+                              required
+                              min={5000}
+                              value={newProductMaxAmount}
+                              onChange={(e) => setNewProductMaxAmount(Number(e.target.value))}
+                              className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none font-mono"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 pt-1">
+                          <div className="p-3 bg-purple-50/80 border border-purple-200 rounded-lg space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <label className="block font-semibold text-purple-950">Share Capital Multiplier</label>
+                              <span className="text-xs font-mono font-bold bg-purple-600 text-white px-2 py-0.5 rounded shadow-xs">
+                                {newProductShareMultiplier}x Multiplier
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  min={0.5}
+                                  max={10}
+                                  required
+                                  value={newProductShareMultiplier}
+                                  onChange={(e) => setNewProductShareMultiplier(Number(e.target.value))}
+                                  className="w-20 border border-purple-300 rounded-lg p-2 text-xs font-mono font-bold text-purple-900 bg-white focus:ring-2 focus:ring-purple-500 outline-none"
+                                />
+                                <span className="font-bold text-purple-800 text-xs">x</span>
+                              </div>
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {[1.0, 2.0, 2.5, 3.0, 4.0, 5.0].map((m) => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => setNewProductShareMultiplier(m)}
+                                    className={`px-2.5 py-1 rounded text-[11px] font-bold border transition ${
+                                      newProductShareMultiplier === m
+                                        ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                                        : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-100'
+                                    }`}
+                                  >
+                                    {m}x
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                              <div>
+                                <label className="block font-semibold text-purple-950 mb-1">Minimum Principal Floor (₱)</label>
+                                <input
+                                  type="number"
+                                  min={1000}
+                                  required
+                                  value={newProductMinFloor}
+                                  onChange={(e) => setNewProductMinFloor(Number(e.target.value))}
+                                  className="w-full border border-purple-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-purple-500 outline-none font-mono"
+                                />
+                                <p className="text-[10px] text-purple-700 mt-0.5">Minimum loan amount granted</p>
+                              </div>
+                              <div>
+                                <label className="block font-semibold text-purple-950 mb-1">Maximum Principal Ceiling / Cap (₱)</label>
+                                <input
+                                  type="number"
+                                  min={5000}
+                                  required
+                                  value={newProductMaxCeiling}
+                                  onChange={(e) => setNewProductMaxCeiling(Number(e.target.value))}
+                                  className="w-full border border-purple-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-purple-500 outline-none font-mono"
+                                />
+                                <p className="text-[10px] text-purple-700 mt-0.5">Maximum cooperative exposure limit</p>
+                              </div>
+                            </div>
+
+                            {/* Live Simulation Matrix */}
+                            <div className="pt-2 border-t border-purple-200/80 text-[11px] text-purple-900">
+                              <span className="font-bold block mb-1">Live Credit Limit Examples:</span>
+                              <div className="grid grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
+                                <div className="bg-white p-2 rounded-lg border border-purple-200">
+                                  <div className="text-slate-500">₱10k Share Cap</div>
+                                  <div className="font-bold text-purple-700">₱{Math.min(newProductMaxCeiling, Math.max(newProductMinFloor, 10000 * newProductShareMultiplier)).toLocaleString()} Max</div>
+                                </div>
+                                <div className="bg-white p-2 rounded-lg border border-purple-200">
+                                  <div className="text-slate-500">₱25k Share Cap</div>
+                                  <div className="font-bold text-purple-700">₱{Math.min(newProductMaxCeiling, Math.max(newProductMinFloor, 25000 * newProductShareMultiplier)).toLocaleString()} Max</div>
+                                </div>
+                                <div className="bg-white p-2 rounded-lg border border-purple-200">
+                                  <div className="text-slate-500">₱50k Share Cap</div>
+                                  <div className="font-bold text-purple-700">₱{Math.min(newProductMaxCeiling, Math.max(newProductMinFloor, 50000 * newProductShareMultiplier)).toLocaleString()} Max</div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -7718,6 +8416,760 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* TAB: NEWS & ANNOUNCEMENTS MODULE */}
+        {activeTab === 'announcements' && (() => {
+          const nowMs = Date.now();
+          const activeCount = announcements.filter((a) => {
+            const pubMs = new Date(a.publishAt).getTime();
+            const expMs = a.expiresAt ? new Date(a.expiresAt).getTime() : Infinity;
+            return pubMs <= nowMs && expMs >= nowMs;
+          }).length;
+
+          const scheduledCount = announcements.filter((a) => {
+            const pubMs = new Date(a.publishAt).getTime();
+            return pubMs > nowMs;
+          }).length;
+
+          const expiredCount = announcements.filter((a) => {
+            return a.expiresAt && new Date(a.expiresAt).getTime() < nowMs;
+          }).length;
+
+          const filteredAnnouncements = announcements.filter((a) => {
+            // Text search
+            if (announcementSearchQuery.trim()) {
+              const q = announcementSearchQuery.toLowerCase();
+              const matchTitle = (a.title || '').toLowerCase().includes(q);
+              const matchContent = (a.content || '').toLowerCase().includes(q);
+              const matchCategory = (a.category || '').toLowerCase().includes(q);
+              const matchAuthor = (a.authorName || '').toLowerCase().includes(q);
+              if (!matchTitle && !matchContent && !matchCategory && !matchAuthor) return false;
+            }
+
+            // Audience filter
+            if (announcementFilterAudience !== 'ALL') {
+              if (announcementFilterAudience === 'ALL_MEMBERS' && a.targetAudience !== 'ALL') return false;
+              if (announcementFilterAudience === 'AFFILIATE' && a.targetAudience !== 'AFFILIATE') return false;
+              if (announcementFilterAudience === 'REGULAR' && a.targetAudience !== 'REGULAR') return false;
+            }
+
+            // Status filter
+            const pubMs = new Date(a.publishAt).getTime();
+            const expMs = a.expiresAt ? new Date(a.expiresAt).getTime() : Infinity;
+            const isLive = pubMs <= nowMs && expMs >= nowMs;
+            const isScheduled = pubMs > nowMs;
+            const isExpired = a.expiresAt && expMs < nowMs;
+
+            if (announcementFilterStatus === 'ACTIVE' && !isLive) return false;
+            if (announcementFilterStatus === 'SCHEDULED' && !isScheduled) return false;
+            if (announcementFilterStatus === 'EXPIRED' && !isExpired) return false;
+
+            return true;
+          });
+
+          return (
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-5">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700">
+                      <Megaphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">News & Announcements Management</h2>
+                      <p className="text-xs text-slate-500">
+                        Broadcast bulletins, notices, and advisories with scheduled publishing, auto-expiration, and audience targeting.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCreateAnnouncement}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm self-stretch sm:self-auto justify-center"
+                >
+                  <Plus className="w-4 h-4" /> Publish New Announcement
+                </button>
+              </div>
+
+              {/* Notification Banner */}
+              {announcementNotification && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs flex items-center justify-between animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{announcementNotification}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAnnouncementNotification(null)}
+                    className="text-emerald-700 hover:text-emerald-900 font-bold ml-2"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Metrics Overview */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
+                    <span>Total Announcements</span>
+                    <Megaphone className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900">{announcements.length}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">Across all member segments</div>
+                </div>
+
+                <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between text-emerald-700 text-xs mb-1">
+                    <span>Active & Live Now</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-950">{activeCount}</div>
+                  <div className="text-[10px] text-emerald-700 mt-0.5">Visible to targeted members</div>
+                </div>
+
+                <div className="bg-sky-50/70 border border-sky-200/80 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between text-sky-700 text-xs mb-1">
+                    <span>Scheduled for Future</span>
+                    <Clock className="w-3.5 h-3.5 text-sky-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-sky-950">{scheduledCount}</div>
+                  <div className="text-[10px] text-sky-700 mt-0.5">Auto-publishes on set date</div>
+                </div>
+
+                <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between text-amber-700 text-xs mb-1">
+                    <span>Expired / Archived</span>
+                    <Calendar className="w-3.5 h-3.5 text-amber-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-amber-950">{expiredCount}</div>
+                  <div className="text-[10px] text-amber-700 mt-0.5">Past expiration time</div>
+                </div>
+              </div>
+
+              {/* Filters & Search Toolbar */}
+              <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-slate-50/70 p-3 rounded-xl border border-slate-200">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={announcementSearchQuery}
+                    onChange={(e) => setAnnouncementSearchQuery(e.target.value)}
+                    placeholder="Search by title, content, category, author..."
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
+                  />
+                  {announcementSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setAnnouncementSearchQuery('')}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Status Pills */}
+                  <div className="flex items-center bg-white p-1 rounded-lg border border-slate-200 text-xs font-medium">
+                    {[
+                      { key: 'ALL', label: 'All' },
+                      { key: 'ACTIVE', label: 'Active' },
+                      { key: 'SCHEDULED', label: 'Scheduled' },
+                      { key: 'EXPIRED', label: 'Expired' },
+                    ].map((st) => (
+                      <button
+                        key={st.key}
+                        type="button"
+                        onClick={() => setAnnouncementFilterStatus(st.key as any)}
+                        className={`px-2.5 py-1 rounded-md transition-colors ${
+                          announcementFilterStatus === st.key
+                            ? 'bg-emerald-600 text-white font-semibold shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Target Audience Dropdown */}
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs">
+                    <Filter className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-slate-500 font-medium">Audience:</span>
+                    <select
+                      value={announcementFilterAudience}
+                      onChange={(e) => setAnnouncementFilterAudience(e.target.value as any)}
+                      className="bg-transparent text-slate-900 font-semibold outline-none text-xs cursor-pointer"
+                    >
+                      <option value="ALL">All Audiences</option>
+                      <option value="ALL_MEMBERS">All Members (General)</option>
+                      <option value="REGULAR">Regular Members Only</option>
+                      <option value="AFFILIATE">Affiliate Members Only</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Announcements Cards Grid */}
+              {filteredAnnouncements.length === 0 ? (
+                <div className="text-center py-12 px-4 border border-dashed border-slate-300 rounded-xl bg-slate-50/50">
+                  <Megaphone className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No announcements match your search or filter.</p>
+                  <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                    Try adjusting the search query, switching filters, or publish a new announcement for cooperative members.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateAnnouncement}
+                    className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Publish Announcement
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredAnnouncements.map((ann) => {
+                    const pubMs = new Date(ann.publishAt).getTime();
+                    const expMs = ann.expiresAt ? new Date(ann.expiresAt).getTime() : Infinity;
+                    const isLive = pubMs <= nowMs && expMs >= nowMs;
+                    const isScheduled = pubMs > nowMs;
+                    const isExpired = ann.expiresAt && expMs < nowMs;
+
+                    return (
+                      <div
+                        key={ann.id}
+                        className="bg-white border border-slate-200 hover:border-emerald-300 rounded-xl p-4 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-3 group"
+                      >
+                        <div className="space-y-2.5">
+                          {/* Badges Row */}
+                          <div className="flex items-center justify-between flex-wrap gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {/* Status Badge */}
+                              {isLive && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                                  Live / Published
+                                </span>
+                              )}
+                              {isScheduled && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-200">
+                                  <Clock className="w-3 h-3 text-sky-600" />
+                                  Scheduled
+                                </span>
+                              )}
+                              {isExpired && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                                  Expired
+                                </span>
+                              )}
+
+                              {/* Priority Tag */}
+                              {ann.priority === 'URGENT' && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                                  🚨 Urgent
+                                </span>
+                              )}
+                              {ann.priority === 'IMPORTANT' && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                  ⭐ Important
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Audience Pill */}
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                ann.targetAudience === 'REGULAR'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : ann.targetAudience === 'AFFILIATE'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}
+                            >
+                              {ann.targetAudience === 'REGULAR'
+                                ? 'Regular Members Only'
+                                : ann.targetAudience === 'AFFILIATE'
+                                ? 'Affiliate Members Only'
+                                : 'All Members'}
+                            </span>
+                          </div>
+
+                          {/* Category */}
+                          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                            {ann.category || 'General Announcement'}
+                          </div>
+
+                          {/* Title */}
+                          <h3 className="text-sm font-bold text-slate-900 group-hover:text-emerald-700 transition-colors line-clamp-2">
+                            {ann.title}
+                          </h3>
+
+                          {/* Content Excerpt */}
+                          <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                            {ann.content}
+                          </p>
+                        </div>
+
+                        {/* Schedule & Expiration Meta */}
+                        <div className="pt-3 border-t border-slate-100 space-y-1.5 text-[11px] text-slate-500">
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 text-slate-600">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              {isScheduled ? 'Scheduled for:' : 'Published:'}
+                            </span>
+                            <span className="font-semibold text-slate-800">
+                              {new Date(ann.publishAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })}{' '}
+                              {new Date(ann.publishAt).toLocaleTimeString('en-US', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 text-slate-600">
+                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                              Expiration:
+                            </span>
+                            <span className={`font-semibold ${isExpired ? 'text-rose-600' : 'text-slate-800'}`}>
+                              {ann.expiresAt
+                                ? `${new Date(ann.expiresAt).toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric',
+                                  })} ${new Date(ann.expiresAt).toLocaleTimeString('en-US', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}`
+                                : 'No Expiration (Permanent)'}
+                            </span>
+                          </div>
+
+                          {ann.authorName && (
+                            <div className="text-[10px] text-slate-400 pt-0.5">
+                              By {ann.authorName} {ann.authorRole ? `(${ann.authorRole})` : ''}
+                            </div>
+                          )}
+
+                          {/* Card Action Buttons */}
+                          <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewAnnouncementModal(ann)}
+                              className="inline-flex items-center gap-1 text-slate-600 hover:text-emerald-700 font-semibold px-2 py-1 rounded hover:bg-slate-50 text-xs transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Preview
+                            </button>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditAnnouncement(ann)}
+                                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-semibold px-2 py-1 rounded hover:bg-blue-50 text-xs transition-colors"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" /> Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAnnouncement(ann.id)}
+                                className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 rounded hover:bg-rose-50 text-xs transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" /> Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* ANNOUNCEMENT CREATION / EDIT MODAL */}
+              {showAnnouncementModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+                  <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4">
+                    <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                          <Megaphone className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            {editingAnnouncementId ? 'Edit Cooperative Announcement' : 'Publish Cooperative Announcement'}
+                          </h3>
+                          <p className="text-xs text-slate-500">
+                            Broadcast announcements with scheduled publishing, auto-expiration, and member audience filtering.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAnnouncementModal(false)}
+                        className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveAnnouncement} className="space-y-4 text-xs">
+                      {/* Title & Category */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2 space-y-1">
+                          <label className="block font-bold text-slate-800">
+                            Announcement Title <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={announcementFormTitle}
+                            onChange={(e) => setAnnouncementFormTitle(e.target.value)}
+                            placeholder="e.g. Annual General Assembly 2026 Scheduled for November 15"
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-emerald-500 outline-none font-semibold text-slate-900"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block font-bold text-slate-800">Category</label>
+                          <select
+                            value={announcementFormCategory}
+                            onChange={(e) => setAnnouncementFormCategory(e.target.value)}
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs bg-white text-slate-900 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                          >
+                            <option value="General Announcement">General Announcement</option>
+                            <option value="Advisory">Advisory & Circular</option>
+                            <option value="General Assembly">General Assembly (AGM)</option>
+                            <option value="Loan Products">Loan Products & Credit</option>
+                            <option value="Dividends & Patronage">Dividends & Patronage</option>
+                            <option value="System Maintenance">System Maintenance</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* TARGET AUDIENCE SELECTION (All members, Affiliate, or Regular Members only) */}
+                      <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-3">
+                        <div>
+                          <label className="block font-bold text-emerald-950 text-xs">
+                            Target Audience / Member Visibility <span className="text-rose-500">*</span>
+                          </label>
+                          <p className="text-[11px] text-emerald-800">
+                            Control which members can view this announcement on their dashboard.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <label
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              announcementFormAudience === 'ALL'
+                                ? 'bg-white border-emerald-600 shadow-sm ring-1 ring-emerald-600'
+                                : 'bg-white/60 border-emerald-200 text-slate-700 hover:bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <input
+                                type="radio"
+                                name="announcementAudience"
+                                value="ALL"
+                                checked={announcementFormAudience === 'ALL'}
+                                onChange={() => setAnnouncementFormAudience('ALL')}
+                                className="text-emerald-600"
+                              />
+                              <span className="font-bold text-slate-900 text-xs">All Members</span>
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              Visible to every cooperative member across the portal.
+                            </p>
+                          </label>
+
+                          <label
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              announcementFormAudience === 'AFFILIATE'
+                                ? 'bg-white border-blue-600 shadow-sm ring-1 ring-blue-600'
+                                : 'bg-white/60 border-blue-200 text-slate-700 hover:bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <input
+                                type="radio"
+                                name="announcementAudience"
+                                value="AFFILIATE"
+                                checked={announcementFormAudience === 'AFFILIATE'}
+                                onChange={() => setAnnouncementFormAudience('AFFILIATE')}
+                                className="text-blue-600"
+                              />
+                              <span className="font-bold text-blue-950 text-xs">Affiliate Only</span>
+                            </div>
+                            <p className="text-[10px] text-blue-800">
+                              Exclusive to Affiliate / Associate members only.
+                            </p>
+                          </label>
+
+                          <label
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              announcementFormAudience === 'REGULAR'
+                                ? 'bg-white border-purple-600 shadow-sm ring-1 ring-purple-600'
+                                : 'bg-white/60 border-purple-200 text-slate-700 hover:bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <input
+                                type="radio"
+                                name="announcementAudience"
+                                value="REGULAR"
+                                checked={announcementFormAudience === 'REGULAR'}
+                                onChange={() => setAnnouncementFormAudience('REGULAR')}
+                                className="text-purple-600"
+                              />
+                              <span className="font-bold text-purple-950 text-xs">Regular Only</span>
+                            </div>
+                            <p className="text-[10px] text-purple-800">
+                              Exclusive to Regular members with full share capital.
+                            </p>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* PUBLISHING SCHEDULE & EXPIRATION CONFIGURATION */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Publishing Schedule */}
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                          <label className="block font-bold text-slate-900 text-xs">
+                            Publishing Schedule
+                          </label>
+
+                          <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                              <input
+                                type="radio"
+                                name="publishOption"
+                                checked={announcementFormPublishImmediate}
+                                onChange={() => setAnnouncementFormPublishImmediate(true)}
+                                className="text-emerald-600"
+                              />
+                              <span className="font-medium">Publish Immediately</span>
+                            </label>
+                            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                              <input
+                                type="radio"
+                                name="publishOption"
+                                checked={!announcementFormPublishImmediate}
+                                onChange={() => setAnnouncementFormPublishImmediate(false)}
+                                className="text-emerald-600"
+                              />
+                              <span className="font-medium">Schedule for Later</span>
+                            </label>
+                          </div>
+
+                          {!announcementFormPublishImmediate && (
+                            <div className="space-y-1 pt-1.5 border-t border-slate-200 animate-in fade-in">
+                              <label className="block text-[11px] font-semibold text-slate-700">
+                                Release Date & Time:
+                              </label>
+                              <input
+                                type="datetime-local"
+                                required={!announcementFormPublishImmediate}
+                                value={announcementFormPublishDate}
+                                onChange={(e) => setAnnouncementFormPublishDate(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                              />
+                              <p className="text-[10px] text-slate-500">
+                                This announcement will be hidden from members until the release time arrives.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Expiration Schedule */}
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <label className="block font-bold text-slate-900 text-xs">
+                              Auto-Expiration / Archive
+                            </label>
+                            <input
+                              type="checkbox"
+                              checked={announcementFormHasExpiration}
+                              onChange={(e) => setAnnouncementFormHasExpiration(e.target.checked)}
+                              className="w-4 h-4 text-emerald-600 rounded"
+                            />
+                          </div>
+
+                          <p className="text-[11px] text-slate-500">
+                            Automatically remove from members dashboard when the announcement expires.
+                          </p>
+
+                          {announcementFormHasExpiration && (
+                            <div className="space-y-1 pt-1.5 border-t border-slate-200 animate-in fade-in">
+                              <label className="block text-[11px] font-semibold text-slate-700">
+                                Expiration Date & Time:
+                              </label>
+                              <input
+                                type="datetime-local"
+                                required={announcementFormHasExpiration}
+                                value={announcementFormExpireDate}
+                                onChange={(e) => setAnnouncementFormExpireDate(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Priority */}
+                      <div className="space-y-1">
+                        <label className="block font-bold text-slate-800">Priority Level</label>
+                        <div className="flex items-center gap-2">
+                          {[
+                            { key: 'NORMAL', label: 'Normal Bulletin' },
+                            { key: 'IMPORTANT', label: 'Important Notice' },
+                            { key: 'URGENT', label: 'Urgent Advisory' },
+                          ].map((p) => (
+                            <button
+                              key={p.key}
+                              type="button"
+                              onClick={() => setAnnouncementFormPriority(p.key as any)}
+                              className={`flex-1 py-2 px-3 rounded-lg border text-xs font-semibold transition-all ${
+                                announcementFormPriority === p.key
+                                  ? p.key === 'URGENT'
+                                    ? 'bg-rose-50 border-rose-500 text-rose-800 ring-1 ring-rose-500'
+                                    : p.key === 'IMPORTANT'
+                                    ? 'bg-amber-50 border-amber-500 text-amber-800 ring-1 ring-amber-500'
+                                    : 'bg-emerald-50 border-emerald-600 text-emerald-800 ring-1 ring-emerald-600'
+                                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Full Content */}
+                      <div className="space-y-1">
+                        <label className="block font-bold text-slate-800">
+                          Full Announcement Content <span className="text-rose-500">*</span>
+                        </label>
+                        <textarea
+                          required
+                          rows={6}
+                          value={announcementFormContent}
+                          onChange={(e) => setAnnouncementFormContent(e.target.value)}
+                          placeholder="Provide the complete message, meeting agendas, guidelines, or details. This full content will be displayed in the modal when members click the announcement title..."
+                          className="w-full border border-slate-300 rounded-lg p-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none text-slate-900 leading-relaxed font-normal"
+                        />
+                      </div>
+
+                      {/* Modal Footer */}
+                      <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAnnouncementModal(false)}
+                          className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors shadow-sm flex items-center gap-1.5"
+                        >
+                          <Megaphone className="w-3.5 h-3.5" />
+                          {editingAnnouncementId ? 'Save Changes' : 'Publish Announcement'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* ANNOUNCEMENT PREVIEW MODAL (Member Portal Simulation) */}
+              {previewAnnouncementModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+                  <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[85vh] overflow-y-auto space-y-4">
+                    <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            {previewAnnouncementModal.category || 'Announcement'}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              previewAnnouncementModal.targetAudience === 'REGULAR'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : previewAnnouncementModal.targetAudience === 'AFFILIATE'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-slate-50 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            Audience:{' '}
+                            {previewAnnouncementModal.targetAudience === 'REGULAR'
+                              ? 'Regular Members Only'
+                              : previewAnnouncementModal.targetAudience === 'AFFILIATE'
+                              ? 'Affiliate Members Only'
+                              : 'All Members'}
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-slate-900 leading-snug">
+                          {previewAnnouncementModal.title}
+                        </h3>
+                        <p className="text-[11px] text-slate-400">
+                          Published on{' '}
+                          {new Date(previewAnnouncementModal.publishAt).toLocaleDateString('en-US', {
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setPreviewAnnouncementModal(null)}
+                        className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {previewAnnouncementModal.content}
+                    </div>
+
+                    {previewAnnouncementModal.expiresAt && (
+                      <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800 flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          Notice valid until{' '}
+                          {new Date(previewAnnouncementModal.expiresAt).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="pt-3 border-t border-slate-100 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewAnnouncementModal(null)}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-semibold text-xs transition-colors"
+                      >
+                        Close Preview
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* TAB: LOS APPROVAL MATRIX */}
         {activeTab === 'los' && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
@@ -7745,75 +9197,235 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Loan Underwriting Applications Queue Selector */}
-            {loanApplications.length > 0 && (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-emerald-700" />
-                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                      Loan Underwriting Queue ({loanApplications.length})
-                    </span>
+            {/* Segmented Queue Selector: Underwriting Triage vs Historical & Audit Archive */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200">
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex p-1 bg-slate-200/80 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setLosQueueView('UNDERWRITING')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        losQueueView === 'UNDERWRITING'
+                          ? 'bg-white text-emerald-800 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Loan Underwriting Queue</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-emerald-100 text-emerald-800 font-black">
+                        {loanApplications.filter((app) => ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'PENDING_CO_MAKER_ACCEPTANCE', 'CO_MAKER_DECLINED'].includes(app.status)).length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLosQueueView('AUDIT_HISTORY')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        losQueueView === 'AUDIT_HISTORY'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <History className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Historical &amp; Audit Archive</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-slate-200 text-slate-700 font-black">
+                        {loanApplications.filter((app) => ['DISBURSED', 'REJECTED', 'CANCELLED'].includes(app.status)).length}
+                      </span>
+                    </button>
                   </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500 hidden sm:inline">
+                    {losQueueView === 'UNDERWRITING'
+                      ? 'Loans subject for credit review & approval'
+                      : 'Historical ledger of disbursed & closed loans'}
+                  </span>
                   <button
                     type="button"
                     onClick={fetchLoanApplications}
                     className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 hover:underline"
                   >
-                    <RefreshCw className="w-3 h-3" /> Refresh Applications
+                    <RefreshCw className="w-3 h-3" /> Refresh
                   </button>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {loanApplications.map((app) => {
-                    const isSelected = activeLoanApplication?.id === app.id;
-                    return (
-                      <button
-                        key={app.id}
-                        type="button"
-                        onClick={() => {
-                          setActiveLoanApplication(app);
-                          setLoanStatus(app.status || 'SUBMITTED');
-                          setLosFirstDueDate(app.firstDueDate || '');
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all ${
-                          isSelected
-                            ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="text-[11px] font-mono font-bold text-slate-700">{app.id}</span>
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                            app.submissionSource === 'STAFF_WALK_IN'
-                              ? 'bg-purple-100 text-purple-800'
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {app.submissionSource === 'STAFF_WALK_IN' ? 'Walk-In' : 'Member Portal'}
-                          </span>
-                        </div>
-                        <div className="font-bold text-xs text-slate-900 truncate">{app.memberName}</div>
-                        <div className="text-[11px] text-slate-500 truncate">{app.productName}</div>
-                        <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
-                          <span className="font-black text-slate-900">₱{Number(app.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            app.status === 'DISBURSED'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : app.status === 'APPROVED'
-                              ? 'bg-teal-100 text-teal-800'
-                              : app.status === 'CANCELLED'
-                              ? 'bg-rose-100 text-rose-800'
-                              : 'bg-amber-100 text-amber-900'
-                          }`}>
-                            {app.status || 'SUBMITTED'}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
               </div>
-            )}
+
+              {/* View 1: Active Underwriting Queue (Only loans subject for review & approval) */}
+              {losQueueView === 'UNDERWRITING' && (() => {
+                const activeQueue = loanApplications.filter((app) =>
+                  ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'PENDING_CO_MAKER_ACCEPTANCE', 'CO_MAKER_DECLINED'].includes(app.status)
+                );
+
+                if (activeQueue.length === 0) {
+                  return (
+                    <div className="p-6 text-center text-slate-500 text-xs bg-white rounded-xl border border-slate-200">
+                      <p className="font-semibold text-slate-700">No loans currently in underwriting queue</p>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        All applications have been either disbursed, rejected, or are stored in the Historical &amp; Audit Archive.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {activeQueue.map((app) => {
+                      const isSelected = activeLoanApplication?.id === app.id;
+                      return (
+                        <button
+                          key={app.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveLoanApplication(app);
+                            setLoanStatus(app.status || 'SUBMITTED');
+                            setLosFirstDueDate(app.firstDueDate || '');
+                          }}
+                          className={`text-left p-3 rounded-xl border transition-all ${
+                            isSelected
+                              ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 shadow-xs'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="text-[11px] font-mono font-bold text-slate-700">{app.id}</span>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                              app.submissionSource === 'STAFF_WALK_IN'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {app.submissionSource === 'STAFF_WALK_IN' ? 'Walk-In' : 'Member Portal'}
+                            </span>
+                          </div>
+                          <div className="font-bold text-xs text-slate-900 truncate">{app.memberName}</div>
+                          <div className="text-[11px] text-slate-500 truncate">{app.productName}</div>
+                          <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
+                            <span className="font-black text-slate-900">₱{Number(app.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              app.status === 'APPROVED'
+                                ? 'bg-teal-100 text-teal-800'
+                                : app.status === 'UNDER_CREDIT_REVIEW'
+                                ? 'bg-indigo-100 text-indigo-800'
+                                : app.status === 'BOD_APPROVAL'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-amber-100 text-amber-900'
+                            }`}>
+                              {app.status || 'SUBMITTED'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* View 2: Historical & Audit Archive (Rejected, Disbursed, and Cancelled Loans) */}
+              {losQueueView === 'AUDIT_HISTORY' && (() => {
+                let archiveList = loanApplications.filter((app) =>
+                  ['DISBURSED', 'REJECTED', 'CANCELLED'].includes(app.status)
+                );
+
+                if (auditFilterStatus !== 'ALL') {
+                  archiveList = archiveList.filter((app) => app.status === auditFilterStatus);
+                }
+
+                if (auditSearchQuery.trim()) {
+                  const q = auditSearchQuery.toLowerCase().trim();
+                  archiveList = archiveList.filter((app) =>
+                    app.id?.toLowerCase().includes(q) ||
+                    app.loanNumber?.toLowerCase().includes(q) ||
+                    app.memberName?.toLowerCase().includes(q) ||
+                    app.productName?.toLowerCase().includes(q)
+                  );
+                }
+
+                return (
+                  <div className="space-y-3">
+                    {/* Filter Pills and Search */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {(['ALL', 'DISBURSED', 'REJECTED', 'CANCELLED'] as const).map((st) => (
+                          <button
+                            key={st}
+                            type="button"
+                            onClick={() => setAuditFilterStatus(st)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition font-mono ${
+                              auditFilterStatus === st
+                                ? 'bg-slate-900 text-white'
+                                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                            }`}
+                          >
+                            {st}
+                          </button>
+                        ))}
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="Search archived loan # or member..."
+                        value={auditSearchQuery}
+                        onChange={(e) => setAuditSearchQuery(e.target.value)}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-500 w-full sm:w-64"
+                      />
+                    </div>
+
+                    {archiveList.length === 0 ? (
+                      <div className="p-6 text-center text-slate-500 text-xs bg-white rounded-xl border border-slate-200">
+                        No historical or audit loan records match your current filter criteria.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                        {archiveList.map((app) => {
+                          const isSelected = activeLoanApplication?.id === app.id;
+                          return (
+                            <button
+                              key={app.id}
+                              type="button"
+                              onClick={() => {
+                                setActiveLoanApplication(app);
+                                setLoanStatus(app.status || 'DISBURSED');
+                                setLosFirstDueDate(app.firstDueDate || '');
+                              }}
+                              className={`text-left p-3 rounded-xl border transition-all ${
+                                isSelected
+                                  ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 shadow-xs'
+                                  : 'border-slate-200 bg-white hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex justify-between items-start mb-1">
+                                <span className="text-[11px] font-mono font-bold text-slate-700">{app.id}</span>
+                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                                  app.status === 'DISBURSED'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : app.status === 'REJECTED'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {app.status}
+                                </span>
+                              </div>
+                              <div className="font-bold text-xs text-slate-900 truncate">{app.memberName}</div>
+                              <div className="text-[11px] text-slate-500 truncate">{app.productName}</div>
+                              <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
+                                <span className="font-black text-slate-900">₱{Number(app.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {app.status === 'DISBURSED' && app.disbursedAt
+                                    ? formatApprovalTimestamp(app.disbursedAt)
+                                    : app.status === 'REJECTED' && app.rejectedAt
+                                    ? formatApprovalTimestamp(app.rejectedAt)
+                                    : 'Archived'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
 
             {/* Live Co-Maker Status Banner (Production: Simulation Buttons Removed) */}
             {activeLoanApplication && loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
@@ -8201,348 +9813,686 @@ export default function AdminDashboard() {
               {/* Stepper Pipeline with 5 Steps: Co-Maker -> LO -> CreCom -> BOD -> Disbursement */}
               <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                 {/* Step 0: Co-Maker Endorsement */}
-                <div className={`p-4 rounded-lg border ${
-                  ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
-                    ? 'border-emerald-300 bg-emerald-50/60'
-                    : loanStatus === 'CO_MAKER_DECLINED'
-                    ? 'border-rose-300 bg-rose-50/60'
-                    : 'border-amber-300 bg-amber-50/60'
-                }`}>
-                  <div className="flex items-center justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-700">0. Co-Maker</span>
-                    {['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
-                      <span className="text-emerald-700 flex items-center gap-1">✓ Endorsed</span>
-                    ) : loanStatus === 'CO_MAKER_DECLINED' ? (
-                      <span className="text-rose-600">Declined</span>
-                    ) : (
-                      <span className="text-amber-600">Pending</span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mb-3">Juan Dela Cruz (MEM-2026-0002) digital endorsement.</p>
-                  <div className="text-[10px] font-mono text-slate-600 bg-white p-1.5 rounded border border-slate-200">
-                    {['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
-                      ? 'Solidary Undertaking Confirmed'
-                      : loanStatus === 'CO_MAKER_DECLINED'
-                      ? 'Request Declined'
-                      : 'Awaiting Member Action'}
-                  </div>
-                </div>
+                {(() => {
+                  const isEndorsed = ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus);
+                  const isDeclined = loanStatus === 'CO_MAKER_DECLINED';
+                  const approverName = activeLoanApplication?.stageApprovals?.coMaker?.approvedBy || activeLoanApplication?.coMakerEndorsedBy || (isEndorsed ? (activeLoanApplication?.coMakerName || 'Designated Co-Maker') : '');
+                  const approvalTs = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.coMaker?.approvedAt || activeLoanApplication?.coMakerEndorsedAt);
+
+                  return (
+                    <div className={`p-4 rounded-xl border ${
+                      isEndorsed
+                        ? 'border-emerald-300 bg-emerald-50/60'
+                        : isDeclined
+                        ? 'border-rose-300 bg-rose-50/60'
+                        : 'border-amber-300 bg-amber-50/60'
+                    }`}>
+                      <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">0. Co-Maker</span>
+                        {isEndorsed ? (
+                          <span className="text-emerald-700 flex items-center gap-1 font-mono text-[11px]">✓ Endorsed</span>
+                        ) : isDeclined ? (
+                          <span className="text-rose-600 font-mono text-[11px]">Declined</span>
+                        ) : (
+                          <span className="text-amber-600 font-mono text-[11px]">Pending</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2 truncate">
+                        {activeLoanApplication?.coMakerName || 'Juan Dela Cruz'} ({activeLoanApplication?.coMakerNo || 'Co-Maker'})
+                      </p>
+
+                      {/* Approver & Timestamp */}
+                      {isEndorsed ? (
+                        <div className="text-[10px] space-y-1 bg-white p-2 rounded-lg border border-emerald-200">
+                          <div className="text-emerald-950 font-bold flex items-center gap-1 truncate">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{approverName}</span>
+                          </div>
+                          <div className="text-slate-500 font-mono text-[9px] flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{approvalTs}</span>
+                          </div>
+                          <div className="text-[9px] text-emerald-700 font-medium">Solidary Undertaking Confirmed</div>
+                        </div>
+                      ) : isDeclined ? (
+                        <div className="text-[10px] space-y-1 bg-white p-2 rounded-lg border border-rose-200">
+                          <div className="text-rose-900 font-bold">Endorsement Declined</div>
+                          <div className="text-slate-500 font-mono text-[9px]">{approvalTs}</div>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] font-mono text-slate-600 bg-white p-2 rounded-lg border border-slate-200 text-center">
+                          Awaiting Member Action
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Step 1: Loan Officer */}
-                <div className={`p-4 rounded-lg border ${
-                  ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
-                    ? 'border-emerald-300 bg-emerald-50/60'
-                    : loanStatus === 'REJECTED'
-                    ? 'border-rose-200 bg-rose-50/40'
-                    : 'border-slate-300 bg-white'
-                }`}>
-                  <div className="flex items-center justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-700">1. Loan Officer</span>
-                    {['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
-                      <span className="text-emerald-700 flex items-center gap-1">✓ Endorsed</span>
-                    ) : loanStatus === 'REJECTED' ? (
-                      <span className="text-rose-700 flex items-center gap-1 font-semibold">✕ Rejected</span>
-                    ) : (
-                      <span className="text-slate-500">Triage Queue</span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mb-2">Credit scoring & financial capacity verified.</p>
-                  {activeLoanApplication?.firstDueDate && ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) && (
-                    <div className="mb-2.5 p-1.5 bg-emerald-100/70 border border-emerald-300 rounded text-[11px] font-mono text-emerald-900 flex items-center justify-between">
-                      <span className="font-sans text-[10px] uppercase font-bold text-emerald-800">First Due Date:</span>
-                      <span className="font-bold">{activeLoanApplication.firstDueDate}</span>
-                    </div>
-                  )}
-                  {loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full bg-slate-100 text-slate-400 text-[10px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-200"
-                    >
-                      Awaiting Co-Maker
-                    </button>
-                  )}
-                  {loanStatus === 'CO_MAKER_DECLINED' && (
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full bg-rose-100 text-rose-500 text-[10px] font-medium py-1.5 rounded cursor-not-allowed border border-rose-200"
-                    >
-                      Co-Maker Declined
-                    </button>
-                  )}
-                  {loanStatus === 'SUBMITTED' && (
-                    <div className="space-y-2">
-                      {(currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER') && (
-                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-left">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                            First Due Date (Schedule Anchor)
-                          </label>
-                          <input
-                            type="date"
-                            value={losFirstDueDate}
-                            onChange={(e) => setLosFirstDueDate(e.target.value)}
-                            className="w-full text-xs px-2 py-1.5 rounded border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800"
-                            placeholder="YYYY-MM-DD"
-                          />
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            Anchors amortization schedule &amp; payment cycle.
-                          </p>
+                {(() => {
+                  const isEndorsed = ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus);
+                  const isRejectedAtThisStage = loanStatus === 'REJECTED' && (!activeLoanApplication?.stageApprovals?.rejection?.stage || activeLoanApplication?.stageApprovals?.rejection?.stage === 'LOAN_OFFICER');
+                  const approverName = activeLoanApplication?.stageApprovals?.loanOfficer?.approvedBy || activeLoanApplication?.reviewedBy || (isEndorsed ? 'Senior Loan Officer' : '');
+                  const approvalTs = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.loanOfficer?.approvedAt || activeLoanApplication?.reviewedAt);
+
+                  return (
+                    <div className={`p-4 rounded-xl border ${
+                      isEndorsed
+                        ? 'border-emerald-300 bg-emerald-50/60'
+                        : isRejectedAtThisStage
+                        ? 'border-rose-200 bg-rose-50/40'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">1. Loan Officer</span>
+                        {isEndorsed ? (
+                          <span className="text-emerald-700 flex items-center gap-1 font-mono text-[11px]">✓ Endorsed</span>
+                        ) : isRejectedAtThisStage ? (
+                          <span className="text-rose-700 flex items-center gap-1 font-semibold text-[11px]">✕ Rejected</span>
+                        ) : (
+                          <span className="text-slate-500 text-[11px]">Triage Queue</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2">Credit appraisal & capacity scoring.</p>
+
+                      {/* Approver & Timestamp */}
+                      {isEndorsed && (
+                        <div className="mb-2 text-[10px] space-y-1 bg-white p-2 rounded-lg border border-emerald-200">
+                          <div className="text-emerald-950 font-bold flex items-center gap-1 truncate">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{approverName}</span>
+                          </div>
+                          <div className="text-slate-500 font-mono text-[9px] flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{approvalTs}</span>
+                          </div>
                         </div>
                       )}
-                      {currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenLosConfirm({
-                                actionType: 'PROCEED_APPROVAL',
-                                targetStatus: 'UNDER_CREDIT_REVIEW',
-                                stageTitle: 'Loan Officer Endorsement',
-                                actionTitle: 'Proceed Approval to Credit Committee',
-                                message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.${losFirstDueDate ? ` First due date anchored to ${losFirstDueDate}.` : ''}`,
-                                statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
-                                confirmBtnText: 'Proceed Approval',
-                                confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                              })
-                            }
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
-                          >
-                            Endorse
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenLosConfirm({
-                                actionType: 'REJECT_APPLICATION',
-                                targetStatus: 'REJECTED',
-                                stageTitle: 'Loan Officer Rejection',
-                                actionTitle: 'Decline / Reject Application',
-                                message: `Reject loan application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}) at the Loan Officer appraisal stage?`,
-                                statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
-                                confirmBtnText: 'Reject Application',
-                                confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
-                              })
-                            }
-                            className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
-                          >
-                            Decline
-                          </button>
+
+                      {activeLoanApplication?.firstDueDate && isEndorsed && (
+                        <div className="mb-2 p-1.5 bg-emerald-100/70 border border-emerald-300 rounded text-[10px] font-mono text-emerald-900 flex items-center justify-between">
+                          <span className="font-sans text-[9px] uppercase font-bold text-emerald-800">First Due Date:</span>
+                          <span className="font-bold">{activeLoanApplication.firstDueDate}</span>
                         </div>
-                      ) : (
+                      )}
+
+                      {loanStatus === 'PENDING_CO_MAKER_ACCEPTANCE' && (
                         <button
                           type="button"
                           disabled
-                          title="Only Loan Officers or General Manager may endorse applications"
-                          className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
+                          className="w-full bg-slate-100 text-slate-400 text-[10px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-200"
                         >
-                          Requires Loan Officer
+                          Awaiting Co-Maker
                         </button>
                       )}
+                      {loanStatus === 'CO_MAKER_DECLINED' && (
+                        <button
+                          type="button"
+                          disabled
+                          className="w-full bg-rose-100 text-rose-500 text-[10px] font-medium py-1.5 rounded cursor-not-allowed border border-rose-200"
+                        >
+                          Co-Maker Declined
+                        </button>
+                      )}
+                      {loanStatus === 'SUBMITTED' && (
+                        <div className="space-y-2">
+                          {(currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER') && (
+                            <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-left">
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                                First Due Date (Schedule Anchor)
+                              </label>
+                              <input
+                                type="date"
+                                value={losFirstDueDate}
+                                onChange={(e) => setLosFirstDueDate(e.target.value)}
+                                className="w-full text-xs px-2 py-1.5 rounded border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800"
+                                placeholder="YYYY-MM-DD"
+                              />
+                            </div>
+                          )}
+                          {currentStaff.role === 'LOAN_OFFICER' || currentStaff.role === 'GENERAL_MANAGER' ? (
+                            <div className="flex gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenLosConfirm({
+                                    actionType: 'PROCEED_APPROVAL',
+                                    targetStatus: 'UNDER_CREDIT_REVIEW',
+                                    stageTitle: 'Loan Officer Endorsement',
+                                    actionTitle: 'Proceed Approval to Credit Committee',
+                                    message: `You are endorsing application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}, ₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) to the Credit Committee.${losFirstDueDate ? ` First due date anchored to ${losFirstDueDate}.` : ''}`,
+                                    statutoryDetail: 'Under CDA underwriting standards, this action certifies that borrower capacity to pay and co-maker qualifications have been satisfactorily appraised.',
+                                    confirmBtnText: 'Proceed Approval',
+                                    confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                                  })
+                                }
+                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
+                              >
+                                Endorse
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenLosConfirm({
+                                    actionType: 'REJECT_APPLICATION',
+                                    targetStatus: 'REJECTED',
+                                    stageTitle: 'Loan Officer Rejection',
+                                    actionTitle: 'Decline / Reject Application',
+                                    message: `Reject loan application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}) at the Loan Officer appraisal stage?`,
+                                    statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
+                                    confirmBtnText: 'Reject Application',
+                                    confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                                  })
+                                }
+                                className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="Only Loan Officers or General Manager may endorse applications"
+                              className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
+                            >
+                              Requires Loan Officer
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Step 2: Credit Committee */}
-                <div className={`p-4 rounded-lg border ${
-                  ['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus)
-                    ? 'border-emerald-300 bg-emerald-50/60'
-                    : loanStatus === 'REJECTED'
-                    ? 'border-rose-200 bg-rose-50/40'
-                    : 'border-slate-300 bg-white'
-                }`}>
-                  <div className="flex items-center justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-700">2. Credit Committee</span>
-                    {['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus) ? (
-                      <span className="text-emerald-700 flex items-center gap-1">✓ Approved</span>
-                    ) : loanStatus === 'REJECTED' ? (
-                      <span className="text-rose-700 flex items-center gap-1 font-semibold">✕ Rejected</span>
-                    ) : (
-                      <span className="text-slate-400">Waiting</span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mb-3">Capacity to pay & collateral evaluation.</p>
-                  {loanStatus === 'UNDER_CREDIT_REVIEW' && (
-                    <div>
-                      {currentStaff.role === 'CREDIT_COMMITTEE' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenLosConfirm({
-                                actionType: 'PROCEED_APPROVAL',
-                                targetStatus: 'BOD_APPROVAL',
-                                stageTitle: 'Credit Committee Evaluation',
-                                actionTitle: 'Proceed Approval to Board of Directors',
-                                message: `You are approving application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) and escalating to the Board of Directors for policy sign-off.`,
-                                statutoryDetail: 'Committee sign-off verifies compliance with the cooperative credit manual and confirms collateral/co-maker risk buffers.',
-                                confirmBtnText: 'Proceed Approval',
-                                confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                              })
-                            }
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenLosConfirm({
-                                actionType: 'REJECT_APPLICATION',
-                                targetStatus: 'REJECTED',
-                                stageTitle: 'Credit Committee Rejection',
-                                actionTitle: 'Decline / Reject Application',
-                                message: `Reject loan application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}) at Credit Committee evaluation stage?`,
-                                statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
-                                confirmBtnText: 'Reject Application',
-                                confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
-                              })
-                            }
-                            className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
-                          >
-                            Decline
-                          </button>
+                {(() => {
+                  const isApproved = ['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus);
+                  const isRejectedAtThisStage = loanStatus === 'REJECTED' && activeLoanApplication?.stageApprovals?.rejection?.stage === 'CREDIT_COMMITTEE';
+                  const approverName = activeLoanApplication?.stageApprovals?.creditCommittee?.approvedBy || activeLoanApplication?.committeeApprovedBy || (isApproved ? 'Credit Committee Chairperson' : '');
+                  const approvalTs = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.creditCommittee?.approvedAt || activeLoanApplication?.committeeApprovedAt);
+
+                  return (
+                    <div className={`p-4 rounded-xl border ${
+                      isApproved
+                        ? 'border-emerald-300 bg-emerald-50/60'
+                        : isRejectedAtThisStage
+                        ? 'border-rose-200 bg-rose-50/40'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">2. Credit Committee</span>
+                        {isApproved ? (
+                          <span className="text-emerald-700 flex items-center gap-1 font-mono text-[11px]">✓ Approved</span>
+                        ) : isRejectedAtThisStage ? (
+                          <span className="text-rose-700 flex items-center gap-1 font-semibold text-[11px]">✕ Rejected</span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">Waiting</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2">Capacity to pay & collateral evaluation.</p>
+
+                      {/* Approver & Timestamp */}
+                      {isApproved && (
+                        <div className="mb-2 text-[10px] space-y-1 bg-white p-2 rounded-lg border border-emerald-200">
+                          <div className="text-emerald-950 font-bold flex items-center gap-1 truncate">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{approverName}</span>
+                          </div>
+                          <div className="text-slate-500 font-mono text-[9px] flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{approvalTs}</span>
+                          </div>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          title="Requires Credit Committee Chairperson or General Manager"
-                          className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
-                        >
-                          Requires Credit Committee
-                        </button>
+                      )}
+
+                      {loanStatus === 'UNDER_CREDIT_REVIEW' && (
+                        <div>
+                          {currentStaff.role === 'CREDIT_COMMITTEE' || currentStaff.role === 'GENERAL_MANAGER' ? (
+                            <div className="flex gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenLosConfirm({
+                                    actionType: 'PROCEED_APPROVAL',
+                                    targetStatus: 'BOD_APPROVAL',
+                                    stageTitle: 'Credit Committee Evaluation',
+                                    actionTitle: 'Proceed Approval to Board of Directors',
+                                    message: `You are approving application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}) and escalating to the Board of Directors for policy sign-off.`,
+                                    statutoryDetail: 'Committee sign-off verifies compliance with the cooperative credit manual and confirms collateral/co-maker risk buffers.',
+                                    confirmBtnText: 'Proceed Approval',
+                                    confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                                  })
+                                }
+                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenLosConfirm({
+                                    actionType: 'REJECT_APPLICATION',
+                                    targetStatus: 'REJECTED',
+                                    stageTitle: 'Credit Committee Rejection',
+                                    actionTitle: 'Decline / Reject Application',
+                                    message: `Reject loan application ${activeLoanApplication?.id || ''} (${activeLoanApplication?.memberName || ''}) at Credit Committee evaluation stage?`,
+                                    statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
+                                    confirmBtnText: 'Reject Application',
+                                    confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                                  })
+                                }
+                                className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="Requires Credit Committee Chairperson or General Manager"
+                              className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
+                            >
+                              Requires Credit Committee
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Step 3: Board of Directors */}
-                <div className={`p-4 rounded-lg border ${
-                  ['APPROVED', 'DISBURSED'].includes(loanStatus)
-                    ? 'border-emerald-300 bg-emerald-50/60'
-                    : loanStatus === 'REJECTED'
-                    ? 'border-rose-200 bg-rose-50/40'
-                    : 'border-slate-300 bg-white'
-                }`}>
-                  <div className="flex items-center justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-700">3. Board of Directors</span>
-                    {['APPROVED', 'DISBURSED'].includes(loanStatus) ? (
-                      <span className="text-emerald-700 flex items-center gap-1">✓ Approved</span>
-                    ) : loanStatus === 'REJECTED' ? (
-                      <span className="text-rose-700 flex items-center gap-1 font-semibold">✕ Rejected</span>
-                    ) : (
-                      <span className="text-slate-400">Waiting</span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mb-3">Resolution & authority sign-off.</p>
-                  {loanStatus === 'BOD_APPROVAL' && (
-                    <div>
-                      {currentStaff.role === 'BOD' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenLosConfirm({
-                                actionType: 'PROCEED_APPROVAL',
-                                targetStatus: 'APPROVED',
-                                stageTitle: 'Board of Directors Resolution',
-                                actionTitle: 'Proceed with BOD Final Authorization',
-                                message: `You are ratifying the Board Credit Facility Resolution for application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Funds will be unlocked for Cashier disbursement.`,
-                                statutoryDetail: 'Under CDA MC 2015-06, Board sign-off authorizes disbursement from cooperative deposit liabilities.',
-                                confirmBtnText: 'Proceed Approval',
-                                confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                              })
-                            }
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
-                          >
-                            BOD Sign-Off
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenLosConfirm({
-                                actionType: 'REJECT_APPLICATION',
-                                targetStatus: 'REJECTED',
-                                stageTitle: 'Board of Directors Rejection',
-                                actionTitle: 'Decline / Reject Application',
-                                message: `Decline and reject loan application ${activeLoanApplication?.id || ''} at BOD review stage?`,
-                                statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
-                                confirmBtnText: 'Reject Application',
-                                confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
-                              })
-                            }
-                            className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
-                          >
-                            Decline
-                          </button>
+                {(() => {
+                  const isApproved = ['APPROVED', 'DISBURSED'].includes(loanStatus);
+                  const isRejectedAtThisStage = loanStatus === 'REJECTED' && activeLoanApplication?.stageApprovals?.rejection?.stage === 'BOARD_OF_DIRECTORS';
+                  const approverName = activeLoanApplication?.stageApprovals?.boardOfDirectors?.approvedBy || activeLoanApplication?.bodApprovedBy || (isApproved ? 'Board of Directors Chairman' : '');
+                  const approvalTs = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.boardOfDirectors?.approvedAt || activeLoanApplication?.bodApprovedAt);
+                  const resolutionNo = activeLoanApplication?.bodResolutionNumber || activeLoanApplication?.stageApprovals?.boardOfDirectors?.resolutionNumber;
+
+                  return (
+                    <div className={`p-4 rounded-xl border ${
+                      isApproved
+                        ? 'border-emerald-300 bg-emerald-50/60'
+                        : isRejectedAtThisStage
+                        ? 'border-rose-200 bg-rose-50/40'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">3. Board of Directors</span>
+                        {isApproved ? (
+                          <span className="text-emerald-700 flex items-center gap-1 font-mono text-[11px]">✓ Approved</span>
+                        ) : isRejectedAtThisStage ? (
+                          <span className="text-rose-700 flex items-center gap-1 font-semibold text-[11px]">✕ Rejected</span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">Waiting</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2">Resolution & authority sign-off.</p>
+
+                      {/* Approver & Timestamp */}
+                      {isApproved && (
+                        <div className="mb-2 text-[10px] space-y-1 bg-white p-2 rounded-lg border border-emerald-200">
+                          <div className="text-emerald-950 font-bold flex items-center gap-1 truncate">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{approverName}</span>
+                          </div>
+                          <div className="text-slate-500 font-mono text-[9px] flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{approvalTs}</span>
+                          </div>
+                          {resolutionNo && (
+                            <div className="text-[9px] text-purple-700 font-mono font-bold truncate">
+                              Res: {resolutionNo}
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          title="Requires Board of Directors or General Manager resolution"
-                          className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
-                        >
-                          Requires Board Chairman
-                        </button>
+                      )}
+
+                      {loanStatus === 'BOD_APPROVAL' && (
+                        <div>
+                          {currentStaff.role === 'BOD' || currentStaff.role === 'GENERAL_MANAGER' ? (
+                            <div className="flex gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenLosConfirm({
+                                    actionType: 'PROCEED_APPROVAL',
+                                    targetStatus: 'APPROVED',
+                                    stageTitle: 'Board of Directors Resolution',
+                                    actionTitle: 'Proceed with BOD Final Authorization',
+                                    message: `You are ratifying the Board Credit Facility Resolution for application ${activeLoanApplication?.id || ''} (₱${(activeLoanApplication?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Funds will be unlocked for Cashier disbursement.`,
+                                    statutoryDetail: 'Under CDA MC 2015-06, Board sign-off authorizes disbursement from cooperative deposit liabilities.',
+                                    confirmBtnText: 'Proceed Approval',
+                                    confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                                  })
+                                }
+                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded transition-colors shadow-sm"
+                              >
+                                BOD Sign-Off
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenLosConfirm({
+                                    actionType: 'REJECT_APPLICATION',
+                                    targetStatus: 'REJECTED',
+                                    stageTitle: 'Board of Directors Rejection',
+                                    actionTitle: 'Decline / Reject Application',
+                                    message: `Decline and reject loan application ${activeLoanApplication?.id || ''} at BOD review stage?`,
+                                    statutoryDetail: 'This halts the underwriting evaluation and sets the loan status to REJECTED across all cooperative and member systems.',
+                                    confirmBtnText: 'Reject Application',
+                                    confirmBtnClass: 'bg-rose-600 hover:bg-rose-700 text-white',
+                                  })
+                                }
+                                className="px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-medium py-1.5 rounded transition-colors"
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="Requires Board of Directors or General Manager resolution"
+                              className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
+                            >
+                              Requires Board Chairman
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Step 4: Disbursement */}
-                <div className={`p-4 rounded-lg border ${
-                  loanStatus === 'DISBURSED'
-                    ? 'border-emerald-300 bg-emerald-50/60'
-                    : 'border-slate-300 bg-white'
-                }`}>
-                  <div className="flex items-center justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-700">4. Disbursement</span>
-                    {loanStatus === 'DISBURSED' ? (
-                      <span className="text-emerald-700 flex items-center gap-1">✓ Disbursed</span>
-                    ) : (
-                      <span className="text-slate-400">Locked</span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mb-3">
-                    {techFeeTreatment === 'PASS_THROUGH'
-                      ? 'Deducts 1% Technology Fee & issues 12% VAT invoice.'
-                      : '1% Technology Fee absorbed via Coop OPEX & issues 12% VAT invoice.'}
-                  </p>
-                  {loanStatus === 'APPROVED' && (
-                    <div>
-                      {currentStaff.role === 'CASHIER' || currentStaff.role === 'GENERAL_MANAGER' ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleOpenLosConfirm({
-                              actionType: 'PROCEED_APPROVAL',
-                              targetStatus: 'DISBURSED',
-                              stageTitle: 'Cashier Disbursement Execution',
-                              actionTitle: 'Proceed with Cashier Disbursement',
-                              message: `You are executing disbursement of net proceeds for application ${activeLoanApplication?.id || ''} to ${activeLoanApplication?.memberName || 'Borrower'} after upfront fee deductions.`,
-                              statutoryDetail: 'An official Disbursement Voucher and BIR Electronic Sales Invoice will be booked in the General Ledger.',
-                              confirmBtnText: 'Proceed Disbursement',
-                              confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
-                            })
-                          }
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 rounded transition-colors shadow-sm"
-                        >
-                          Execute Disbursement
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          title="Under CDA MC 2015-06, only bonded Cashiers or GM may disburse cash proceeds"
-                          className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
-                        >
-                          Requires Branch Cashier
-                        </button>
+                {(() => {
+                  const isDisbursed = loanStatus === 'DISBURSED';
+                  const approverName = activeLoanApplication?.stageApprovals?.disbursement?.approvedBy || activeLoanApplication?.disbursedBy || (isDisbursed ? 'Branch Head Cashier' : '');
+                  const approvalTs = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.disbursement?.approvedAt || activeLoanApplication?.disbursedAt);
+
+                  return (
+                    <div className={`p-4 rounded-xl border ${
+                      isDisbursed
+                        ? 'border-emerald-300 bg-emerald-50/60'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">4. Disbursement</span>
+                        {isDisbursed ? (
+                          <span className="text-emerald-700 flex items-center gap-1 font-mono text-[11px]">✓ Disbursed</span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">Locked</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-2">
+                        {techFeeTreatment === 'PASS_THROUGH'
+                          ? 'Deducts 1% Tech Fee & books GL voucher.'
+                          : '1% Tech Fee absorbed via Coop OPEX.'}
+                      </p>
+
+                      {/* Approver & Timestamp */}
+                      {isDisbursed && (
+                        <div className="mb-2 text-[10px] space-y-1 bg-white p-2 rounded-lg border border-emerald-200">
+                          <div className="text-emerald-950 font-bold flex items-center gap-1 truncate">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{approverName}</span>
+                          </div>
+                          <div className="text-slate-500 font-mono text-[9px] flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                            <span>{approvalTs}</span>
+                          </div>
+                          <div className="text-[9px] text-emerald-700 font-medium">Disbursement Voucher Booked</div>
+                        </div>
+                      )}
+
+                      {loanStatus === 'APPROVED' && (
+                        <div>
+                          {currentStaff.role === 'CASHIER' || currentStaff.role === 'GENERAL_MANAGER' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleOpenLosConfirm({
+                                  actionType: 'PROCEED_APPROVAL',
+                                  targetStatus: 'DISBURSED',
+                                  stageTitle: 'Cashier Disbursement Execution',
+                                  actionTitle: 'Proceed with Cashier Disbursement',
+                                  message: `You are executing disbursement of net proceeds for application ${activeLoanApplication?.id || ''} to ${activeLoanApplication?.memberName || 'Borrower'} after upfront fee deductions.`,
+                                  statutoryDetail: 'An official Disbursement Voucher and BIR Electronic Sales Invoice will be booked in the General Ledger.',
+                                  confirmBtnText: 'Proceed Disbursement',
+                                  confirmBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                                })
+                              }
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 rounded transition-colors shadow-sm"
+                            >
+                              Execute Disbursement
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="Under CDA MC 2015-06, only bonded Cashiers or GM may disburse cash proceeds"
+                              className="w-full bg-slate-200 text-slate-500 text-[11px] font-medium py-1.5 rounded cursor-not-allowed border border-slate-300"
+                            >
+                              Requires Branch Cashier
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
+                  );
+                })()}
+              </div>
+
+              {/* LOS Statutory Approval Matrix & Governance Audit Trail Table */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 space-y-3">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 border-b border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                      LOS Approval Matrix &amp; Governance Audit Trail
+                    </h4>
+                  </div>
+                  <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200">
+                    Application ID: <strong className="text-slate-800">{activeLoanApplication?.id || '—'}</strong> • Status: <strong className="text-emerald-700">{loanStatus}</strong>
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-mono text-[10px] uppercase tracking-wider border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3">Approval Stage</th>
+                        <th className="py-2.5 px-3">Authorized Roles</th>
+                        <th className="py-2.5 px-3">Decision Status</th>
+                        <th className="py-2.5 px-3">Approved / Acted By</th>
+                        <th className="py-2.5 px-3">Timestamp of Approval</th>
+                        <th className="py-2.5 px-3">Statutory Reference &amp; Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {/* Row 0: Co-Maker */}
+                      {(() => {
+                        const isEndorsed = ['SUBMITTED', 'UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus);
+                        const isDeclined = loanStatus === 'CO_MAKER_DECLINED';
+                        const approver = activeLoanApplication?.stageApprovals?.coMaker?.approvedBy || activeLoanApplication?.coMakerEndorsedBy || (isEndorsed ? (activeLoanApplication?.coMakerName || 'Designated Co-Maker') : '—');
+                        const ts = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.coMaker?.approvedAt || activeLoanApplication?.coMakerEndorsedAt);
+
+                        return (
+                          <tr className="hover:bg-slate-50/80 transition">
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>Stage 0: Co-Maker Endorsement</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">Designated Co-Maker</td>
+                            <td className="py-2.5 px-3">
+                              {isEndorsed ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                  ✓ Endorsed
+                                </span>
+                              ) : isDeclined ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                                  ✕ Declined
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                                  ⏳ Awaiting Action
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">{approver}</td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{isEndorsed || isDeclined ? ts : '—'}</td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-500">RA 3765 &amp; Joint Solidary Liability Guarantee</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {/* Row 1: Loan Officer */}
+                      {(() => {
+                        const isEndorsed = ['UNDER_CREDIT_REVIEW', 'BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus);
+                        const isRejectedAtThisStage = loanStatus === 'REJECTED' && (!activeLoanApplication?.stageApprovals?.rejection?.stage || activeLoanApplication?.stageApprovals?.rejection?.stage === 'LOAN_OFFICER');
+                        const approver = activeLoanApplication?.stageApprovals?.loanOfficer?.approvedBy || activeLoanApplication?.reviewedBy || (isEndorsed ? 'Senior Loan Officer' : (isRejectedAtThisStage ? (activeLoanApplication?.rejectedBy || 'Senior Loan Officer') : '—'));
+                        const ts = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.loanOfficer?.approvedAt || activeLoanApplication?.reviewedAt || (isRejectedAtThisStage ? activeLoanApplication?.rejectedAt : ''));
+
+                        return (
+                          <tr className="hover:bg-slate-50/80 transition">
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>Stage 1: Loan Officer Appraisal</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">LOAN_OFFICER / GM</td>
+                            <td className="py-2.5 px-3">
+                              {isEndorsed ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                  ✓ Endorsed
+                                </span>
+                              ) : isRejectedAtThisStage ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                                  ✕ Rejected
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {loanStatus === 'SUBMITTED' ? '⏳ In Triage' : 'Queued'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">{approver}</td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{isEndorsed || isRejectedAtThisStage ? ts : '—'}</td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-500">Credit Score &amp; Debt Service Ratio (DSR) Verification</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {/* Row 2: Credit Committee */}
+                      {(() => {
+                        const isApproved = ['BOD_APPROVAL', 'APPROVED', 'DISBURSED'].includes(loanStatus);
+                        const isRejectedAtThisStage = loanStatus === 'REJECTED' && activeLoanApplication?.stageApprovals?.rejection?.stage === 'CREDIT_COMMITTEE';
+                        const approver = activeLoanApplication?.stageApprovals?.creditCommittee?.approvedBy || activeLoanApplication?.committeeApprovedBy || (isApproved ? 'Credit Committee Chairperson' : (isRejectedAtThisStage ? (activeLoanApplication?.rejectedBy || 'Credit Committee') : '—'));
+                        const ts = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.creditCommittee?.approvedAt || activeLoanApplication?.committeeApprovedAt || (isRejectedAtThisStage ? activeLoanApplication?.rejectedAt : ''));
+
+                        return (
+                          <tr className="hover:bg-slate-50/80 transition">
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>Stage 2: Credit Committee Evaluation</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">CREDIT_COMMITTEE / GM</td>
+                            <td className="py-2.5 px-3">
+                              {isApproved ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                  ✓ Approved
+                                </span>
+                              ) : isRejectedAtThisStage ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                                  ✕ Rejected
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {loanStatus === 'UNDER_CREDIT_REVIEW' ? '⏳ Under Review' : 'Queued'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">{approver}</td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{isApproved || isRejectedAtThisStage ? ts : '—'}</td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-500">Article 86 RA 9520 &amp; Coop Credit Policy Manual</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {/* Row 3: Board of Directors */}
+                      {(() => {
+                        const isApproved = ['APPROVED', 'DISBURSED'].includes(loanStatus);
+                        const isRejectedAtThisStage = loanStatus === 'REJECTED' && activeLoanApplication?.stageApprovals?.rejection?.stage === 'BOARD_OF_DIRECTORS';
+                        const approver = activeLoanApplication?.stageApprovals?.boardOfDirectors?.approvedBy || activeLoanApplication?.bodApprovedBy || (isApproved ? 'Board of Directors Chairman' : (isRejectedAtThisStage ? (activeLoanApplication?.rejectedBy || 'Board of Directors') : '—'));
+                        const ts = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.boardOfDirectors?.approvedAt || activeLoanApplication?.bodApprovedAt || (isRejectedAtThisStage ? activeLoanApplication?.rejectedAt : ''));
+                        const resNo = activeLoanApplication?.bodResolutionNumber || activeLoanApplication?.stageApprovals?.boardOfDirectors?.resolutionNumber;
+
+                        return (
+                          <tr className="hover:bg-slate-50/80 transition">
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>Stage 3: Board of Directors Sign-Off</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">BOD / GM</td>
+                            <td className="py-2.5 px-3">
+                              {isApproved ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                  ✓ Ratified
+                                </span>
+                              ) : isRejectedAtThisStage ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                                  ✕ Declined
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {loanStatus === 'BOD_APPROVAL' ? '⏳ Awaiting Board Action' : 'Queued'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">
+                              <div>{approver}</div>
+                              {resNo && <div className="text-[10px] text-purple-700 font-mono font-bold">Res: {resNo}</div>}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{isApproved || isRejectedAtThisStage ? ts : '—'}</td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-500">CDA MC 2015-06 Credit Facility Board Resolution</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {/* Row 4: Cashier Disbursement */}
+                      {(() => {
+                        const isDisbursed = loanStatus === 'DISBURSED';
+                        const approver = activeLoanApplication?.stageApprovals?.disbursement?.approvedBy || activeLoanApplication?.disbursedBy || (isDisbursed ? 'Branch Head Cashier' : '—');
+                        const ts = formatApprovalTimestamp(activeLoanApplication?.stageApprovals?.disbursement?.approvedAt || activeLoanApplication?.disbursedAt);
+
+                        return (
+                          <tr className="hover:bg-slate-50/80 transition">
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>Stage 4: Cashier Disbursement Execution</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">CASHIER / GM</td>
+                            <td className="py-2.5 px-3">
+                              {isDisbursed ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                  ✓ Disbursed
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {loanStatus === 'APPROVED' ? '⏳ Ready for Cashier' : 'Locked'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">{approver}</td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{isDisbursed ? ts : '—'}</td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-500">CDA GL JV Posting, DV &amp; BIR 12% VAT Sales Invoice</td>
+                          </tr>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -8916,22 +10866,50 @@ export default function AdminDashboard() {
                       </div>
 
                       {/* Step 3: Loan Principal, Term & Purpose */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <label className="block font-semibold text-slate-700 mb-1">
-                            Principal (₱{selectedWalkInProd.minAmount.toLocaleString()} - ₱{selectedWalkInProd.maxAmount.toLocaleString()})
-                          </label>
-                          <input
-                            type="number"
-                            required
-                            min={selectedWalkInProd.minAmount || 1000}
-                            max={selectedWalkInProd.maxAmount || 500000}
-                            step={1000}
-                            value={walkInAmount}
-                            onChange={(e) => setWalkInAmount(Number(e.target.value))}
-                            className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
-                          />
-                        </div>
+                      {(() => {
+                        const isDynamicProd = Boolean(selectedWalkInProd.isDynamicPrincipal || selectedWalkInProd.principalType === 'DYNAMIC_SHARE_CAPITAL');
+                        const memberShareCapital = Number(selectedWalkInMember?.paidUpShares) || 0;
+                        const multiplier = Number(selectedWalkInProd.shareCapitalMultiplier) || 3.0;
+                        const dynamicMaxRaw = Math.round(memberShareCapital * multiplier);
+                        const floor = Number(selectedWalkInProd.shareCapitalMinFloor) || Number(selectedWalkInProd.minAmount) || 1000;
+                        const ceiling = Number(selectedWalkInProd.shareCapitalMaxCeiling) || Number(selectedWalkInProd.maxAmount) || 500000;
+                        const effectiveMaxAmount = isDynamicProd
+                          ? Math.min(ceiling, Math.max(floor, dynamicMaxRaw))
+                          : (Number(selectedWalkInProd.maxAmount) || 500000);
+                        const effectiveMinAmount = Number(selectedWalkInProd.minAmount) || 1000;
+
+                        return (
+                          <div className="space-y-2">
+                            {isDynamicProd && (
+                              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Zap className="w-4 h-4 text-amber-600 shrink-0" />
+                                  <span>
+                                    <strong>Dynamic Principal Loan:</strong> Computed as <strong>{multiplier}x</strong> member's Share Capital (₱{memberShareCapital.toLocaleString()}).
+                                  </span>
+                                </div>
+                                <span className="font-bold text-amber-950 bg-white/80 px-2 py-0.5 rounded border border-amber-300">
+                                  Max Allowable: ₱{effectiveMaxAmount.toLocaleString()}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div>
+                                <label className="block font-semibold text-slate-700 mb-1">
+                                  Principal (₱{effectiveMinAmount.toLocaleString()} - ₱{effectiveMaxAmount.toLocaleString()})
+                                </label>
+                                <input
+                                  type="number"
+                                  required
+                                  min={effectiveMinAmount}
+                                  max={effectiveMaxAmount}
+                                  step={1000}
+                                  value={walkInAmount}
+                                  onChange={(e) => setWalkInAmount(Number(e.target.value))}
+                                  className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                              </div>
 
                         <div>
                           <label className="block font-semibold text-slate-700 mb-1">
@@ -8960,6 +10938,9 @@ export default function AdminDashboard() {
                           />
                         </div>
                       </div>
+                    </div>
+                  );
+                })()}
 
                       {/* Step 4: Designated Co-Maker */}
                       {requiresCoMaker && (
@@ -17920,10 +19901,10 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base tracking-tight leading-tight">
-                      Cooperative Enterprise
+                      {coopName || 'Cooperative Enterprise'}
                     </h3>
                     <div className="text-[11px] text-slate-300 font-mono">
-                      CDA Reg: CDA-NCR-2024-00921 • TIN: 009-887-123-000
+                      CDA Reg: {tenantCdaNo || 'CDA Registered'} • TIN: {tenantTin || '009-887-123-000'}
                     </div>
                   </div>
                 </div>

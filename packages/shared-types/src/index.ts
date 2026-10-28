@@ -535,6 +535,31 @@ export interface LoanProduct {
   advanceInterestOption?: string;
   succeedingMethod?: string;
   fixedMonthlyInstallment?: boolean;
+  // Dynamic Principal Configuration
+  principalType?: 'FIXED' | 'DYNAMIC_SHARE_CAPITAL';
+  isDynamicPrincipal?: boolean;
+  shareCapitalMultiplier?: number;
+  shareCapitalMinFloor?: number;
+  shareCapitalMaxCeiling?: number;
+}
+
+export type AnnouncementTargetAudience = 'ALL' | 'REGULAR' | 'AFFILIATE';
+
+export interface CoopAnnouncement {
+  id: string;
+  tenantId?: string;
+  title: string;
+  content: string;
+  category?: string;
+  targetAudience: AnnouncementTargetAudience;
+  publishAt: string; // ISO string or datetime
+  expiresAt?: string | null; // ISO string or datetime
+  priority?: 'NORMAL' | 'IMPORTANT' | 'URGENT';
+  authorName?: string;
+  authorRole?: string;
+  status?: 'DRAFT' | 'SCHEDULED' | 'PUBLISHED' | 'EXPIRED';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface LoanApprovalStep {
@@ -588,6 +613,72 @@ export interface Loan {
   disbursementMethod?: DisbursementMethod;
   disbursementReference?: string;
   disbursedAt?: string;
+  disbursedBy?: string;
+  coMakerEndorsedAt?: string;
+  coMakerEndorsedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewRemarks?: string;
+  committeeApprovedBy?: string;
+  committeeApprovedAt?: string;
+  bodApprovedBy?: string;
+  bodApprovedAt?: string;
+  bodResolutionNumber?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionRemarks?: string;
+  cancelledBy?: string;
+  cancelledAt?: string;
+  cancellationRemarks?: string;
+  stageApprovals?: {
+    coMaker?: {
+      approvedBy?: string;
+      approvedAt?: string;
+      status?: string;
+      notes?: string;
+    };
+    loanOfficer?: {
+      approvedBy?: string;
+      approvedAt?: string;
+      status?: string;
+      role?: string;
+      notes?: string;
+    };
+    creditCommittee?: {
+      approvedBy?: string;
+      approvedAt?: string;
+      status?: string;
+      role?: string;
+      notes?: string;
+    };
+    boardOfDirectors?: {
+      approvedBy?: string;
+      approvedAt?: string;
+      status?: string;
+      role?: string;
+      resolutionNumber?: string;
+      notes?: string;
+    };
+    disbursement?: {
+      approvedBy?: string;
+      approvedAt?: string;
+      status?: string;
+      role?: string;
+      reference?: string;
+      notes?: string;
+    };
+    rejection?: {
+      stage?: string;
+      rejectedBy?: string;
+      rejectedAt?: string;
+      remarks?: string;
+    };
+    cancellation?: {
+      cancelledBy?: string;
+      cancelledAt?: string;
+      remarks?: string;
+    };
+  };
   // Deductions:
   platformFee: number;
   coopServiceFee: number;

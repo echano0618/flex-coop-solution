@@ -242,7 +242,7 @@ export async function performUnifiedLogin(
       joinedAt: '2026-01-01T08:00:00.000Z',
       createdAt: '2026-01-01T08:00:00.000Z',
       updatedAt: new Date().toISOString(),
-      selfieUrl: '/avatars/MEM-2026-0001.jpg',
+      selfiePreview: null,
     };
     try {
       await fsService.saveMember(tenantId, member);
@@ -1235,6 +1235,63 @@ app.get('/api/v1/tenants', (_req: Request, res: Response) => {
   res.json({ success: true, count: tenants.length, data: tenants });
 });
 
+export const handleGetTenant = async (req: Request, res: Response) => {
+  try {
+    const slugOrId = (req.params.slugOrId || '').trim();
+    const lower = slugOrId.toLowerCase();
+
+    // 1. Look up in dbStore.tenants
+    let tenant = dbStore.tenants.get(slugOrId);
+    if (!tenant) {
+      tenant = Array.from(dbStore.tenants.values()).find(
+        (t) => t.slug?.toLowerCase() === lower || t.id.toLowerCase() === lower
+      );
+    }
+
+    // 2. Look up in dbStore.coopRegistrations
+    const reg = dbStore.coopRegistrations.find(
+      (r) => r.slug?.toLowerCase() === lower || r.id.toLowerCase() === lower || (tenant && r.slug === tenant.slug)
+    );
+
+    // 3. Fallback to Firestore if tenant not found in memory
+    if (!tenant) {
+      try {
+        const fsService = FirestoreCoopService.getInstance();
+        const t1 = await fsService.getTenant(slugOrId);
+        const t2 = await fsService.getTenant(lower);
+        tenant = (t1 || t2) || undefined;
+      } catch {}
+    }
+
+    if (!tenant && !reg) {
+      return res.status(404).json({ success: false, error: `Tenant or Cooperative not found for '${slugOrId}'.` });
+    }
+
+    const payload = {
+      id: tenant?.id || `tenant_${reg?.slug}`,
+      name: tenant?.name || reg?.name,
+      slug: tenant?.slug || reg?.slug,
+      cdaRegistrationNumber: tenant?.cdaRegistrationNumber || reg?.cdaRegistrationNumber || 'CDA Registered',
+      tin: tenant?.tin || reg?.tin || '009-887-123-000',
+      contactEmail: tenant?.contactEmail || reg?.contactEmail || reg?.adminEmail,
+      contactPhone: tenant?.contactPhone || reg?.contactPhone,
+      address: tenant?.address || reg?.address || 'Philippines',
+      adminFirstName: tenant?.adminFirstName || reg?.adminFirstName,
+      adminMiddleName: tenant?.adminMiddleName || reg?.adminMiddleName,
+      adminLastName: tenant?.adminLastName || reg?.adminLastName,
+      status: tenant?.status || reg?.status || 'ACTIVE',
+      billingMode: tenant?.billingMode || 'STANDARD_UNIFIED',
+      environment: tenant?.environment || 'production',
+      tag: tenant?.tag || '',
+    };
+
+    res.json({ success: true, data: payload });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.get('/api/v1/tenants/:slugOrId', handleGetTenant);
+
 app.post('/api/v1/tenants', (req: Request, res: Response) => {
   const {
     name,
@@ -1519,7 +1576,7 @@ app.post('/api/v1/operator/tenants/:id/details', async (req: Request, res: Respo
 });
 
 // Create Admin Portal User and Assign Role for Cooperative Instance
-app.post('/api/v1/operator/tenants/:id/admin-users', async (req: Request, res: Response) => {
+export const handleCreateTenantAdminUser = async (req: Request, res: Response) => {
   try {
     const tenantId = req.params.id;
     const { fullName, email, username, password, role, phone } = req.body;
@@ -1620,18 +1677,135 @@ app.post('/api/v1/operator/tenants/:id/admin-users', async (req: Request, res: R
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/v1/operator/tenants/:id/admin-users', handleCreateTenantAdminUser);
 
-// List Admin Users for Cooperative Instance
-app.get('/api/v1/operator/tenants/:id/admin-users', async (req: Request, res: Response) => {
+// List Admin Users for Cooperative Instance (Strictly NO dummy users; Only Primary Administrator and custom staff)
+export const handleGetTenantAdminUsers = async (req: Request, res: Response) => {
   try {
     const tenantId = req.params.id;
-    const staff = AuthService.getStaffAccounts(tenantId);
+    const fsService = FirestoreCoopService.getInstance();
+
+    // 1. Fetch credentials from Firestore & in-memory cache
+    const firestoreStaff = await fsService.listStaffCredentials(tenantId);
+    for (const cred of firestoreStaff) {
+      AuthService.addStaffAccount({
+        id: cred.id || cred.userId || `usr_${String(cred.role || 'staff').toLowerCase()}_${Date.now()}`,
+        email: cred.email,
+        fullName: cred.fullName,
+        role: cred.role as UserRole,
+        tenantId,
+        roleTitle: cred.roleTitle || cred.position || 'Cooperative Staff',
+        status: cred.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+        username: cred.username,
+      });
+    }
+
+    let staff = AuthService.getStaffAccounts(tenantId);
+
+    // List of known mock/dummy names that should NEVER be displayed in the operator portal
+    const DUMMY_NAMES = [
+      'Atty. Roberto Dela Rosa',
+      'Grace Villanueva',
+      'Engr. Manuel Reyes',
+      'Dr. Corazon Aquino-Cruz',
+      'Leah Mendoza',
+      'Felipe Santos, CPA',
+      'Atty. Cristina Gomez',
+    ];
+    // Filter out dummy names
+    staff = staff.filter((s) => !DUMMY_NAMES.includes(s.fullName));
+
+    // 2. If no valid staff exists, auto-provision ONLY the Primary Administrator from the coop registration or tenant record
+    if (staff.length === 0) {
+      // Find tenant or registration
+      const tenant =
+        dbStore.tenants.get(tenantId) ||
+        Array.from(dbStore.tenants.values()).find((t) => t.slug === tenantId || t.id === tenantId);
+
+      const reg = dbStore.coopRegistrations.find(
+        (r) => r.slug === tenantId || (tenant && r.slug === tenant.slug) || (tenant && r.name === tenant.name)
+      );
+
+      const adminFirstName = reg?.adminFirstName || tenant?.adminFirstName || '';
+      const adminMiddleName = reg?.adminMiddleName || tenant?.adminMiddleName || '';
+      const adminLastName = reg?.adminLastName || tenant?.adminLastName || '';
+      const adminFullName =
+        [adminFirstName, adminMiddleName, adminLastName].filter(Boolean).join(' ') ||
+        (tenant ? `${tenant.name} Administrator` : 'Primary Administrator');
+
+      const adminEmail = (reg?.adminEmail || tenant?.contactEmail || `admin@${tenant?.slug || 'coop'}.ph`).trim().toLowerCase();
+      const adminUsername = (reg?.adminEmail || tenant?.contactEmail || 'admin').split('@')[0].toLowerCase();
+      const adminUserId = `usr_admin_${tenant?.slug || tenantId}_01`;
+      const primaryAdminRoleTitle = 'General Manager / Primary Administrator';
+
+      const primaryAdmin = {
+        id: adminUserId,
+        email: adminEmail,
+        fullName: adminFullName,
+        role: 'GENERAL_MANAGER' as UserRole,
+        tenantId,
+        roleTitle: primaryAdminRoleTitle,
+        status: 'ACTIVE' as const,
+        username: adminUsername,
+      };
+
+      AuthService.addStaffAccount(primaryAdmin);
+
+      try {
+        await fsService.saveMemberCredential(tenantId, {
+          id: adminUserId,
+          tenantId,
+          fullName: adminFullName,
+          email: adminEmail,
+          username: adminUsername,
+          password: reg?.oneTimePassword || 'AdminPass2026!',
+          pin: '123456',
+          role: 'GENERAL_MANAGER',
+          roleTitle: primaryAdminRoleTitle,
+          isStaff: true,
+          status: 'ACTIVE',
+          kycStatus: 'VERIFIED',
+          createdAt: new Date().toISOString(),
+        });
+      } catch {}
+
+      staff = [primaryAdmin];
+    }
+
     res.json({ success: true, count: staff.length, data: staff });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.get('/api/v1/operator/tenants/:id/admin-users', handleGetTenantAdminUsers);
+
+// Update Admin Portal User Status (Activate / Deactivate)
+export const handleUpdateTenantAdminUserStatus = async (req: Request, res: Response) => {
+  try {
+    const { id: tenantId, userId } = req.params;
+    const { status } = req.body;
+    if (status !== 'ACTIVE' && status !== 'INACTIVE') {
+      return res.status(400).json({ success: false, error: "status must be 'ACTIVE' or 'INACTIVE'." });
+    }
+
+    // 1. Update in AuthService
+    AuthService.updateStaffAccountStatus(tenantId, userId, status);
+
+    // 2. Update in Firestore & dbStore
+    const fsService = FirestoreCoopService.getInstance();
+    await fsService.updateStaffCredentialStatus(tenantId, userId, status);
+
+    res.json({
+      success: true,
+      message: `Admin portal user status updated to ${status}.`,
+      data: { tenantId, userId, status },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.post('/api/v1/operator/tenants/:id/admin-users/:userId/status', handleUpdateTenantAdminUserStatus);
 
 // Prepaid Credit Ledger (Stored in Firebase Firestore)
 app.get('/api/v1/operator/credit-transactions', async (req: Request, res: Response) => {
@@ -3131,7 +3305,7 @@ export async function handleGetMemberBusinessPage(req: Request, res: Response) {
       firstName: member.firstName,
       lastName: member.lastName,
       name: member.name || `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Coop Member',
-      selfieUrl: member.selfieUrl || member.selfiePreview || null,
+      selfiePreview: member.selfiePreview || null,
       classification: member.classification,
     };
 
@@ -4740,7 +4914,7 @@ app.get('/api/v1/loan-products', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
+export const handleCreateLoanProduct = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const {
@@ -4806,6 +4980,11 @@ app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
       minCoMakers: minCoMakers ? Number(minCoMakers) : (requiresCoMaker ? 1 : 0),
       coMakerRuleDescription: coMakerRuleDescription || (requiresCoMaker ? 'Must be an active member in good standing with updated share capital' : undefined),
       requiresCollateral: Boolean(requiresCollateral),
+      principalType: req.body.principalType || (req.body.isDynamicPrincipal ? 'DYNAMIC_SHARE_CAPITAL' : 'FIXED'),
+      isDynamicPrincipal: Boolean(req.body.isDynamicPrincipal || req.body.principalType === 'DYNAMIC_SHARE_CAPITAL'),
+      shareCapitalMultiplier: req.body.shareCapitalMultiplier ? Number(req.body.shareCapitalMultiplier) : (req.body.isDynamicPrincipal ? 2.0 : 1.0),
+      shareCapitalMinFloor: req.body.shareCapitalMinFloor !== undefined ? Number(req.body.shareCapitalMinFloor) : undefined,
+      shareCapitalMaxCeiling: req.body.shareCapitalMaxCeiling !== undefined ? Number(req.body.shareCapitalMaxCeiling) : undefined,
       isActive: isActive !== undefined ? Boolean(isActive) : (status !== 'INACTIVE'),
       status: status || (isActive !== false ? 'ACTIVE' : 'INACTIVE'),
       createdAt: matchingExisting?.createdAt || new Date().toISOString(),
@@ -4835,7 +5014,8 @@ app.post('/api/v1/loan-products', async (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/v1/loan-products', handleCreateLoanProduct);
 
 app.put('/api/v1/loan-products/:id', async (req: Request, res: Response) => {
   try {
@@ -4898,6 +5078,341 @@ app.delete('/api/v1/loan-products/:id', async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// --------------------------------------------------------------------------
+// 5.5 COOPERATIVE NEWS & ANNOUNCEMENTS MODULE
+// --------------------------------------------------------------------------
+
+const DEFAULT_COOP_ANNOUNCEMENTS = [
+  {
+    id: 'ann_seed_001',
+    title: '2026 Annual General Assembly & Election of Officers',
+    category: 'General Assembly',
+    content: 'Notice is hereby given to all cooperative members that the 2026 Annual General Assembly will be held on December 5, 2026, at 9:00 AM at the Cooperative Main Auditorium and via secure Zoom teleconference. Registration starts at 7:30 AM. Attendance is strictly monitored for dividend eligibility and quorum requirements.',
+    targetAudience: 'ALL',
+    publishAt: '2026-10-15T08:00',
+    expiresAt: '2026-12-06T18:00',
+    priority: 'IMPORTANT',
+    authorName: 'Cooperative Board Secretary',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-15T08:00:00.000Z',
+  },
+  {
+    id: 'ann_seed_002',
+    title: 'Capital Build-Up (CBU) Incentive Drive for Affiliate Members',
+    category: 'Membership',
+    content: 'Calling all Affiliate/Associate members! Upgrade your membership to Regular status before November 30, 2026 to enjoy full dividend sharing, voting rights, and up to 3x share capital borrowing privileges. Attend the Saturday PMES refresher session and complete your required paid-up capital of ₱10,000.',
+    targetAudience: 'AFFILIATE',
+    publishAt: '2026-10-20T08:00',
+    expiresAt: '2026-11-30T23:59',
+    priority: 'NORMAL',
+    authorName: 'Education & Membership Committee',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-20T08:00:00.000Z',
+  },
+  {
+    id: 'ann_seed_003',
+    title: 'Special Dividend Distribution & Patronage Refund Release',
+    category: 'Dividends & Finance',
+    content: 'The Board of Directors is pleased to announce the approved release of the mid-year interest on share capital and patronage refunds for all Regular Members in good standing. Credited directly to your digital passbook savings account on October 31, 2026.',
+    targetAudience: 'REGULAR',
+    publishAt: '2026-10-25T08:00',
+    expiresAt: '2026-11-15T23:59',
+    priority: 'URGENT',
+    authorName: 'Audit & Inventory Committee',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-25T08:00:00.000Z',
+  },
+];
+
+export const handleListAnnouncements = async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const fsService = FirestoreCoopService.getInstance();
+    let fsItems: any[] = [];
+    try {
+      fsItems = await fsService.listAnnouncements(tenantId);
+    } catch {
+      fsItems = [];
+    }
+    let inMem = dbStore.announcements.get(tenantId);
+
+    // Collect deleted IDs from Firestore docs (isDeleted/status DELETED) and in-memory deleted set
+    const deletedIds = new Set<string>();
+    const memDeleted = dbStore.deletedAnnouncements?.get(tenantId);
+    if (memDeleted) {
+      memDeleted.forEach((id) => deletedIds.add(id));
+    }
+
+    const activeFsItems: any[] = [];
+    for (const f of fsItems) {
+      if (f.isDeleted === true || f.status === 'DELETED') {
+        deletedIds.add(f.id);
+      } else {
+        activeFsItems.push(f);
+      }
+    }
+
+    // Default seeds excluding any deleted announcements
+    const seeds = DEFAULT_COOP_ANNOUNCEMENTS
+      .filter((seed) => !deletedIds.has(seed.id))
+      .map((seed) => ({ ...seed, tenantId }));
+
+    const map = new Map<string, any>();
+    // 1. Seed defaults
+    seeds.forEach((s) => map.set(s.id, s));
+
+    // 2. Overlay inMem (excluding deleted)
+    if (inMem && inMem.length > 0) {
+      inMem.forEach((a: any) => {
+        if (!deletedIds.has(a.id) && !a.isDeleted && a.status !== 'DELETED') {
+          map.set(a.id, a);
+        }
+      });
+    }
+
+    // 3. Overlay active Firestore items (persisted truth)
+    activeFsItems.forEach((f: any) => {
+      if (!deletedIds.has(f.id)) {
+        map.set(f.id, { ...map.get(f.id), ...f });
+      }
+    });
+
+    let items = Array.from(map.values()).filter(
+      (a: any) => !deletedIds.has(a.id) && !a.isDeleted && a.status !== 'DELETED'
+    );
+    dbStore.announcements.set(tenantId, items);
+
+    const { audience, activeOnly, portal } = req.query;
+    const nowTime = Date.now();
+
+    // Auto-update computed status for expired items
+    items = items.map((a: any) => {
+      const expRaw = a.expiresAt || a.expiryDate || a.expirationDate;
+      const expTime = expRaw ? new Date(expRaw).getTime() : Infinity;
+      const isPastExpiry = !isNaN(expTime) && expTime <= nowTime;
+      const statusUpper = String(a.status || '').toUpperCase();
+      if (isPastExpiry || statusUpper === 'EXPIRED') {
+        return { ...a, status: 'EXPIRED' };
+      }
+      return a;
+    });
+
+    if (portal === 'member' || activeOnly === 'true') {
+      items = items.filter((a: any) => {
+        const statusUpper = String(a.status || '').toUpperCase();
+        if (['EXPIRED', 'ARCHIVED', 'INACTIVE', 'DRAFT'].includes(statusUpper)) return false;
+        const expRaw = a.expiresAt || a.expiryDate || a.expirationDate;
+        if (expRaw) {
+          const expTime = new Date(expRaw).getTime();
+          if (isNaN(expTime) || expTime <= nowTime) return false;
+        }
+        if (a.isExpired === true || a.expired === true) return false;
+        const pubTime = a.publishAt ? new Date(a.publishAt).getTime() : 0;
+        if (!isNaN(pubTime) && pubTime > nowTime) return false;
+        return true;
+      });
+    }
+
+    if (audience && typeof audience === 'string') {
+      const audUpper = audience.toUpperCase();
+      items = items.filter((a: any) => {
+        if (a.targetAudience === 'ALL') return true;
+        if (audUpper === 'REGULAR' && a.targetAudience === 'REGULAR') return true;
+        if ((audUpper === 'AFFILIATE' || audUpper === 'ASSOCIATE') && (a.targetAudience === 'AFFILIATE' || a.targetAudience === 'ASSOCIATE')) return true;
+        return false;
+      });
+    }
+
+    // Sort by publishAt descending
+    items.sort((a: any, b: any) => new Date(b.publishAt || b.createdAt || 0).getTime() - new Date(a.publishAt || a.createdAt || 0).getTime());
+
+    res.json({
+      success: true,
+      count: items.length,
+      data: items,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.get('/api/v1/announcements', handleListAnnouncements);
+
+export const handleCreateAnnouncement = async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const {
+      id,
+      title,
+      content,
+      category,
+      targetAudience,
+      publishAt,
+      expiresAt,
+      priority,
+      authorName,
+      authorRole,
+      status,
+    } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: 'Title and content are required for cooperative announcements.' });
+    }
+
+    const annId = id || `ann_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    const nowIso = new Date().toISOString();
+    const resolvedPublishAt = publishAt || nowIso;
+
+    // Determine current status based on schedule
+    let resolvedStatus = status || 'PUBLISHED';
+    const nowTime = Date.now();
+    const pubTime = new Date(resolvedPublishAt).getTime();
+    const expTime = expiresAt ? new Date(expiresAt).getTime() : Infinity;
+
+    if (nowTime < pubTime) {
+      resolvedStatus = 'SCHEDULED';
+    } else if (nowTime > expTime) {
+      resolvedStatus = 'EXPIRED';
+    } else {
+      resolvedStatus = 'PUBLISHED';
+    }
+
+    const newAnnouncement = {
+      id: annId,
+      tenantId,
+      title: title.trim(),
+      content: content.trim(),
+      category: category || 'General Announcement',
+      targetAudience: targetAudience || 'ALL', // ALL | REGULAR | AFFILIATE
+      publishAt: resolvedPublishAt,
+      expiresAt: expiresAt || null,
+      priority: priority || 'NORMAL',
+      authorName: authorName || 'Cooperative Administration',
+      authorRole: authorRole || 'Admin',
+      status: resolvedStatus,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const fsService = FirestoreCoopService.getInstance();
+    await fsService.saveAnnouncement(tenantId, newAnnouncement);
+
+    const existing = dbStore.announcements.get(tenantId) || [];
+    const updated = [newAnnouncement, ...existing.filter((a: any) => a.id !== annId)];
+    dbStore.announcements.set(tenantId, updated);
+
+    res.status(201).json({
+      success: true,
+      message: `Announcement "${newAnnouncement.title}" saved successfully.`,
+      data: newAnnouncement,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.post('/api/v1/announcements', handleCreateAnnouncement);
+
+export const handleUpdateAnnouncement = async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const annId = req.params.id || req.body?.id || (req.query?.id as string);
+    if (!annId) {
+      return res.status(400).json({ success: false, error: 'Announcement ID is required.' });
+    }
+    const fsService = FirestoreCoopService.getInstance();
+
+    let existingList = dbStore.announcements.get(tenantId);
+    if (!existingList || existingList.length === 0) {
+      const fsItems = await fsService.listAnnouncements(tenantId).catch(() => []);
+      if (fsItems && fsItems.length > 0) {
+        existingList = fsItems;
+      } else {
+        existingList = DEFAULT_COOP_ANNOUNCEMENTS.map((a) => ({ ...a, tenantId }));
+      }
+    }
+
+    const existing = existingList.find((a: any) => a.id === annId) || {};
+
+    const nowIso = new Date().toISOString();
+    const resolvedPublishAt = req.body.publishAt || existing.publishAt || nowIso;
+    const resolvedExpiresAt = req.body.expiresAt !== undefined ? req.body.expiresAt : (existing.expiresAt || null);
+    const pubTime = new Date(resolvedPublishAt).getTime();
+    const expTime = resolvedExpiresAt ? new Date(resolvedExpiresAt).getTime() : Infinity;
+    const nowTime = Date.now();
+    let computedStatus = req.body.status || existing.status || 'PUBLISHED';
+    if (nowTime < pubTime) {
+      computedStatus = 'SCHEDULED';
+    } else if (nowTime > expTime || computedStatus === 'EXPIRED') {
+      computedStatus = 'EXPIRED';
+    }
+
+    const updates = {
+      ...existing,
+      ...req.body,
+      id: annId,
+      tenantId,
+      publishAt: resolvedPublishAt,
+      expiresAt: resolvedExpiresAt,
+      status: computedStatus,
+      updatedAt: nowIso,
+    };
+
+    await fsService.saveAnnouncement(tenantId, updates);
+
+    const exists = existingList.some((a: any) => a.id === annId);
+    const updatedList = exists
+      ? existingList.map((a: any) => (a.id === annId ? updates : a))
+      : [updates, ...existingList];
+    dbStore.announcements.set(tenantId, updatedList);
+
+    res.json({
+      success: true,
+      message: `Announcement updated successfully.`,
+      data: updates,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.put('/api/v1/announcements/:id', handleUpdateAnnouncement);
+app.put('/api/v1/announcements', handleUpdateAnnouncement);
+
+export const handleDeleteAnnouncement = async (req: Request, res: Response) => {
+  try {
+    const tenantId = resolveTenantId(req);
+    const annId = req.params.id || (req.body && req.body.id) || (req.query && (req.query.id as string));
+    if (!annId) {
+      return res.status(400).json({ success: false, error: 'Announcement ID is required.' });
+    }
+    const fsService = FirestoreCoopService.getInstance();
+
+    await fsService.deleteAnnouncement(tenantId, annId);
+
+    // Track in-memory deleted set
+    if (!dbStore.deletedAnnouncements) {
+      dbStore.deletedAnnouncements = new Map();
+    }
+    let delSet = dbStore.deletedAnnouncements.get(tenantId);
+    if (!delSet) {
+      delSet = new Set();
+      dbStore.deletedAnnouncements.set(tenantId, delSet);
+    }
+    delSet.add(annId);
+
+    const existingList = dbStore.announcements.get(tenantId) || [];
+    const filtered = existingList.filter((a: any) => a.id !== annId);
+    dbStore.announcements.set(tenantId, filtered);
+
+    res.json({
+      success: true,
+      message: 'Announcement deleted successfully.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.delete('/api/v1/announcements/:id', handleDeleteAnnouncement);
+app.delete('/api/v1/announcements', handleDeleteAnnouncement);
 
 app.post('/api/v1/loans/apply', async (req: Request, res: Response) => {
   try {
@@ -5165,7 +5680,7 @@ app.get('/api/v1/co-maker/pending/:memberId', (req: Request, res: Response) => {
   res.json({ success: true, count: pendingRequests.length, data: pendingRequests });
 });
 
-app.post('/api/v1/co-maker/endorse', (req: Request, res: Response) => {
+app.post('/api/v1/co-maker/endorse', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const { loanId, coMakerMemberId, decision, decisionNotes, agreedToJointLiability } = req.body;
 
@@ -5212,14 +5727,38 @@ app.post('/api/v1/co-maker/endorse', (req: Request, res: Response) => {
       });
     }
 
+    const nowIso = new Date().toISOString();
+    const coMakerName = loan.coMaker.coMakerName || 'Co-Maker';
     loan.coMaker.status = 'ACCEPTED';
-    loan.coMaker.acceptedAt = new Date().toISOString();
+    loan.coMaker.acceptedAt = nowIso;
     loan.coMaker.jointSolidaryAgreementAccepted = true;
     loan.coMaker.decisionNotes = decisionNotes || 'Endorsed and accepted by co-maker.';
 
+    loan.coMakerEndorsedAt = nowIso;
+    loan.coMakerEndorsedBy = coMakerName;
+    loan.stageApprovals = loan.stageApprovals || {};
+    loan.stageApprovals.coMaker = {
+      approvedBy: coMakerName,
+      approvedAt: nowIso,
+      status: 'ENDORSED',
+      notes: loan.coMaker.decisionNotes,
+    };
+
     // PUSH TO NEXT PROCESS: Advance status to SUBMITTED so Loan Officer can triage!
     loan.status = 'SUBMITTED';
-    loan.updatedAt = new Date().toISOString();
+    loan.updatedAt = nowIso;
+
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.updateLoanStatus(tenantId, loan.id, 'SUBMITTED', {
+        coMaker: loan.coMaker,
+        coMakerEndorsedAt: loan.coMakerEndorsedAt,
+        coMakerEndorsedBy: loan.coMakerEndorsedBy,
+        stageApprovals: loan.stageApprovals,
+        updatedAt: loan.updatedAt,
+      });
+      await fsService.saveLoan(tenantId, loan);
+    } catch {}
 
     res.json({
       success: true,
@@ -5227,10 +5766,29 @@ app.post('/api/v1/co-maker/endorse', (req: Request, res: Response) => {
       data: loan,
     });
   } else if (decision === 'DECLINE') {
+    const nowIso = new Date().toISOString();
+    const coMakerName = loan.coMaker?.coMakerName || 'Co-Maker';
     loan.coMaker.status = 'DECLINED';
     loan.coMaker.decisionNotes = decisionNotes || 'Co-maker declined request.';
     loan.status = 'CO_MAKER_DECLINED';
-    loan.updatedAt = new Date().toISOString();
+    loan.updatedAt = nowIso;
+    loan.stageApprovals = loan.stageApprovals || {};
+    loan.stageApprovals.coMaker = {
+      approvedBy: coMakerName,
+      approvedAt: nowIso,
+      status: 'DECLINED',
+      notes: loan.coMaker.decisionNotes,
+    };
+
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.updateLoanStatus(tenantId, loan.id, 'CO_MAKER_DECLINED', {
+        coMaker: loan.coMaker,
+        stageApprovals: loan.stageApprovals,
+        updatedAt: loan.updatedAt,
+      });
+      await fsService.saveLoan(tenantId, loan);
+    } catch {}
 
     res.json({
       success: true,
@@ -5304,7 +5862,7 @@ async function postLoanApprovalLedgerEntry(tenantId: string, loan: any, approver
 app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { remarks, approved, firstDueDate } = req.body;
+  const { remarks, approved, firstDueDate, reviewedBy, approverName, approverRole } = req.body;
   const fsService = FirestoreCoopService.getInstance();
 
   let loans = dbStore.loans.get(tenantId) || [];
@@ -5316,10 +5874,32 @@ app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
   }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
+  const nowIso = new Date().toISOString();
+  const reviewer = reviewedBy || approverName || 'Loan Officer';
+
   if (approved === false) {
     loan.status = 'REJECTED';
-    loan.updatedAt = new Date().toISOString();
-    try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
+    loan.updatedAt = nowIso;
+    loan.rejectedBy = reviewer;
+    loan.rejectedAt = nowIso;
+    loan.rejectionRemarks = remarks || 'Loan rejected by Loan Officer.';
+    loan.stageApprovals = loan.stageApprovals || {};
+    loan.stageApprovals.rejection = {
+      stage: 'LOAN_OFFICER_REVIEW',
+      rejectedBy: reviewer,
+      rejectedAt: nowIso,
+      remarks: loan.rejectionRemarks,
+    };
+    try {
+      await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', {
+        updatedAt: loan.updatedAt,
+        rejectedBy: loan.rejectedBy,
+        rejectedAt: loan.rejectedAt,
+        rejectionRemarks: loan.rejectionRemarks,
+        stageApprovals: loan.stageApprovals,
+      });
+      await fsService.saveLoan(tenantId, loan);
+    } catch {}
     const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
     if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
     dbStore.loans.set(tenantId, loans);
@@ -5353,13 +5933,29 @@ app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
   }
 
   loan.status = 'UNDER_CREDIT_REVIEW';
-  loan.updatedAt = new Date().toISOString();
+  loan.updatedAt = nowIso;
+  loan.reviewedBy = reviewer;
+  loan.reviewedAt = nowIso;
+  loan.reviewRemarks = remarks || 'Endorsed to Credit Committee.';
+  loan.stageApprovals = loan.stageApprovals || {};
+  loan.stageApprovals.loanOfficer = {
+    approvedBy: reviewer,
+    approvedAt: nowIso,
+    status: 'REVIEWED',
+    role: approverRole || 'Loan Officer',
+    notes: loan.reviewRemarks,
+  };
+
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, 'UNDER_CREDIT_REVIEW', {
       firstDueDate: loan.firstDueDate,
       schedule: loan.schedule,
       totalInterestExpected: loan.totalInterestExpected,
       totalPayable: loan.totalPayable,
+      reviewedBy: loan.reviewedBy,
+      reviewedAt: loan.reviewedAt,
+      reviewRemarks: loan.reviewRemarks,
+      stageApprovals: loan.stageApprovals,
       updatedAt: loan.updatedAt,
     });
     await fsService.saveLoan(tenantId, loan);
@@ -5379,7 +5975,7 @@ app.post('/api/v1/loans/:id/review', async (req: Request, res: Response) => {
 app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { approved } = req.body;
+  const { approved, approvedBy, approverName, approverRole, remarks } = req.body;
   const fsService = FirestoreCoopService.getInstance();
 
   let loans = dbStore.loans.get(tenantId) || [];
@@ -5391,10 +5987,32 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
   }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
+  const nowIso = new Date().toISOString();
+  const approver = approvedBy || approverName || 'Credit Committee';
+
   if (approved === false) {
     loan.status = 'REJECTED';
-    loan.updatedAt = new Date().toISOString();
-    try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
+    loan.updatedAt = nowIso;
+    loan.rejectedBy = approver;
+    loan.rejectedAt = nowIso;
+    loan.rejectionRemarks = remarks || 'Loan rejected by Credit Committee.';
+    loan.stageApprovals = loan.stageApprovals || {};
+    loan.stageApprovals.rejection = {
+      stage: 'CREDIT_COMMITTEE',
+      rejectedBy: approver,
+      rejectedAt: nowIso,
+      remarks: loan.rejectionRemarks,
+    };
+    try {
+      await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', {
+        updatedAt: loan.updatedAt,
+        rejectedBy: loan.rejectedBy,
+        rejectedAt: loan.rejectedAt,
+        rejectionRemarks: loan.rejectionRemarks,
+        stageApprovals: loan.stageApprovals,
+      });
+      await fsService.saveLoan(tenantId, loan);
+    } catch {}
     const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
     if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
     dbStore.loans.set(tenantId, loans);
@@ -5428,12 +6046,26 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
   } else {
     loan.status = 'APPROVED';
   }
-  loan.updatedAt = new Date().toISOString();
+  loan.updatedAt = nowIso;
+  loan.committeeApprovedBy = approver;
+  loan.committeeApprovedAt = nowIso;
+  loan.stageApprovals = loan.stageApprovals || {};
+  loan.stageApprovals.creditCommittee = {
+    approvedBy: approver,
+    approvedAt: nowIso,
+    status: 'APPROVED',
+    role: approverRole || 'Credit Committee',
+    notes: remarks || (loan.status === 'BOD_APPROVAL' ? 'Endorsed to Board of Directors' : 'Approved by Credit Committee'),
+  };
+
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, loan.status, {
       schedule: loan.schedule,
       totalInterestExpected: loan.totalInterestExpected,
       totalPayable: loan.totalPayable,
+      committeeApprovedBy: loan.committeeApprovedBy,
+      committeeApprovedAt: loan.committeeApprovedAt,
+      stageApprovals: loan.stageApprovals,
       updatedAt: loan.updatedAt,
     });
     await fsService.saveLoan(tenantId, loan);
@@ -5456,7 +6088,7 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
 app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { approved } = req.body;
+  const { approved, approvedBy, approverName, approverRole, remarks, resolutionNumber } = req.body;
   const fsService = FirestoreCoopService.getInstance();
 
   let loans = dbStore.loans.get(tenantId) || [];
@@ -5468,10 +6100,32 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
   }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
+  const nowIso = new Date().toISOString();
+  const approver = approvedBy || approverName || 'Board of Directors';
+
   if (approved === false) {
     loan.status = 'REJECTED';
-    loan.updatedAt = new Date().toISOString();
-    try { await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', { updatedAt: loan.updatedAt }); } catch {}
+    loan.updatedAt = nowIso;
+    loan.rejectedBy = approver;
+    loan.rejectedAt = nowIso;
+    loan.rejectionRemarks = remarks || 'Loan rejected by Board of Directors.';
+    loan.stageApprovals = loan.stageApprovals || {};
+    loan.stageApprovals.rejection = {
+      stage: 'BOARD_OF_DIRECTORS',
+      rejectedBy: approver,
+      rejectedAt: nowIso,
+      remarks: loan.rejectionRemarks,
+    };
+    try {
+      await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', {
+        updatedAt: loan.updatedAt,
+        rejectedBy: loan.rejectedBy,
+        rejectedAt: loan.rejectedAt,
+        rejectionRemarks: loan.rejectionRemarks,
+        stageApprovals: loan.stageApprovals,
+      });
+      await fsService.saveLoan(tenantId, loan);
+    } catch {}
     const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
     if (idx >= 0) loans[idx] = loan; else loans.unshift(loan);
     dbStore.loans.set(tenantId, loans);
@@ -5500,12 +6154,29 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
   }
 
   loan.status = 'APPROVED';
-  loan.updatedAt = new Date().toISOString();
+  loan.updatedAt = nowIso;
+  loan.bodApprovedBy = approver;
+  loan.bodApprovedAt = nowIso;
+  if (resolutionNumber) loan.bodResolutionNumber = resolutionNumber;
+  loan.stageApprovals = loan.stageApprovals || {};
+  loan.stageApprovals.boardOfDirectors = {
+    approvedBy: approver,
+    approvedAt: nowIso,
+    status: 'APPROVED',
+    role: approverRole || 'Board of Directors',
+    resolutionNumber: loan.bodResolutionNumber,
+    notes: remarks || 'Approved by Board of Directors',
+  };
+
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, 'APPROVED', {
       schedule: loan.schedule,
       totalInterestExpected: loan.totalInterestExpected,
       totalPayable: loan.totalPayable,
+      bodApprovedBy: loan.bodApprovedBy,
+      bodApprovedAt: loan.bodApprovedAt,
+      bodResolutionNumber: loan.bodResolutionNumber,
+      stageApprovals: loan.stageApprovals,
       updatedAt: loan.updatedAt,
     });
     await fsService.saveLoan(tenantId, loan);
@@ -5526,7 +6197,7 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
 app.post('/api/v1/loans/:id/reject', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { remarks, rejectedBy } = req.body;
+  const { remarks, rejectedBy, rejectorName, rejectorRole } = req.body;
   const fsService = FirestoreCoopService.getInstance();
 
   let loans = dbStore.loans.get(tenantId) || [];
@@ -5538,16 +6209,31 @@ app.post('/api/v1/loans/:id/reject', async (req: Request, res: Response) => {
   }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
+  const nowIso = new Date().toISOString();
+  const rejector = rejectedBy || rejectorName || 'Credit Committee';
   loan.status = 'REJECTED';
-  loan.updatedAt = new Date().toISOString();
-  if (remarks) (loan as any).rejectionRemarks = remarks;
-  if (rejectedBy) (loan as any).rejectedBy = rejectedBy;
+  loan.updatedAt = nowIso;
+  loan.rejectedAt = nowIso;
+  loan.rejectedBy = rejector;
+  loan.rejectionRemarks = remarks || 'Loan application rejected.';
+  loan.stageApprovals = loan.stageApprovals || {};
+  loan.stageApprovals.rejection = {
+    stage: 'UNDERWRITING_REJECTION',
+    rejectedBy: rejector,
+    rejectedAt: nowIso,
+    remarks: loan.rejectionRemarks,
+  };
 
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, 'REJECTED', {
       updatedAt: loan.updatedAt,
+      rejectedBy: loan.rejectedBy,
+      rejectedAt: loan.rejectedAt,
+      rejectionRemarks: loan.rejectionRemarks,
+      stageApprovals: loan.stageApprovals,
       ...(remarks ? { disbursementReference: remarks } : {}),
     });
+    await fsService.saveLoan(tenantId, loan);
   } catch {}
 
   const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
@@ -5564,7 +6250,7 @@ app.post('/api/v1/loans/:id/reject', async (req: Request, res: Response) => {
 app.post('/api/v1/loans/:id/cancel', async (req: Request, res: Response) => {
   const tenantId = resolveTenantId(req);
   const loanId = req.params.id;
-  const { remarks, cancelledBy } = req.body;
+  const { remarks, cancelledBy, cancellerName } = req.body;
   const fsService = FirestoreCoopService.getInstance();
 
   let loans = dbStore.loans.get(tenantId) || [];
@@ -5576,16 +6262,30 @@ app.post('/api/v1/loans/:id/cancel', async (req: Request, res: Response) => {
   }
   if (!loan) return res.status(404).json({ success: false, error: 'Loan not found' });
 
+  const nowIso = new Date().toISOString();
+  const canceller = cancelledBy || cancellerName || 'Staff';
   loan.status = 'CANCELLED';
-  loan.updatedAt = new Date().toISOString();
-  if (remarks) (loan as any).cancellationRemarks = remarks;
-  if (cancelledBy) (loan as any).cancelledBy = cancelledBy;
+  loan.updatedAt = nowIso;
+  loan.cancelledAt = nowIso;
+  loan.cancelledBy = canceller;
+  loan.cancellationRemarks = remarks || 'Loan application cancelled.';
+  loan.stageApprovals = loan.stageApprovals || {};
+  loan.stageApprovals.cancellation = {
+    cancelledBy: canceller,
+    cancelledAt: nowIso,
+    remarks: loan.cancellationRemarks,
+  };
 
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, 'CANCELLED', {
       updatedAt: loan.updatedAt,
+      cancelledBy: loan.cancelledBy,
+      cancelledAt: loan.cancelledAt,
+      cancellationRemarks: loan.cancellationRemarks,
+      stageApprovals: loan.stageApprovals,
       ...(remarks ? { disbursementReference: remarks } : {}),
     });
+    await fsService.saveLoan(tenantId, loan);
   } catch {}
 
   const idx = loans.findIndex((l) => l.id === loan.id || l.loanNumber === loan.loanNumber);
@@ -6480,8 +7180,21 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
 
   loan.netProceedsDisbursed = principalAmount - loan.platformFee - loan.coopServiceFee - mandatoryShareAmount;
   loan.status = 'DISBURSED';
-  loan.disbursedAt = new Date().toISOString();
-  loan.disbursementReference = loan.disbursementReference || `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
+  const nowIso = new Date().toISOString();
+  loan.disbursedAt = nowIso;
+  const { reference, disbursedBy, cashierName, cashierRole, notes } = req.body || {};
+  const cashier = disbursedBy || cashierName || 'Cashier / Treasury';
+  loan.disbursedBy = cashier;
+  loan.disbursementReference = reference || loan.disbursementReference || `DISB-TX-${Date.now().toString(36).toUpperCase()}`;
+  loan.stageApprovals = loan.stageApprovals || {};
+  loan.stageApprovals.disbursement = {
+    approvedBy: cashier,
+    approvedAt: nowIso,
+    status: 'DISBURSED',
+    role: cashierRole || 'Treasury / Cashier',
+    reference: loan.disbursementReference,
+    notes: notes || 'Net proceeds disbursed to borrower.',
+  };
 
   // Ensure amortization schedule exists
   if (!loan.schedule || loan.schedule.length === 0) {
@@ -6510,11 +7223,13 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
       platformFee: loan.platformFee,
       netProceedsDisbursed: loan.netProceedsDisbursed,
       disbursedAt: loan.disbursedAt,
+      disbursedBy: loan.disbursedBy,
       disbursementReference: loan.disbursementReference,
+      stageApprovals: loan.stageApprovals,
       balanceRemaining: loan.balanceRemaining,
       schedule: loan.schedule,
       totalPayable: loan.totalPayable,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     });
     await fsService.saveLoan(tenantId, loan);
   } catch (fsErr) {

@@ -252,6 +252,7 @@ export default function OperatorPortalPage() {
   const [isLoadingCoopCreditTx, setIsLoadingCoopCreditTx] = useState<boolean>(false);
   const [coopAdminUsers, setCoopAdminUsers] = useState<any[]>([]);
   const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState<boolean>(false);
+  const [togglingAdminUserId, setTogglingAdminUserId] = useState<string | null>(null);
   const [showCreateAdminForm, setShowCreateAdminForm] = useState<boolean>(false);
   const [newAdminFullName, setNewAdminFullName] = useState<string>('');
   const [newAdminEmail, setNewAdminEmail] = useState<string>('');
@@ -852,6 +853,38 @@ export default function OperatorPortalPage() {
       alert('Network error creating admin user.');
     } finally {
       setIsCreatingAdminUser(false);
+    }
+  };
+
+  const handleToggleAdminUserStatus = async (user: any) => {
+    if (!selectedFleetCoopModal) return;
+    const targetStatus = user.status === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
+    const actionLabel = targetStatus === 'ACTIVE' ? 'activate' : 'deactivate';
+    if (!confirm(`Are you sure you want to ${actionLabel} admin user '${user.fullName}'?`)) {
+      return;
+    }
+
+    setTogglingAdminUserId(user.id);
+    try {
+      const res = await fetch(
+        `${getApiBaseUrl()}/operator/tenants/${encodeURIComponent(selectedFleetCoopModal.id)}/admin-users/${encodeURIComponent(user.id)}/status`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: targetStatus }),
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setToastMessage(`Admin user '${user.fullName}' has been ${targetStatus === 'ACTIVE' ? 'activated' : 'deactivated'}.`);
+        await fetchCoopAdminUsers(selectedFleetCoopModal.id);
+      } else {
+        alert(json.error || `Failed to ${actionLabel} admin user.`);
+      }
+    } catch (err) {
+      alert(`Network error updating admin user status.`);
+    } finally {
+      setTogglingAdminUserId(null);
     }
   };
 
@@ -4536,22 +4569,68 @@ https://tuntongtech.com`;
                         <th className="py-2 px-3">Email</th>
                         <th className="py-2 px-3">Username</th>
                         <th className="py-2 px-3">Assigned Role</th>
+                        <th className="py-2 px-3">Status</th>
+                        <th className="py-2 px-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                      {coopAdminUsers.map((u) => (
-                        <tr key={u.id || u.email} className="hover:bg-slate-900/60">
-                          <td className="py-2.5 px-3 font-semibold text-white">{u.fullName}</td>
-                          <td className="py-2.5 px-3 font-mono text-slate-300">{u.email}</td>
-                          <td className="py-2.5 px-3 font-mono text-slate-400">{u.username || '—'}</td>
-                          <td className="py-2.5 px-3">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full">
-                              <Shield className="w-2.5 h-2.5 text-purple-400" />
-                              <span>{u.roleTitle || u.role}</span>
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {coopAdminUsers.map((u) => {
+                        const isInactive = u.status === 'INACTIVE';
+                        const isToggling = togglingAdminUserId === u.id;
+                        return (
+                          <tr key={u.id || u.email} className="hover:bg-slate-900/60 transition">
+                            <td className="py-2.5 px-3 font-semibold text-white">
+                              {u.fullName}
+                              {u.roleTitle?.includes('Primary Administrator') && (
+                                <span className="ml-1.5 text-[9px] bg-amber-950 text-amber-300 border border-amber-800 px-1.5 py-0.2 rounded font-sans font-bold">
+                                  Primary
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-slate-300">{u.email}</td>
+                            <td className="py-2.5 px-3 font-mono text-slate-400">{u.username || '—'}</td>
+                            <td className="py-2.5 px-3">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full">
+                                <Shield className="w-2.5 h-2.5 text-purple-400" />
+                                <span>{u.roleTitle || u.role}</span>
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {isInactive ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-rose-950/80 text-rose-300 border border-rose-800/80 px-2 py-0.5 rounded-full">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                  <span>Deactivated</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-2 py-0.5 rounded-full">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                  <span>Active</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <button
+                                type="button"
+                                disabled={isToggling}
+                                onClick={() => handleToggleAdminUserStatus(u)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition flex items-center gap-1 ml-auto ${
+                                  isInactive
+                                    ? 'bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800'
+                                    : 'bg-rose-950 text-rose-300 hover:bg-rose-900 border border-rose-800'
+                                } disabled:opacity-50`}
+                              >
+                                {isToggling ? (
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                ) : isInactive ? (
+                                  'Activate'
+                                ) : (
+                                  'Deactivate'
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

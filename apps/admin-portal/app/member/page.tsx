@@ -59,6 +59,8 @@ import {
   ImageIcon,
   Trash2,
   Briefcase,
+  Megaphone,
+  Zap,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -202,6 +204,76 @@ const DEFAULT_LOAN_PRODUCTS = [
       { id: 'opt_fee_1', name: 'Documentary Stamp Tax (DST)', type: 'PERCENTAGE', value: 0.75 },
       { id: 'opt_fee_2', name: 'Student Assistance Insurance', type: 'FIXED', value: 350 },
     ],
+  },
+  {
+    id: 'prod_share_multiplier',
+    code: 'SHARE_MULTIPLIER_LOAN',
+    name: 'Share Capital Multiplier Credit Line',
+    type: 'REGULAR',
+    minAmount: 5000,
+    maxAmount: 300000,
+    annualInterestRate: 0.10,
+    minTermMonths: 6,
+    maxTermMonths: 36,
+    amortizationMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    advanceInterestOption: 'NONE',
+    succeedingMethod: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+    fixedMonthlyInstallment: true,
+    serviceFeeRate: 0.015,
+    finesRateMonthly: 0.02,
+    requiresCoMaker: false,
+    minCoMakers: 0,
+    coMakerRuleDescription: 'Fully backed by Member Share Capital. No co-maker required up to 300% of paid-up capital.',
+    requiresCollateral: false,
+    isActive: true,
+    status: 'ACTIVE',
+    principalType: 'DYNAMIC_SHARE_CAPITAL',
+    isDynamicPrincipal: true,
+    shareCapitalMultiplier: 3.0,
+    shareCapitalMinFloor: 5000,
+    shareCapitalMaxCeiling: 300000,
+  },
+];
+
+const DEFAULT_COOP_ANNOUNCEMENTS = [
+  {
+    id: 'ann_seed_001',
+    title: '2026 Annual General Assembly & Election of Officers',
+    category: 'General Assembly',
+    content: 'Notice is hereby given to all cooperative members that the 2026 Annual General Assembly will be held on December 5, 2026, at 9:00 AM at the Cooperative Main Auditorium and via secure Zoom teleconference. Registration starts at 7:30 AM. Attendance is strictly monitored for dividend eligibility and quorum requirements.',
+    targetAudience: 'ALL',
+    publishAt: '2026-10-15T08:00',
+    expiresAt: '2026-12-06T18:00',
+    priority: 'IMPORTANT',
+    authorName: 'Cooperative Board Secretary',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-15T08:00:00.000Z',
+  },
+  {
+    id: 'ann_seed_002',
+    title: 'Capital Build-Up (CBU) Incentive Drive for Affiliate Members',
+    category: 'Membership',
+    content: 'Calling all Affiliate/Associate members! Upgrade your membership to Regular status before November 30, 2026 to enjoy full dividend sharing, voting rights, and up to 3x share capital borrowing privileges. Attend the Saturday PMES refresher session and complete your required paid-up capital of ₱10,000.',
+    targetAudience: 'AFFILIATE',
+    publishAt: '2026-10-20T08:00',
+    expiresAt: '2026-11-30T23:59',
+    priority: 'NORMAL',
+    authorName: 'Education & Membership Committee',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-20T08:00:00.000Z',
+  },
+  {
+    id: 'ann_seed_003',
+    title: 'Special Dividend Distribution & Patronage Refund Release',
+    category: 'Dividends & Finance',
+    content: 'The Board of Directors is pleased to announce the approved release of the mid-year interest on share capital and patronage refunds for all Regular Members in good standing. Credited directly to your digital passbook savings account on October 31, 2026.',
+    targetAudience: 'REGULAR',
+    publishAt: '2026-10-25T08:00',
+    expiresAt: '2026-11-15T23:59',
+    priority: 'URGENT',
+    authorName: 'Audit & Inventory Committee',
+    status: 'PUBLISHED',
+    createdAt: '2026-10-25T08:00:00.000Z',
   },
 ];
 
@@ -474,6 +546,21 @@ export default function MemberPortalPage() {
   useEffect(() => {
     const info = resolveTenantCoop();
     setTenantInfo(info);
+
+    // Fetch live cooperative tenant metadata to ensure CDA No and TIN are inherited from coop-register
+    fetch(`${getApiBaseUrl()}/tenants/${encodeURIComponent(info.slug)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          setTenantInfo((prev) => ({
+            ...prev,
+            name: json.data.name || prev.name,
+            registrationNumber: json.data.cdaRegistrationNumber || prev.registrationNumber,
+            tin: json.data.tin || prev.tin,
+          }));
+        }
+      })
+      .catch(() => {});
 
     try {
       if (typeof window !== 'undefined') {
@@ -829,8 +916,7 @@ export default function MemberPortalPage() {
     memberNumber: 'MEM-2026-0001',
     name: gmInfo.name || 'General Manager',
     initials: gmInitials || 'GM',
-    selfieUrl: '/avatars/MEM-2026-0001.jpg',
-    selfiePreview: '/avatars/MEM-2026-0001.jpg',
+    selfiePreview: null,
     classification: 'ASSOCIATE',
     isDividendEligible: false,
     type: 'Associate Member',
@@ -1377,12 +1463,119 @@ export default function MemberPortalPage() {
     loanProducts[0] ||
     DEFAULT_LOAN_PRODUCTS[0];
 
+  // Cooperative News & Announcements State
+  const [announcements, setAnnouncements] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const deletedKey = `flexcoop_deleted_announcements_${tenant.slug}`;
+        const rawDel = localStorage.getItem(deletedKey);
+        const deletedIds = new Set<string>(rawDel ? JSON.parse(rawDel) : []);
+        const cached = localStorage.getItem(`flexcoop_announcements_${tenant.slug}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            return parsed.filter((a: any) => !deletedIds.has(a.id) && a.status !== 'DELETED' && !a.isDeleted);
+          }
+        }
+        return DEFAULT_COOP_ANNOUNCEMENTS.filter((a) => !deletedIds.has(a.id));
+      } catch {}
+    }
+    return DEFAULT_COOP_ANNOUNCEMENTS;
+  });
+  const [selectedAnnouncementModal, setSelectedAnnouncementModal] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storageKey = `flexcoop_announcements_${tenantInfo.slug}`;
+    const deletedKey = `flexcoop_deleted_announcements_${tenantInfo.slug}`;
+
+    try {
+      const rawDel = localStorage.getItem(deletedKey);
+      const deletedIds = new Set<string>(rawDel ? JSON.parse(rawDel) : []);
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setAnnouncements(parsed.filter((a: any) => !deletedIds.has(a.id) && a.status !== 'DELETED' && !a.isDeleted));
+        }
+      }
+    } catch {}
+
+    fetch(`${getApiBaseUrl()}/announcements?coop=${tenantInfo.slug}&portal=member`, {
+      headers: { 'X-Tenant-Slug': tenantInfo.slug },
+    })
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData && resData.success && Array.isArray(resData.data)) {
+          const rawDel = localStorage.getItem(deletedKey);
+          const deletedIds = new Set<string>(rawDel ? JSON.parse(rawDel) : []);
+          const cleanData = resData.data.filter((a: any) => !deletedIds.has(a.id) && a.status !== 'DELETED' && !a.isDeleted);
+          setAnnouncements(cleanData);
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(cleanData));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, [tenantInfo.slug]);
+
+  // Filter announcements for the current member:
+  // - Scheduled publishing: publishAt <= now
+  // - Expiration: !expiresAt || expiresAt > now, and status !== 'EXPIRED'
+  // - Target Audience: ALL, AFFILIATE, or REGULAR based on member classification
+  // - Top 3 recent news/announcements sorted descending by publishAt
+  const topMemberAnnouncements = useMemo(() => {
+    const nowMs = Date.now();
+    const memberClass = (currentMember?.classification || 'REGULAR').toUpperCase();
+    const isAffiliate = memberClass === 'ASSOCIATE' || memberClass === 'AFFILIATE';
+
+    const eligible = announcements.filter((a) => {
+      // Status check: strictly exclude EXPIRED, ARCHIVED, INACTIVE, DRAFT, and DELETED
+      const statusUpper = String(a.status || '').toUpperCase();
+      if (['EXPIRED', 'ARCHIVED', 'INACTIVE', 'DRAFT', 'DELETED'].includes(statusUpper) || a.isDeleted === true) {
+        return false;
+      }
+
+      // Scheduled publishing check
+      const pubMs = a.publishAt ? new Date(a.publishAt).getTime() : 0;
+      if (!isNaN(pubMs) && pubMs > nowMs) return false;
+
+      // Expiration check (all date fields and formats)
+      const rawExp = a.expiresAt || a.expiryDate || a.expirationDate;
+      if (rawExp) {
+        const expMs = new Date(rawExp).getTime();
+        if (isNaN(expMs) || expMs <= nowMs) return false;
+      }
+
+      // Boolean expiration flags
+      if (a.isExpired === true || a.expired === true) return false;
+
+      // Audience targeting
+      const target = (a.targetAudience || 'ALL').toUpperCase();
+      if (target === 'ALL') return true;
+      if (target === 'AFFILIATE' && isAffiliate) return true;
+      if (target === 'REGULAR' && !isAffiliate) return true;
+
+      return false;
+    });
+
+    eligible.sort((a, b) => {
+      const timeA = new Date(a.publishAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.publishAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    return eligible.slice(0, 3);
+  }, [announcements, currentMember?.classification]);
+
   // Member Loan Application State
   const [loanCalculationBasis, setLoanCalculationBasis] = useState<'PRINCIPAL' | 'AMORTIZATION'>('PRINCIPAL');
-  const [loanAmount, setLoanAmount] = useState<number>(50000);
-  const [desiredAmortization, setDesiredAmortization] = useState<number>(4442);
-  const [loanTerm, setLoanTerm] = useState<number>(12);
-  const [loanTermWeeks, setLoanTermWeeks] = useState<number>(12);
+  const [loanAmount, setLoanAmount] = useState<number>(5000);
+  const [desiredAmortization, setDesiredAmortization] = useState<number>(500);
+  const [loanTerm, setLoanTerm] = useState<number>(3);
+  const [loanTermWeeks, setLoanTermWeeks] = useState<number>(4);
+  const [selectedTermUnit, setSelectedTermUnit] = useState<'WEEKS' | 'MONTHS' | null>(null);
   const [coMaker, setCoMaker] = useState<string>('Co-Maker Member (MEM-2026-0002)');
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [applicationSubmitted, setApplicationSubmitted] = useState<boolean>(false);
@@ -1610,7 +1803,16 @@ export default function MemberPortalPage() {
   const [depositChannel, setDepositChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER' | 'EWALLET' | 'CASHIER'>('BANK_TRANSFER');
   const [bankReferenceInput, setBankReferenceInput] = useState<string>('');
   const [isSubmittingDirectShare, setIsSubmittingDirectShare] = useState<boolean>(false);
-  const [coopPaymentOptions, setCoopPaymentOptions] = useState<any>(null);
+  const [coopPaymentOptions, setCoopPaymentOptions] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const slug = resolveTenantCoop().slug || 'family-coop';
+        const cached = localStorage.getItem(`flexcoop_payment_options_${slug}`);
+        if (cached) return JSON.parse(cached);
+      } catch {}
+    }
+    return null;
+  });
 
   // Members Directory State (Showing strictly Selfie, First Name, Last Name sorted alphabetically)
   const [directoryMembers, setDirectoryMembers] = useState<Array<{
@@ -1628,6 +1830,15 @@ export default function MemberPortalPage() {
 
   useEffect(() => {
     const slug = tenantInfo.slug || 'default';
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(`flexcoop_payment_options_${slug}`);
+        if (cached && !coopPaymentOptions) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') setCoopPaymentOptions(parsed);
+        }
+      } catch {}
+    }
     fetch(`${getApiBaseUrl()}/coop/payment-options`, {
       headers: { 'x-tenant-slug': slug },
     })
@@ -1635,6 +1846,9 @@ export default function MemberPortalPage() {
       .then((data) => {
         if (data.success && data.data) {
           setCoopPaymentOptions(data.data);
+          try {
+            localStorage.setItem(`flexcoop_payment_options_${slug}`, JSON.stringify(data.data));
+          } catch {}
         }
       })
       .catch(() => {});
@@ -1674,6 +1888,7 @@ export default function MemberPortalPage() {
       setDepositChannel(enabledList[0]);
     }
   }, [depositModalType, coopPaymentOptions, depositChannel]);
+
 
   const [depositSuccessResult, setDepositSuccessResult] = useState<{
     type: string;
@@ -2287,13 +2502,24 @@ export default function MemberPortalPage() {
 
   // Dynamic Calculations for Loan Application
   const annualRate = selectedProduct.annualInterestRate || 0.12;
+  const isDynamicPrincipal = Boolean(
+    selectedProduct.isDynamicPrincipal || selectedProduct.principalType === 'DYNAMIC_SHARE_CAPITAL'
+  );
+  const shareMultiplier = Number(selectedProduct.shareCapitalMultiplier) || 3.0;
+  const shareCapitalRaw = Number(paidUpCapital) || 0;
+  const dynamicMaxRaw = Math.round(shareCapitalRaw * shareMultiplier);
+  const floorLimit = Number(selectedProduct.shareCapitalMinFloor) || Number(selectedProduct.minAmount) || 5000;
+  const ceilingLimit = Number(selectedProduct.shareCapitalMaxCeiling) || Number(selectedProduct.maxAmount) || 100000;
+
   const minPrincipal = selectedProduct.minAmount || 5000;
-  const maxPrincipal = selectedProduct.maxAmount || 100000;
+  const maxPrincipal = isDynamicPrincipal
+    ? Math.min(ceilingLimit, Math.max(floorLimit, dynamicMaxRaw))
+    : (selectedProduct.maxAmount || 100000);
   const requiresCoMaker = Boolean(selectedProduct.requiresCoMaker);
   const coMakerRuleText = selectedProduct.coMakerRuleDescription || 'Requires active co-maker endorsement with joint solidary liability.';
 
   // Term unit & payment frequency calculations
-  const isWeeks = selectedProduct.termUnit === 'WEEKS';
+  const isWeeks = selectedTermUnit ? selectedTermUnit === 'WEEKS' : selectedProduct.termUnit === 'WEEKS';
   const isBiWeekly = isWeeks && selectedProduct.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
   const periodsPerYear = isWeeks ? (isBiWeekly ? 26.0 : 52.0) : 12.0;
   const effectiveTermPeriods = isWeeks
@@ -2379,6 +2605,32 @@ export default function MemberPortalPage() {
     }
     return false; // Safe default false prevents button and card flickering on refresh
   });
+
+  // Check if Deposit Savings has available payment option(s) configured
+  const hasDepositSavingsPaymentOptions = useMemo(() => {
+    if (!savingsDepositEnabled) return false;
+    if (coopPaymentOptions) {
+      const productConfig = coopPaymentOptions?.products?.depositSavings;
+      const isPaymongoEnabled = Boolean(
+        (productConfig?.paymongo?.enabled ?? (coopPaymentOptions?.paymongo?.enabled ?? true)) &&
+        (coopPaymentOptions?.paymongo?.enabled !== false)
+      );
+      const isBankEnabled = Boolean(
+        (productConfig?.bankTransfer?.enabled ?? (coopPaymentOptions?.bankTransfer?.enabled ?? true)) &&
+        (coopPaymentOptions?.bankTransfer?.enabled !== false)
+      );
+      const isEwalletEnabled = Boolean(
+        (productConfig?.ewalletTransfer?.enabled ?? (coopPaymentOptions?.ewalletTransfer?.enabled ?? false)) &&
+        (coopPaymentOptions?.ewalletTransfer?.enabled !== false)
+      );
+      const isCashierEnabled = Boolean(
+        (productConfig?.cashier?.enabled ?? (coopPaymentOptions?.cashier?.enabled ?? true)) &&
+        (coopPaymentOptions?.cashier?.enabled !== false)
+      );
+      return isPaymongoEnabled || isBankEnabled || isEwalletEnabled || isCashierEnabled;
+    }
+    return savingsDepositEnabled;
+  }, [savingsDepositEnabled, coopPaymentOptions]);
 
   useEffect(() => {
     const resolvedSlug =
@@ -3877,32 +4129,31 @@ export default function MemberPortalPage() {
             })()}
 
             {/* Quick Action Buttons Section */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+              <div className="flex items-center justify-between px-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                   Quick Actions
                 </h3>
                 <span className="text-[11px] text-emerald-700 font-semibold">Self-Service</span>
               </div>
 
-              <div className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2.5 sm:gap-3`}>
-                {/* Deposit Savings (Removes completely when disabled) */}
-                {savingsDepositEnabled && (
+              <div className={`grid ${hasDepositSavingsPaymentOptions ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5 sm:gap-2`}>
+                {/* Deposit Savings (Hidden if no available payment option) */}
+                {hasDepositSavingsPaymentOptions && (
                   <button
                     type="button"
                     onClick={() => {
                       setDepositModalType('SAVINGS');
                       setDepositSuccessResult(null);
                     }}
-                    className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 bg-slate-50/70 transition-all text-center group"
+                    className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-emerald-50/80 transition-all text-center group cursor-pointer"
                   >
-                    <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-xs">
-                      <PiggyBank className="w-5 h-5" />
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-1 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-2xs">
+                      <PiggyBank className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                     </div>
-                    <span className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-tight">
+                    <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-emerald-700 transition-colors leading-tight text-center">
                       Deposit Savings
                     </span>
-                    <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">3% p.a. Compounded</span>
                   </button>
                 )}
 
@@ -3914,47 +4165,109 @@ export default function MemberPortalPage() {
                     setPaymongoActivePayment(null);
                     setDepositSuccessResult(null);
                   }}
-                  className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 bg-slate-50/70 transition-all text-center group"
+                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-amber-50/80 transition-all text-center group cursor-pointer"
                 >
-                  <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center mb-2 group-hover:bg-amber-600 group-hover:text-white transition-colors shadow-xs">
-                    <Landmark className="w-5 h-5" />
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center mb-1 group-hover:bg-amber-600 group-hover:text-white transition-all shadow-2xs">
+                    <Landmark className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                   </div>
-                  <span className="text-xs font-bold text-slate-900 group-hover:text-amber-800 transition-colors leading-tight">
+                  <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-amber-800 transition-colors leading-tight text-center">
                     Purchase Share
                   </span>
-                  <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">Capital Build-Up</span>
                 </button>
 
                 {/* Apply for Loan */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('apply')}
-                  className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 bg-slate-50/70 transition-all text-center group"
+                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-indigo-50/80 transition-all text-center group cursor-pointer"
                 >
-                  <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center mb-2 group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-xs">
-                    <CreditCard className="w-5 h-5" />
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center mb-1 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-2xs">
+                    <CreditCard className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                   </div>
-                  <span className="text-xs font-bold text-slate-900 group-hover:text-indigo-700 transition-colors leading-tight">
+                  <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-indigo-700 transition-colors leading-tight text-center">
                     Apply for Loan
                   </span>
-                  <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">Diminishing Rate</span>
                 </button>
 
                 {/* My Business Page Quick Action */}
                 <button
                   type="button"
                   onClick={handleOpenMyBusiness}
-                  className="flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 bg-slate-50/70 transition-all text-center group"
+                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-emerald-50/80 transition-all text-center group cursor-pointer"
                 >
-                  <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-xs">
-                    <Store className="w-5 h-5" />
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-1 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-2xs">
+                    <Store className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                   </div>
-                  <span className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-tight">
+                  <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-emerald-700 transition-colors leading-tight text-center">
                     My Business
                   </span>
-                  <span className="text-[10px] text-slate-500 hidden sm:block mt-0.5">Enterprise Page</span>
                 </button>
               </div>
+            </div>
+
+            {/* News and Announcements Section (Below Quick Action - Top 3 Recent) */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                    <Megaphone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                      News and Announcements
+                    </h3>
+                    <p className="text-[10px] text-slate-500">Official bulletins &amp; updates for cooperative members</p>
+                  </div>
+                </div>
+              </div>
+
+              {topMemberAnnouncements.length === 0 ? (
+                <div className="text-center py-6 px-4 bg-slate-50/60 rounded-xl border border-dashed border-slate-200">
+                  <Megaphone className="w-6 h-6 text-slate-300 mx-auto mb-1" />
+                  <p className="text-xs font-medium text-slate-600">No active announcements at this time.</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Check back later for important cooperative updates.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {topMemberAnnouncements.map((item) => (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedAnnouncementModal(item)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedAnnouncementModal(item);
+                        }
+                      }}
+                      className="p-3.5 rounded-xl border border-slate-100 hover:border-emerald-300 bg-slate-50/50 hover:bg-emerald-50/30 flex items-center justify-between gap-3 cursor-pointer transition-all group shadow-2xs hover:shadow-xs"
+                    >
+                      <div className="flex-1 min-w-0">
+                        {/* Strictly title and date published only as requested */}
+                        <h4 className="text-xs font-bold text-slate-900 group-hover:text-emerald-800 transition-colors truncate">
+                          {item.title}
+                        </h4>
+                        <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+                          <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span>
+                            Published:{' '}
+                            {new Date(item.publishAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                          </span>
+                        </p>
+                      </div>
+
+                      <div className="flex items-center text-slate-400 group-hover:text-emerald-700 transition-colors shrink-0 pl-2">
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Active Loan Applications & Underwriting Pipeline (Dashboard Section) */}
@@ -4832,8 +5145,7 @@ export default function MemberPortalPage() {
               Back to More Services
             </button>
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Digital Loan Application & Amortization Calculator</h2>
-              <p className="text-xs text-slate-500">Transparent pass-through loan processing fee deduction and net member disbursement preview.</p>
+              <h2 className="text-xl font-bold text-slate-900">Digital Loan Application</h2>
             </div>
 
             {applicationSubmitted ? (
@@ -4944,15 +5256,25 @@ export default function MemberPortalPage() {
                       ) : (
                         activeLoanProducts.map((p) => {
                           const isSelected = selectedProductId === p.id;
+                          const isPDynamic = Boolean(p.isDynamicPrincipal || p.principalType === 'DYNAMIC_SHARE_CAPITAL');
+                          const pMultiplier = Number(p.shareCapitalMultiplier) || 3.0;
+                          const pDynamicMax = Math.min(
+                            Number(p.shareCapitalMaxCeiling) || Number(p.maxAmount) || 300000,
+                            Math.max(
+                              Number(p.shareCapitalMinFloor) || Number(p.minAmount) || 5000,
+                              Math.round((Number(paidUpCapital) || 0) * pMultiplier)
+                            )
+                          );
+                          const pRate = p.annualInterestRate || 0.12;
+                          const pMin = p.minAmount || 5000;
+                          const pMax = isPDynamic ? pDynamicMax : (p.maxAmount || 100000);
+
                           return (
                             <button
                               key={p.id}
                               type="button"
                               onClick={() => {
                                 setSelectedProductId(p.id);
-                                const pRate = p.annualInterestRate || 0.12;
-                                const pMin = p.minAmount || 5000;
-                                const pMax = p.maxAmount || 100000;
                                 const pIsWeeks = p.termUnit === 'WEEKS';
                                 const pIsBiWeekly = pIsWeeks && p.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
                                 const pPeriodsPerYear = pIsWeeks ? (pIsBiWeekly ? 26.0 : 52.0) : 12.0;
@@ -4979,23 +5301,20 @@ export default function MemberPortalPage() {
                                 const pPeriodicRate = pRate / pPeriodsPerYear;
 
                                 if (loanCalculationBasis === 'AMORTIZATION') {
-                                  let targetAmort = desiredAmortization;
-                                  if (pIsWeeks && targetAmort > 3500) {
-                                    targetAmort = 1000;
-                                    setDesiredAmortization(1000);
-                                  } else if (!pIsWeeks && targetAmort < 1500) {
-                                    targetAmort = 4442;
-                                    setDesiredAmortization(4442);
-                                  }
                                   const pMandatoryShareQty = p.mandatoryShareQuantity || 10;
                                   const pMandatoryShareTotal = p.mandatorySharePurchaseEnabled ? (pMandatoryShareQty * 100) : 0;
                                   const pIsInstallmentShare = Boolean(p.mandatorySharePurchaseEnabled) && p.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT';
                                   const pShareAmort = pIsInstallmentShare ? Math.round((pMandatoryShareTotal / pTermPeriods) * 100) / 100 : 0;
-                                  const computed = computePrincipalFromAmortization(targetAmort, pTermPeriods, pPeriodicRate, pShareAmort);
-                                  setLoanAmount(computed);
+                                  const minAmort = Math.max(
+                                    pIsWeeks ? 200 : 500,
+                                    Math.ceil(computeAmortizationFromPrincipal(pMin, pTermPeriods, pPeriodicRate) / 50) * 50
+                                  );
+                                  setDesiredAmortization(minAmort);
+                                  const computed = computePrincipalFromAmortization(minAmort, pTermPeriods, pPeriodicRate, pShareAmort);
+                                  setLoanAmount(Math.max(pMin, Math.min(pMax, computed)));
                                 } else {
-                                  if (loanAmount > pMax) setLoanAmount(pMax);
-                                  if (loanAmount < pMin) setLoanAmount(pMin);
+                                  // Always default to minimum value of the selected product
+                                  setLoanAmount(pMin);
                                 }
                               }}
                               className={`p-3 rounded-xl border text-left transition-colors relative ${
@@ -5011,14 +5330,25 @@ export default function MemberPortalPage() {
                                 </span>
                               </div>
                               <div className="text-[11px] font-normal text-slate-500 mt-1">
-                                {(p.annualInterestRate * 100).toFixed(1)}% p.a. •{' '}
                                 {p.termUnit === 'WEEKS'
                                   ? `Up to ${p.maxTermWeeks || 52} wks (${p.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK' ? 'Bi-Weekly' : 'Weekly'})`
                                   : `Up to ${p.maxTermMonths} mos`}
                               </div>
-                              <div className="text-[10px] text-emerald-700 font-medium mt-1">
-                                ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}
-                              </div>
+                              {isPDynamic ? (
+                                <div className="space-y-0.5 mt-1.5">
+                                  <div className="text-[10px] text-amber-700 font-bold flex items-center gap-1">
+                                    <Zap className="w-3 h-3 text-amber-600 shrink-0" />
+                                    Dynamic ({pMultiplier}x Share Capital)
+                                  </div>
+                                  <div className="text-[9px] text-slate-500">
+                                    Max limit: ₱{pDynamicMax.toLocaleString()} (₱{(Number(paidUpCapital) || 0).toLocaleString()} shares)
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-emerald-700 font-medium mt-1">
+                                  ₱{p.minAmount.toLocaleString()} - ₱{p.maxAmount.toLocaleString()}
+                                </div>
+                              )}
                               {p.mandatorySharePurchaseEnabled && (
                                 <div className="text-[9px] font-semibold text-purple-700 mt-1 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 w-fit">
                                   ★ Mandatory Share ({p.mandatoryShareQuantity || 10} shares • {p.mandatorySharePaymentTreatment === 'INCLUDED_IN_LOAN_PAYMENT' ? 'Installments' : 'Upfront'})
@@ -5048,6 +5378,7 @@ export default function MemberPortalPage() {
                         type="button"
                         onClick={() => {
                           setLoanCalculationBasis('PRINCIPAL');
+                          setLoanAmount(minPrincipal);
                         }}
                         className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                           loanCalculationBasis === 'PRINCIPAL'
@@ -5062,10 +5393,13 @@ export default function MemberPortalPage() {
                         type="button"
                         onClick={() => {
                           setLoanCalculationBasis('AMORTIZATION');
-                          const initialAmort = isWeeks ? 1000 : 4442;
-                          setDesiredAmortization(initialAmort);
-                          const computed = computePrincipalFromAmortization(initialAmort, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
-                          setLoanAmount(computed);
+                          const minAmort = Math.max(
+                            isWeeks ? 200 : 500,
+                            Math.ceil(computeAmortizationFromPrincipal(minPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50
+                          );
+                          setDesiredAmortization(minAmort);
+                          const computed = computePrincipalFromAmortization(minAmort, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
+                          setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
                         }}
                         className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                           loanCalculationBasis === 'AMORTIZATION'
@@ -5092,8 +5426,8 @@ export default function MemberPortalPage() {
                           min={minPrincipal}
                           max={maxPrincipal}
                           step={1000}
-                          value={loanAmount}
-                          onChange={(e) => setLoanAmount(Number(e.target.value))}
+                          value={Math.max(minPrincipal, Math.min(maxPrincipal, loanAmount))}
+                          onChange={(e) => setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, Number(e.target.value))))}
                           className="w-full accent-emerald-600"
                         />
                         <div className="flex justify-between text-[11px] text-slate-400">
@@ -5128,15 +5462,15 @@ export default function MemberPortalPage() {
 
                         <input
                           type="range"
-                          min={isWeeks ? 200 : 500}
-                          max={Math.max(isWeeks ? 5000 : 25000, Math.ceil(computeAmortizationFromPrincipal(maxPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50)}
+                          min={Math.max(isWeeks ? 200 : 500, Math.ceil(computeAmortizationFromPrincipal(minPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50)}
+                          max={Math.max(isWeeks ? 2000 : 10000, Math.ceil(computeAmortizationFromPrincipal(maxPrincipal, effectiveTermPeriods, periodicRate) / 50) * 50)}
                           step={isWeeks ? 50 : 100}
                           value={desiredAmortization}
                           onChange={(e) => {
                             const newAmort = Number(e.target.value);
                             setDesiredAmortization(newAmort);
                             const computed = computePrincipalFromAmortization(newAmort, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
-                            setLoanAmount(computed);
+                            setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
                           }}
                           className="w-full accent-emerald-600"
                         />
@@ -5153,7 +5487,7 @@ export default function MemberPortalPage() {
                               onClick={() => {
                                 setDesiredAmortization(amt);
                                 const computed = computePrincipalFromAmortization(amt, effectiveTermPeriods, periodicRate, shareAmortizationPerPeriod);
-                                setLoanAmount(computed);
+                                setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
                               }}
                               className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition ${
                                 desiredAmortization === amt
@@ -5195,59 +5529,103 @@ export default function MemberPortalPage() {
                       <label className="text-xs font-bold text-slate-700">
                         3. Repayment Term {isWeeks ? `(Weeks • ${isBiWeekly ? 'Bi-Weekly Payment' : 'Weekly Payment'})` : '(Months • Monthly Payment)'}
                       </label>
-                      <span className="text-[11px] font-semibold text-emerald-800 font-mono">
-                        {isWeeks ? `${loanTermWeeks} Weeks (${effectiveTermPeriods} Installments)` : `${loanTerm} Months`}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className="inline-flex p-0.5 bg-slate-100 rounded-lg border border-slate-200 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTermUnit('WEEKS');
+                              setLoanTermWeeks(4);
+                              if (loanCalculationBasis === 'AMORTIZATION') {
+                                const periods = isBiWeekly ? 2 : 4;
+                                const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / periods) * 100) / 100 : 0;
+                                const computed = computePrincipalFromAmortization(desiredAmortization, periods, annualRate / (isBiWeekly ? 26.0 : 52.0), shareAmort);
+                                setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded-md font-bold transition ${
+                              isWeeks ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            Weeks
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTermUnit('MONTHS');
+                              setLoanTerm(selectedProduct.minTermMonths || 3);
+                              if (loanCalculationBasis === 'AMORTIZATION') {
+                                const periods = selectedProduct.minTermMonths || 3;
+                                const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / periods) * 100) / 100 : 0;
+                                const computed = computePrincipalFromAmortization(desiredAmortization, periods, annualRate / 12.0, shareAmort);
+                                setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded-md font-bold transition ${
+                              !isWeeks ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            Months
+                          </button>
+                        </div>
+                        <span className="text-[11px] font-semibold text-emerald-800 font-mono">
+                          {isWeeks ? `${loanTermWeeks} Weeks (${effectiveTermPeriods} Installments)` : `${loanTerm} Months`}
+                        </span>
+                      </div>
                     </div>
 
                     {isWeeks ? (
                       <div className="flex flex-wrap gap-2">
-                        {[4, 8, 12, 16, 24, 36, 52].filter((w) => w >= (selectedProduct.minTermWeeks || 4) && w <= (selectedProduct.maxTermWeeks || 52)).map((w) => (
-                          <button
-                            key={w}
-                            type="button"
-                            onClick={() => {
-                              setLoanTermWeeks(w);
-                              if (loanCalculationBasis === 'AMORTIZATION') {
-                                const periods = isBiWeekly ? Math.max(1, Math.ceil(w / 2)) : Math.max(1, w);
-                                const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / periods) * 100) / 100 : 0;
-                                const computed = computePrincipalFromAmortization(desiredAmortization, periods, periodicRate, shareAmort);
-                                setLoanAmount(computed);
-                              }
-                            }}
-                            className={`flex-1 min-w-[65px] py-2 rounded-lg border text-xs font-bold transition-colors ${
-                              loanTermWeeks === w
-                                ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            {w} Wks
-                          </button>
-                        ))}
+                        {[4, 6, 8, 12, 16, 24, 36, 52]
+                          .filter((w) => w >= (selectedProduct.minTermWeeks || 4) && w <= (selectedProduct.maxTermWeeks || 52))
+                          .map((w) => (
+                            <button
+                              key={w}
+                              type="button"
+                              onClick={() => {
+                                setLoanTermWeeks(w);
+                                if (loanCalculationBasis === 'AMORTIZATION') {
+                                  const periods = isBiWeekly ? Math.max(1, Math.ceil(w / 2)) : Math.max(1, w);
+                                  const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / periods) * 100) / 100 : 0;
+                                  const computed = computePrincipalFromAmortization(desiredAmortization, periods, periodicRate, shareAmort);
+                                  setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
+                                }
+                              }}
+                              className={`flex-1 min-w-[70px] py-2.5 rounded-lg border text-xs font-bold transition-colors ${
+                                loanTermWeeks === w
+                                  ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              {w} Weeks
+                            </button>
+                          ))}
                       </div>
                     ) : (
                       <div className="flex gap-2">
-                        {[3, 6, 12, 18, 24, 36].filter((t) => t >= (selectedProduct.minTermMonths || 1) && t <= (selectedProduct.maxTermMonths || 36)).map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => {
-                              setLoanTerm(t);
-                              if (loanCalculationBasis === 'AMORTIZATION') {
-                                const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / t) * 100) / 100 : 0;
-                                const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate / 12.0, shareAmort);
-                                setLoanAmount(computed);
-                              }
-                            }}
-                            className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-colors ${
-                              loanTerm === t
-                                ? 'border-emerald-600 bg-emerald-600 text-white'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            {t} Months
-                          </button>
-                        ))}
+                        {[3, 6, 12, 18, 24, 36]
+                          .filter((t) => t >= (selectedProduct.minTermMonths || 1) && t <= (selectedProduct.maxTermMonths || 36))
+                          .map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                setLoanTerm(t);
+                                if (loanCalculationBasis === 'AMORTIZATION') {
+                                  const shareAmort = isInstallmentSharePayment ? Math.round((mandatoryShareTotal / t) * 100) / 100 : 0;
+                                  const computed = computePrincipalFromAmortization(desiredAmortization, t, annualRate / 12.0, shareAmort);
+                                  setLoanAmount(Math.max(minPrincipal, Math.min(maxPrincipal, computed)));
+                                }
+                              }}
+                              className={`flex-1 py-2.5 rounded-lg border text-xs font-bold transition-colors ${
+                                loanTerm === t
+                                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              {t} Months
+                            </button>
+                          ))}
                       </div>
                     )}
                   </div>
@@ -5459,7 +5837,7 @@ export default function MemberPortalPage() {
                         interestRateAnnual: annualRate,
                         termMonths: isWeeks ? Math.ceil(loanTermWeeks / 4) : loanTerm,
                         termWeeks: isWeeks ? loanTermWeeks : undefined,
-                        termUnit: selectedProduct.termUnit || 'MONTHS',
+                        termUnit: isWeeks ? 'WEEKS' : (selectedProduct.termUnit || 'MONTHS'),
                         weeklyPaymentFrequency: selectedProduct.weeklyPaymentFrequency || 'EVERY_WEEK',
                         paymentFrequency: isWeeks ? (isBiWeekly ? 'BI_WEEKLY' : 'WEEKLY') : 'MONTHLY',
                         mandatorySharePurchaseEnabled: Boolean(selectedProduct.mandatorySharePurchaseEnabled),
@@ -5662,10 +6040,6 @@ export default function MemberPortalPage() {
                         </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="text-[11px] text-slate-500 bg-white p-3 rounded-lg border border-slate-200">
-                    💡 <strong>CDA Compliance:</strong> Every deduction is accounted for under standard CDA account codes and issued an electronic official sales invoice with 12% Output VAT breakdown.
                   </div>
                 </div>
               </div>
@@ -7444,6 +7818,97 @@ export default function MemberPortalPage() {
           </div>
         )}
 
+        {/* NEWS AND ANNOUNCEMENT FULL CONTENT MODAL (NOT FULL SCREEN) */}
+        {selectedAnnouncementModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[85vh] overflow-y-auto space-y-4">
+              <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+                <div className="space-y-1.5 pr-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      {selectedAnnouncementModal.category || 'News & Announcement'}
+                    </span>
+                    {selectedAnnouncementModal.priority === 'URGENT' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                        🚨 Urgent
+                      </span>
+                    )}
+                    {selectedAnnouncementModal.priority === 'IMPORTANT' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                        ⭐ Important
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 leading-snug">
+                    {selectedAnnouncementModal.title}
+                  </h3>
+                  <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <span>
+                      Published on{' '}
+                      {new Date(selectedAnnouncementModal.publishAt).toLocaleDateString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedAnnouncementModal(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Full Content */}
+              <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap py-2 border-t border-slate-100">
+                {selectedAnnouncementModal.content}
+              </div>
+
+              {/* Expiration Note */}
+              {selectedAnnouncementModal.expiresAt && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800 flex items-center gap-2">
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Valid until{' '}
+                    {new Date(selectedAnnouncementModal.expiresAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </div>
+              )}
+
+              {/* Author footer */}
+              {selectedAnnouncementModal.authorName && (
+                <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-400 flex items-center justify-between">
+                  <span>
+                    Issued by: <strong className="text-slate-700 font-semibold">{selectedAnnouncementModal.authorName}</strong>
+                    {selectedAnnouncementModal.authorRole && (
+                      <span className="text-slate-500"> ({selectedAnnouncementModal.authorRole})</span>
+                    )}
+                  </span>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedAnnouncementModal(null)}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs transition-colors shadow-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* SELF-SERVICE DEPOSIT & SHARE PURCHASE MODAL */}
         {depositModalType && (
           <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
@@ -8581,10 +9046,10 @@ export default function MemberPortalPage() {
                     Republic of the Philippines • Cooperative Development Authority
                   </div>
                   <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                    Cooperative Enterprise
+                    {tenantInfo.name || 'Cooperative Enterprise'}
                   </h2>
                   <div className="text-slate-600 text-xs font-medium">
-                    CDA Registration: <strong>CDA-NCR-2024-00921</strong> • BIR TIN: <strong>004-912-340-000</strong>
+                    CDA Registration: <strong>{tenantInfo.registrationNumber || 'CDA Registered'}</strong> • BIR TIN: <strong>{tenantInfo.tin || '004-912-340-000'}</strong>
                   </div>
                   <div className="text-slate-500 text-[11px]">
                     Main Office: 456 Katipunan Avenue, Loyola Heights, Quezon City, Metro Manila
@@ -8997,9 +9462,9 @@ export default function MemberPortalPage() {
                     {/* Member Proprietor Card */}
                     <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/90 flex items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-3 min-w-0">
-                        {selectedBusinessMember.selfieUrl ? (
+                        {selectedBusinessMember.selfiePreview || selectedBusinessMember.selfieUrl ? (
                           <img
-                            src={selectedBusinessMember.selfieUrl}
+                            src={selectedBusinessMember.selfiePreview || selectedBusinessMember.selfieUrl}
                             alt={selectedBusinessMember.firstName || selectedBusinessMember.name}
                             className="w-10 h-10 rounded-full object-cover border-2 border-emerald-500/40 shrink-0"
                           />

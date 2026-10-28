@@ -89,6 +89,11 @@ export class AuthService {
     role: UserRole;
     tenantId: string;
     roleTitle: string;
+    status: 'ACTIVE' | 'INACTIVE';
+    username?: string;
+    phone?: string;
+    createdAt?: string;
+    updatedAt?: string;
   }>> = new Map();
 
   static addStaffAccount(account: {
@@ -98,14 +103,56 @@ export class AuthService {
     role: UserRole;
     tenantId: string;
     roleTitle: string;
+    status?: 'ACTIVE' | 'INACTIVE';
+    username?: string;
+    phone?: string;
+    createdAt?: string;
   }) {
     const list = this.customStaffAccounts.get(account.tenantId) || [];
-    const filtered = list.filter((a) => a.email.toLowerCase() !== account.email.toLowerCase());
-    this.customStaffAccounts.set(account.tenantId, [account, ...filtered]);
+    const staffObj = {
+      ...account,
+      status: account.status || 'ACTIVE',
+      createdAt: account.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const filtered = list.filter(
+      (a) => a.email.toLowerCase() !== account.email.toLowerCase() && a.id !== account.id
+    );
+    this.customStaffAccounts.set(account.tenantId, [staffObj, ...filtered]);
+  }
+
+  static updateStaffAccountStatus(tenantId: string, userId: string, status: 'ACTIVE' | 'INACTIVE'): boolean {
+    const list = this.customStaffAccounts.get(tenantId) || [];
+    const target = list.find((a) => a.id === userId || a.email.toLowerCase() === userId.toLowerCase());
+    if (target) {
+      target.status = status;
+      target.updatedAt = new Date().toISOString();
+      return true;
+    }
+    return false;
+  }
+
+  static clearStaffAccounts(tenantId: string) {
+    this.customStaffAccounts.delete(tenantId);
+  }
+
+  static seedTestDefaults(tenantId: string) {
+    const defaults = [
+      { id: 'usr_gm_01', email: 'gm@bayanicoop.ph', fullName: 'Atty. Roberto Dela Rosa', role: 'GENERAL_MANAGER' as UserRole, tenantId, roleTitle: 'General Manager / Superadmin', status: 'ACTIVE' as const },
+      { id: 'usr_lo_01', email: 'lo@bayanicoop.ph', fullName: 'Grace Villanueva', role: 'LOAN_OFFICER' as UserRole, tenantId, roleTitle: 'Senior Loan Officer', status: 'ACTIVE' as const },
+      { id: 'usr_crecom_01', email: 'crecom@bayanicoop.ph', fullName: 'Engr. Manuel Reyes', role: 'CREDIT_COMMITTEE' as UserRole, tenantId, roleTitle: 'Credit Committee Chairperson', status: 'ACTIVE' as const },
+      { id: 'usr_bod_01', email: 'bod@bayanicoop.ph', fullName: 'Dr. Corazon Aquino-Cruz', role: 'BOD' as UserRole, tenantId, roleTitle: 'Board of Directors Chairman', status: 'ACTIVE' as const },
+      { id: 'usr_cashier_01', email: 'cashier@bayanicoop.ph', fullName: 'Leah Mendoza', role: 'CASHIER' as UserRole, tenantId, roleTitle: 'Branch Head Cashier & Teller', status: 'ACTIVE' as const },
+      { id: 'usr_acct_01', email: 'accountant@bayanicoop.ph', fullName: 'Felipe Santos, CPA', role: 'ACCOUNTANT' as UserRole, tenantId, roleTitle: 'Chief Bookkeeper & Accountant', status: 'ACTIVE' as const },
+      { id: 'usr_dpo_01', email: 'compliance@bayanicoop.ph', fullName: 'Atty. Cristina Gomez', role: 'COMPLIANCE_OFFICER' as UserRole, tenantId, roleTitle: 'Compliance Officer & DPO', status: 'ACTIVE' as const },
+    ];
+    this.customStaffAccounts.set(tenantId, defaults);
   }
 
   /**
-   * Predefined and custom staff accounts per cooperative
+   * Predefined and custom staff accounts per cooperative.
+   * STRICT PRODUCTION RULE: Never return dummy users for cooperative instances.
+   * Only return explicitly registered or provisioned staff accounts.
    */
   static getStaffAccounts(tenantId: string): Array<{
     id: string;
@@ -114,74 +161,13 @@ export class AuthService {
     role: UserRole;
     tenantId: string;
     roleTitle: string;
+    status: 'ACTIVE' | 'INACTIVE';
+    username?: string;
+    phone?: string;
+    createdAt?: string;
+    updatedAt?: string;
   }> {
-    const custom = this.customStaffAccounts.get(tenantId) || [];
-    const defaults: Array<{
-      id: string;
-      email: string;
-      fullName: string;
-      role: UserRole;
-      tenantId: string;
-      roleTitle: string;
-    }> = [
-      {
-        id: 'usr_gm_01',
-        email: 'gm@bayanicoop.ph',
-        fullName: 'Atty. Roberto Dela Rosa',
-        role: 'GENERAL_MANAGER',
-        tenantId,
-        roleTitle: 'General Manager / Superadmin',
-      },
-      {
-        id: 'usr_lo_01',
-        email: 'lo@bayanicoop.ph',
-        fullName: 'Grace Villanueva',
-        role: 'LOAN_OFFICER',
-        tenantId,
-        roleTitle: 'Senior Loan Officer',
-      },
-      {
-        id: 'usr_crecom_01',
-        email: 'crecom@bayanicoop.ph',
-        fullName: 'Engr. Manuel Reyes',
-        role: 'CREDIT_COMMITTEE',
-        tenantId,
-        roleTitle: 'Credit Committee Chairperson',
-      },
-      {
-        id: 'usr_bod_01',
-        email: 'bod@bayanicoop.ph',
-        fullName: 'Dr. Corazon Aquino-Cruz',
-        role: 'BOD',
-        tenantId,
-        roleTitle: 'Board of Directors Chairman',
-      },
-      {
-        id: 'usr_cashier_01',
-        email: 'cashier@bayanicoop.ph',
-        fullName: 'Leah Mendoza',
-        role: 'CASHIER',
-        tenantId,
-        roleTitle: 'Branch Head Cashier & Teller',
-      },
-      {
-        id: 'usr_acct_01',
-        email: 'accountant@bayanicoop.ph',
-        fullName: 'Felipe Santos, CPA',
-        role: 'ACCOUNTANT',
-        tenantId,
-        roleTitle: 'Chief Bookkeeper & Accountant',
-      },
-      {
-        id: 'usr_dpo_01',
-        email: 'compliance@bayanicoop.ph',
-        fullName: 'Atty. Cristina Gomez',
-        role: 'COMPLIANCE_OFFICER',
-        tenantId,
-        roleTitle: 'Compliance Officer & DPO',
-      },
-    ];
-    return [...custom, ...defaults];
+    return this.customStaffAccounts.get(tenantId) || [];
   }
 
   /**
