@@ -361,6 +361,29 @@ export function getTenantMemberSession(expectedSlug?: string): any | null {
 
     if (expectedSlug && expectedSlug !== 'default') {
       if (!parsed.coopSlug || !isCoopSlugMatch(parsed.coopSlug, expectedSlug)) {
+        // Multi-coop support: check if citizen belongs to expectedSlug via linked memberships
+        if (
+          Array.isArray(parsed.memberships) &&
+          parsed.memberships.some(
+            (m: any) =>
+              isCoopSlugMatch(m.tenantSlug || '', expectedSlug) ||
+              isCoopSlugMatch(m.tenantId || '', expectedSlug)
+          )
+        ) {
+          const matchedM = parsed.memberships.find(
+            (m: any) =>
+              isCoopSlugMatch(m.tenantSlug || '', expectedSlug) ||
+              isCoopSlugMatch(m.tenantId || '', expectedSlug)
+          );
+          return {
+            ...parsed,
+            coopSlug: expectedSlug,
+            coopName: matchedM?.coopName || parsed.coopName,
+            memberNumber: matchedM?.memberNumber || parsed.memberNumber,
+            id: matchedM?.memberId || parsed.id,
+            isCoopLinked: true,
+          };
+        }
         // Mismatch: Member belongs to a different coop!
         return null;
       }
@@ -373,10 +396,20 @@ export function getTenantMemberSession(expectedSlug?: string): any | null {
 
 export function setTenantMemberSession(member: any, slug: string, coopName?: string) {
   if (typeof window === 'undefined') return;
+  let existingMemberships: any[] = [];
+  try {
+    const raw = localStorage.getItem('flexcoop_auth_member');
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (Array.isArray(p.memberships)) existingMemberships = p.memberships;
+    }
+  } catch {}
+
   const enriched = {
     ...member,
     coopSlug: slug,
     coopName: coopName || member.coopName,
+    memberships: member.memberships || existingMemberships,
   };
   const str = JSON.stringify(enriched);
   localStorage.setItem('flexcoop_auth_member', str);

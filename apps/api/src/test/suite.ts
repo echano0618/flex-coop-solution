@@ -47,6 +47,9 @@ import {
   handleUpdateMemberProfile,
   handleLoanRepayment,
   handleLinkCoopMemberAccount,
+  handleSwitchCoopMemberAccount,
+  handleListCoopMemberships,
+  handleUnlinkCoopMemberAccount,
   handleListCommunityArticles,
   handleCreateCommunityArticle,
   handleLikeCommunityArticle,
@@ -6118,7 +6121,175 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 52 PAYMONGO QR PH LOAN REPAYMENT AUTO-POSTING & FEE ABSORPTION TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51 & 52) PASSED SUCCESSFULLY!\n');
+  // =========================================================================
+  // SECTION 53: MULTI-COOPERATIVE CENTRAL IDENTITY & CONTEXT SWITCHING
+  // =========================================================================
+  console.log('\n--- SECTION 53: MULTI-COOPERATIVE CENTRAL IDENTITY & CONTEXT SWITCHING (TUNTONG TECH CENTRAL FIREBASE: 581563779021) ---');
+  {
+    const createMockHttp = (overrides: {
+      params?: any;
+      headers?: any;
+      body?: any;
+      query?: any;
+    }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      const req: any = {
+        params: overrides.params || {},
+        headers: overrides.headers || {},
+        body: overrides.body || {},
+        query: overrides.query || {},
+      };
+      return { req, res, getStatus: () => statusCode, getBody: () => responseBody };
+    };
+
+    const multiCoopEmail = `citizen_multicoop_${Date.now()}@example.com`;
+    const coop1TenantId = 'tenant_family';
+    const coop2TenantId = 'tenant_bayani';
+
+    // 1. Initial Google Sign-In with 0 linked cooperatives
+    console.log('  53.1 Citizen Google Sign-In with no linked cooperatives...');
+    const login1Mock = createMockHttp({
+      body: {
+        email: multiCoopEmail,
+        name: 'Maria Santos',
+        googleUid: 'google_sub_maria_001',
+      },
+    });
+    await handleMemberGoogleLogin(login1Mock.req, login1Mock.res);
+    assert(login1Mock.getStatus() === 200, 'Google Login returns HTTP 200');
+    const login1Body = login1Mock.getBody();
+    assert(login1Body.isCoopLinked === false, 'Initially isCoopLinked is false');
+    assert(Array.isArray(login1Body.memberships) && login1Body.memberships.length === 0, 'Initial memberships list is empty');
+    assert(login1Body.firebaseProjectId === 'tuntong-tech', 'Auth response uses central Firebase: tuntong-tech');
+    assert(login1Body.firebaseProjectNumber === '581563779021', 'Auth response has project number 581563779021');
+    const mariaTid = login1Body.member.tid;
+    assert(mariaTid && mariaTid.length === 11, 'Deterministic 11-digit TID generated');
+
+    // Seed test member accounts in coop 1 and coop 2
+    if (!dbStore.members.has(coop1TenantId)) dbStore.members.set(coop1TenantId, []);
+    dbStore.members.get(coop1TenantId)!.push({
+      id: 'mem_maria_fam',
+      memberNumber: 'MEM-FAM-001',
+      name: 'Maria Santos',
+      email: multiCoopEmail,
+      classification: 'REGULAR',
+    } as any);
+
+    if (!dbStore.members.has(coop2TenantId)) dbStore.members.set(coop2TenantId, []);
+    dbStore.members.get(coop2TenantId)!.push({
+      id: 'mem_maria_bayani',
+      memberNumber: 'MEM-BAY-001',
+      name: 'Maria Santos',
+      email: multiCoopEmail,
+      classification: 'ASSOCIATE',
+    } as any);
+
+    // 2. Link first cooperative (Family Coop)
+    console.log('  53.2 Linking first cooperative (Family Multi-Purpose Cooperative)...');
+    const link1Mock = createMockHttp({
+      headers: {
+        'x-tenant-id': coop1TenantId,
+        'x-tenant-slug': 'family',
+      },
+      body: {
+        tenantId: coop1TenantId,
+        tenantSlug: 'family',
+        account: 'MEM-FAM-001',
+        password: 'password',
+        currentEmail: multiCoopEmail,
+        tid: mariaTid,
+      },
+    });
+    await handleLinkCoopMemberAccount(link1Mock.req, link1Mock.res);
+    assert(link1Mock.getStatus() === 200, 'Link first coop returns HTTP 200');
+    const link1Body = link1Mock.getBody();
+    assert(link1Body.success === true, 'First coop linking succeeded');
+    assert(link1Body.memberships.length === 1, 'Memberships list has 1 coop');
+    assert(link1Body.activeTenantId === coop1TenantId, 'Active tenant is coop 1');
+
+    // 3. Link second cooperative (Bayani Transport Coop)
+    console.log('  53.3 Linking second cooperative (Bayani Transport Cooperative)...');
+    const link2Mock = createMockHttp({
+      headers: {
+        'x-tenant-id': coop2TenantId,
+        'x-tenant-slug': 'bayani',
+      },
+      body: {
+        tenantId: coop2TenantId,
+        tenantSlug: 'bayani',
+        account: 'MEM-BAY-001',
+        password: 'password',
+        currentEmail: multiCoopEmail,
+        tid: mariaTid,
+      },
+    });
+    await handleLinkCoopMemberAccount(link2Mock.req, link2Mock.res);
+    assert(link2Mock.getStatus() === 200, 'Link second coop returns HTTP 200');
+    const link2Body = link2Mock.getBody();
+    assert(link2Body.success === true, 'Second coop linking succeeded');
+    assert(link2Body.memberships.length === 2, 'Memberships list now has 2 distinct cooperatives');
+    assert(link2Body.activeTenantId === coop2TenantId, 'Active tenant updated to newly linked coop 2');
+
+    // 4. Query central memberships endpoint
+    console.log('  53.4 Querying central memberships endpoint (GET /api/v1/members/memberships)...');
+    const listMock = createMockHttp({
+      query: { tid: mariaTid, email: multiCoopEmail },
+    });
+    await handleListCoopMemberships(listMock.req, listMock.res);
+    assert(listMock.getStatus() === 200, 'List memberships returns HTTP 200');
+    const listBody = listMock.getBody();
+    assert(listBody.memberships.length === 2, 'Returns both linked cooperatives');
+    assert(listBody.firebaseProjectId === 'tuntong-tech', 'Memberships fetched from tuntong-tech');
+
+    // 5. Switch active cooperative back to Family Coop
+    console.log('  53.5 Switching active cooperative back to Family Coop (POST /api/v1/members/switch-coop)...');
+    const switchMock = createMockHttp({
+      body: {
+        tenantId: coop1TenantId,
+        tenantSlug: 'family',
+        tid: mariaTid,
+        email: multiCoopEmail,
+      },
+    });
+    await handleSwitchCoopMemberAccount(switchMock.req, switchMock.res);
+    assert(switchMock.getStatus() === 200, 'Switch coop returns HTTP 200');
+    const switchBody = switchMock.getBody();
+    assert(switchBody.success === true, 'Cooperative switched successfully');
+    assert(switchBody.activeTenantId === coop1TenantId, 'Active tenant is now Family Coop');
+    assert(switchBody.member.memberNumber === 'MEM-FAM-001', 'Member record reflects Family Coop member ID');
+    assert(switchBody.token !== undefined, 'Issued new JWT token for Family Coop context');
+
+    // 6. Unlink Bayani Coop
+    console.log('  53.6 Unlinking Bayani Coop (POST /api/v1/members/unlink-coop)...');
+    const unlinkMock = createMockHttp({
+      body: {
+        tenantId: coop2TenantId,
+        tenantSlug: 'bayani',
+        tid: mariaTid,
+        email: multiCoopEmail,
+      },
+    });
+    await handleUnlinkCoopMemberAccount(unlinkMock.req, unlinkMock.res);
+    assert(unlinkMock.getStatus() === 200, 'Unlink coop returns HTTP 200');
+    const unlinkBody = unlinkMock.getBody();
+    assert(unlinkBody.memberships.length === 1, 'Remaining memberships count is 1');
+    assert(unlinkBody.activeTenantId === coop1TenantId, 'Active cooperative remains Family Coop');
+
+    console.log('  ✅ ALL SECTION 53 MULTI-COOPERATIVE CENTRAL IDENTITY & CONTEXT SWITCHING TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52 & 53) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

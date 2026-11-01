@@ -17,6 +17,7 @@ import {
   AlertCircle,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   Plus,
   X,
   Search,
@@ -80,6 +81,7 @@ import {
   clearTenantAdminSession,
   resolveGeneralManager,
   isTestCoopTenant,
+  isCoopSlugMatch,
   purgeTenantDummyRecords,
   TenantInfo,
   uint8ArrayToBase64Url,
@@ -744,6 +746,19 @@ export default function MemberPortalPage() {
               const initials = ((parsed.firstName?.[0] || '') + (parsed.lastName?.[0] || '') || fullName.slice(0, 2)).toUpperCase();
               const classification = parsed.classification || 'ASSOCIATE';
               const isDividendEligible = parsed.isDividendEligible !== undefined ? Boolean(parsed.isDividendEligible) : (classification === 'REGULAR');
+              const memberMemberships = Array.isArray(parsed.memberships) && parsed.memberships.length > 0
+                ? parsed.memberships
+                : (parsed.isCoopLinked ? [{
+                    tenantId: parsed.tenantId || `tenant_${info.slug}`,
+                    tenantSlug: info.slug,
+                    memberId: parsed.id,
+                    memberNumber: parsed.memberNumber || parsed.memberNo,
+                    coopName: info.name,
+                    role: classification,
+                    isDefault: true,
+                  }] : []);
+              setMemberships(memberMemberships);
+
               setCustomMember({
                 id: parsed.id || parsed.email || '',
                 memberNumber: parsed.memberNumber || parsed.memberNo || '',
@@ -752,8 +767,11 @@ export default function MemberPortalPage() {
                 initials: initials || 'MB',
                 classification: classification,
                 isDividendEligible: isDividendEligible,
-                isCoopLinked: parsed.isCoopLinked === true,
+                isCoopLinked: parsed.isCoopLinked === true || memberMemberships.length > 0,
                 authProvider: parsed.authProvider,
+                tid: parsed.tid || '',
+                activeTenantId: parsed.activeTenantId || parsed.tenantId,
+                memberships: memberMemberships,
                 type: parsed.position ? `${parsed.position} (${classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'})` : (classification === 'REGULAR' ? 'Regular Member' : 'Associate Member'),
                 paidUpCapital: parsed.paidUpCapital !== undefined ? Number(parsed.paidUpCapital) : (isTestTenant ? 25000 : 0),
                 sharesCount: parsed.sharesCount !== undefined ? Number(parsed.sharesCount) : (isTestTenant ? 250 : 0),
@@ -769,6 +787,18 @@ export default function MemberPortalPage() {
                 if (parsed.businessPage.comments) {
                   setBusinessComments(parsed.businessPage.comments);
                 }
+              }
+
+              // Background sync multi-coop memberships from Tuntong Central Auth
+              if (parsed.tid || parsed.email) {
+                fetch(`${getApiBaseUrl()}/members/memberships?tid=${encodeURIComponent(parsed.tid || '')}&email=${encodeURIComponent(parsed.email || '')}`)
+                  .then((r) => r.json())
+                  .then((mJson) => {
+                    if (mJson && mJson.success && Array.isArray(mJson.memberships) && mJson.memberships.length > 0) {
+                      setMemberships(mJson.memberships);
+                    }
+                  })
+                  .catch(() => {});
               }
             }
           } catch {}
@@ -1631,8 +1661,25 @@ export default function MemberPortalPage() {
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkSuccess, setLinkSuccess] = useState<string | null>(null);
 
+  // Multi-Cooperative Management State (Centralized via Tuntong Central Auth)
+  const [memberships, setMemberships] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('flexcoop_auth_member');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.memberships)) return parsed.memberships;
+        }
+      } catch {}
+    }
+    return [];
+  });
+  const [showCoopSwitcherModal, setShowCoopSwitcherModal] = useState<boolean>(false);
+  const [isSwitchingCoop, setIsSwitchingCoop] = useState<boolean>(false);
+
   const isCoopLinked = Boolean(
     (currentMember as any)?.isCoopLinked === true ||
+    memberships.length > 0 ||
     ((currentMember as any)?.isCoopLinked !== false &&
       (currentMember as any)?.authProvider !== 'GOOGLE' &&
       currentMember?.memberNumber &&
@@ -1947,6 +1994,7 @@ export default function MemberPortalPage() {
           account: linkUserAccount.trim(),
           password: linkPassword.trim(),
           currentEmail: currentMember.email || linkUserAccount.trim(),
+          tid: (currentMember as any)?.tid,
         }),
       });
 
@@ -1957,11 +2005,25 @@ export default function MemberPortalPage() {
 
       setLinkSuccess('Your cooperative account has been successfully linked!');
       if (typeof window !== 'undefined') {
+        const remainingMemberships = json.memberships || [
+          ...memberships.filter((m: any) => m.tenantSlug !== cleanSlug),
+          {
+            tenantId: targetTenantId,
+            tenantSlug: cleanSlug,
+            memberId: json.data?.id,
+            memberNumber: json.data?.memberNumber,
+            coopName: json.data?.coopName || cleanSlug,
+            isDefault: memberships.length === 0,
+          },
+        ];
+        setMemberships(remainingMemberships);
+
         const updatedAuth = {
           ...(getTenantMemberSession(cleanSlug) || {}),
           ...json.data,
           isCoopLinked: true,
           tenantSlug: cleanSlug,
+          memberships: remainingMemberships,
         };
         setTenantMemberSession(updatedAuth, cleanSlug, json.data?.coopName || cleanSlug);
         setTimeout(() => {
@@ -1972,6 +2034,82 @@ export default function MemberPortalPage() {
       setLinkError(err.message || 'Verification failed. Please check your Tenant ID, Account, and Password.');
     } finally {
       setLinkLoading(false);
+    }
+  };
+
+  const handleSwitchCoop = async (targetTenantId: string, targetSlug: string) => {
+    if (!targetSlug || isSwitchingCoop) return;
+    if (isCoopSlugMatch(targetSlug, tenantInfo.slug)) {
+      setShowCoopSwitcherModal(false);
+      return;
+    }
+    setIsSwitchingCoop(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/members/switch-coop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: targetTenantId,
+          tenantSlug: targetSlug,
+          tid: (currentMember as any)?.tid,
+          email: currentMember.email,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        if (typeof window !== 'undefined') {
+          const updatedAuth = {
+            ...(getTenantMemberSession(targetSlug) || {}),
+            ...json.member,
+            isCoopLinked: true,
+            tenantSlug: targetSlug,
+            memberships: json.memberships || memberships,
+          };
+          setTenantMemberSession(updatedAuth, targetSlug, json.coopName || targetSlug);
+          window.location.href = `/member?coop=${targetSlug}`;
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Switch coop API fallback, switching locally:', err);
+    }
+    if (typeof window !== 'undefined') {
+      window.location.href = `/member?coop=${targetSlug}`;
+    }
+  };
+
+  const handleUnlinkCoop = async (targetTenantId: string, targetSlug: string, targetCoopName: string) => {
+    if (!confirm(`Are you sure you want to unlink ${targetCoopName}?`)) return;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/members/unlink-coop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: targetTenantId,
+          tenantSlug: targetSlug,
+          tid: (currentMember as any)?.tid,
+          email: currentMember.email,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        const remaining = json.memberships || [];
+        setMemberships(remaining);
+        if (isCoopSlugMatch(targetSlug, tenantInfo.slug)) {
+          if (remaining.length > 0) {
+            const nextCoop = remaining[0];
+            handleSwitchCoop(nextCoop.tenantId, nextCoop.tenantSlug);
+          } else {
+            const cur = getTenantMemberSession() || {};
+            cur.isCoopLinked = false;
+            cur.memberships = [];
+            setTenantMemberSession(cur, 'unlinked');
+            window.location.href = '/member';
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Unlink coop error:', err);
     }
   };
   const [memberLoanApplications, setMemberLoanApplications] = useState<any[]>([]);
@@ -5185,12 +5323,12 @@ export default function MemberPortalPage() {
             {/* Member Cooperative Account Card (Silong Palette) - Compact Height */}
             {isCoopLinked ? (
               <div className="bg-gradient-to-br from-[#223a5e] via-[#1c3150] to-[#15253d] border border-[#e68a38]/30 text-white rounded-2xl p-3.5 sm:p-4 shadow-lg shadow-[#223a5e]/15 relative overflow-hidden space-y-2.5">
-                <div
-                  onClick={() => setActiveTab('coop_page')}
-                  className="flex items-center justify-between cursor-pointer group relative z-10"
-                  title="Click to view Cooperative Page & Services"
-                >
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between relative z-10">
+                  <div
+                    onClick={() => setActiveTab('coop_page')}
+                    className="flex items-center gap-2 cursor-pointer group"
+                    title="Click to view Cooperative Page & Services"
+                  >
                     <img
                       src="/icons/silong-icon-192.png"
                       alt="Silong"
@@ -5201,6 +5339,18 @@ export default function MemberPortalPage() {
                       <ChevronRight className="w-3.5 h-3.5 inline text-[#e68a38]" />
                     </span>
                   </div>
+
+                  {/* Multi-Cooperative Switcher Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCoopSwitcherModal(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-semibold text-[#f4efe6] transition-colors shadow-2xs cursor-pointer shrink-0"
+                    title="Switch active cooperative or link another"
+                  >
+                    <Building2 className="w-3 h-3 text-[#e68a38]" />
+                    <span>Switch</span>
+                    <ChevronDown className="w-3 h-3 text-slate-300" />
+                  </button>
                 </div>
 
                 {/* Financial Quick Glance (Tapping opens Coop Page) */}
@@ -10231,11 +10381,21 @@ export default function MemberPortalPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowLinkCoopModal(true)}
+                  onClick={() => {
+                    if (isCoopLinked && memberships.length > 0) {
+                      setShowCoopSwitcherModal(true);
+                    } else {
+                      setShowLinkCoopModal(true);
+                    }
+                  }}
                   className="px-3 py-1.5 bg-white border border-slate-300 hover:border-[#e68a38] text-slate-700 hover:text-[#e68a38] rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                 >
-                  <Link2 className="w-3.5 h-3.5" />
-                  <span>{isCoopLinked ? 'Switch / Re-link Coop' : 'Link Cooperative Account'}</span>
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>
+                    {isCoopLinked
+                      ? `Manage Coops (${memberships.length || 1})`
+                      : 'Link Cooperative Account'}
+                  </span>
                 </button>
               </div>
             </div>
@@ -12589,6 +12749,135 @@ export default function MemberPortalPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* MULTI-COOPERATIVE SWITCHER & MANAGEMENT MODAL */}
+        {showCoopSwitcherModal && (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center shrink-0">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">My Cooperatives</h3>
+                    <p className="text-[11px] text-slate-500">Switch or manage your linked cooperative memberships</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCoopSwitcherModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* List of Linked Cooperatives */}
+              <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                {memberships.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
+                    No cooperatives linked yet. Link your cooperative account to access loans, savings, and passbooks.
+                  </div>
+                ) : (
+                  memberships.map((m: any, idx: number) => {
+                    const isActive = isCoopSlugMatch(m.tenantSlug || m.tenantId, tenantInfo.slug);
+                    return (
+                      <div
+                        key={m.tenantId || idx}
+                        className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                          isActive
+                            ? 'bg-[#223a5e]/5 border-[#e68a38] ring-1 ring-[#e68a38]/40 shadow-xs'
+                            : 'bg-white hover:bg-slate-50 border-slate-200 cursor-pointer'
+                        }`}
+                        onClick={() => {
+                          if (!isActive) handleSwitchCoop(m.tenantId, m.tenantSlug);
+                        }}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 font-bold text-xs ${
+                              isActive ? 'bg-[#223a5e] text-[#e68a38]' : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            <Building2 className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs text-slate-900 truncate">{m.coopName || `${m.tenantSlug} Cooperative`}</span>
+                              {isActive && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-[#e68a38] text-white shrink-0 uppercase tracking-wide">
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 truncate flex items-center gap-2 mt-0.5">
+                              <span>ID: <strong className="text-slate-700 font-mono">{m.memberNumber || m.memberId}</strong></span>
+                              {m.role && <span className="text-slate-400">• {m.role}</span>}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isActive ? (
+                            <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                              <Check className="w-3.5 h-3.5" />
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isSwitchingCoop}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSwitchCoop(m.tenantId, m.tenantSlug);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[#223a5e] hover:bg-[#1b2f4d] text-white text-[11px] font-bold transition shadow-2xs cursor-pointer"
+                            >
+                              {isSwitchingCoop ? 'Switching...' : 'Switch'}
+                            </button>
+                          )}
+                          {memberships.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUnlinkCoop(m.tenantId, m.tenantSlug, m.coopName || m.tenantSlug);
+                              }}
+                              title="Unlink this cooperative account"
+                              className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCoopSwitcherModal(false);
+                    setLinkTenantId('');
+                    setLinkUserAccount(currentMember.email || '');
+                    setLinkPassword('');
+                    setLinkError(null);
+                    setLinkSuccess(null);
+                    setShowLinkCoopModal(true);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl border border-dashed border-[#e68a38] bg-[#e68a38]/5 hover:bg-[#e68a38]/10 text-[#e68a38] text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Link Another Cooperative Account</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

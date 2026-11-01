@@ -722,19 +722,100 @@ export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
     }
     const computedTid = String(numericHash).slice(-11).padStart(11, '0');
 
-    // 1. Check if user has an existing cooperative account across tenants
-    let matchedCoopMember: any = null;
-    let matchedTenantId: string | null = null;
-    let matchedCoopName = 'Silong Community Hub';
+    // 1. Fetch user's multi-cooperative memberships from Central Tuntong Tech Firebase (581563779021)
+    const tuntongFs = FirestoreTuntongService.getInstance();
+    let centralMembershipsDoc: any =
+      dbStore.userCoopMemberships.get(computedTid) ||
+      dbStore.userCoopMemberships.get(cleanEmail);
+    try {
+      const fsMemberships =
+        (await tuntongFs.getUserCoopMemberships(computedTid)) ||
+        (await tuntongFs.getUserCoopMemberships(cleanEmail));
+      if (fsMemberships) centralMembershipsDoc = fsMemberships;
+    } catch {}
 
-    for (const [tId, memList] of dbStore.members.entries()) {
-      const found = memList.find((m) => String(m.email || '').toLowerCase() === cleanEmail);
-      if (found) {
-        matchedCoopMember = found;
-        matchedTenantId = tId;
-        const coopReg = dbStore.coopRegistrations.find((r) => r.id === tId || r.slug === tId.replace('tenant_', ''));
-        matchedCoopName = coopReg?.name || `${tId.replace('tenant_', '')} Cooperative`;
-        break;
+    let memberships: any[] = Array.isArray(centralMembershipsDoc?.memberships)
+      ? [...centralMembershipsDoc.memberships]
+      : [];
+    let activeTenantId: string | null = centralMembershipsDoc?.activeTenantId || null;
+
+    // If no memberships record exists in central storage, auto-discover across tenants in coop-solution
+    if (memberships.length === 0) {
+      for (const [tId, memList] of dbStore.members.entries()) {
+        const found = memList.find((m) => String(m.email || '').toLowerCase() === cleanEmail);
+        if (found) {
+          const cleanSlug = tId.replace('tenant_', '');
+          const coopReg = dbStore.coopRegistrations.find(
+            (r) => r.id === tId || r.slug === cleanSlug || r.id === `tenant_${cleanSlug}`
+          );
+          const coopName = coopReg?.name || `${cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)} Cooperative`;
+          const entry = {
+            tenantId: tId,
+            tenantSlug: cleanSlug,
+            memberId: found.id,
+            memberNumber: found.memberNumber || found.id,
+            memberName: found.name || `${found.firstName || ''} ${found.lastName || ''}`.trim(),
+            coopName,
+            coopCdaNumber: (coopReg as any)?.cdaRegistrationNumber || (coopReg as any)?.cdaNumber || '',
+            role: found.classification || 'REGULAR',
+            isDefault: memberships.length === 0,
+            linkedAt: new Date().toISOString(),
+          };
+          memberships.push(entry);
+        }
+      }
+
+      if (memberships.length > 0) {
+        activeTenantId = memberships[0].tenantId;
+        const record = {
+          tid: computedTid,
+          googleEmail: cleanEmail,
+          googleUid: googleUid || '',
+          activeTenantId,
+          memberships,
+          firebaseProjectId: 'tuntong-tech',
+          firebaseProjectNumber: '581563779021',
+          updatedAt: new Date().toISOString(),
+        };
+        dbStore.userCoopMemberships.set(computedTid, record);
+        dbStore.userCoopMemberships.set(cleanEmail, record);
+        try {
+          await tuntongFs.saveUserCoopMemberships(computedTid, record);
+        } catch {}
+      }
+    }
+
+    // Determine active membership and active tenant
+    let activeMembership: any = null;
+    if (memberships.length > 0) {
+      if (!activeTenantId || !memberships.some((m) => m.tenantId === activeTenantId)) {
+        activeTenantId = memberships[0].tenantId;
+      }
+      activeMembership = memberships.find((m) => m.tenantId === activeTenantId) || memberships[0];
+    }
+
+    // Load active member details from coop-solution for the active tenant
+    let matchedCoopMember: any = null;
+    let matchedTenantId: string | null = activeTenantId;
+    let matchedCoopName = activeMembership?.coopName || 'Silong Community Hub';
+
+    if (matchedTenantId) {
+      const tenantMembers = dbStore.members.get(matchedTenantId) || [];
+      matchedCoopMember =
+        tenantMembers.find(
+          (m) =>
+            m.id === activeMembership?.memberId ||
+            m.memberNumber === activeMembership?.memberNumber ||
+            String(m.email || '').toLowerCase() === cleanEmail
+        ) || null;
+      if (!matchedCoopMember && activeMembership) {
+        matchedCoopMember = {
+          id: activeMembership.memberId,
+          memberNumber: activeMembership.memberNumber,
+          name: activeMembership.memberName || cleanName,
+          email: cleanEmail,
+          classification: activeMembership.role || 'REGULAR',
+        };
       }
     }
 
@@ -798,6 +879,9 @@ export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
       tenantId: matchedTenantId || 'tenant_default',
       tenantSlug: matchedTenantId ? matchedTenantId.replace('tenant_', '') : 'unlinked',
       coopName: matchedCoopName,
+      memberships,
+      activeTenantId,
+      activeMembership,
       businessPage: personalWall,
       authProvider: 'GOOGLE',
       firebaseProjectId: 'tuntong-tech',
@@ -817,6 +901,9 @@ export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
       success: true,
       message: 'Google Sign-In authenticated successfully.',
       member: memberProfile,
+      memberships,
+      activeTenantId,
+      activeMembership,
       isCoopLinked,
       isFirstLogin,
       token,
@@ -4721,17 +4808,80 @@ export const handleLinkCoopMemberAccount = async (req: Request, res: Response) =
     );
     const coopName = matchedCoop?.name || `${cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)} Cooperative`;
 
+    // 5. Centralized Multi-Cooperative Link in Tuntong Tech Firebase (581563779021)
+    const effectiveEmail = String(currentEmail || matchedMember.email || '').trim().toLowerCase();
+    let citizenTid = String(req.body.tid || '').trim();
+    if (!citizenTid && effectiveEmail) {
+      let numericHash = 0;
+      for (let i = 0; i < effectiveEmail.length; i++) {
+        numericHash = (numericHash * 31 + effectiveEmail.charCodeAt(i)) >>> 0;
+      }
+      citizenTid = String(numericHash).slice(-11).padStart(11, '0');
+    }
+
+    const membershipEntry = {
+      tenantId,
+      tenantSlug: cleanSlug,
+      memberId: matchedMember.id,
+      memberNumber: matchedMember.memberNumber || matchedMember.id,
+      memberName: matchedMember.name || `${matchedMember.firstName || ''} ${matchedMember.lastName || ''}`.trim(),
+      coopName,
+      coopCdaNumber: (matchedCoop as any)?.cdaRegistrationNumber || (matchedCoop as any)?.cdaNumber || '',
+      role: matchedMember.classification || 'REGULAR',
+      linkedAt: new Date().toISOString(),
+      isDefault: false,
+    };
+
+    let updatedRecord: any = null;
+    const tuntongFs = FirestoreTuntongService.getInstance();
+    if (citizenTid) {
+      try {
+        updatedRecord = await tuntongFs.addOrUpdateCoopMembership(citizenTid, membershipEntry, true);
+        if (effectiveEmail && effectiveEmail !== citizenTid) {
+          await tuntongFs.addOrUpdateCoopMembership(effectiveEmail, membershipEntry, true);
+        }
+      } catch (err) {
+        console.warn('Failed to save to Tuntong Firestore:', err);
+      }
+    }
+
+    // In-memory fallback / sync
+    const keys = [citizenTid, effectiveEmail].filter(Boolean) as string[];
+    for (const key of keys) {
+      const existing = dbStore.userCoopMemberships.get(key) || { memberships: [] };
+      const currentList: any[] = Array.isArray(existing.memberships) ? existing.memberships : [];
+      const filtered = currentList.filter((m: any) => m.tenantId !== tenantId && m.tenantSlug !== cleanSlug);
+      const isDefault = filtered.length === 0;
+      const updatedMemberships = [...filtered, { ...membershipEntry, isDefault }];
+      const record = {
+        tid: citizenTid || key,
+        activeTenantId: tenantId,
+        memberships: updatedMemberships,
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+        updatedAt: new Date().toISOString(),
+      };
+      dbStore.userCoopMemberships.set(key, record);
+      if (!updatedRecord) updatedRecord = record;
+    }
+
+    const allMemberships = updatedRecord?.memberships || [membershipEntry];
+
     return res.json({
       success: true,
       tenantId,
       tenantSlug: cleanSlug,
       coopName,
+      memberships: allMemberships,
+      activeTenantId: tenantId,
       data: {
         ...matchedMember,
         isCoopLinked: true,
         tenantId,
         tenantSlug: cleanSlug,
         coopName,
+        memberships: allMemberships,
+        activeTenantId: tenantId,
       },
       message: 'Cooperative account linked successfully.',
     });
@@ -4740,7 +4890,195 @@ export const handleLinkCoopMemberAccount = async (req: Request, res: Response) =
   }
 };
 
+export const handleSwitchCoopMemberAccount = async (req: Request, res: Response) => {
+  try {
+    const { tenantId, tenantSlug, tid, email } = req.body || {};
+    const targetTenantId = tenantId || (tenantSlug ? `tenant_${tenantSlug.replace(/^tenant_/, '')}` : null);
+    if (!targetTenantId) {
+      return res.status(400).json({ success: false, error: 'Target tenantId or tenantSlug is required.' });
+    }
+
+    const cleanSlug = targetTenantId.replace(/^tenant_/, '');
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    let citizenTid = String(tid || '').trim();
+    if (!citizenTid && cleanEmail) {
+      let numericHash = 0;
+      for (let i = 0; i < cleanEmail.length; i++) {
+        numericHash = (numericHash * 31 + cleanEmail.charCodeAt(i)) >>> 0;
+      }
+      citizenTid = String(numericHash).slice(-11).padStart(11, '0');
+    }
+
+    const tuntongFs = FirestoreTuntongService.getInstance();
+    let record: any = null;
+    if (citizenTid) {
+      try {
+        record = await tuntongFs.setActiveCoop(citizenTid, targetTenantId);
+        if (cleanEmail && cleanEmail !== citizenTid) {
+          await tuntongFs.setActiveCoop(cleanEmail, targetTenantId);
+        }
+      } catch {}
+    }
+
+    const keys = [citizenTid, cleanEmail].filter(Boolean) as string[];
+    for (const key of keys) {
+      const existing = dbStore.userCoopMemberships.get(key);
+      if (existing) {
+        existing.activeTenantId = targetTenantId;
+        existing.updatedAt = new Date().toISOString();
+        dbStore.userCoopMemberships.set(key, existing);
+        if (!record) record = existing;
+      }
+    }
+
+    const memberships: any[] = record?.memberships || [];
+    const activeMembership = memberships.find((m: any) => m.tenantId === targetTenantId) || null;
+
+    // Fetch member details from target coop in coop-solution
+    let memberInTarget = (dbStore.members.get(targetTenantId) || []).find(
+      (m: any) =>
+        (activeMembership && (m.id === activeMembership.memberId || m.memberNumber === activeMembership.memberNumber)) ||
+        (cleanEmail && String(m.email || '').toLowerCase() === cleanEmail)
+    );
+
+    const coopReg = dbStore.coopRegistrations.find(
+      (r) => r.id === targetTenantId || r.slug === cleanSlug || r.id === `tenant_${cleanSlug}`
+    );
+    const coopName = activeMembership?.coopName || coopReg?.name || `${cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)} Cooperative`;
+
+    const token = AuthService.generateToken({
+      id: memberInTarget?.id || activeMembership?.memberId || `usr_${citizenTid}`,
+      fullName: memberInTarget?.name || activeMembership?.memberName || 'Cooperative Member',
+      email: cleanEmail,
+      role: 'MEMBER' as any,
+      tenantId: targetTenantId,
+    });
+
+    return res.json({
+      success: true,
+      tenantId: targetTenantId,
+      tenantSlug: cleanSlug,
+      coopName,
+      activeTenantId: targetTenantId,
+      activeMembership,
+      memberships,
+      member: {
+        ...(memberInTarget || {}),
+        id: memberInTarget?.id || activeMembership?.memberId || `usr_${citizenTid}`,
+        memberNumber: memberInTarget?.memberNumber || activeMembership?.memberNumber || citizenTid,
+        name: memberInTarget?.name || activeMembership?.memberName || 'Cooperative Member',
+        email: cleanEmail,
+        isCoopLinked: true,
+        tenantId: targetTenantId,
+        tenantSlug: cleanSlug,
+        coopName,
+        memberships,
+        activeTenantId: targetTenantId,
+      },
+      token,
+      message: `Active cooperative switched to ${coopName}.`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const handleListCoopMemberships = async (req: Request, res: Response) => {
+  try {
+    const tid = String(req.query.tid || req.headers['x-user-tid'] || '').trim();
+    const email = String(req.query.email || req.headers['x-user-email'] || '').trim().toLowerCase();
+
+    let citizenTid = tid;
+    if (!citizenTid && email) {
+      let numericHash = 0;
+      for (let i = 0; i < email.length; i++) {
+        numericHash = (numericHash * 31 + email.charCodeAt(i)) >>> 0;
+      }
+      citizenTid = String(numericHash).slice(-11).padStart(11, '0');
+    }
+
+    const tuntongFs = FirestoreTuntongService.getInstance();
+    let record: any = citizenTid ? await tuntongFs.getUserCoopMemberships(citizenTid) : null;
+    if (!record && (citizenTid || email)) {
+      record = dbStore.userCoopMemberships.get(citizenTid) || dbStore.userCoopMemberships.get(email);
+    }
+
+    return res.json({
+      success: true,
+      tid: citizenTid,
+      activeTenantId: record?.activeTenantId || null,
+      memberships: record?.memberships || [],
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const handleUnlinkCoopMemberAccount = async (req: Request, res: Response) => {
+  try {
+    const { tenantId, tenantSlug, tid, email } = req.body || {};
+    const targetTenantId = tenantId || (tenantSlug ? `tenant_${tenantSlug.replace(/^tenant_/, '')}` : null);
+    if (!targetTenantId) {
+      return res.status(400).json({ success: false, error: 'Target tenantId or tenantSlug is required.' });
+    }
+
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    let citizenTid = String(tid || '').trim();
+    if (!citizenTid && cleanEmail) {
+      let numericHash = 0;
+      for (let i = 0; i < cleanEmail.length; i++) {
+        numericHash = (numericHash * 31 + cleanEmail.charCodeAt(i)) >>> 0;
+      }
+      citizenTid = String(numericHash).slice(-11).padStart(11, '0');
+    }
+
+    const tuntongFs = FirestoreTuntongService.getInstance();
+    let updated: any = null;
+    if (citizenTid) {
+      try {
+        updated = await tuntongFs.removeCoopMembership(citizenTid, targetTenantId);
+        if (cleanEmail && cleanEmail !== citizenTid) {
+          await tuntongFs.removeCoopMembership(cleanEmail, targetTenantId);
+        }
+      } catch {}
+    }
+
+    const keys = [citizenTid, cleanEmail].filter(Boolean) as string[];
+    for (const key of keys) {
+      const existing = dbStore.userCoopMemberships.get(key) || { memberships: [] };
+      const filtered = (existing.memberships || []).filter((m: any) => m.tenantId !== targetTenantId);
+      let activeTenantId = existing.activeTenantId;
+      if (activeTenantId === targetTenantId) {
+        activeTenantId = filtered.length > 0 ? filtered[0].tenantId : null;
+      }
+      const record = {
+        ...existing,
+        activeTenantId,
+        memberships: filtered,
+        updatedAt: new Date().toISOString(),
+      };
+      dbStore.userCoopMemberships.set(key, record);
+      if (!updated) updated = record;
+    }
+
+    return res.json({
+      success: true,
+      activeTenantId: updated?.activeTenantId || null,
+      memberships: updated?.memberships || [],
+      message: 'Cooperative account unlinked successfully.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 app.post('/api/v1/members/link-account', handleLinkCoopMemberAccount);
+app.post('/api/v1/members/switch-coop', handleSwitchCoopMemberAccount);
+app.post('/api/v1/members/unlink-coop', handleUnlinkCoopMemberAccount);
+app.delete('/api/v1/members/unlink-coop', handleUnlinkCoopMemberAccount);
+app.get('/api/v1/members/memberships', handleListCoopMemberships);
 app.get('/api/v1/members/:id/business', handleGetMemberBusinessPage);
 app.put('/api/v1/members/:id/business', handleUpdateMemberBusinessPage);
 app.post('/api/v1/members/:id/business/comments', handleAddBusinessComment);

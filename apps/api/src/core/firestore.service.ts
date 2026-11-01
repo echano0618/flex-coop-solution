@@ -1736,5 +1736,139 @@ export class FirestoreTuntongService {
       return null;
     }
   }
+
+  // -------------------------------------------------------------
+  // MULTI-COOPERATIVE CITIZEN MEMBERSHIPS (Stored in tuntong-tech: 581563779021)
+  // -------------------------------------------------------------
+  public userCoopMembershipsCol() {
+    return this.db.collection('user_coop_memberships');
+  }
+
+  public userCoopMembershipsDoc(identifierOrTid: string) {
+    const cleanId = encodeURIComponent(String(identifierOrTid).trim().toLowerCase());
+    return this.userCoopMembershipsCol().doc(cleanId);
+  }
+
+  public async getUserCoopMemberships(identifierOrTid: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const doc = await this.userCoopMembershipsDoc(identifierOrTid).get();
+      return doc.exists ? doc.data() : null;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] getUserCoopMemberships fallback:', err);
+      return null;
+    }
+  }
+
+  public async saveUserCoopMemberships(identifierOrTid: string, data: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      await this.userCoopMembershipsDoc(identifierOrTid).set(
+        {
+          ...data,
+          firebaseProjectId: this.projectId,
+          firebaseProjectNumber: this.projectNumber,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] saveUserCoopMemberships fallback:', err);
+    }
+  }
+
+  public async addOrUpdateCoopMembership(
+    identifierOrTid: string,
+    membership: any,
+    makeActive: boolean = true
+  ): Promise<any> {
+    if (!this.isConfigured()) return null;
+    try {
+      const docRef = this.userCoopMembershipsDoc(identifierOrTid);
+      const snap = await docRef.get();
+      const existing = snap.exists ? (snap.data() as any) || {} : {};
+      const currentList: any[] = Array.isArray(existing.memberships) ? existing.memberships : [];
+
+      const cleanTenantId = membership.tenantId;
+      const filtered = currentList.filter(
+        (m: any) => m.tenantId !== cleanTenantId && m.tenantSlug !== membership.tenantSlug
+      );
+      const updatedMemberships = [
+        ...filtered,
+        {
+          ...membership,
+          linkedAt: membership.linkedAt || new Date().toISOString(),
+          isDefault: filtered.length === 0 ? true : Boolean(membership.isDefault),
+        },
+      ];
+
+      const activeTenantId = makeActive ? cleanTenantId : existing.activeTenantId || cleanTenantId;
+
+      const record = {
+        ...existing,
+        tid: identifierOrTid,
+        activeTenantId,
+        memberships: updatedMemberships,
+        firebaseProjectId: this.projectId,
+        firebaseProjectNumber: this.projectNumber,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await docRef.set(record, { merge: true });
+      return record;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] addOrUpdateCoopMembership fallback:', err);
+      return null;
+    }
+  }
+
+  public async setActiveCoop(identifierOrTid: string, tenantId: string): Promise<any> {
+    if (!this.isConfigured()) return null;
+    try {
+      const docRef = this.userCoopMembershipsDoc(identifierOrTid);
+      const snap = await docRef.get();
+      if (!snap.exists) return null;
+      const existing = snap.data() || {};
+      const record = {
+        ...existing,
+        activeTenantId: tenantId,
+        updatedAt: new Date().toISOString(),
+      };
+      await docRef.set(record, { merge: true });
+      return record;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] setActiveCoop fallback:', err);
+      return null;
+    }
+  }
+
+  public async removeCoopMembership(identifierOrTid: string, tenantId: string): Promise<any> {
+    if (!this.isConfigured()) return null;
+    try {
+      const docRef = this.userCoopMembershipsDoc(identifierOrTid);
+      const snap = await docRef.get();
+      if (!snap.exists) return null;
+      const existing = snap.data() || {};
+      const currentList: any[] = Array.isArray(existing.memberships) ? existing.memberships : [];
+      const updatedMemberships = currentList.filter(
+        (m: any) => m.tenantId !== tenantId && m.tenantSlug !== tenantId.replace(/^tenant_/, '')
+      );
+      let activeTenantId = existing.activeTenantId;
+      if (activeTenantId === tenantId) {
+        activeTenantId = updatedMemberships.length > 0 ? updatedMemberships[0].tenantId : null;
+      }
+      const record = {
+        ...existing,
+        activeTenantId,
+        memberships: updatedMemberships,
+        updatedAt: new Date().toISOString(),
+      };
+      await docRef.set(record, { merge: true });
+      return record;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] removeCoopMembership fallback:', err);
+      return null;
+    }
+  }
 }
 
