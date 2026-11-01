@@ -6177,23 +6177,31 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     assert(mariaTid && mariaTid.length === 11, 'Deterministic 11-digit TID generated');
 
     // Seed test member accounts in coop 1 and coop 2
-    if (!dbStore.members.has(coop1TenantId)) dbStore.members.set(coop1TenantId, []);
-    dbStore.members.get(coop1TenantId)!.push({
+    const mariaMember1 = {
       id: 'mem_maria_fam',
       memberNumber: 'MEM-FAM-001',
       name: 'Maria Santos',
       email: multiCoopEmail,
       classification: 'REGULAR',
-    } as any);
+    };
+    if (!dbStore.members.has(coop1TenantId)) dbStore.members.set(coop1TenantId, []);
+    dbStore.members.get(coop1TenantId)!.push(mariaMember1 as any);
 
-    if (!dbStore.members.has(coop2TenantId)) dbStore.members.set(coop2TenantId, []);
-    dbStore.members.get(coop2TenantId)!.push({
+    const mariaMember2 = {
       id: 'mem_maria_bayani',
       memberNumber: 'MEM-BAY-001',
       name: 'Maria Santos',
       email: multiCoopEmail,
       classification: 'ASSOCIATE',
-    } as any);
+    };
+    if (!dbStore.members.has(coop2TenantId)) dbStore.members.set(coop2TenantId, []);
+    dbStore.members.get(coop2TenantId)!.push(mariaMember2 as any);
+
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveMember(coop1TenantId, mariaMember1 as any);
+      await fsService.saveMember(coop2TenantId, mariaMember2 as any);
+    } catch {}
 
     // 2. Link first cooperative (Family Coop)
     console.log('  53.2 Linking first cooperative (Family Multi-Purpose Cooperative)...');
