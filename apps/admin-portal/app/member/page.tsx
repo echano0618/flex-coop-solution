@@ -1413,10 +1413,12 @@ export default function MemberPortalPage() {
   // MY CIRCLE (SOCIAL NETWORK GRAPH & INVITATION SYSTEM)
   // -------------------------------------------------------------
   const userTid = useMemo(() => {
-    if ((currentMember as any)?.tid) return (currentMember as any).tid;
-    const baseNum = String(currentMember?.memberNumber || currentMember?.id || '89214').replace(/[^0-9]/g, '');
-    const padded = (baseNum.slice(-5) || '89214').padStart(5, '0');
-    return `TT-${padded}`;
+    if ((currentMember as any)?.tid) {
+      const clean = String((currentMember as any).tid).replace(/[^0-9]/g, '');
+      if (clean.length === 11) return clean;
+    }
+    const rawDigits = String(currentMember?.phone || currentMember?.contactNumber || currentMember?.memberNumber || currentMember?.id || '91712345678').replace(/[^0-9]/g, '');
+    return rawDigits.slice(-11).padStart(11, '0');
   }, [currentMember]);
 
   const [circleMembers, setCircleMembers] = useState<any[]>(() => {
@@ -1432,7 +1434,7 @@ export default function MemberPortalPage() {
     return [
       {
         id: 'circ_01',
-        tid: 'TT-10492',
+        tid: '09178291049',
         name: 'Maria Santos',
         displayName: 'Maria S.',
         email: 'maria.santos@tuntongtech.com',
@@ -1445,7 +1447,7 @@ export default function MemberPortalPage() {
       },
       {
         id: 'circ_02',
-        tid: 'TT-20418',
+        tid: '09189204182',
         name: 'Juan Dela Cruz',
         displayName: 'Juan D.',
         email: 'juan.delacruz@tuntongtech.com',
@@ -1458,7 +1460,7 @@ export default function MemberPortalPage() {
       },
       {
         id: 'circ_03',
-        tid: 'TT-30815',
+        tid: '09203810815',
         name: 'Elena Reyes',
         displayName: 'Elena R.',
         email: 'elena.reyes@tuntongtech.com',
@@ -1471,7 +1473,7 @@ export default function MemberPortalPage() {
       },
       {
         id: 'circ_04',
-        tid: 'TT-41902',
+        tid: '09194821902',
         name: 'Ricardo Dalisay',
         displayName: 'Cardo D.',
         email: 'ricardo.dalisay@tuntongtech.com',
@@ -1505,9 +1507,9 @@ export default function MemberPortalPage() {
 
     setTimeout(() => {
       if (inviteMethod === 'TID') {
-        const cleanTid = inviteTidInput.trim().toUpperCase();
-        if (!cleanTid) {
-          setInviteError('Please enter a valid Tuntong Tech ID (TID).');
+        const cleanTid = inviteTidInput.trim().replace(/[^0-9]/g, '');
+        if (cleanTid.length !== 11) {
+          setInviteError('Please enter a valid 11-digit Tuntong Tech ID (TID).');
           setInviteLoading(false);
           return;
         }
@@ -1525,10 +1527,10 @@ export default function MemberPortalPage() {
         const newMember = {
           id: `circ_${Date.now()}`,
           tid: cleanTid,
-          name: `Member ${cleanTid}`,
-          displayName: cleanTid,
-          email: `${cleanTid.toLowerCase().replace(/[^a-z0-9]/g, '')}@tuntongtech.com`,
-          initials: cleanTid.replace(/[^A-Z]/g, '').slice(0, 2) || 'TT',
+          name: `User ${cleanTid.slice(-4)}`,
+          displayName: `Member ${cleanTid.slice(-4)}`,
+          email: `user.${cleanTid}@tuntongtech.com`,
+          initials: 'TT',
           role: 'Connected Member',
           relationship: 'Direct Connection (via TID)',
           connectedAt: 'Just now',
@@ -1542,7 +1544,7 @@ export default function MemberPortalPage() {
           localStorage.setItem('silong_circle_members', JSON.stringify(updated));
         } catch {}
 
-        setInviteSuccess(`Successfully connected with ${cleanTid}! Added to your Social Network Graph.`);
+        setInviteSuccess(`Successfully connected with TID ${cleanTid}! Added to your Social Network Graph.`);
         setInviteTidInput('');
       } else if (inviteMethod === 'EMAIL') {
         const cleanEmail = inviteEmailInput.trim().toLowerCase();
@@ -1552,7 +1554,7 @@ export default function MemberPortalPage() {
           return;
         }
 
-        const randomTid = `TT-${Math.floor(10000 + Math.random() * 90000)}`;
+        const randomTid = String(Math.floor(10000000000 + Math.random() * 89999999999));
         const namePart = cleanEmail.split('@')[0];
         const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
 
@@ -11928,18 +11930,19 @@ export default function MemberPortalPage() {
                 <form onSubmit={handleSendInvite} className="space-y-3.5">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Tuntong Tech ID (TID) <span className="text-rose-500">*</span>
+                      11-Digit Tuntong Tech ID (TID) <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
                       required
+                      maxLength={11}
                       value={inviteTidInput}
-                      onChange={(e) => setInviteTidInput(e.target.value.toUpperCase())}
-                      placeholder="e.g. TT-98214"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs font-mono uppercase"
+                      onChange={(e) => setInviteTidInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 11))}
+                      placeholder="e.g. 09171234567"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs font-mono tracking-wider"
                     />
                     <p className="text-[10px] text-slate-400 mt-1">
-                      Ask your connection for their unique Tuntong Tech ID (e.g. TT-98214).
+                      Enter the 11-digit numeric Tuntong Tech ID (TID) with no prefixes.
                     </p>
                   </div>
 
