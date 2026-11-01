@@ -283,7 +283,7 @@ export default function MemberLoginPage() {
 
   const GOOGLE_CLIENT_ID =
     process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
-    '581563779021-tuntongtech.apps.googleusercontent.com';
+    '581563779021-hpr2v1ri91l7mhj9fuilpj022ekfbrk9.apps.googleusercontent.com';
 
   // Load Google Identity Services SDK
   React.useEffect(() => {

@@ -7,6 +7,8 @@ ARG NEXT_PUBLIC_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.ap
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ARG INTERNAL_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app
 ENV INTERNAL_API_URL=${INTERNAL_API_URL}
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID=581563779021-hpr2v1ri91l7mhj9fuilpj022ekfbrk9.apps.googleusercontent.com
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
 
 # Copy monorepo configuration
 COPY package*.json ./
@@ -27,6 +29,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV NEXT_PUBLIC_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app/api/v1
 ENV INTERNAL_API_URL=https://flexcoop-api-607281616647.asia-southeast1.run.app
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=581563779021-hpr2v1ri91l7mhj9fuilpj022ekfbrk9.apps.googleusercontent.com
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
