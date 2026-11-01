@@ -324,7 +324,7 @@ export default function MemberLoginPage() {
         setTenantMemberSession(data.member, data.member.tenantSlug, data.member.coopName);
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('silong_google_user', JSON.stringify(data.member));
-          if (!data.isCoopLinked) {
+          if (!data.isCoopLinked && data.isFirstLogin) {
             sessionStorage.setItem('silong_prompt_link_coop', 'true');
           }
         }

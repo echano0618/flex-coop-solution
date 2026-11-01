@@ -746,6 +746,8 @@ export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
       if (fsWall) personalWall = fsWall;
     } catch {}
 
+    const isFirstLogin = !personalWall;
+
     if (!personalWall) {
       personalWall = {
         businessName: `${cleanName}'s Personal Wall`,
@@ -816,6 +818,7 @@ export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
       message: 'Google Sign-In authenticated successfully.',
       member: memberProfile,
       isCoopLinked,
+      isFirstLogin,
       token,
       firebaseProjectId: 'tuntong-tech',
       firebaseProjectNumber: '581563779021',
@@ -4382,6 +4385,10 @@ export async function handleListCommunityArticles(req: Request, res: Response) {
       console.warn('[FirestoreTuntongService] listCommunityArticles error:', fsErr);
     }
 
+    // Exclude expired articles (45-day expiration per spec)
+    const nowIso = new Date().toISOString();
+    articles = articles.filter((art) => !art.expiresAt || art.expiresAt > nowIso);
+
     // Sort by createdAt descending
     articles.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
@@ -4480,6 +4487,7 @@ export async function handleCreateCommunityArticle(req: Request, res: Response) 
       comments: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
       firebaseProjectId: 'tuntong-tech',
       firebaseProjectNumber: '581563779021',
     };

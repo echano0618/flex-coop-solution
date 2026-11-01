@@ -5746,8 +5746,11 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     assert(validBody.firebaseProjectNumber === '581563779021', 'Carries firebaseProjectNumber: 581563779021');
     assert(validBody.firebaseProjectId !== 'coop-solution', 'Community Feed is NOT stored in coop-solution');
     assert(validBody.firebaseProjectNumber !== '607281616647', 'Community Feed is NOT stored in 607281616647');
+    assert(validBody.data.expiresAt, 'Article has 45-day expiresAt field');
+    const expTime = new Date(validBody.data.expiresAt).getTime();
+    assert(expTime > Date.now() + 44 * 24 * 60 * 60 * 1000, 'Article expires 45 days in future');
     const createdArticleId = validBody.data.id;
-    console.log('  ✅ 50.3 Article successfully published to Community Feed');
+    console.log('  ✅ 50.3 Article successfully published with 45-day expiration to tuntong-tech Firestore');
 
     // 50.4 Post article from an outsider (not in user circle) to verify visibility filtering
     const outsiderMock = createMockHttp({
@@ -5808,6 +5811,27 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     assert(deleteMock.getStatus() === 200, 'Delete article returns HTTP 200');
     assert(dbStore.communityArticles.has(createdArticleId) === false, 'Article is removed from dbStore');
     console.log('  ✅ 50.7 Community article deletion verified');
+
+    // 50.8 Testing 45-day expiration filter
+    console.log('  50.8 Testing 45-day article expiration filtering...');
+    const expiredArticleId = `art_expired_${Date.now()}`;
+    dbStore.communityArticles.set(expiredArticleId, {
+      id: expiredArticleId,
+      content: 'Expired article from 46 days ago',
+      authorTid: userTid,
+      visibility: 'ALL',
+      createdAt: new Date(Date.now() - 46 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+    const expFeedMock = createMockHttp({
+      query: { scope: 'all' },
+    });
+    await handleListCommunityArticles(expFeedMock.req, expFeedMock.res);
+    const expFeedBody = expFeedMock.getBody();
+    assert(!expFeedBody.data.some((a: any) => a.id === expiredArticleId), 'Expired articles > 45 days are excluded from feed');
+    console.log('  ✅ 50.8 Expired community feed articles filtered out after 45 days');
 
     console.log('  ✅ ALL SECTION 50 SILONG COMMUNITY FEED & ARTICLES TESTS PASSED!');
   }

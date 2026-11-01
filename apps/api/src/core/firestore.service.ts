@@ -1666,11 +1666,14 @@ export class FirestoreTuntongService {
   public async listCommunityArticles(): Promise<any[]> {
     if (!this.isConfigured()) return [];
     try {
+      const nowIso = new Date().toISOString();
       const snap = await this.communityArticlesCol()
         .orderBy('createdAt', 'desc')
         .limit(50)
         .get();
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((d: any) => !d.expiresAt || d.expiresAt > nowIso);
     } catch (err) {
       console.warn('[FirestoreTuntongService] listCommunityArticles fallback:', err);
       return [];
@@ -1680,9 +1683,13 @@ export class FirestoreTuntongService {
   public async saveCommunityArticle(article: any): Promise<void> {
     if (!this.isConfigured()) return;
     try {
+      const expiresAt =
+        article.expiresAt ||
+        new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString();
       await this.communityArticleDoc(article.id).set(
         {
           ...article,
+          expiresAt,
           firebaseProjectId: this.projectId,
           firebaseProjectNumber: this.projectNumber,
           updatedAt: new Date().toISOString(),

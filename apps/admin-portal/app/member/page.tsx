@@ -1643,6 +1643,14 @@ export default function MemberPortalPage() {
       tenantInfo.slug !== 'default')
   );
 
+  // User Google Display Picture & Name (Actual image, strictly avoiding cartoony avatar)
+  const googleAvatarUrl =
+    currentMember?.pictureUrl ||
+    currentMember?.selfiePreview ||
+    (currentMember as any)?.photoURL ||
+    (currentMember as any)?.picture ||
+    '';
+
   // -------------------------------------------------------------
   // COMMUNITY FEED ARTICLES STATE (Stored in Central Firebase: 581563779021)
   // Visible to user's circle; supports 1 image <= 5MB
@@ -1886,13 +1894,17 @@ export default function MemberPortalPage() {
     } catch {}
   };
 
-  // Auto-prompt onboarding modal on initial visit if coop is not linked yet
+  // Auto-prompt onboarding modal ONLY during first login if coop is not linked yet
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const prompted = sessionStorage.getItem('silong_onboarding_coop_prompted');
-      const forcePrompt = sessionStorage.getItem('silong_prompt_link_coop');
-      if ((!isCoopLinked && !prompted) || forcePrompt === 'true') {
-        sessionStorage.setItem('silong_onboarding_coop_prompted', 'true');
+    if (typeof window !== 'undefined' && currentMember) {
+      const userKey = currentMember.email || currentMember.tid || currentMember.memberNumber || 'default';
+      const storageKey = `silong_coop_link_prompted_${userKey}`;
+      const hasBeenPromptedEver = localStorage.getItem(storageKey) === 'true';
+      const isFirstLoginPrompt = sessionStorage.getItem('silong_prompt_link_coop') === 'true';
+
+      // "Link Cooperative Account" modal should only pop-up during first login
+      if (!isCoopLinked && !hasBeenPromptedEver && isFirstLoginPrompt) {
+        localStorage.setItem(storageKey, 'true');
         sessionStorage.removeItem('silong_prompt_link_coop');
         setShowLinkCoopModal(true);
         if (currentMember?.email) {
@@ -4725,7 +4737,138 @@ export default function MemberPortalPage() {
         className="hidden"
       />
       {/* Main Body with Safe Bottom Padding for Mobile Navigation Bar */}
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-5 sm:pt-6 pb-28 sm:pb-32">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 pb-28 sm:pb-32">
+        {/* TOP BAR: MY WALL (Top Left) & COMMUNITY FEED POST COMPOSER */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-3 sm:p-3.5 shadow-sm mb-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Top Left: My Wall Menu Trigger (User Display Name + Actual Google Picture) */}
+            <button
+              type="button"
+              onClick={handleOpenMyBusiness}
+              title="Open My Personal Wall"
+              className="flex items-center gap-2 py-1 px-1.5 sm:px-2 rounded-xl hover:bg-slate-100 transition-all group shrink-0 cursor-pointer"
+            >
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden flex items-center justify-center ring-2 ring-[#e68a38] shrink-0 bg-[#223a5e] shadow-2xs">
+                {googleAvatarUrl ? (
+                  <img
+                    src={googleAvatarUrl}
+                    alt={currentMember?.name || 'User'}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <span className="text-white font-bold text-xs uppercase tracking-wider">
+                    {currentMember?.initials || currentMember?.name?.substring(0, 2).toUpperCase() || 'U'}
+                  </span>
+                )}
+              </div>
+              <div className="text-left hidden xs:block sm:block max-w-[100px] sm:max-w-[150px] md:max-w-[200px]">
+                <div className="font-extrabold text-xs sm:text-sm text-slate-800 truncate group-hover:text-[#e68a38] transition-colors leading-tight">
+                  {currentMember?.name || 'Community Member'}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium truncate">My Wall</div>
+              </div>
+            </button>
+
+            {/* Besides the user avatar: Text field to input his post */}
+            <div className="flex-1 min-w-0 flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 rounded-full pl-3 sm:pl-4 pr-1.5 py-1 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20 transition-all">
+              <input
+                type="text"
+                value={articleText}
+                onChange={(e) => {
+                  setArticleText(e.target.value);
+                  if (postArticleError) setPostArticleError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && articleText.trim() && !isPostingArticle) {
+                    e.preventDefault();
+                    handlePublishArticle();
+                  }
+                }}
+                placeholder="post to inspire your community"
+                className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400"
+              />
+
+              {/* Hidden file input for 1 image up to 5MB */}
+              <input
+                type="file"
+                ref={articleFileInputRef}
+                accept="image/*"
+                onChange={handleSelectArticleImage}
+                className="hidden"
+                aria-label="Upload article image (up to 5MB)"
+              />
+
+              {/* Add Photo Button: Icon Only, No Text Label */}
+              <button
+                type="button"
+                onClick={() => articleFileInputRef.current?.click()}
+                title="Add photo (up to 5MB)"
+                className={`p-2 rounded-full transition-all shrink-0 cursor-pointer ${
+                  articleImage
+                    ? 'bg-[#e68a38]/15 text-[#e68a38]'
+                    : 'text-slate-400 hover:text-[#e68a38] hover:bg-slate-200/50'
+                }`}
+              >
+                <ImageIcon className="w-4 h-4 text-[#e68a38]" />
+              </button>
+
+              {/* Post Button: Icon Only, No Text Label */}
+              <button
+                type="button"
+                onClick={() => handlePublishArticle()}
+                disabled={isPostingArticle || !articleText.trim()}
+                title="Post Article"
+                className="p-2 rounded-full bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs shrink-0 cursor-pointer"
+              >
+                {isPostingArticle ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Selected Image Preview (if image attached) */}
+          {articleImage && (
+            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
+                  <img src={articleImage} alt="Attachment" className="w-full h-full object-cover" />
+                </div>
+                <div className="min-w-0 text-xs">
+                  <div className="font-semibold text-slate-700 truncate">{articleImageName || 'Photo attached'}</div>
+                  <div className="text-[10px] text-slate-400">{(articleImageSize / (1024 * 1024)).toFixed(2)} MB (Max 5MB)</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleRemoveArticleImage}
+                className="p-1 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                title="Remove photo"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Feedback messages */}
+          {postArticleError && (
+            <div className="mt-2 p-2 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{postArticleError}</span>
+            </div>
+          )}
+          {postArticleSuccess && (
+            <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2">
+              <Check className="w-3.5 h-3.5 shrink-0" />
+              <span>{postArticleSuccess}</span>
+            </div>
+          )}
+        </div>
 
         {/* TAB 1: MY PORTFOLIO (Dashboard) */}
         {activeTab === 'home' && (
@@ -4759,65 +4902,31 @@ export default function MemberPortalPage() {
               </div>
             )}
 
-            {/* Member Cooperative Account Card (Silong Palette) or Unlinked Welcome Banner */}
+            {/* Member Cooperative Account Card (Silong Palette) - Compact Height */}
             {isCoopLinked ? (
-              <div className="bg-gradient-to-br from-[#223a5e] via-[#1c3150] to-[#15253d] border border-[#e68a38]/30 text-white rounded-2xl p-5 sm:p-6 shadow-xl shadow-[#223a5e]/15 relative overflow-hidden space-y-4">
-                <div className="flex items-start justify-between gap-4 relative z-10">
-                  <div
-                    onClick={() => setActiveTab('coop_page')}
-                    className="min-w-0 flex-1 cursor-pointer group"
-                    title="Click to view Cooperative Page & Services"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <img
-                        src="/icons/silong-icon-192.png"
-                        alt="Silong"
-                        className="w-5 h-5 rounded-md object-cover ring-1 ring-[#e68a38]/50 shrink-0"
-                      />
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#e68a38] truncate group-hover:underline flex items-center gap-1">
-                        {tenantInfo.name}
-                        <ChevronRight className="w-3.5 h-3.5 inline text-[#e68a38]" />
-                      </span>
-                    </div>
-                    <h2 className="text-xl font-bold truncate text-[#f4efe6]">{currentMember.name}</h2>
-                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                      <span className="text-xs text-slate-300 font-mono">
-                        {currentMember.memberNumber || (currentMember.applicantId ? `Applicant ID: ${currentMember.applicantId}` : '— (Pending Approval)')}
-                      </span>
-                      <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 border ${
-                        !currentMember.memberNumber || currentMember.isApplicant
-                          ? 'bg-[#e68a38]/25 text-[#f4efe6] border-[#e68a38]/50'
-                          : currentMember.classification === 'REGULAR'
-                          ? 'bg-[#78a89a]/25 text-[#f4efe6] border-[#78a89a]/50'
-                          : 'bg-[#e68a38]/25 text-[#f4efe6] border-[#e68a38]/50'
-                      }`}>
-                        {!currentMember.memberNumber || currentMember.isApplicant ? 'Membership Applicant' : (currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member')}
-                      </span>
-                    </div>
+              <div className="bg-gradient-to-br from-[#223a5e] via-[#1c3150] to-[#15253d] border border-[#e68a38]/30 text-white rounded-2xl p-3.5 sm:p-4 shadow-lg shadow-[#223a5e]/15 relative overflow-hidden space-y-2.5">
+                <div
+                  onClick={() => setActiveTab('coop_page')}
+                  className="flex items-center justify-between cursor-pointer group relative z-10"
+                  title="Click to view Cooperative Page & Services"
+                >
+                  <div className="flex items-center gap-2">
+                    <img
+                      src="/icons/silong-icon-192.png"
+                      alt="Silong"
+                      className="w-5 h-5 rounded-md object-cover ring-1 ring-[#e68a38]/50 shrink-0"
+                    />
+                    <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-[#e68a38] group-hover:underline flex items-center gap-1">
+                      {tenantInfo.name}
+                      <ChevronRight className="w-3.5 h-3.5 inline text-[#e68a38]" />
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleToggleSilongSong}
-                    aria-label={isPlayingSilongSong ? 'Pause Silong song' : 'Play Silong song'}
-                    title={isPlayingSilongSong ? 'Pause Silong Theme Song' : 'Play Silong Theme Song'}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer border shadow-md ${
-                      isPlayingSilongSong
-                        ? 'bg-[#e68a38] text-white border-[#f4efe6]/40 shadow-[#e68a38]/30 scale-105'
-                        : 'bg-white/10 hover:bg-[#e68a38] text-[#f4efe6] hover:text-white border-[#e68a38]/40'
-                    }`}
-                  >
-                    {isPlayingSilongSong ? (
-                      <Pause className="w-4 h-4 fill-current" />
-                    ) : (
-                      <Play className="w-4 h-4 fill-current ml-0.5" />
-                    )}
-                  </button>
                 </div>
 
                 {/* Financial Quick Glance (Tapping opens Coop Page) */}
                 <div
                   onClick={() => setActiveTab('coop_page')}
-                  className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2 pt-3 border-t border-white/15 text-center relative z-10 cursor-pointer`}
+                  className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2 pt-2 border-t border-white/15 text-center relative z-10 cursor-pointer`}
                   title="Click to view Cooperative Page & Services"
                 >
                   <div className="bg-white/10 hover:bg-white/15 transition-colors rounded-xl p-2.5 backdrop-blur-sm border border-white/10">
@@ -4843,13 +4952,13 @@ export default function MemberPortalPage() {
                 </div>
 
                 {/* Integrated Coop Card Quick Actions (Passbook, Members, Deposit, Shares, Loans) */}
-                <div className="pt-3 border-t border-white/15 relative z-10">
+                <div className="pt-2 border-t border-white/15 relative z-10">
                   <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
                     {/* 1. Passbook */}
                     <button
                       type="button"
                       onClick={() => setActiveTab('passbook')}
-                      className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
+                      className="flex flex-col items-center justify-center py-1.5 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
                       title="Digital Passbook & Ledger"
                     >
                       <div className="w-8 h-8 rounded-lg bg-[#e68a38] text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
@@ -5338,11 +5447,20 @@ export default function MemberPortalPage() {
               <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 shadow-2xs border border-[#e68a38]/30">
-                    <img
-                      src={currentMember?.selfiePreview || currentMember?.avatarUrl || currentMember?.pictureUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentMember?.name || 'User')}`}
-                      alt={currentMember?.name || 'User'}
-                      className="w-full h-full object-cover"
-                    />
+                    {googleAvatarUrl ? (
+                      <img
+                        src={googleAvatarUrl}
+                        alt={currentMember?.name || 'User'}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-white font-bold text-xs uppercase">
+                        {currentMember?.initials || currentMember?.name?.substring(0, 2).toUpperCase() || 'U'}
+                      </span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -5431,15 +5549,15 @@ export default function MemberPortalPage() {
                         <button
                           type="button"
                           onClick={() => articleFileInputRef.current?.click()}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                          className={`p-2 rounded-xl border transition-all cursor-pointer ${
                             articleImage
-                              ? 'bg-[#e68a38]/10 text-[#e68a38] border-[#e68a38]/30'
-                              : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'
+                              ? 'bg-[#e68a38]/15 text-[#e68a38] border-[#e68a38]/30'
+                              : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-[#e68a38] border-slate-200 hover:border-slate-300'
                           }`}
-                          title="Add 1 image (up to 5MB)"
+                          title="Add photo (up to 5MB)"
+                          aria-label="Add photo"
                         >
                           <ImageIcon className="w-4 h-4 text-[#e68a38]" />
-                          <span>{articleImage ? 'Change Image (Max 5MB)' : 'Add Photo (Max 5MB)'}</span>
                         </button>
                       </div>
 
@@ -5447,18 +5565,14 @@ export default function MemberPortalPage() {
                         type="button"
                         onClick={() => handlePublishArticle()}
                         disabled={isPostingArticle || !articleText.trim()}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+                        className="p-2 rounded-xl bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs cursor-pointer"
+                        title="Post Article"
+                        aria-label="Post Article"
                       >
                         {isPostingArticle ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Publishing...</span>
-                          </>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
                         ) : (
-                          <>
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Post Article</span>
-                          </>
+                          <Send className="w-4 h-4" />
                         )}
                       </button>
                     </div>
@@ -5495,11 +5609,20 @@ export default function MemberPortalPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="w-10 h-10 rounded-xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 shadow-2xs border border-slate-200">
-                              <img
-                                src={article.authorAvatar || article.authorPictureUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(article.authorName || 'Member')}`}
-                                alt={article.authorName || 'Author'}
-                                className="w-full h-full object-cover"
-                              />
+                              {article.authorAvatar || article.authorPictureUrl ? (
+                                <img
+                                  src={article.authorAvatar || article.authorPictureUrl}
+                                  alt={article.authorName || 'Author'}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <span className="text-white font-bold text-xs uppercase">
+                                  {article.authorName ? article.authorName.substring(0, 2).toUpperCase() : 'CM'}
+                                </span>
+                              )}
                             </div>
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -9304,10 +9427,10 @@ export default function MemberPortalPage() {
           ];
 
           const myAvatarUrl =
-            currentMember?.selfiePreview ||
-            currentMember?.avatarUrl ||
-            currentMember?.pictureUrl ||
-            `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentMember?.name || 'me')}`;
+            googleAvatarUrl ||
+            `data:image/svg+xml;utf8,${encodeURIComponent(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60"><rect width="60" height="60" fill="#223a5e"/><text x="50%" y="55%" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${(currentMember?.name || 'ME').substring(0, 2).toUpperCase()}</text></svg>`
+            )}`;
 
           return (
             <div className="relative w-full h-[calc(100vh-140px)] sm:h-[calc(100vh-150px)] min-h-[580px] bg-gradient-to-b from-[#142338] via-[#1a2f4a] to-[#223a5e] rounded-3xl border border-[#e68a38]/30 overflow-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden touch-pan-x touch-pan-y shadow-2xl flex items-center justify-center p-4">
@@ -9567,7 +9690,9 @@ export default function MemberPortalPage() {
                       m.avatarUrl ||
                       m.pictureUrl ||
                       m.selfieUrl ||
-                      `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(m.name || 'Member')}`;
+                      `data:image/svg+xml;utf8,${encodeURIComponent(
+                        `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60"><rect width="60" height="60" fill="#223a5e"/><text x="50%" y="55%" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${(m.name || 'MB').substring(0, 2).toUpperCase()}</text></svg>`
+                      )}`;
 
                     return (
                       <g
@@ -9649,16 +9774,17 @@ export default function MemberPortalPage() {
                     <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-12 h-12 rounded-2xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 border border-[#e68a38]/40 shadow-xs">
-                          <img
-                            src={
-                              selectedCircleMember.avatarUrl ||
-                              selectedCircleMember.pictureUrl ||
-                              selectedCircleMember.selfieUrl ||
-                              `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(selectedCircleMember.name || 'Member')}`
-                            }
-                            alt={selectedCircleMember.name}
-                            className="w-full h-full object-cover"
-                          />
+                          {selectedCircleMember.avatarUrl || selectedCircleMember.pictureUrl || selectedCircleMember.selfieUrl ? (
+                            <img
+                              src={selectedCircleMember.avatarUrl || selectedCircleMember.pictureUrl || selectedCircleMember.selfieUrl}
+                              alt={selectedCircleMember.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-white font-bold text-sm uppercase">
+                              {(selectedCircleMember.name || 'MB').substring(0, 2).toUpperCase()}
+                            </span>
+                          )}
                         </div>
                         <div className="min-w-0">
                           <h3 className="font-bold text-base text-slate-900 leading-tight truncate">
@@ -12449,12 +12575,12 @@ export default function MemberPortalPage() {
         )}
       </div>
 
-      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 4 Hubs) */}
+      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 3 Hubs: More, Dashboard, My Circle) */}
       <nav
         className="fixed bottom-0 left-0 right-0 z-40 bg-[#223a5e] border-t border-[#e68a38]/30 shadow-2xl pt-2 px-3"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
-        <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5">
+        <div className="max-w-md mx-auto grid grid-cols-3 gap-1.5">
           {/* 1. More (Account, Identity & Settings) - Leftmost */}
           <button
             type="button"
@@ -12516,39 +12642,6 @@ export default function MemberPortalPage() {
               </span>
             </div>
             <span className="text-[10px] leading-tight">My Circle</span>
-          </button>
-
-          {/* 4. My Personal Wall - Rightmost (Google Profile Display Image as Icon) */}
-          <button
-            type="button"
-            onClick={handleOpenMyBusiness}
-            className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
-              Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
-                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
-                : 'text-slate-300 hover:text-white font-medium'
-            }`}
-          >
-            <div className={`w-5 h-5 mb-1 rounded-full overflow-hidden flex items-center justify-center ring-1.5 ${
-              Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
-                ? 'ring-[#e68a38]'
-                : 'ring-white/40'
-            }`}>
-              <img
-                src={
-                  currentMember?.pictureUrl ||
-                  currentMember?.avatarUrl ||
-                  currentMember?.selfiePreview ||
-                  (currentMember as any)?.photoURL ||
-                  `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentMember?.name || 'User')}`
-                }
-                alt="My Wall"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentMember?.name || 'User')}`;
-                }}
-              />
-            </div>
-            <span className="text-[10px] leading-tight">My Wall</span>
           </button>
         </div>
       </nav>
