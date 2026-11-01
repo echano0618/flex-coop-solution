@@ -4172,6 +4172,226 @@ export async function handleDeleteBusinessComment(req: Request, res: Response) {
 }
 
 // -------------------------------------------------------------
+// COMMUNITY FEED ARTICLES (Stored in tuntong-tech: 581563779021)
+// Visible to author and user's circle; supports 1 image <= 5MB
+// Placeholder: "post to inspire your community"
+// -------------------------------------------------------------
+export async function handleListCommunityArticles(req: Request, res: Response) {
+  try {
+    const { scope, circleTids, userTid, authorId } = req.query;
+
+    // 1. Fetch from Tuntong Tech central Firestore
+    let articles: any[] = Array.from(dbStore.communityArticles.values());
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      const fsArticles = await tuntongFs.listCommunityArticles();
+      if (fsArticles && fsArticles.length > 0) {
+        for (const art of fsArticles) {
+          dbStore.communityArticles.set(art.id, art);
+        }
+        articles = Array.from(dbStore.communityArticles.values());
+      }
+    } catch (fsErr) {
+      console.warn('[FirestoreTuntongService] listCommunityArticles error:', fsErr);
+    }
+
+    // Sort by createdAt descending
+    articles.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    // 2. Filter by circle visibility if scope === 'circle'
+    const parsedCircleTids = typeof circleTids === 'string'
+      ? circleTids.split(',').map((t) => t.trim()).filter(Boolean)
+      : Array.isArray(circleTids)
+      ? (circleTids as string[]).map((t) => String(t).trim())
+      : [];
+
+    const currentUserTid = String(userTid || '').trim();
+
+    if (scope === 'circle' && (parsedCircleTids.length > 0 || currentUserTid || authorId)) {
+      articles = articles.filter((art) => {
+        // Author is user himself
+        if (currentUserTid && art.authorTid === currentUserTid) return true;
+        if (authorId && art.authorId === authorId) return true;
+        // Author is in user's circle
+        if (art.authorTid && parsedCircleTids.includes(art.authorTid)) return true;
+        // Public visibility
+        if (art.visibility === 'ALL') return true;
+        return false;
+      });
+    }
+
+    res.json({
+      success: true,
+      data: articles,
+      count: articles.length,
+      placeholder: 'post to inspire your community',
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+export async function handleCreateCommunityArticle(req: Request, res: Response) {
+  try {
+    const {
+      content,
+      image,
+      imageUrl,
+      imageSize,
+      authorId,
+      authorTid,
+      authorName,
+      authorDisplayName,
+      authorInitials,
+      authorCoopName,
+      authorRole,
+      visibility = 'CIRCLE',
+    } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ success: false, error: 'Article content cannot be empty.' });
+    }
+
+    const effectiveImage = image || imageUrl || '';
+    let calculatedImageSize = Number(imageSize || 0);
+
+    // Validate 1 image up-to 5MB (5 * 1024 * 1024 = 5,242,880 bytes)
+    const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+    if (effectiveImage) {
+      if (effectiveImage.startsWith('data:image/')) {
+        const base64Data = effectiveImage.split(',')[1] || '';
+        calculatedImageSize = Math.ceil((base64Data.length * 3) / 4);
+      }
+      if (calculatedImageSize > MAX_IMAGE_BYTES) {
+        return res.status(400).json({
+          success: false,
+          error: 'Image exceeds the maximum allowed size of 5MB.',
+        });
+      }
+    }
+
+    const articleId = `art_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const cleanTid = authorTid ? String(authorTid).replace(/[^0-9]/g, '').slice(-11).padStart(11, '0') : '';
+
+    const newArticle = {
+      id: articleId,
+      content: content.trim(),
+      imageUrl: effectiveImage,
+      imageSize: calculatedImageSize,
+      authorId: authorId || 'unknown_user',
+      authorTid: cleanTid,
+      authorName: authorName || 'Community Member',
+      authorDisplayName: authorDisplayName || authorName || 'Community Member',
+      authorInitials: authorInitials || (authorName ? authorName.substring(0, 2).toUpperCase() : 'CM'),
+      authorCoopName: authorCoopName || 'Silong Community Hub',
+      authorRole: authorRole || 'Community Contributor',
+      visibility: visibility || 'CIRCLE',
+      likes: [],
+      likesCount: 0,
+      comments: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    };
+
+    // Store in-memory and in Tuntong Tech Central Firebase (581563779021)
+    dbStore.communityArticles.set(articleId, newArticle);
+
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      await tuntongFs.saveCommunityArticle(newArticle);
+    } catch (fsErr) {
+      console.warn('[FirestoreTuntongService] saveCommunityArticle fallback:', fsErr);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Article published successfully to Community Feed.',
+      data: newArticle,
+      placeholder: 'post to inspire your community',
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+export async function handleLikeCommunityArticle(req: Request, res: Response) {
+  try {
+    const { id: articleId } = req.params;
+    const { memberId, tid } = req.body;
+    const userIdentifier = tid || memberId || 'anonymous';
+
+    let article = dbStore.communityArticles.get(articleId);
+    if (!article) {
+      try {
+        const tuntongFs = FirestoreTuntongService.getInstance();
+        const doc = await tuntongFs.communityArticleDoc(articleId).get();
+        if (doc.exists) article = { id: doc.id, ...doc.data() };
+      } catch {}
+    }
+
+    if (!article) {
+      return res.status(404).json({ success: false, error: 'Article not found.' });
+    }
+
+    const likes: string[] = Array.isArray(article.likes) ? article.likes : [];
+    const alreadyLiked = likes.includes(userIdentifier);
+    const updatedLikes = alreadyLiked
+      ? likes.filter((l) => l !== userIdentifier)
+      : [...likes, userIdentifier];
+
+    article.likes = updatedLikes;
+    article.likesCount = updatedLikes.length;
+    article.updatedAt = new Date().toISOString();
+
+    dbStore.communityArticles.set(articleId, article);
+
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      await tuntongFs.likeCommunityArticle(articleId, userIdentifier);
+    } catch (fsErr) {
+      console.warn('[FirestoreTuntongService] likeCommunityArticle fallback:', fsErr);
+    }
+
+    res.json({
+      success: true,
+      data: article,
+      liked: !alreadyLiked,
+      likesCount: article.likesCount,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+export async function handleDeleteCommunityArticle(req: Request, res: Response) {
+  try {
+    const { id: articleId } = req.params;
+    dbStore.communityArticles.delete(articleId);
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      await tuntongFs.deleteCommunityArticle(articleId);
+    } catch {}
+
+    res.json({
+      success: true,
+      message: 'Article deleted successfully from Community Feed.',
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+// -------------------------------------------------------------
 // COMMUNITY HUB (SILONG) - COOPERATIVE ACCOUNT LINKING
 // Verifies Tenant ID, Member Account / Email, and Date of Birth
 // -------------------------------------------------------------
@@ -4273,6 +4493,12 @@ app.get('/api/v1/members/:id/business', handleGetMemberBusinessPage);
 app.put('/api/v1/members/:id/business', handleUpdateMemberBusinessPage);
 app.post('/api/v1/members/:id/business/comments', handleAddBusinessComment);
 app.delete('/api/v1/members/:id/business/comments/:commentId', handleDeleteBusinessComment);
+
+// Community Feed Articles (Central Tuntong Tech Firebase: 581563779021)
+app.get('/api/v1/community/articles', handleListCommunityArticles);
+app.post('/api/v1/community/articles', handleCreateCommunityArticle);
+app.delete('/api/v1/community/articles/:id', handleDeleteCommunityArticle);
+app.post('/api/v1/community/articles/:id/like', handleLikeCommunityArticle);
 
 app.get('/api/v1/system-config', async (req: Request, res: Response) => {
   try {

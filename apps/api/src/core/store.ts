@@ -85,10 +85,61 @@ export class AppDataStore {
   public announcements: Map<string, any[]> = new Map(); // tenantId -> announcements
   public deletedAnnouncements: Map<string, Set<string>> = new Map(); // tenantId -> Set<annId>
   public personalWalls: Map<string, any> = new Map(); // userId / memberId / tid -> Personal Wall (Tuntong Tech Central Firebase: 581563779021)
+  public communityArticles: Map<string, any> = new Map(); // articleId -> Community Feed Article (Tuntong Tech Central Firebase: 581563779021)
 
   constructor() {
     this.seedDefaultPaymentMethods();
+    this.seedDefaultCommunityArticles();
     this.seedInitialTenantData();
+  }
+
+  private seedDefaultCommunityArticles() {
+    if (this.communityArticles.size === 0) {
+      const art1 = {
+        id: 'art_seed_01',
+        content: 'Delighted to share our cooperative community organic farm harvest! Supporting local growers creates shared prosperity for every family. 🌱🥕',
+        imageUrl: '',
+        imageSize: 0,
+        authorId: 'circ_01',
+        authorTid: '09178291049',
+        authorName: 'Maria Santos',
+        authorDisplayName: 'Maria S.',
+        authorInitials: 'MS',
+        authorCoopName: 'Bayani Cooperative',
+        authorRole: 'Cooperative Peer',
+        visibility: 'CIRCLE',
+        likes: ['09189204182', '09203810815'],
+        likesCount: 2,
+        comments: [],
+        createdAt: '2026-10-31T08:30:00.000Z',
+        updatedAt: '2026-10-31T08:30:00.000Z',
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      };
+      const art2 = {
+        id: 'art_seed_02',
+        content: 'Our neighborhood community livelihood workshop just concluded with 25 new micro-enterprise artisans. Never underestimate the power of collective community collaboration! 🤝🧵',
+        imageUrl: '',
+        imageSize: 0,
+        authorId: 'circ_02',
+        authorTid: '09189204182',
+        authorName: 'Juan Dela Cruz',
+        authorDisplayName: 'Juan D.',
+        authorInitials: 'JD',
+        authorCoopName: 'Family Multi-Purpose Cooperative',
+        authorRole: 'Micro-Enterprise Partner',
+        visibility: 'CIRCLE',
+        likes: ['09178291049'],
+        likesCount: 1,
+        comments: [],
+        createdAt: '2026-10-31T14:15:00.000Z',
+        updatedAt: '2026-10-31T14:15:00.000Z',
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      };
+      this.communityArticles.set(art1.id, art1);
+      this.communityArticles.set(art2.id, art2);
+    }
   }
 
   private seedDefaultPaymentMethods() {

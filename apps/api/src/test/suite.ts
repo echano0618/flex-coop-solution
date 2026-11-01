@@ -47,6 +47,10 @@ import {
   handleUpdateMemberProfile,
   handleLoanRepayment,
   handleLinkCoopMemberAccount,
+  handleListCommunityArticles,
+  handleCreateCommunityArticle,
+  handleLikeCommunityArticle,
+  handleDeleteCommunityArticle,
   resolveTenantId,
 } from '../index';
 import {
@@ -5602,7 +5606,161 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 49 SILONG COMMUNITY HUB PERSONAL WALL TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48 & 49) PASSED SUCCESSFULLY!\n');
+  // -------------------------------------------------------------
+  // 50. Silong Community Hub Feed & Articles (Circle Visibility, 1 Image <= 5MB, Placeholder)
+  // -------------------------------------------------------------
+  console.log('\n--- 50. Silong Community Hub Feed & Articles (Circle Visibility, 1 Image <= 5MB, Placeholder) ---');
+  {
+    const createMockHttp = (overrides: {
+      params?: any;
+      headers?: any;
+      body?: any;
+      query?: any;
+    }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        params: overrides.params || {},
+        headers: overrides.headers || {},
+        body: overrides.body || {},
+        query: overrides.query || {},
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    const userTid = '09171234567';
+    const peerTid1 = '09178291049'; // Maria Santos (in circle)
+    const outsiderTid = '09999999999'; // Stranger (not in circle)
+
+    // 50.1 Empty content rejected with HTTP 400
+    console.log('  50.1 Testing empty article content validation...');
+    const emptyMock = createMockHttp({
+      body: { content: '   ', authorTid: userTid },
+    });
+    await handleCreateCommunityArticle(emptyMock.req, emptyMock.res);
+    assert(emptyMock.getStatus() === 400, 'Empty content returns HTTP 400');
+    assert(emptyMock.getBody().success === false, 'Returns success: false');
+
+    // 50.2 Image exceeding 5MB rejected with HTTP 400
+    console.log('  50.2 Testing image size enforcement (1 image up-to 5MB limit)...');
+    // Simulate a 6MB base64 image (6 * 1024 * 1024 bytes)
+    const oversizedBase64 = 'data:image/jpeg;base64,' + 'A'.repeat(8 * 1024 * 1024);
+    const oversizedMock = createMockHttp({
+      body: {
+        content: 'Post with too large image',
+        image: oversizedBase64,
+        authorTid: userTid,
+      },
+    });
+    await handleCreateCommunityArticle(oversizedMock.req, oversizedMock.res);
+    assert(oversizedMock.getStatus() === 400, 'Image > 5MB returns HTTP 400');
+    assert(oversizedMock.getBody().error.includes('5MB'), 'Error message highlights 5MB limit');
+
+    // 50.3 Valid article with 1 image <= 5MB succeeds with HTTP 201
+    console.log('  50.3 Testing successful article posting with 1 image <= 5MB and placeholder...');
+    const validBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const validMock = createMockHttp({
+      body: {
+        content: 'Together, we empower local coffee farmers through community micro-grants! #SilongInspires',
+        image: validBase64,
+        authorTid: userTid,
+        authorName: 'Alex Mercer',
+        authorDisplayName: 'Alex',
+        authorCoopName: 'Bayani Multi-Purpose Cooperative',
+        visibility: 'CIRCLE',
+      },
+    });
+    await handleCreateCommunityArticle(validMock.req, validMock.res);
+    assert(validMock.getStatus() === 201, 'Valid article returns HTTP 201');
+    const validBody = validMock.getBody();
+    assert(validBody.success === true, 'Returns success: true');
+    assert(validBody.placeholder === 'post to inspire your community', 'Carries exact placeholder "post to inspire your community"');
+    assert(validBody.data.visibility === 'CIRCLE', 'Article visibility is set to CIRCLE');
+    assert(validBody.data.authorTid === userTid, 'Article retains 11-digit author TID');
+    assert(validBody.firebaseProjectId === 'tuntong-tech', 'Carries firebaseProjectId: tuntong-tech');
+    assert(validBody.firebaseProjectNumber === '581563779021', 'Carries firebaseProjectNumber: 581563779021');
+    const createdArticleId = validBody.data.id;
+    console.log('  ✅ 50.3 Article successfully published to Community Feed');
+
+    // 50.4 Post article from an outsider (not in user circle) to verify visibility filtering
+    const outsiderMock = createMockHttp({
+      body: {
+        content: 'Article by a user outside the circle',
+        authorTid: outsiderTid,
+        authorName: 'Stranger User',
+        visibility: 'CIRCLE',
+      },
+    });
+    await handleCreateCommunityArticle(outsiderMock.req, outsiderMock.res);
+
+    // 50.5 Feed listing filtered by circle visibility
+    console.log('  50.5 Testing Community Feed circle visibility filtering...');
+    const circleFeedMock = createMockHttp({
+      query: {
+        scope: 'circle',
+        circleTids: `${peerTid1},09189204182`, // circle includes Maria Santos
+        userTid: userTid,
+      },
+    });
+    await handleListCommunityArticles(circleFeedMock.req, circleFeedMock.res);
+    assert(circleFeedMock.getStatus() === 200, 'List articles returns HTTP 200');
+    const feedBody = circleFeedMock.getBody();
+    assert(feedBody.success === true, 'Feed fetch returns success: true');
+    assert(feedBody.placeholder === 'post to inspire your community', 'Feed response embeds placeholder: "post to inspire your community"');
+
+    // Check that user's own article is visible
+    const ownArticleFound = feedBody.data.some((a: any) => a.id === createdArticleId);
+    assert(ownArticleFound, 'User sees their own posted article in Circle feed');
+
+    // Check that peer in circle is visible
+    const peerArticleFound = feedBody.data.some((a: any) => a.authorTid === peerTid1);
+    assert(peerArticleFound, 'Articles by members in user circle are visible');
+
+    // Check that outsider article is NOT visible in circle scope
+    const outsiderArticleFound = feedBody.data.some((a: any) => a.authorTid === outsiderTid);
+    assert(!outsiderArticleFound, 'Articles from users outside circle are strictly hidden in Circle feed');
+    console.log('  ✅ 50.5 Feed circle visibility filtering verified successfully');
+
+    // 50.6 Toggle like / inspire reaction
+    console.log('  50.6 Testing like/inspire reaction on community article...');
+    const likeMock = createMockHttp({
+      params: { id: createdArticleId },
+      body: { tid: userTid },
+    });
+    await handleLikeCommunityArticle(likeMock.req, likeMock.res);
+    assert(likeMock.getStatus() === 200, 'Like article returns HTTP 200');
+    assert(likeMock.getBody().liked === true, 'Like toggle sets liked: true');
+    assert(likeMock.getBody().likesCount === 1, 'Likes count incremented to 1');
+
+    // 50.7 Delete article
+    console.log('  50.7 Testing article deletion...');
+    const deleteMock = createMockHttp({
+      params: { id: createdArticleId },
+    });
+    await handleDeleteCommunityArticle(deleteMock.req, deleteMock.res);
+    assert(deleteMock.getStatus() === 200, 'Delete article returns HTTP 200');
+    assert(dbStore.communityArticles.has(createdArticleId) === false, 'Article is removed from dbStore');
+    console.log('  ✅ 50.7 Community article deletion verified');
+
+    console.log('  ✅ ALL SECTION 50 SILONG COMMUNITY FEED & ARTICLES TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49 & 50) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

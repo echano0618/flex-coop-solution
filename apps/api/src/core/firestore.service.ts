@@ -1651,5 +1651,83 @@ export class FirestoreTuntongService {
       return [];
     }
   }
+
+  // -------------------------------------------------------------
+  // COMMUNITY FEED ARTICLES (Stored in tuntong-tech: 581563779021)
+  // -------------------------------------------------------------
+  public communityArticlesCol() {
+    return this.db.collection('community_articles');
+  }
+
+  public communityArticleDoc(articleId: string) {
+    return this.communityArticlesCol().doc(articleId);
+  }
+
+  public async listCommunityArticles(): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    try {
+      const snap = await this.communityArticlesCol()
+        .orderBy('createdAt', 'desc')
+        .limit(50)
+        .get();
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] listCommunityArticles fallback:', err);
+      return [];
+    }
+  }
+
+  public async saveCommunityArticle(article: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      await this.communityArticleDoc(article.id).set(
+        {
+          ...article,
+          firebaseProjectId: this.projectId,
+          firebaseProjectNumber: this.projectNumber,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] saveCommunityArticle fallback:', err);
+    }
+  }
+
+  public async deleteCommunityArticle(articleId: string): Promise<boolean> {
+    if (!this.isConfigured()) return true;
+    try {
+      await this.communityArticleDoc(articleId).delete();
+      return true;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] deleteCommunityArticle fallback:', err);
+      return false;
+    }
+  }
+
+  public async likeCommunityArticle(articleId: string, memberIdOrTid: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const docRef = this.communityArticleDoc(articleId);
+      const doc = await docRef.get();
+      if (!doc.exists) return null;
+      const data = doc.data() as any;
+      const likes: string[] = Array.isArray(data.likes) ? data.likes : [];
+      const alreadyLiked = likes.includes(memberIdOrTid);
+      const updatedLikes = alreadyLiked
+        ? likes.filter((id) => id !== memberIdOrTid)
+        : [...likes, memberIdOrTid];
+
+      await docRef.update({
+        likes: updatedLikes,
+        likesCount: updatedLikes.length,
+        updatedAt: new Date().toISOString(),
+      });
+      return { ...data, likes: updatedLikes, likesCount: updatedLikes.length };
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] likeCommunityArticle fallback:', err);
+      return null;
+    }
+  }
 }
 

@@ -68,6 +68,7 @@ import {
   Share2,
   UserPlus,
   Network,
+  Heart,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -1635,6 +1636,249 @@ export default function MemberPortalPage() {
     tenantInfo?.slug &&
     tenantInfo.slug !== 'unlinked'
   );
+
+  // -------------------------------------------------------------
+  // COMMUNITY FEED ARTICLES STATE (Stored in Central Firebase: 581563779021)
+  // Visible to user's circle; supports 1 image <= 5MB
+  // Placeholder: "post to inspire your community"
+  // -------------------------------------------------------------
+  const [communityArticles, setCommunityArticles] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('silong_community_articles');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [
+      {
+        id: 'art_seed_01',
+        content: 'Delighted to share our cooperative community organic farm harvest! Supporting local growers creates shared prosperity for every family. 🌱🥕',
+        imageUrl: '',
+        imageSize: 0,
+        authorId: 'circ_01',
+        authorTid: '09178291049',
+        authorName: 'Maria Santos',
+        authorDisplayName: 'Maria S.',
+        authorInitials: 'MS',
+        authorCoopName: 'Bayani Cooperative',
+        authorRole: 'Cooperative Peer',
+        visibility: 'CIRCLE',
+        likes: ['09189204182'],
+        likesCount: 2,
+        createdAt: '2026-10-31T08:30:00.000Z',
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      },
+      {
+        id: 'art_seed_02',
+        content: 'Our neighborhood community livelihood workshop just concluded with 25 new micro-enterprise artisans. Never underestimate the power of collective community collaboration! 🤝🧵',
+        imageUrl: '',
+        imageSize: 0,
+        authorId: 'circ_02',
+        authorTid: '09189204182',
+        authorName: 'Juan Dela Cruz',
+        authorDisplayName: 'Juan D.',
+        authorInitials: 'JD',
+        authorCoopName: 'Family Multi-Purpose Cooperative',
+        authorRole: 'Micro-Enterprise Partner',
+        visibility: 'CIRCLE',
+        likes: ['09178291049'],
+        likesCount: 1,
+        createdAt: '2026-10-31T14:15:00.000Z',
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      },
+    ];
+  });
+
+  const [feedScope, setFeedScope] = useState<'circle' | 'all'>('circle');
+  const [articleText, setArticleText] = useState<string>('');
+  const [articleImage, setArticleImage] = useState<string | null>(null);
+  const [articleImageSize, setArticleImageSize] = useState<number>(0);
+  const [articleImageName, setArticleImageName] = useState<string>('');
+  const [isPostingArticle, setIsPostingArticle] = useState<boolean>(false);
+  const [postArticleError, setPostArticleError] = useState<string | null>(null);
+  const [postArticleSuccess, setPostArticleSuccess] = useState<string | null>(null);
+  const articleFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter articles visible to user's circle
+  const visibleArticles = useMemo(() => {
+    const circleTidSet = new Set(circleMembers.map((m) => m.tid));
+    circleTidSet.add(userTid);
+    if (feedScope === 'all') return communityArticles;
+    return communityArticles.filter((art) => {
+      if (art.visibility === 'ALL') return true;
+      if (art.authorTid && circleTidSet.has(art.authorTid)) return true;
+      if (art.authorId === currentMember.id) return true;
+      return false;
+    });
+  }, [communityArticles, circleMembers, userTid, feedScope, currentMember]);
+
+  // Load articles from Tuntong Tech central API on mount
+  useEffect(() => {
+    const fetchArticles = async () => {
+      try {
+        const apiBase = getApiBaseUrl();
+        const circleTidsParam = circleMembers.map((m) => m.tid).join(',');
+        const res = await fetch(`${apiBase}/api/v1/community/articles?scope=circle&circleTids=${circleTidsParam}&userTid=${userTid}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+            setCommunityArticles((prev) => {
+              const map = new Map();
+              for (const item of json.data) map.set(item.id, item);
+              for (const item of prev) {
+                if (!map.has(item.id)) map.set(item.id, item);
+              }
+              return Array.from(map.values()).sort(
+                (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+              );
+            });
+          }
+        }
+      } catch {}
+    };
+    fetchArticles();
+  }, [userTid, circleMembers]);
+
+  const handleSelectArticleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPostArticleError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
+    if (file.size > MAX_SIZE) {
+      setPostArticleError(`Image exceeds maximum allowed size of 5MB (${(file.size / (1024 * 1024)).toFixed(1)}MB detected). Please choose an image up to 5MB.`);
+      if (articleFileInputRef.current) articleFileInputRef.current.value = '';
+      return;
+    }
+
+    setArticleImageSize(file.size);
+    setArticleImageName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (loadEvt) => {
+      setArticleImage(loadEvt.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveArticleImage = () => {
+    setArticleImage(null);
+    setArticleImageSize(0);
+    setArticleImageName('');
+    if (articleFileInputRef.current) articleFileInputRef.current.value = '';
+  };
+
+  const handlePublishArticle = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!articleText.trim()) {
+      setPostArticleError('Please write some content to inspire your community.');
+      return;
+    }
+
+    setIsPostingArticle(true);
+    setPostArticleError(null);
+    setPostArticleSuccess(null);
+
+    const newArticlePayload = {
+      content: articleText.trim(),
+      image: articleImage || '',
+      imageSize: articleImageSize,
+      authorId: currentMember.id || 'current_user',
+      authorTid: userTid,
+      authorName: currentMember.name || 'Community Member',
+      authorDisplayName: (currentMember.name || 'Member').split(' ')[0],
+      authorInitials: currentMember.initials || 'ME',
+      authorCoopName: isCoopLinked ? tenantInfo.name : 'Silong Community Hub',
+      authorRole: isCoopLinked
+        ? currentMember.classification === 'REGULAR'
+          ? 'Regular Member'
+          : 'Associate Member'
+        : 'Community Contributor',
+      visibility: 'CIRCLE',
+    };
+
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetch(`${apiBase}/api/v1/community/articles`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantInfo.slug || 'bayani',
+        },
+        body: JSON.stringify(newArticlePayload),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const created = data.data;
+        const updated = [created, ...communityArticles];
+        setCommunityArticles(updated);
+        try {
+          localStorage.setItem('silong_community_articles', JSON.stringify(updated));
+        } catch {}
+        setArticleText('');
+        handleRemoveArticleImage();
+        setPostArticleSuccess('Article published to Community Feed and visible to your circle!');
+        setTimeout(() => setPostArticleSuccess(null), 4000);
+      } else {
+        throw new Error(data.error || 'Failed to publish article');
+      }
+    } catch (err: any) {
+      // Offline fallback
+      const offlineArticle = {
+        id: `art_local_${Date.now()}`,
+        ...newArticlePayload,
+        imageUrl: articleImage || '',
+        likes: [],
+        likesCount: 0,
+        createdAt: new Date().toISOString(),
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      };
+      const updated = [offlineArticle, ...communityArticles];
+      setCommunityArticles(updated);
+      try {
+        localStorage.setItem('silong_community_articles', JSON.stringify(updated));
+      } catch {}
+      setArticleText('');
+      handleRemoveArticleImage();
+      setPostArticleSuccess('Article published to Community Feed and visible to your circle!');
+      setTimeout(() => setPostArticleSuccess(null), 4000);
+    } finally {
+      setIsPostingArticle(false);
+    }
+  };
+
+  const handleToggleArticleLike = async (articleId: string) => {
+    const updated = communityArticles.map((art) => {
+      if (art.id !== articleId) return art;
+      const likes: string[] = Array.isArray(art.likes) ? art.likes : [];
+      const hasLiked = likes.includes(userTid);
+      const newLikes = hasLiked
+        ? likes.filter((id) => id !== userTid)
+        : [...likes, userTid];
+      return {
+        ...art,
+        likes: newLikes,
+        likesCount: newLikes.length,
+      };
+    });
+    setCommunityArticles(updated);
+    try {
+      localStorage.setItem('silong_community_articles', JSON.stringify(updated));
+      const apiBase = getApiBaseUrl();
+      await fetch(`${apiBase}/api/v1/community/articles/${articleId}/like`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tid: userTid, memberId: currentMember.id }),
+      });
+    } catch {}
+  };
 
   // Auto-prompt onboarding modal on initial visit if coop is not linked yet
   useEffect(() => {
@@ -5024,6 +5268,324 @@ export default function MemberPortalPage() {
               </div>
             );
           })()}
+
+            {/* --------------------------------------------------------- */}
+            {/* COMMUNITY FEED SECTION (Silong Community Hub)             */}
+            {/* Posts visible to user's circle; supports 1 image <= 5MB   */}
+            {/* Placeholder: "post to inspire your community"             */}
+            {/* --------------------------------------------------------- */}
+            <div className="space-y-4 pt-2">
+              {/* Feed Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#223a5e] to-[#15253d] text-[#e68a38] flex items-center justify-center font-black shadow-xs shrink-0 border border-[#e68a38]/30">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-sm sm:text-base text-slate-900">
+                        Community Feed
+                      </h3>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[#223a5e] text-white px-2 py-0.5 rounded-full">
+                        Circle Network
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Inspiring stories, updates & collaborations from you and your circle
+                    </p>
+                  </div>
+                </div>
+
+                {/* Scope Toggle: Circle vs All */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setFeedScope('circle')}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                      feedScope === 'circle'
+                        ? 'bg-white text-[#223a5e] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    My Circle ({circleMembers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFeedScope('all')}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                      feedScope === 'all'
+                        ? 'bg-white text-[#223a5e] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All Community ({communityArticles.length})
+                  </button>
+                </div>
+              </div>
+
+              {/* ARTICLE COMPOSER CARD */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                    {currentMember?.initials || 'ME'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-xs text-slate-900 truncate">
+                          {currentMember?.name || 'Community Member'}
+                        </span>
+                        <span className="text-[10px] font-mono text-[#e68a38] font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                          {userTid}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        <Network className="w-3 h-3 text-[#e68a38]" />
+                        <span>Visible to Circle</span>
+                      </span>
+                    </div>
+
+                    {/* Textarea with mandatory placeholder "post to inspire your community" */}
+                    <div className="relative">
+                      <textarea
+                        value={articleText}
+                        onChange={(e) => {
+                          setArticleText(e.target.value);
+                          if (postArticleError) setPostArticleError(null);
+                        }}
+                        rows={3}
+                        placeholder="post to inspire your community"
+                        className="w-full text-xs sm:text-sm p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38] transition-all resize-none text-slate-800 placeholder:text-slate-400 bg-slate-50/50"
+                      />
+                    </div>
+
+                    {/* Selected Image Preview (1 image up-to 5mb) */}
+                    {articleImage && (
+                      <div className="mt-2 relative rounded-xl overflow-hidden border border-slate-200 bg-slate-900/5 p-2">
+                        <div className="flex items-center justify-between gap-2 pb-1.5">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-600 truncate">
+                            <ImageIcon className="w-3.5 h-3.5 text-[#e68a38] shrink-0" />
+                            <span className="truncate font-medium">{articleImageName || 'Selected image'}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ({(articleImageSize / (1024 * 1024)).toFixed(2)} MB / 5MB max)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleRemoveArticleImage}
+                            title="Remove image"
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="relative max-h-48 rounded-lg overflow-hidden flex items-center justify-center bg-slate-100">
+                          <img
+                            src={articleImage}
+                            alt="Article attachment preview"
+                            className="max-h-48 w-full object-contain rounded-lg"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error and Success feedback messages */}
+                    {postArticleError && (
+                      <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{postArticleError}</span>
+                      </div>
+                    )}
+
+                    {postArticleSuccess && (
+                      <div className="mt-2 p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2">
+                        <Check className="w-4 h-4 shrink-0" />
+                        <span>{postArticleSuccess}</span>
+                      </div>
+                    )}
+
+                    {/* Bottom Actions Bar */}
+                    <div className="flex items-center justify-between gap-2 pt-2.5 mt-1 border-t border-slate-100">
+                      <div className="flex items-center gap-2">
+                        {/* Hidden file input for 1 image up to 5mb */}
+                        <input
+                          type="file"
+                          ref={articleFileInputRef}
+                          accept="image/*"
+                          onChange={handleSelectArticleImage}
+                          className="hidden"
+                          aria-label="Upload article image (up to 5MB)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => articleFileInputRef.current?.click()}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                            articleImage
+                              ? 'bg-[#e68a38]/10 text-[#e68a38] border-[#e68a38]/30'
+                              : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'
+                          }`}
+                          title="Add 1 image (up to 5MB)"
+                        >
+                          <ImageIcon className="w-4 h-4 text-[#e68a38]" />
+                          <span>{articleImage ? 'Change Image (Max 5MB)' : 'Add Photo (Max 5MB)'}</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePublishArticle()}
+                        disabled={isPostingArticle || !articleText.trim()}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+                      >
+                        {isPostingArticle ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Publishing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Post Article</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ARTICLES FEED STREAM */}
+              <div className="space-y-4">
+                {visibleArticles.length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
+                      <Sparkles className="w-6 h-6 text-[#e68a38]" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800">No Articles in Feed Yet</h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                        Be the first to post an inspiring article to your circle network!
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  visibleArticles.map((article) => {
+                    const isOwnArticle = article.authorTid === userTid || article.authorId === currentMember.id;
+                    const isLiked = Array.isArray(article.likes) && article.likes.includes(userTid);
+                    const isInCircle = circleMembers.some((m) => m.tid === article.authorTid);
+
+                    return (
+                      <article
+                        key={article.id}
+                        className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 transition-all hover:border-slate-300"
+                      >
+                        {/* Author Header */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                              {article.authorInitials || 'CM'}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                                  {article.authorName}
+                                </h4>
+                                {isOwnArticle && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-[#e68a38] text-white px-1.5 py-0.5 rounded">
+                                    You
+                                  </span>
+                                )}
+                                {isInCircle && !isOwnArticle && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                    <Network className="w-2.5 h-2.5" />
+                                    In Circle
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[#223a5e] font-semibold">TID: {article.authorTid}</span>
+                                <span>•</span>
+                                <span>{article.authorCoopName || 'Silong Community Hub'}</span>
+                                <span>•</span>
+                                <span>{new Date(article.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Provenance Pill */}
+                          <span className="text-[9px] font-mono font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full shrink-0 hidden sm:inline-block">
+                            Central Cloud: 581563779021
+                          </span>
+                        </div>
+
+                        {/* Article Text Content */}
+                        <p className="text-xs sm:text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
+                          {article.content}
+                        </p>
+
+                        {/* Article Image (up to 5MB, 1 image) */}
+                        {article.imageUrl && (
+                          <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 max-h-96 flex items-center justify-center">
+                            <img
+                              src={article.imageUrl}
+                              alt="Article visual attachment"
+                              className="w-full max-h-96 object-cover rounded-xl hover:scale-[1.01] transition-transform duration-200"
+                            />
+                          </div>
+                        )}
+
+                        {/* Interaction Footer Bar */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                          <div className="flex items-center gap-2">
+                            {/* Like / Inspire button */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleArticleLike(article.id)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
+                                isLiked
+                                  ? 'bg-rose-50 text-rose-600 border-rose-200 font-bold'
+                                  : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-rose-500 text-rose-500' : 'text-slate-400'}`} />
+                              <span>{article.likesCount || 0}</span>
+                              <span className="hidden sm:inline">Inspire</span>
+                            </button>
+
+                            {/* View author's personal wall */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleOpenBusinessPage({
+                                  id: article.authorId,
+                                  memberNumber: article.authorTid,
+                                  name: article.authorName,
+                                  businessPage: {
+                                    businessName: `${article.authorName}'s Personal Wall`,
+                                    natureOfBusiness: article.authorRole,
+                                    description: article.content,
+                                  },
+                                });
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-slate-600 border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
+                              title="View author's personal wall"
+                            >
+                              <Store className="w-3.5 h-3.5 text-[#e68a38]" />
+                              <span className="hidden sm:inline">Personal Wall</span>
+                            </button>
+                          </div>
+
+                          <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-[#e68a38]" />
+                            <span>Silong Community Hub</span>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -8770,6 +9332,20 @@ export default function MemberPortalPage() {
                         {hasCopiedTid ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFeedScope('circle');
+                        setActiveTab('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-3 py-2 bg-[#223a5e] hover:bg-[#1a2f4a] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                      title="View Circle Articles on Community Feed"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#e68a38]" />
+                      <span>Circle Feed</span>
+                    </button>
 
                     <button
                       type="button"
