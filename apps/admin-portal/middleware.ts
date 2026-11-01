@@ -27,6 +27,29 @@ export function middleware(request: NextRequest) {
   // 2. Multi-tenant Subdomain Resolution
   let tenantSlug = 'family';
   let isTenantSubdomain = false;
+  const isSilongDomain = cleanHost === 'silong.tuntongtech.com' || cleanHost === 'silong.localhost';
+
+  // 2.1 Silong Central Community Hub Dedicated Routing
+  if (isSilongDomain) {
+    if (pathname === '/') {
+      const memberCookie = request.cookies.get('flexcoop_auth_member')?.value;
+      if (memberCookie) {
+        return NextResponse.redirect(new URL('/member', request.url));
+      }
+      return NextResponse.redirect(new URL('/member/login', request.url));
+    }
+    if (pathname === '/login') {
+      return NextResponse.redirect(new URL('/member/login', request.url));
+    }
+  }
+
+  // 2.2 Global /join referral route alias
+  if (pathname === '/join') {
+    const ref = request.nextUrl.searchParams.get('ref');
+    const target = new URL('/member/login', request.url);
+    if (ref) target.searchParams.set('ref', ref);
+    return NextResponse.redirect(target);
+  }
 
   const coopProdSuffix = '-coop.tuntongtech.com';
   const flexCoopProdSuffix = '-flexcoop.tuntongtech.com';

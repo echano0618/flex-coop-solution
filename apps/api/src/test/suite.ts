@@ -538,6 +538,15 @@ console.log('\n--- 13. Dynamic Subdomain Tenant Resolution (tuntongtech.com) ---
     (t) => t.slug === slugBayani || t.slug.replace(/_/g, '-') === slugBayani
   );
   assert(matchedTenant !== undefined && matchedTenant.id === 'tenant_bayani_001', 'Maps extracted subdomain to Bayani Cooperative tenant document');
+
+  // 13.6 Silong Central Community Hub Domain Identification
+  const isSilongDomain = (host: string) => {
+    const clean = host.split(':')[0].toLowerCase();
+    return clean === 'silong.tuntongtech.com' || clean === 'silong.localhost';
+  };
+  assert(isSilongDomain('silong.tuntongtech.com'), 'Recognizes silong.tuntongtech.com as central hub');
+  assert(isSilongDomain('silong.localhost:3000'), 'Recognizes local development silong.localhost');
+  assert(!isSilongDomain('bayani-coop.tuntongtech.com'), 'Does not classify tenant subdomains as central silong hub');
 }
 
 // 14. Member Share Capital Purchase & Savings Deposits (In-Person & Self-Service Rails)
