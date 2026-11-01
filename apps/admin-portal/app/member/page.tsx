@@ -1808,7 +1808,7 @@ export default function MemberPortalPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': tenantInfo.slug || 'bayani',
+          'x-central-storage': 'tuntong-tech',
         },
         body: JSON.stringify(newArticlePayload),
       });

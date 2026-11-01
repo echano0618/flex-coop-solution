@@ -8,7 +8,6 @@ import {
   Mail,
   ArrowRight,
   AlertCircle,
-  UserCheck,
   Eye,
   EyeOff,
   Fingerprint,
@@ -20,7 +19,6 @@ import {
   Smartphone,
   Share2,
   PlusSquare,
-  ChevronRight,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../../api-config';
 import {
@@ -70,9 +68,6 @@ export default function MemberLoginPage() {
 
   // Google Sign-In State (Tuntong Tech Central Firebase: 581563779021)
   const [isGoogleAuthenticating, setIsGoogleAuthenticating] = useState<boolean>(false);
-  const [showGoogleModal, setShowGoogleModal] = useState<boolean>(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState<string>('');
-  const [customGoogleName, setCustomGoogleName] = useState<string>('');
 
   const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
     slug: 'default',
@@ -286,16 +281,55 @@ export default function MemberLoginPage() {
     }
   };
 
-  const handleExecuteGoogleLogin = async (selectedEmail: string, selectedName?: string) => {
-    const emailToUse = selectedEmail.trim();
+  const GOOGLE_CLIENT_ID =
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+    '581563779021-tuntongtech.apps.googleusercontent.com';
+
+  // Load Google Identity Services SDK
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (document.getElementById('google-gsi-client')) return;
+
+    const script = document.createElement('script');
+    script.id = 'google-gsi-client';
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      try {
+        const google = (window as any).google;
+        if (google?.accounts?.id) {
+          google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: handleGoogleCredentialResponse,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+          });
+        }
+      } catch (err) {
+        console.warn('Google GSI initialization error:', err);
+      }
+    };
+    document.head.appendChild(script);
+  }, []);
+
+  const handleCompleteGoogleLogin = async (
+    email: string,
+    name?: string,
+    pictureUrl?: string,
+    googleUid?: string,
+    idToken?: string,
+    accessToken?: string
+  ) => {
+    const emailToUse = String(email || '').trim();
     if (!emailToUse) {
-      setErrorMessage('Please enter a valid Google Account email.');
+      setIsGoogleAuthenticating(false);
+      setErrorMessage('Google did not return a valid email address.');
       return;
     }
 
     setIsGoogleAuthenticating(true);
     setErrorMessage('');
-    setShowGoogleModal(false);
 
     try {
       const res = await fetch(`${getApiBaseUrl()}/auth/member/google-login`, {
@@ -306,8 +340,11 @@ export default function MemberLoginPage() {
         },
         body: JSON.stringify({
           email: emailToUse,
-          name: selectedName || emailToUse.split('@')[0],
-          googleUid: `goog_${Date.now()}`,
+          name: name || emailToUse.split('@')[0],
+          pictureUrl: pictureUrl || '',
+          googleUid: googleUid || '',
+          idToken: idToken || '',
+          accessToken: accessToken || '',
         }),
       });
 
@@ -320,7 +357,11 @@ export default function MemberLoginPage() {
             sessionStorage.setItem('silong_prompt_link_coop', 'true');
           }
         }
-        router.push(data.member.tenantSlug && data.member.tenantSlug !== 'unlinked' ? `/member?coop=${data.member.tenantSlug}` : '/member');
+        router.push(
+          data.member.tenantSlug && data.member.tenantSlug !== 'unlinked'
+            ? `/member?coop=${data.member.tenantSlug}`
+            : '/member'
+        );
         return;
       }
 
@@ -329,6 +370,137 @@ export default function MemberLoginPage() {
     } catch (err: any) {
       setIsGoogleAuthenticating(false);
       setErrorMessage('Unable to connect with Google central authentication service.');
+    }
+  };
+
+  const handleGoogleCredentialResponse = async (response: any) => {
+    if (!response || !response.credential) {
+      setIsGoogleAuthenticating(false);
+      return;
+    }
+
+    try {
+      let email = '';
+      let name = '';
+      let pictureUrl = '';
+      let googleUid = '';
+
+      try {
+        const payloadBase64 = response.credential.split('.')[1];
+        const decoded = JSON.parse(atob(payloadBase64.replace(/-/g, '+').replace(/_/g, '/')));
+        email = decoded.email || '';
+        name = decoded.name || decoded.given_name || email.split('@')[0];
+        pictureUrl = decoded.picture || '';
+        googleUid = decoded.sub || '';
+      } catch (e) {
+        console.warn('Could not parse Google ID token locally', e);
+      }
+
+      await handleCompleteGoogleLogin(email, name, pictureUrl, googleUid, response.credential);
+    } catch (err: any) {
+      setIsGoogleAuthenticating(false);
+      setErrorMessage('Unable to verify Google credential.');
+    }
+  };
+
+  const handleStartGoogleSignIn = () => {
+    setIsGoogleAuthenticating(true);
+    setErrorMessage('');
+
+    const google = typeof window !== 'undefined' ? (window as any).google : null;
+
+    // 1. Try Google Identity Services OAuth 2.0 Token Client (Official Google Account Chooser popup)
+    if (google?.accounts?.oauth2) {
+      try {
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: 'email profile openid',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse && tokenResponse.access_token) {
+              try {
+                const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+                });
+                const userInfo = await userInfoRes.json();
+                if (userInfo && userInfo.email) {
+                  await handleCompleteGoogleLogin(
+                    userInfo.email,
+                    userInfo.name || userInfo.email.split('@')[0],
+                    userInfo.picture,
+                    userInfo.sub,
+                    undefined,
+                    tokenResponse.access_token
+                  );
+                  return;
+                }
+              } catch (err) {
+                console.warn('Failed to fetch userinfo from Google', err);
+              }
+            }
+            setIsGoogleAuthenticating(false);
+          },
+          error_callback: (err: any) => {
+            console.warn('Google OAuth popup error:', err);
+            setIsGoogleAuthenticating(false);
+            if (err?.type !== 'popup_closed') {
+              setErrorMessage('Google Sign-In was cancelled or interrupted.');
+            }
+          },
+        });
+        tokenClient.requestAccessToken();
+        return;
+      } catch (clientErr) {
+        console.warn('Error launching Google token client:', clientErr);
+      }
+    }
+
+    // 2. Try Google Identity Services One Tap / Prompt
+    if (google?.accounts?.id) {
+      try {
+        google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            console.warn('GSI prompt notification:', notification.getNotDisplayedReason?.());
+          }
+        });
+        return;
+      } catch (promptErr) {
+        console.warn('Error launching GSI prompt:', promptErr);
+      }
+    }
+
+    // 3. Fallback: Standard Google OAuth 2.0 Web Popup Flow
+    try {
+      const width = 500;
+      const height = 620;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const redirectUri = typeof window !== 'undefined' ? window.location.origin : '';
+      const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(
+        GOOGLE_CLIENT_ID
+      )}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(
+        'email profile openid'
+      )}&prompt=select_account`;
+
+      const popup = window.open(
+        oauthUrl,
+        'google_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,status=no`
+      );
+
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        setIsGoogleAuthenticating(false);
+        setErrorMessage('Popup blocked. Please allow popups for this site to sign in with Google.');
+      } else {
+        const timer = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(timer);
+            setIsGoogleAuthenticating(false);
+          }
+        }, 1000);
+      }
+    } catch (err) {
+      setIsGoogleAuthenticating(false);
+      setErrorMessage('Google Sign-In is unavailable. Please sign in with your email and password.');
     }
   };
 
@@ -441,21 +613,9 @@ export default function MemberLoginPage() {
         </p>
       </div>
 
-      {/* Bottom 50% Height: Cooperative Name, Login Section, and Footer */}
+      {/* Bottom 50% Height: Login Section, and Footer */}
       <div className="min-h-[50dvh] flex flex-col justify-between px-4 sm:px-6 lg:px-8 pb-6 pt-2">
         <div className="max-w-md w-full mx-auto space-y-5">
-          {/* Cooperative Name above the login section */}
-          <div className="text-center space-y-0.5">
-            <h2 className="text-lg sm:text-xl font-extrabold text-[#223a5e] tracking-tight">
-              {tenantInfo.name}
-            </h2>
-            {tenantInfo.registrationNumber && (
-              <div className="text-[11px] text-slate-500 font-mono">
-                {tenantInfo.registrationNumber}
-              </div>
-            )}
-          </div>
-
           {/* Login Section */}
           <div className="bg-white/95 backdrop-blur-md border border-[#e2d5c1] rounded-3xl p-6 sm:p-7 shadow-xl shadow-[#223a5e]/10 space-y-4">
             {errorMessage && (
@@ -516,7 +676,7 @@ export default function MemberLoginPage() {
                 {/* 1. Primary: Continue with Google (Tuntong Tech Central Firebase: 581563779021) */}
                 <button
                   type="button"
-                  onClick={() => setShowGoogleModal(true)}
+                  onClick={handleStartGoogleSignIn}
                   disabled={isLoading || isGoogleAuthenticating}
                   className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-bold rounded-xl transition flex items-center justify-center gap-3 border border-slate-300 shadow-sm text-xs sm:text-sm cursor-pointer group hover:border-slate-400"
                 >
@@ -701,15 +861,6 @@ export default function MemberLoginPage() {
 
         {/* Footer */}
         <footer className="max-w-md w-full mx-auto pt-6 text-center space-y-3">
-          <div>
-            <Link
-              href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/register?coop=${tenantInfo.slug}` : '/member/register'}
-              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-[#f4efe6] hover:bg-[#ebe2d3] text-[#223a5e] border border-[#d97724]/35 font-bold rounded-xl text-xs transition shadow-xs"
-            >
-              <UserCheck className="w-4 h-4 text-[#d97724]" />
-              <span>Apply for Membership Online</span>
-            </Link>
-          </div>
           <div className="text-xs font-semibold text-[#223a5e]/75">
             Silong - A Tuntong Tech Solution
           </div>
@@ -932,119 +1083,6 @@ export default function MemberLoginPage() {
               >
                 Continue in Web Browser
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Google Sign-In Modal (Tuntong Tech Central: 581563779021) */}
-      {showGoogleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 relative">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                  />
-                </svg>
-                <div>
-                  <h3 className="font-bold text-sm text-slate-900">Sign in with Google</h3>
-                  <p className="text-[10px] text-slate-500">to continue to Silong Community Hub</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGoogleModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Quick Select Saved/Active Google Accounts */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-1">
-                Choose an account
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleExecuteGoogleLogin('maria.santos@gmail.com', 'Maria Clara Santos')}
-                className="w-full p-3 rounded-2xl border border-slate-200 hover:border-[#4285F4] hover:bg-blue-50/50 transition-all flex items-center justify-between text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                    MS
-                  </div>
-                  <div>
-                    <div className="font-bold text-xs text-slate-900 group-hover:text-[#4285F4]">
-                      Maria Clara Santos
-                    </div>
-                    <div className="text-[11px] text-slate-500 font-mono">maria.santos@gmail.com</div>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#4285F4] transition-colors" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleExecuteGoogleLogin('juan.delacruz@gmail.com', 'Juan Perez Dela Cruz')}
-                className="w-full p-3 rounded-2xl border border-slate-200 hover:border-[#4285F4] hover:bg-blue-50/50 transition-all flex items-center justify-between text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                    JD
-                  </div>
-                  <div>
-                    <div className="font-bold text-xs text-slate-900 group-hover:text-[#4285F4]">
-                      Juan Perez Dela Cruz
-                    </div>
-                    <div className="text-[11px] text-slate-500 font-mono">juan.delacruz@gmail.com</div>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#4285F4] transition-colors" />
-              </button>
-            </div>
-
-            {/* Or input other Google account */}
-            <div className="pt-2 border-t border-slate-100 space-y-2.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-1">
-                Use another Google account
-              </div>
-              <input
-                type="email"
-                value={customGoogleEmail}
-                onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                placeholder="Enter your google email address"
-                className="w-full bg-[#faf7f2] border border-[#e2d5c1] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#223a5e] focus:bg-white transition"
-              />
-              <button
-                type="button"
-                onClick={() => handleExecuteGoogleLogin(customGoogleEmail)}
-                disabled={!customGoogleEmail.trim()}
-                className="w-full py-2.5 bg-[#4285F4] hover:bg-[#3367d6] disabled:opacity-50 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              >
-                <span>Sign In with Google</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="text-[10px] text-slate-400 text-center pt-1 border-t border-slate-100">
-              Secured by Tuntong Tech Central Cloud • Project ID: tuntong-tech (581563779021)
             </div>
           </div>
         </div>

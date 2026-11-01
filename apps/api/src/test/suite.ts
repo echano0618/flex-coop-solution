@@ -5699,6 +5699,8 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     assert(validBody.data.authorTid === userTid, 'Article retains 11-digit author TID');
     assert(validBody.firebaseProjectId === 'tuntong-tech', 'Carries firebaseProjectId: tuntong-tech');
     assert(validBody.firebaseProjectNumber === '581563779021', 'Carries firebaseProjectNumber: 581563779021');
+    assert(validBody.firebaseProjectId !== 'coop-solution', 'Community Feed is NOT stored in coop-solution');
+    assert(validBody.firebaseProjectNumber !== '607281616647', 'Community Feed is NOT stored in 607281616647');
     const createdArticleId = validBody.data.id;
     console.log('  ✅ 50.3 Article successfully published to Community Feed');
 
@@ -5863,6 +5865,30 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     assert(existingBody.member.coopName !== undefined && existingBody.member.coopName.length > 0, 'Includes linked coop name');
     assert(existingBody.firebaseProjectId === 'tuntong-tech', 'Carries central Tuntong Tech Firebase metadata');
     assert(existingBody.firebaseProjectNumber === '581563779021', 'Carries 581563779021');
+
+    // 51.5 Standard Google ID Token (JWT) credential response authentication
+    console.log('  51.5 Testing standard Google ID Token (JWT) authentication...');
+    const dummyJwtPayload = Buffer.from(
+      JSON.stringify({
+        email: 'standard.google.user@gmail.com',
+        name: 'Standard Google User',
+        picture: 'https://lh3.googleusercontent.com/a/standard-user',
+        sub: '109876543210987654321',
+      })
+    ).toString('base64');
+    const mockIdToken = `eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.${dummyJwtPayload}.signature`;
+    const tokenMock = createMockHttp({
+      body: { idToken: mockIdToken },
+    });
+    await handleMemberGoogleLogin(tokenMock.req, tokenMock.res);
+    assert(tokenMock.getStatus() === 200, 'ID token sign-in returns HTTP 200');
+    const tokenBody = tokenMock.getBody();
+    assert(tokenBody.success === true, 'Returns success: true');
+    assert(tokenBody.member.email === 'standard.google.user@gmail.com', 'Decodes email from Google ID token');
+    assert(tokenBody.member.name === 'Standard Google User', 'Decodes name from Google ID token');
+    assert(tokenBody.firebaseProjectId === 'tuntong-tech', 'Carries tuntong-tech project ID');
+    assert(tokenBody.firebaseProjectNumber === '581563779021', 'Carries 581563779021 project number');
+    assert(tokenBody.member.tid.length === 11, 'Generates 11-digit TID');
 
     console.log('  ✅ ALL SECTION 51 GOOGLE SIGN-IN & TUNTONG TECH CENTRAL AUTH TESTS PASSED!');
   }

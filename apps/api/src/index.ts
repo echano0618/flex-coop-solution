@@ -689,7 +689,23 @@ app.post('/api/v1/auth/member/login', async (req: Request, res: Response) => {
 // -------------------------------------------------------------
 export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
   try {
-    const { email, name, pictureUrl, googleUid } = req.body || {};
+    let { email, name, pictureUrl, googleUid, idToken } = req.body || {};
+
+    // Auto-extract from Google ID token if email is omitted
+    if ((!email || !String(email).trim()) && idToken) {
+      try {
+        const parts = String(idToken).split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+          email = payload.email;
+          name = payload.name || payload.given_name;
+          pictureUrl = payload.picture;
+          googleUid = payload.sub;
+        }
+      } catch (tokenErr) {
+        console.warn('[handleMemberGoogleLogin] ID token decode error:', tokenErr);
+      }
+    }
 
     if (!email || !String(email).trim()) {
       return res.status(400).json({ success: false, error: 'Google email is required.' });
@@ -4677,6 +4693,10 @@ app.get('/api/v1/community/articles', handleListCommunityArticles);
 app.post('/api/v1/community/articles', handleCreateCommunityArticle);
 app.delete('/api/v1/community/articles/:id', handleDeleteCommunityArticle);
 app.post('/api/v1/community/articles/:id/like', handleLikeCommunityArticle);
+app.get('/community/articles', handleListCommunityArticles);
+app.post('/community/articles', handleCreateCommunityArticle);
+app.delete('/community/articles/:id', handleDeleteCommunityArticle);
+app.post('/community/articles/:id/like', handleLikeCommunityArticle);
 
 app.get('/api/v1/system-config', async (req: Request, res: Response) => {
   try {
