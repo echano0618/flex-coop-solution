@@ -13,7 +13,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL('https://silong.tuntongtech.com'),
   title: 'Silong - Community Hub | A Tuntong Tech Solution',
-  description: 'Silong - Community Hub. Sa iisang bubong, sama-samang aahon. Community Hub, cooperative passbook & member enterprise platform.',
+  description: 'Silong - Community Hub. Engage, empower, uplift. Community Hub, cooperative passbook & member enterprise platform.',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,

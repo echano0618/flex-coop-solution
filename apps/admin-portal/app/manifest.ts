@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Silong',
     short_name: 'Silong',
-    description: 'Silong — Sa iisang bubong, sama-samang aahon. Cooperative Member Portal powered by Tuntong Tech Solution.',
+    description: 'Silong — Engage, empower, uplift. Cooperative Member Portal powered by Tuntong Tech Solution.',
     start_url: '/member',
     display: 'standalone',
     background_color: '#223a5e',

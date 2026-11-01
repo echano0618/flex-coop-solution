@@ -4694,7 +4694,7 @@ export default function MemberPortalPage() {
             SILONG
           </h1>
           <p className="text-sm sm:text-base font-medium text-slate-200 mt-1.5">
-            Sa iisang bubong, sama-samang aahon
+            Engage, empower, uplift.
           </p>
           <div className="mt-8 flex flex-col items-center gap-2.5">
             <div className="w-7 h-7 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
@@ -9860,36 +9860,6 @@ export default function MemberPortalPage() {
               )}
             </div>
 
-            {/* PWA Mobile App Card */}
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-[#223a5e] flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
-                  <img
-                    src="/icons/silong-icon-192.png"
-                    alt="Silong"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h4 className="font-bold text-sm text-emerald-950">Install Silong App (PWA)</h4>
-                    <span className="bg-emerald-200 text-emerald-900 text-[10px] font-bold px-1.5 py-0.2 rounded">Fast & Offline</span>
-                  </div>
-                  <p className="text-xs text-emerald-800 mt-0.5">
-                    Add Silong to your mobile home screen for instant biometric login and offline passbook access.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleInstallPwa}
-                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-colors shadow-sm shrink-0 flex items-center gap-1.5 w-full sm:w-auto justify-center"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-200" />
-                {isInstallable ? 'Install to Home Screen' : 'Install App Guide'}
-              </button>
-            </div>
-
             {/* Account & Navigation Settings */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -9899,24 +9869,9 @@ export default function MemberPortalPage() {
               <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row gap-2.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    setPasswordChangeError(null);
-                    setPasswordChangeSuccess(null);
-                    setCurrentPasswordInput('');
-                    setNewPasswordInput('');
-                    setConfirmPasswordInput('');
-                    setShowChangePasswordModal(true);
-                  }}
-                  className="flex-1 py-2.5 px-4 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold text-center transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                >
-                  <KeyRound className="w-4 h-4 text-emerald-600" />
-                  <span>Change Password</span>
-                </button>
-                <button
-                  type="button"
                   onClick={handleMemberSignOut}
                   title="Sign out of Member Portal"
-                  className="py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold text-center transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-2.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold text-center transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>Sign Out</span>
@@ -12500,7 +12455,31 @@ export default function MemberPortalPage() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
         <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5">
-          {/* 1. Dashboard (Silong Community Hub) */}
+          {/* 1. More (Account, Identity & Settings) - Leftmost */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('more');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
+              activeTab === 'more'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
+            }`}
+          >
+            <div className="relative">
+              <Menu className={`w-5 h-5 mb-1 ${activeTab === 'more' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+              {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
+                <span className="absolute -top-1 -right-2 bg-[#e68a38] text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-[#223a5e]">
+                  1
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] leading-tight">More</span>
+          </button>
+
+          {/* 2. Dashboard (Silong Community Hub) */}
           <button
             type="button"
             onClick={() => {
@@ -12515,20 +12494,6 @@ export default function MemberPortalPage() {
           >
             <LayoutDashboard className={`w-5 h-5 mb-1 ${activeTab === 'home' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
             <span className="text-[10px] leading-tight">Dashboard</span>
-          </button>
-
-          {/* 2. My Personal Wall */}
-          <button
-            type="button"
-            onClick={handleOpenMyBusiness}
-            className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
-              Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
-                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
-                : 'text-slate-300 hover:text-white font-medium'
-            }`}
-          >
-            <Store className={`w-5 h-5 mb-1 ${Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber)) ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
-            <span className="text-[10px] leading-tight">My Wall</span>
           </button>
 
           {/* 3. My Circle (Social Network Graph) */}
@@ -12553,28 +12518,37 @@ export default function MemberPortalPage() {
             <span className="text-[10px] leading-tight">My Circle</span>
           </button>
 
-          {/* 4. More (Account, Identity & Settings) */}
+          {/* 4. My Personal Wall - Rightmost (Google Profile Display Image as Icon) */}
           <button
             type="button"
-            onClick={() => {
-              setActiveTab('more');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
-              activeTab === 'more'
+            onClick={handleOpenMyBusiness}
+            className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
+              Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
             }`}
           >
-            <div className="relative">
-              <Menu className={`w-5 h-5 mb-1 ${activeTab === 'more' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
-              {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
-                <span className="absolute -top-1 -right-2 bg-[#e68a38] text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-[#223a5e]">
-                  1
-                </span>
-              )}
+            <div className={`w-5 h-5 mb-1 rounded-full overflow-hidden flex items-center justify-center ring-1.5 ${
+              Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
+                ? 'ring-[#e68a38]'
+                : 'ring-white/40'
+            }`}>
+              <img
+                src={
+                  currentMember?.pictureUrl ||
+                  currentMember?.avatarUrl ||
+                  currentMember?.selfiePreview ||
+                  (currentMember as any)?.photoURL ||
+                  `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentMember?.name || 'User')}`
+                }
+                alt="My Wall"
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentMember?.name || 'User')}`;
+                }}
+              />
             </div>
-            <span className="text-[10px] leading-tight">More</span>
+            <span className="text-[10px] leading-tight">My Wall</span>
           </button>
         </div>
       </nav>
