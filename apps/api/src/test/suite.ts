@@ -5453,6 +5453,10 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  48.3 Testing Date of Birth mismatch verification failure...');
     // Ensure member has a known DOB
     (testMember as any).dateOfBirth = '1988-12-04';
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      await fsService.saveMember(linkTenant, testMember);
+    } catch {}
     const mismatchDobMock = createMockHttp({
       headers: { 'x-tenant-id': linkTenant },
       body: {
