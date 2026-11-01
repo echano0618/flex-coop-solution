@@ -65,6 +65,9 @@ import {
   Pause,
   Copy,
   Link2,
+  Share2,
+  UserPlus,
+  Network,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -1404,7 +1407,215 @@ export default function MemberPortalPage() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'coop_page' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'coop_page' | 'circle' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+
+  // -------------------------------------------------------------
+  // MY CIRCLE (SOCIAL NETWORK GRAPH & INVITATION SYSTEM)
+  // -------------------------------------------------------------
+  const userTid = useMemo(() => {
+    if ((currentMember as any)?.tid) return (currentMember as any).tid;
+    const baseNum = String(currentMember?.memberNumber || currentMember?.id || '89214').replace(/[^0-9]/g, '');
+    const padded = (baseNum.slice(-5) || '89214').padStart(5, '0');
+    return `TT-${padded}`;
+  }, [currentMember]);
+
+  const [circleMembers, setCircleMembers] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('silong_circle_members');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [
+      {
+        id: 'circ_01',
+        tid: 'TT-10492',
+        name: 'Maria Santos',
+        displayName: 'Maria S.',
+        email: 'maria.santos@tuntongtech.com',
+        initials: 'MS',
+        role: 'Cooperative Peer',
+        relationship: 'Direct Connection',
+        connectedAt: 'Oct 2026',
+        status: 'ONLINE',
+        coopName: 'Bayani Cooperative',
+      },
+      {
+        id: 'circ_02',
+        tid: 'TT-20418',
+        name: 'Juan Dela Cruz',
+        displayName: 'Juan D.',
+        email: 'juan.delacruz@tuntongtech.com',
+        initials: 'JD',
+        role: 'Micro-Enterprise Partner',
+        relationship: 'Business Circle',
+        connectedAt: 'Sep 2026',
+        status: 'ACTIVE',
+        coopName: 'Family Multi-Purpose Cooperative',
+      },
+      {
+        id: 'circ_03',
+        tid: 'TT-30815',
+        name: 'Elena Reyes',
+        displayName: 'Elena R.',
+        email: 'elena.reyes@tuntongtech.com',
+        initials: 'ER',
+        role: 'Community Leader',
+        relationship: 'Mutual Member',
+        connectedAt: 'Oct 2026',
+        status: 'ONLINE',
+        coopName: 'Occidental Cooperative',
+      },
+      {
+        id: 'circ_04',
+        tid: 'TT-41902',
+        name: 'Ricardo Dalisay',
+        displayName: 'Cardo D.',
+        email: 'ricardo.dalisay@tuntongtech.com',
+        initials: 'RD',
+        role: 'Co-Maker & Endorser',
+        relationship: 'Trusted Circle',
+        connectedAt: 'Aug 2026',
+        status: 'ACTIVE',
+        coopName: 'Bayani Cooperative',
+      },
+    ];
+  });
+
+  const [selectedCircleMember, setSelectedCircleMember] = useState<any | null>(null);
+  const [showInviteModal, setShowInviteModal] = useState<boolean>(false);
+  const [inviteMethod, setInviteMethod] = useState<'TID' | 'EMAIL' | 'LINK'>('TID');
+  const [inviteTidInput, setInviteTidInput] = useState<string>('');
+  const [inviteEmailInput, setInviteEmailInput] = useState<string>('');
+  const [inviteMessageInput, setInviteMessageInput] = useState<string>('Join my trusted circle on Silong Community Hub');
+  const [inviteLoading, setInviteLoading] = useState<boolean>(false);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [hasCopiedLink, setHasCopiedLink] = useState<boolean>(false);
+  const [hasCopiedTid, setHasCopiedTid] = useState<boolean>(false);
+
+  const handleSendInvite = (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteError(null);
+    setInviteSuccess(null);
+    setInviteLoading(true);
+
+    setTimeout(() => {
+      if (inviteMethod === 'TID') {
+        const cleanTid = inviteTidInput.trim().toUpperCase();
+        if (!cleanTid) {
+          setInviteError('Please enter a valid Tuntong Tech ID (TID).');
+          setInviteLoading(false);
+          return;
+        }
+        if (cleanTid === userTid) {
+          setInviteError('You cannot add your own TID to your circle.');
+          setInviteLoading(false);
+          return;
+        }
+        if (circleMembers.some((m) => m.tid === cleanTid)) {
+          setInviteError(`User with TID ${cleanTid} is already in your circle.`);
+          setInviteLoading(false);
+          return;
+        }
+
+        const newMember = {
+          id: `circ_${Date.now()}`,
+          tid: cleanTid,
+          name: `Member ${cleanTid}`,
+          displayName: cleanTid,
+          email: `${cleanTid.toLowerCase().replace(/[^a-z0-9]/g, '')}@tuntongtech.com`,
+          initials: cleanTid.replace(/[^A-Z]/g, '').slice(0, 2) || 'TT',
+          role: 'Connected Member',
+          relationship: 'Direct Connection (via TID)',
+          connectedAt: 'Just now',
+          status: 'ONLINE' as const,
+          coopName: tenantInfo.name || 'Silong Community',
+        };
+
+        const updated = [...circleMembers, newMember];
+        setCircleMembers(updated);
+        try {
+          localStorage.setItem('silong_circle_members', JSON.stringify(updated));
+        } catch {}
+
+        setInviteSuccess(`Successfully connected with ${cleanTid}! Added to your Social Network Graph.`);
+        setInviteTidInput('');
+      } else if (inviteMethod === 'EMAIL') {
+        const cleanEmail = inviteEmailInput.trim().toLowerCase();
+        if (!cleanEmail || !cleanEmail.includes('@')) {
+          setInviteError('Please enter a valid email address.');
+          setInviteLoading(false);
+          return;
+        }
+
+        const randomTid = `TT-${Math.floor(10000 + Math.random() * 90000)}`;
+        const namePart = cleanEmail.split('@')[0];
+        const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+
+        const newMember = {
+          id: `circ_${Date.now()}`,
+          tid: randomTid,
+          name: formattedName,
+          displayName: formattedName,
+          email: cleanEmail,
+          initials: formattedName.slice(0, 2).toUpperCase(),
+          role: 'Invited Community Peer',
+          relationship: 'Invited via Email',
+          connectedAt: 'Just now',
+          status: 'ACTIVE' as const,
+          coopName: 'Silong Community Hub',
+        };
+
+        const updated = [...circleMembers, newMember];
+        setCircleMembers(updated);
+        try {
+          localStorage.setItem('silong_circle_members', JSON.stringify(updated));
+        } catch {}
+
+        setInviteSuccess(`Invitation sent to ${cleanEmail}! Added to your circle network graph.`);
+        setInviteEmailInput('');
+      }
+      setInviteLoading(false);
+    }, 600);
+  };
+
+  const handleCopyInviteLink = () => {
+    const inviteUrl = `https://silong.tuntongtech.com/join?ref=${userTid}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(inviteUrl);
+      setHasCopiedLink(true);
+      setTimeout(() => setHasCopiedLink(false), 2500);
+    }
+  };
+
+  const handleShareInviteLink = async () => {
+    const inviteUrl = `https://silong.tuntongtech.com/join?ref=${userTid}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Join my circle on Silong - Community Hub',
+          text: `Connect with me on Silong Community Hub using my Tuntong Tech ID: ${userTid}`,
+          url: inviteUrl,
+        });
+      } catch (err) {
+        handleCopyInviteLink();
+      }
+    } else {
+      handleCopyInviteLink();
+    }
+  };
+
+  const handleCopyUserTid = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(userTid);
+      setHasCopiedTid(true);
+      setTimeout(() => setHasCopiedTid(false), 2000);
+    }
+  };
 
   // Community Hub Cooperative Account Linking State
   const [showLinkCoopModal, setShowLinkCoopModal] = useState<boolean>(false);
@@ -8487,6 +8698,597 @@ export default function MemberPortalPage() {
           </div>
         )}
 
+        {/* TAB: MY CIRCLE (SOCIAL NETWORK GRAPH) */}
+        {activeTab === 'circle' && (() => {
+          // Calculate node coordinates on a 600x420 canvas
+          const cx = 300;
+          const cy = 210;
+          const radius = 140;
+          const totalOrbitItems = circleMembers.length + 1; // connected members + 1 empty circle with plus icon
+
+          const orbitNodes = [
+            ...circleMembers.map((m, idx) => {
+              const angle = (idx * 2 * Math.PI) / totalOrbitItems - Math.PI / 2;
+              return {
+                type: 'MEMBER' as const,
+                data: m,
+                x: cx + radius * Math.cos(angle),
+                y: cy + radius * Math.sin(angle),
+              };
+            }),
+            (() => {
+              const angle = (circleMembers.length * 2 * Math.PI) / totalOrbitItems - Math.PI / 2;
+              return {
+                type: 'EMPTY_ADD' as const,
+                data: null,
+                x: cx + radius * Math.cos(angle),
+                y: cy + radius * Math.sin(angle),
+              };
+            })(),
+          ];
+
+          return (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* Header Card with TID Badge and Actions */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#223a5e] to-[#15253d] text-[#e68a38] flex items-center justify-center font-black text-xl shadow-md shrink-0 border border-[#e68a38]/30">
+                      <Network className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold text-[#e68a38] uppercase tracking-wider bg-[#223a5e] text-white px-2 py-0.5 rounded-full">
+                          Community Social Graph
+                        </span>
+                        <span className="text-xs text-slate-400 font-semibold">
+                          {circleMembers.length} Connections
+                        </span>
+                      </div>
+                      <h2 className="font-black text-lg sm:text-xl text-slate-900 leading-tight mt-0.5">
+                        My Circle
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Your direct peer connections and trusted community network
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* TID Badge & One-Click Copy */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2 text-xs">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">My TID:</span>
+                      <span className="font-mono font-bold text-[#223a5e]">{userTid}</span>
+                      <button
+                        type="button"
+                        onClick={handleCopyUserTid}
+                        title="Copy my Tuntong Tech ID"
+                        className="text-slate-400 hover:text-[#e68a38] p-1 rounded hover:bg-slate-200 transition-colors cursor-pointer"
+                      >
+                        {hasCopiedTid ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowInviteModal(true);
+                        setInviteSuccess(null);
+                        setInviteError(null);
+                      }}
+                      className="px-4 py-2 bg-[#e68a38] hover:bg-[#d97c2c] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Invite Member</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* SOCIAL NETWORK GRAPH CONTAINER */}
+              <div className="bg-gradient-to-b from-[#142338] via-[#1a2f4a] to-[#223a5e] rounded-3xl border border-[#e68a38]/30 p-4 sm:p-6 shadow-2xl relative overflow-hidden">
+                {/* Graph Background Decor / Grid lines */}
+                <div className="absolute inset-0 opacity-15 pointer-events-none bg-[radial-gradient(#e68a38_1px,transparent_1px)] [background-size:24px_24px]" />
+                
+                {/* Graph Legend & Status Pill */}
+                <div className="relative z-10 flex items-center justify-between text-xs text-white/80 pb-2">
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-400/20" />
+                      <span>Online ({circleMembers.filter((m) => m.status === 'ONLINE').length})</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#e68a38] ring-2 ring-[#e68a38]/20" />
+                      <span>Active</span>
+                    </span>
+                  </div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[#e68a38] bg-white/10 px-2 py-0.5 rounded-full border border-white/10">
+                    Interactive Social Graph
+                  </span>
+                </div>
+
+                {/* SVG Visual Canvas */}
+                <div className="relative z-10 flex items-center justify-center py-2">
+                  <svg
+                    viewBox="0 0 600 420"
+                    className="w-full h-auto max-w-2xl select-none"
+                    style={{ minHeight: '340px' }}
+                  >
+                    <defs>
+                      <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor="#e68a38" stopOpacity="0.35" />
+                        <stop offset="100%" stopColor="#223a5e" stopOpacity="0" />
+                      </radialGradient>
+                      <linearGradient id="edgeLineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#e68a38" stopOpacity="0.8" />
+                        <stop offset="100%" stopColor="#78a89a" stopOpacity="0.4" />
+                      </linearGradient>
+                      <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                      </filter>
+                    </defs>
+
+                    {/* Orbit Guideline Circle */}
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={radius}
+                      fill="none"
+                      stroke="rgba(255, 255, 255, 0.08)"
+                      strokeWidth="1.5"
+                      strokeDasharray="6 6"
+                    />
+
+                    {/* Connection Edges from Center to Each Node */}
+                    {orbitNodes.map((node, i) => {
+                      if (node.type === 'EMPTY_ADD') {
+                        return (
+                          <line
+                            key={`edge_empty_${i}`}
+                            x1={cx}
+                            y1={cy}
+                            x2={node.x}
+                            y2={node.y}
+                            stroke="#e68a38"
+                            strokeWidth="2"
+                            strokeDasharray="4 4"
+                            strokeOpacity="0.6"
+                          />
+                        );
+                      }
+                      const isSelected = selectedCircleMember?.id === node.data.id;
+                      return (
+                        <line
+                          key={`edge_${node.data.id}`}
+                          x1={cx}
+                          y1={cy}
+                          x2={node.x}
+                          y2={node.y}
+                          stroke={isSelected ? '#e68a38' : 'url(#edgeLineGrad)'}
+                          strokeWidth={isSelected ? '3' : '1.75'}
+                          strokeDasharray={isSelected ? 'none' : '4 2'}
+                          strokeOpacity={isSelected ? 1 : 0.65}
+                          filter={isSelected ? 'url(#glowEffect)' : undefined}
+                        />
+                      );
+                    })}
+
+                    {/* Center Node: Logged-In User */}
+                    <g
+                      onClick={() => setSelectedCircleMember(null)}
+                      className="cursor-pointer transition-transform hover:scale-105"
+                    >
+                      <circle cx={cx} cy={cy} r="46" fill="url(#centerGlow)" />
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r="36"
+                        fill="#223a5e"
+                        stroke="#e68a38"
+                        strokeWidth="3.5"
+                        filter="url(#glowEffect)"
+                      />
+                      <text
+                        x={cx}
+                        y={cy + 6}
+                        textAnchor="middle"
+                        fill="#f4efe6"
+                        fontSize="15"
+                        fontWeight="900"
+                      >
+                        {currentMember?.initials || 'ME'}
+                      </text>
+
+                      {/* "YOU" badge banner */}
+                      <rect
+                        x={cx - 24}
+                        y={cy - 52}
+                        width="48"
+                        height="18"
+                        rx="9"
+                        fill="#e68a38"
+                        stroke="#ffffff"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={cx}
+                        y={cy - 40}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize="9"
+                        fontWeight="900"
+                        letterSpacing="1"
+                      >
+                        YOU
+                      </text>
+
+                      {/* User's Name label */}
+                      <text
+                        x={cx}
+                        y={cy + 52}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize="12"
+                        fontWeight="bold"
+                      >
+                        {currentMember?.name ? currentMember.name.split(' ')[0] : 'My Node'}
+                      </text>
+                      <text
+                        x={cx}
+                        y={cy + 66}
+                        textAnchor="middle"
+                        fill="#e68a38"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fontFamily="monospace"
+                      >
+                        {userTid}
+                      </text>
+                    </g>
+
+                    {/* Orbit Nodes: Circle Members and the Empty Circle with Plus Icon */}
+                    {orbitNodes.map((node) => {
+                      if (node.type === 'EMPTY_ADD') {
+                        return (
+                          <g
+                            key="node_empty_add"
+                            onClick={() => {
+                              setShowInviteModal(true);
+                              setInviteSuccess(null);
+                              setInviteError(null);
+                            }}
+                            className="cursor-pointer group"
+                          >
+                            {/* Pulsing ring aura */}
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r="32"
+                              fill="rgba(230, 138, 56, 0.15)"
+                              stroke="#e68a38"
+                              strokeWidth="1.5"
+                              strokeDasharray="3 3"
+                              className="animate-pulse"
+                            />
+                            {/* Empty circle with dashed border */}
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r="26"
+                              fill="#1c3150"
+                              stroke="#e68a38"
+                              strokeWidth="2.5"
+                              strokeDasharray="5 4"
+                              className="group-hover:fill-[#223a5e] group-hover:stroke-white transition-all"
+                            />
+                            {/* Plus Icon inside Empty Circle */}
+                            <line
+                              x1={node.x - 9}
+                              y1={node.y}
+                              x2={node.x + 9}
+                              y2={node.y}
+                              stroke="#e68a38"
+                              strokeWidth="3"
+                              strokeLinecap="round"
+                              className="group-hover:stroke-white transition-colors"
+                            />
+                            <line
+                              x1={node.x}
+                              y1={node.y - 9}
+                              x2={node.x}
+                              y2={node.y + 9}
+                              stroke="#e68a38"
+                              strokeWidth="3"
+                              strokeLinecap="round"
+                              className="group-hover:stroke-white transition-colors"
+                            />
+
+                            {/* Node Label underneath */}
+                            <text
+                              x={node.x}
+                              y={node.y + 42}
+                              textAnchor="middle"
+                              fill="#e68a38"
+                              fontSize="11"
+                              fontWeight="bold"
+                              className="group-hover:fill-white transition-colors"
+                            >
+                              Add to Circle
+                            </text>
+                            <text
+                              x={node.x}
+                              y={node.y + 54}
+                              textAnchor="middle"
+                              fill="#cbd5e1"
+                              fontSize="9"
+                            >
+                              + Invite User
+                            </text>
+                          </g>
+                        );
+                      }
+
+                      const m = node.data;
+                      const isSelected = selectedCircleMember?.id === m.id;
+
+                      return (
+                        <g
+                          key={`node_${m.id}`}
+                          onClick={() => setSelectedCircleMember(m)}
+                          className="cursor-pointer group"
+                        >
+                          {/* Selection indicator aura */}
+                          {isSelected && (
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r="33"
+                              fill="none"
+                              stroke="#e68a38"
+                              strokeWidth="2.5"
+                              strokeDasharray="4 2"
+                            />
+                          )}
+
+                          {/* Base Member Circle */}
+                          <circle
+                            cx={node.x}
+                            cy={node.y}
+                            r="26"
+                            fill="#1c3150"
+                            stroke={m.status === 'ONLINE' ? '#10b981' : '#e68a38'}
+                            strokeWidth={isSelected ? '3' : '2'}
+                            className="group-hover:stroke-white transition-colors"
+                          />
+
+                          {/* Member Initials */}
+                          <text
+                            x={node.x}
+                            y={node.y + 5}
+                            textAnchor="middle"
+                            fill="#ffffff"
+                            fontSize="12"
+                            fontWeight="bold"
+                          >
+                            {m.initials}
+                          </text>
+
+                          {/* Status Dot */}
+                          <circle
+                            cx={node.x + 18}
+                            cy={node.y - 18}
+                            r="5"
+                            fill={m.status === 'ONLINE' ? '#10b981' : '#f59e0b'}
+                            stroke="#1c3150"
+                            strokeWidth="2"
+                          />
+
+                          {/* Label below node */}
+                          <text
+                            x={node.x}
+                            y={node.y + 40}
+                            textAnchor="middle"
+                            fill="#f4efe6"
+                            fontSize="11"
+                            fontWeight="bold"
+                            className="group-hover:fill-[#e68a38] transition-colors"
+                          >
+                            {m.displayName || m.name.split(' ')[0]}
+                          </text>
+                          <text
+                            x={node.x}
+                            y={node.y + 53}
+                            textAnchor="middle"
+                            fill="#94a3b8"
+                            fontSize="9"
+                            fontFamily="monospace"
+                          >
+                            {m.tid}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+
+                {/* Graph Footer Instruction */}
+                <div className="relative z-10 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#e68a38]" />
+                    <span>Tap any node to view details • Tap empty circle <strong>(+)</strong> to invite</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowInviteModal(true);
+                      setInviteSuccess(null);
+                      setInviteError(null);
+                    }}
+                    className="text-xs font-bold text-[#e68a38] hover:text-white transition-colors underline cursor-pointer"
+                  >
+                    Invite options
+                  </button>
+                </div>
+              </div>
+
+              {/* INSPECTOR CARD FOR SELECTED MEMBER (OR LOGGED IN USER) */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-[#223a5e] text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                      {selectedCircleMember ? selectedCircleMember.initials : currentMember.initials || 'ME'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-sm text-slate-900">
+                          {selectedCircleMember ? selectedCircleMember.name : `${currentMember.name} (You)`}
+                        </h3>
+                        <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-bold border border-slate-200">
+                          {selectedCircleMember ? selectedCircleMember.tid : userTid}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {selectedCircleMember ? selectedCircleMember.relationship : 'Central Community Hub Profile'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {selectedCircleMember && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCircleMember(null)}
+                      className="text-xs text-slate-400 hover:text-slate-600 transition cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Affiliation</span>
+                    <div className="font-bold text-slate-800 mt-0.5">
+                      {selectedCircleMember ? (selectedCircleMember.coopName || 'Community Network') : tenantInfo.name}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Connection Status</span>
+                    <div className="font-bold text-emerald-700 mt-0.5 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <span>{selectedCircleMember ? selectedCircleMember.status : 'ONLINE'}</span>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Connected Since</span>
+                    <div className="font-bold text-slate-800 mt-0.5">
+                      {selectedCircleMember ? selectedCircleMember.connectedAt : 'Member Since Inception'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick actions for inspected user */}
+                <div className="pt-1 flex items-center justify-end gap-2 flex-wrap">
+                  {selectedCircleMember ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleOpenBusinessPage({
+                            ...selectedCircleMember,
+                            businessPage: {
+                              businessName: `${selectedCircleMember.name}'s Personal Wall`,
+                              description: 'Community hub member showcasing projects and micro-enterprise collaborations.',
+                            },
+                          });
+                        }}
+                        className="px-4 py-2 bg-white border border-slate-300 hover:border-[#e68a38] text-slate-700 hover:text-[#e68a38] font-bold text-xs rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Store className="w-3.5 h-3.5" />
+                        <span>View Personal Wall</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => alert(`Direct message channel opened with ${selectedCircleMember.name} (TID: ${selectedCircleMember.tid})`)}
+                        className="px-4 py-2 bg-[#223a5e] hover:bg-[#1a2f4a] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>Message</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleOpenMyBusiness}
+                      className="px-4 py-2 bg-[#223a5e] hover:bg-[#1a2f4a] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Store className="w-3.5 h-3.5" />
+                      <span>Open My Personal Wall</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* ALL CIRCLE MEMBERS ROSTER */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                      Circle Member Directory
+                    </h3>
+                    <p className="text-[11px] text-slate-500">All individuals linked to your social network</p>
+                  </div>
+                  <span className="text-xs font-bold text-[#e68a38] font-mono">
+                    {circleMembers.length} Active Peers
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {circleMembers.map((m) => (
+                    <div
+                      key={m.id}
+                      onClick={() => setSelectedCircleMember(m)}
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        selectedCircleMember?.id === m.id
+                          ? 'border-[#e68a38] bg-[#e68a38]/5 shadow-xs ring-1 ring-[#e68a38]'
+                          : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-white font-bold text-xs flex items-center justify-center shrink-0">
+                          {m.initials}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs text-slate-900 truncate">{m.name}</div>
+                          <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
+                            <span className="text-[#e68a38] font-bold">{m.tid}</span>
+                            <span>•</span>
+                            <span className="truncate">{m.role}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                    </div>
+                  ))}
+
+                  {/* Empty Add Card */}
+                  <div
+                    onClick={() => {
+                      setShowInviteModal(true);
+                      setInviteSuccess(null);
+                      setInviteError(null);
+                    }}
+                    className="p-3.5 rounded-xl border-2 border-dashed border-[#e68a38]/60 hover:border-[#e68a38] bg-[#e68a38]/5 hover:bg-[#e68a38]/10 transition-all cursor-pointer flex items-center justify-center gap-2.5 text-center"
+                  >
+                    <Plus className="w-4 h-4 text-[#e68a38]" />
+                    <span className="text-xs font-bold text-[#e68a38]">Invite / Add New Connection</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* TAB: MORE SERVICES & ACCOUNT (Silong Community Hub) */}
         {activeTab === 'more' && (
           <div className="space-y-6">
@@ -11034,14 +11836,226 @@ export default function MemberPortalPage() {
             </div>
           </div>
         )}
+
+        {/* INVITE TO MY CIRCLE MODAL (TID, EMAIL, SHARE LINK) */}
+        {showInviteModal && (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center shrink-0">
+                    <UserPlus className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">Invite to My Circle</h3>
+                    <p className="text-[11px] text-slate-500">Expand your social network graph</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 3 Invitation Method Tabs */}
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteMethod('TID');
+                    setInviteError(null);
+                    setInviteSuccess(null);
+                  }}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
+                    inviteMethod === 'TID'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Key-in TID
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteMethod('EMAIL');
+                    setInviteError(null);
+                    setInviteSuccess(null);
+                  }}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
+                    inviteMethod === 'EMAIL'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Via E-mail
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteMethod('LINK');
+                    setInviteError(null);
+                    setInviteSuccess(null);
+                  }}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
+                    inviteMethod === 'LINK'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Share Link
+                </button>
+              </div>
+
+              {inviteError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{inviteError}</span>
+                </div>
+              )}
+
+              {inviteSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{inviteSuccess}</span>
+                </div>
+              )}
+
+              {/* METHOD 1: KEY-IN TID */}
+              {inviteMethod === 'TID' && (
+                <form onSubmit={handleSendInvite} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Tuntong Tech ID (TID) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={inviteTidInput}
+                      onChange={(e) => setInviteTidInput(e.target.value.toUpperCase())}
+                      placeholder="e.g. TT-98214"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs font-mono uppercase"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Ask your connection for their unique Tuntong Tech ID (e.g. TT-98214).
+                    </p>
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInviteModal(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition cursor-pointer"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={inviteLoading}
+                      className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {inviteLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      <span>Add to Circle</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* METHOD 2: VIA E-MAIL */}
+              {inviteMethod === 'EMAIL' && (
+                <form onSubmit={handleSendInvite} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Peer E-mail Address <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={inviteEmailInput}
+                      onChange={(e) => setInviteEmailInput(e.target.value)}
+                      placeholder="e.g. colleague@example.com"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Personal Message (Optional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={inviteMessageInput}
+                      onChange={(e) => setInviteMessageInput(e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInviteModal(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition cursor-pointer"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={inviteLoading}
+                      className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {inviteLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      <span>Send E-mail Invite</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* METHOD 3: VIA SHARE LINK */}
+              {inviteMethod === 'LINK' && (
+                <div className="space-y-4">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                      Your Unique Invitation Link:
+                    </span>
+                    <div className="font-mono text-xs text-slate-800 bg-white p-2.5 rounded-lg border border-slate-200 break-all select-all">
+                      {`https://silong.tuntongtech.com/join?ref=${userTid}`}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCopyInviteLink}
+                      className="flex-1 py-2.5 px-4 bg-white border border-[#e68a38] hover:bg-[#e68a38]/10 text-[#e68a38] font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {hasCopiedLink ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                      <span>{hasCopiedLink ? 'Link Copied!' : 'Copy Invite Link'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleShareInviteLink}
+                      className="flex-1 py-2.5 px-4 bg-[#e68a38] hover:bg-[#d97c2c] text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>Share via Apps</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 3 Hubs) */}
+      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 4 Hubs) */}
       <nav
-        className="fixed bottom-0 left-0 right-0 z-40 bg-[#223a5e] border-t border-[#e68a38]/30 shadow-2xl pt-2 px-4"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-[#223a5e] border-t border-[#e68a38]/30 shadow-2xl pt-2 px-3"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
-        <div className="max-w-md mx-auto grid grid-cols-3 gap-2">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5">
           {/* 1. Dashboard (Silong Community Hub) */}
           <button
             type="button"
@@ -11049,7 +12063,7 @@ export default function MemberPortalPage() {
               setActiveTab('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
               activeTab === 'home'
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
@@ -11063,24 +12077,46 @@ export default function MemberPortalPage() {
           <button
             type="button"
             onClick={handleOpenMyBusiness}
-            className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
               Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
             }`}
           >
             <Store className={`w-5 h-5 mb-1 ${Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber)) ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
-            <span className="text-[10px] leading-tight">My Personal Wall</span>
+            <span className="text-[10px] leading-tight">My Wall</span>
           </button>
 
-          {/* 3. More (Account, Identity & Settings) */}
+          {/* 3. My Circle (Social Network Graph) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('circle');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
+              activeTab === 'circle'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
+            }`}
+          >
+            <div className="relative">
+              <Network className={`w-5 h-5 mb-1 ${activeTab === 'circle' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+              <span className="absolute -top-1 -right-2 bg-[#e68a38] text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-[#223a5e]">
+                {circleMembers.length}
+              </span>
+            </div>
+            <span className="text-[10px] leading-tight">My Circle</span>
+          </button>
+
+          {/* 4. More (Account, Identity & Settings) */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('more');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all ${
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
               activeTab === 'more'
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
