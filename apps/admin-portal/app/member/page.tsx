@@ -1884,12 +1884,17 @@ export default function MemberPortalPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const prompted = sessionStorage.getItem('silong_onboarding_coop_prompted');
-      if (!isCoopLinked && !prompted) {
+      const forcePrompt = sessionStorage.getItem('silong_prompt_link_coop');
+      if ((!isCoopLinked && !prompted) || forcePrompt === 'true') {
         sessionStorage.setItem('silong_onboarding_coop_prompted', 'true');
+        sessionStorage.removeItem('silong_prompt_link_coop');
         setShowLinkCoopModal(true);
+        if (currentMember?.email) {
+          setLinkUserAccount(currentMember.email);
+        }
       }
     }
-  }, [isCoopLinked]);
+  }, [isCoopLinked, currentMember]);
 
   const handleLinkCoopSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

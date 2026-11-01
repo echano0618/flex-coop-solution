@@ -51,6 +51,7 @@ import {
   handleCreateCommunityArticle,
   handleLikeCommunityArticle,
   handleDeleteCommunityArticle,
+  handleMemberGoogleLogin,
   resolveTenantId,
 } from '../index';
 import {
@@ -5764,7 +5765,109 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 50 SILONG COMMUNITY FEED & ARTICLES TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49 & 50) PASSED SUCCESSFULLY!\n');
+  // =========================================================================
+  // SECTION 51: GOOGLE SIGN-IN FOR SILONG COMMUNITY HUB (TUNTONG TECH CENTRAL AUTH)
+  // =========================================================================
+  console.log('\n--- SECTION 51: GOOGLE SIGN-IN FOR SILONG COMMUNITY HUB (TUNTONG TECH CENTRAL AUTH) ---');
+  {
+    const createMockHttp = (overrides: {
+      params?: any;
+      headers?: any;
+      body?: any;
+      query?: any;
+    }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        params: overrides.params || {},
+        headers: overrides.headers || {},
+        body: overrides.body || {},
+        query: overrides.query || {},
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    // 51.1 Missing email returns HTTP 400
+    console.log('  51.1 Testing missing Google email validation...');
+    const noEmailMock = createMockHttp({
+      body: { name: 'Anonymous User' },
+    });
+    await handleMemberGoogleLogin(noEmailMock.req, noEmailMock.res);
+    assert(noEmailMock.getStatus() === 400, 'Missing email returns HTTP 400');
+    assert(noEmailMock.getBody().success === false, 'Returns success: false');
+    assert(noEmailMock.getBody().error.includes('email is required'), 'Error message specifies email is required');
+
+    // 51.2 Valid Google Sign-In for new community user (Unlinked to cooperative)
+    console.log('  51.2 Testing new community user Google sign-in (unlinked)...');
+    const newGoogleUser = {
+      email: 'new.community.user@gmail.com',
+      name: 'Community Explorer',
+      pictureUrl: 'https://lh3.googleusercontent.com/a/community-user',
+      googleUid: 'goog_sub_987654321',
+    };
+    const newMock = createMockHttp({
+      body: newGoogleUser,
+    });
+    await handleMemberGoogleLogin(newMock.req, newMock.res);
+    assert(newMock.getStatus() === 200, 'New user Google sign-in returns HTTP 200');
+    const newBody = newMock.getBody();
+    assert(newBody.success === true, 'Returns success: true');
+    assert(newBody.isCoopLinked === false, 'New user is initially isCoopLinked: false');
+    assert(newBody.firebaseProjectId === 'tuntong-tech', 'Carries firebaseProjectId: tuntong-tech');
+    assert(newBody.firebaseProjectNumber === '581563779021', 'Carries firebaseProjectNumber: 581563779021');
+    assert(typeof newBody.token === 'string' && newBody.token.length > 20, 'Generates valid JWT auth token');
+
+    // Verify 11-digit TID
+    const tid = newBody.member.tid;
+    assert(typeof tid === 'string', 'TID is a string');
+    assert(tid.length === 11, `TID must be exactly 11 digits, got length ${tid.length}`);
+    assert(/^\d{11}$/.test(tid), `TID must be all numeric digits without TT- prefix, got ${tid}`);
+    assert(!tid.startsWith('TT-'), 'TID does not have TT- prefix');
+
+    // 51.3 Deterministic TID check (same user yields exact same 11-digit TID)
+    console.log('  51.3 Testing deterministic 11-digit TID generation...');
+    const repeatMock = createMockHttp({
+      body: newGoogleUser,
+    });
+    await handleMemberGoogleLogin(repeatMock.req, repeatMock.res);
+    assert(repeatMock.getBody().member.tid === tid, 'Same Google credentials produce exact same deterministic TID');
+
+    // 51.4 Google Sign-In for existing cooperative member (Auto-linked)
+    console.log('  51.4 Testing existing cooperative member Google sign-in (auto-linked)...');
+    const existingMemberMock = createMockHttp({
+      body: {
+        email: 'maria.santos@gmail.com',
+        name: 'Maria Clara Santos',
+      },
+    });
+    await handleMemberGoogleLogin(existingMemberMock.req, existingMemberMock.res);
+    assert(existingMemberMock.getStatus() === 200, 'Existing member Google sign-in returns HTTP 200');
+    const existingBody = existingMemberMock.getBody();
+    assert(existingBody.success === true, 'Returns success: true');
+    assert(existingBody.isCoopLinked === true, 'Existing coop member is automatically isCoopLinked: true');
+    assert(existingBody.member.coopName !== undefined && existingBody.member.coopName.length > 0, 'Includes linked coop name');
+    assert(existingBody.firebaseProjectId === 'tuntong-tech', 'Carries central Tuntong Tech Firebase metadata');
+    assert(existingBody.firebaseProjectNumber === '581563779021', 'Carries 581563779021');
+
+    console.log('  ✅ ALL SECTION 51 GOOGLE SIGN-IN & TUNTONG TECH CENTRAL AUTH TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50 & 51) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

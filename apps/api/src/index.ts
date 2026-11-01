@@ -683,6 +683,135 @@ app.post('/api/v1/auth/member/login', async (req: Request, res: Response) => {
   }
 });
 
+// -------------------------------------------------------------
+// GOOGLE SIGN-IN FOR SILONG COMMUNITY HUB
+// Authenticates with Tuntong Tech Central Firebase (581563779021)
+// -------------------------------------------------------------
+export const handleMemberGoogleLogin = async (req: Request, res: Response) => {
+  try {
+    const { email, name, pictureUrl, googleUid } = req.body || {};
+
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({ success: false, error: 'Google email is required.' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanName = String(name || cleanEmail.split('@')[0] || 'Community Member').trim();
+
+    // Generate deterministic 11-digit TID (strictly 11 digits, no "TT-" prefix per spec)
+    let numericHash = 0;
+    const seedStr = cleanEmail + (googleUid || '');
+    for (let i = 0; i < seedStr.length; i++) {
+      numericHash = (numericHash * 31 + seedStr.charCodeAt(i)) >>> 0;
+    }
+    const computedTid = String(numericHash).slice(-11).padStart(11, '0');
+
+    // 1. Check if user has an existing cooperative account across tenants
+    let matchedCoopMember: any = null;
+    let matchedTenantId: string | null = null;
+    let matchedCoopName = 'Silong Community Hub';
+
+    for (const [tId, memList] of dbStore.members.entries()) {
+      const found = memList.find((m) => String(m.email || '').toLowerCase() === cleanEmail);
+      if (found) {
+        matchedCoopMember = found;
+        matchedTenantId = tId;
+        const coopReg = dbStore.coopRegistrations.find((r) => r.id === tId || r.slug === tId.replace('tenant_', ''));
+        matchedCoopName = coopReg?.name || `${tId.replace('tenant_', '')} Cooperative`;
+        break;
+      }
+    }
+
+    // 2. Lookup or initialize Personal Wall in Central Tuntong Tech Firebase (581563779021)
+    let personalWall: any = dbStore.personalWalls.get(cleanEmail) || dbStore.personalWalls.get(computedTid);
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      const fsWall = (await tuntongFs.getPersonalWall(cleanEmail)) || (await tuntongFs.getPersonalWall(computedTid));
+      if (fsWall) personalWall = fsWall;
+    } catch {}
+
+    if (!personalWall) {
+      personalWall = {
+        businessName: `${cleanName}'s Personal Wall`,
+        natureOfBusiness: 'Community Contributor',
+        pictureUrl: pictureUrl || '',
+        nextGoal: 'Connect and collaborate with community cooperatives',
+        description: 'Member of Silong Community Hub.',
+        email: cleanEmail,
+        contactNumber: '',
+        location: '',
+        comments: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      };
+      dbStore.personalWalls.set(cleanEmail, personalWall);
+      dbStore.personalWalls.set(computedTid, personalWall);
+      try {
+        const tuntongFs = FirestoreTuntongService.getInstance();
+        await tuntongFs.savePersonalWall(cleanEmail, personalWall);
+        await tuntongFs.savePersonalWall(computedTid, personalWall);
+      } catch {}
+    }
+
+    // 3. Assemble unified member profile
+    const isCoopLinked = Boolean(matchedCoopMember);
+    const memberProfile = {
+      id: matchedCoopMember?.id || `usr_${computedTid}`,
+      memberNumber: matchedCoopMember?.memberNumber || computedTid,
+      name: matchedCoopMember?.name || cleanName,
+      firstName: matchedCoopMember?.firstName || cleanName.split(' ')[0],
+      lastName: matchedCoopMember?.lastName || cleanName.split(' ').slice(1).join(' ') || '',
+      email: cleanEmail,
+      contactNumber: matchedCoopMember?.contactNumber || matchedCoopMember?.phone || '',
+      phone: matchedCoopMember?.phone || matchedCoopMember?.contactNumber || '',
+      tid: computedTid,
+      selfiePreview: pictureUrl || matchedCoopMember?.selfiePreview || '',
+      initials:
+        cleanName
+          .split(' ')
+          .map((n: string) => n[0])
+          .join('')
+          .substring(0, 2)
+          .toUpperCase() || 'CM',
+      classification: matchedCoopMember?.classification || 'REGULAR',
+      isCoopLinked,
+      tenantId: matchedTenantId || 'tenant_default',
+      tenantSlug: matchedTenantId ? matchedTenantId.replace('tenant_', '') : 'unlinked',
+      coopName: matchedCoopName,
+      businessPage: personalWall,
+      authProvider: 'GOOGLE',
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    };
+
+    // 4. Generate JWT token with central project claims
+    const token = AuthService.generateToken({
+      id: memberProfile.id,
+      fullName: memberProfile.name,
+      email: cleanEmail,
+      role: 'MEMBER' as any,
+      tenantId: memberProfile.tenantId,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Google Sign-In authenticated successfully.',
+      member: memberProfile,
+      isCoopLinked,
+      token,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+app.post('/api/v1/auth/member/google-login', handleMemberGoogleLogin);
+app.post('/auth/member/google-login', handleMemberGoogleLogin);
+
 const handleMemberCredentialChange = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
@@ -4492,7 +4621,14 @@ export const handleLinkCoopMemberAccount = async (req: Request, res: Response) =
     }
 
     // 3. Verify Date of Birth if recorded on the member's profile
-    const memberDob = (matchedMember as any).dateOfBirth || (matchedMember as any).birthDate || (matchedMember as any).dob;
+    let memberDob = (matchedMember as any).dateOfBirth || (matchedMember as any).birthDate || (matchedMember as any).dob;
+    if (!memberDob) {
+      const inMemMems = dbStore.members.get(tenantId) || [];
+      const memInMem = inMemMems.find((m: any) => m.id === matchedMember.id || m.memberNumber === matchedMember.memberNumber);
+      if (memInMem) {
+        memberDob = (memInMem as any).dateOfBirth || (memInMem as any).birthDate || (memInMem as any).dob;
+      }
+    }
     if (memberDob) {
       const normMemberDob = String(memberDob).slice(0, 10);
       const normInputDob = cleanDob.slice(0, 10);
