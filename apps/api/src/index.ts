@@ -3825,12 +3825,23 @@ export async function handleGetMemberBusinessPage(req: Request, res: Response) {
 
     // 1. First, lookup Personal Wall in Tuntong Tech Central Firebase (581563779021)
     let personalWall: any = dbStore.personalWalls.get(cleanKey);
+    if (!personalWall && (cleanKey === 'mem_gm_0001' || cleanKey === 'mem-2026-0001')) {
+      personalWall = dbStore.personalWalls.get('mem-2026-0001') || dbStore.personalWalls.get('mem_gm_0001');
+    }
+
     try {
       const tuntongFs = FirestoreTuntongService.getInstance();
       const fsWall = await tuntongFs.getPersonalWall(cleanKey);
       if (fsWall) {
         personalWall = fsWall;
         dbStore.personalWalls.set(cleanKey, fsWall);
+      } else if (cleanKey === 'mem_gm_0001' || cleanKey === 'mem-2026-0001') {
+        const altKey = cleanKey === 'mem_gm_0001' ? 'mem-2026-0001' : 'mem_gm_0001';
+        const altWall = await tuntongFs.getPersonalWall(altKey);
+        if (altWall) {
+          personalWall = altWall;
+          dbStore.personalWalls.set(cleanKey, altWall);
+        }
       }
     } catch (fsErr) {
       console.warn('[FirestoreTuntongService] getPersonalWall error:', fsErr);
@@ -3854,6 +3865,19 @@ export async function handleGetMemberBusinessPage(req: Request, res: Response) {
           ((memberId === 'mem_gm_0001' || memberId === 'MEM-2026-0001') &&
             (m.memberNumber === 'MEM-2026-0001' || m.id === 'mem_gm_0001'))
       );
+    }
+
+    // If still not found, check personal walls under member's other aliases
+    if (!personalWall && member) {
+      if (member.memberNumber) {
+        personalWall = dbStore.personalWalls.get(member.memberNumber.toLowerCase());
+      }
+      if (!personalWall && member.id) {
+        personalWall = dbStore.personalWalls.get(member.id.toLowerCase());
+      }
+      if (!personalWall && member.email) {
+        personalWall = dbStore.personalWalls.get(member.email.toLowerCase());
+      }
     }
 
     // 3. Migration fallback: If not yet in Tuntong Tech, read from existing member.businessPage
@@ -3968,12 +3992,26 @@ export async function handleUpdateMemberBusinessPage(req: Request, res: Response
     if (member?.memberNumber) {
       dbStore.personalWalls.set(member.memberNumber.toLowerCase(), updatedPersonalWall);
     }
+    if (member?.id) {
+      dbStore.personalWalls.set(member.id.toLowerCase(), updatedPersonalWall);
+    }
+    if (cleanKey === 'mem-2026-0001' || cleanKey === 'mem_gm_0001' || member?.memberNumber === 'MEM-2026-0001' || member?.id === 'mem_gm_0001') {
+      dbStore.personalWalls.set('mem-2026-0001', updatedPersonalWall);
+      dbStore.personalWalls.set('mem_gm_0001', updatedPersonalWall);
+    }
 
     try {
       const tuntongFs = FirestoreTuntongService.getInstance();
       await tuntongFs.savePersonalWall(cleanKey, updatedPersonalWall);
       if (member?.email && member.email.toLowerCase() !== cleanKey) {
         await tuntongFs.savePersonalWall(member.email.toLowerCase(), updatedPersonalWall);
+      }
+      if (member?.memberNumber && member.memberNumber.toLowerCase() !== cleanKey) {
+        await tuntongFs.savePersonalWall(member.memberNumber.toLowerCase(), updatedPersonalWall);
+      }
+      if (cleanKey === 'mem-2026-0001' || cleanKey === 'mem_gm_0001' || member?.memberNumber === 'MEM-2026-0001' || member?.id === 'mem_gm_0001') {
+        await tuntongFs.savePersonalWall('mem-2026-0001', updatedPersonalWall);
+        await tuntongFs.savePersonalWall('mem_gm_0001', updatedPersonalWall);
       }
     } catch (fsErr) {
       console.warn('[FirestoreTuntongService] savePersonalWall fallback:', fsErr);
@@ -3986,6 +4024,10 @@ export async function handleUpdateMemberBusinessPage(req: Request, res: Response
       const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
       if (idx !== -1) mems[idx] = member;
       dbStore.members.set(tenantId, mems);
+      try {
+        const fsService = FirestoreCoopService.getInstance();
+        await fsService.saveMember(tenantId, member);
+      } catch {}
     }
 
     res.json({
