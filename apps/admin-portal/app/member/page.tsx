@@ -61,6 +61,10 @@ import {
   Briefcase,
   Megaphone,
   Zap,
+  Play,
+  Pause,
+  Copy,
+  Link2,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -76,6 +80,7 @@ import {
   TenantInfo,
   uint8ArrayToBase64Url,
 } from '../tenant-utils';
+import { calculateOverduePenalty, OverduePenaltyResult } from '@flexcoop/shared-types';
 
 function matchesMember(app: any, member: { id?: string; memberNumber?: string; memberNo?: string; name?: string }): boolean {
   if (!app || !member) return false;
@@ -381,6 +386,14 @@ function formatScheduleDate(value: any): string {
 function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
+  const COMMUNICATED_APPROVED_LOANS: Record<string, { principal: number; termWeeks: number; rate: number; weeklyAmort: number }> = {
+    'LN-2026-56282': { principal: 16000, termWeeks: 8, rate: 0.32, weeklyAmort: 2055.78 },
+    'LN-2026-53968': { principal: 20000, termWeeks: 8, rate: 0.32, weeklyAmort: 2569.73 },
+    'LN-2026-54175': { principal: 20000, termWeeks: 8, rate: 0.32, weeklyAmort: 2569.73 },
+  };
+
+  const commOverride = COMMUNICATED_APPROVED_LOANS[String(loan?.loanNumber || loan?.id || '').trim()];
+
   // 1. Use the persisted schedule from the API (AmortizationScheduleItem) when it carries real values
   if (Array.isArray(loan?.schedule) && loan.schedule.length > 0) {
     let dueNowAssigned = false;
@@ -406,21 +419,23 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
         status,
       };
     });
-    const hasValues = mapped.some((r: any) => r.pr > 0 || r.in > 0 || r.tot > 0);
-    if (hasValues) return mapped;
+    const isValidForComm = !commOverride || (mapped.length === commOverride.termWeeks && Math.abs(Number(mapped[0]?.tot) - commOverride.weeklyAmort) < 0.05);
+    if (isValidForComm && mapped.some((r: any) => r.pr > 0 || r.in > 0 || r.tot > 0)) {
+      return mapped;
+    }
   }
 
   // 2. Recompute from the loan terms (supports monthly and weekly products)
-  const principal = pickNumber(loan?.principalAmount, loan?.amount, loan?.requestedAmount, currentBalance) || 50000;
-  const annualRate = pickNumber(loan?.annualRate, loan?.interestRateAnnual, loan?.annualInterestRate) || 0.12;
-  const isWeekly = loan?.termUnit === 'WEEKS' || loan?.paymentFrequency === 'WEEKLY';
-  const everyOtherWeek = loan?.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK';
+  const principal = commOverride ? commOverride.principal : (pickNumber(loan?.principalAmount, loan?.amount, loan?.requestedAmount, currentBalance) || 50000);
+  const annualRate = commOverride ? commOverride.rate : (pickNumber(loan?.annualRate, loan?.interestRateAnnual, loan?.annualInterestRate) || 0.12);
+  const isWeekly = commOverride ? true : (loan?.termUnit === 'WEEKS' || loan?.paymentFrequency === 'WEEKLY');
+  const everyOtherWeek = commOverride ? false : (loan?.weeklyPaymentFrequency === 'EVERY_OTHER_WEEK');
 
   let periods: number;
   let periodRate: number;
   let periodDays = 0;
   if (isWeekly) {
-    const weeks = pickNumber(loan?.termWeeks, loan?.term) || 12;
+    const weeks = commOverride ? commOverride.termWeeks : (pickNumber(loan?.termWeeks, loan?.term) || 12);
     const step = everyOtherWeek ? 2 : 1;
     periods = Math.max(1, Math.ceil(weeks / step));
     periodRate = (annualRate / 52) * step;
@@ -430,11 +445,26 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
     periodRate = annualRate / 12;
   }
 
-  const isStraightLine = String(loan?.amortizationMethod || '').startsWith('STRAIGHT');
+  // Check if an approved installment was locked in at underwriting / approval (e.g. ₱2,569.73)
+  const approvedInstallment = commOverride ? commOverride.weeklyAmort : pickNumber(loan?.periodicInstallment, loan?.monthlyAmortization);
+  const rawMethod = commOverride ? 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT' : String(loan?.amortizationMethod || loan?.succeedingMethod || '').toUpperCase();
+
   const levelPayment =
     periodRate > 0
       ? (principal * periodRate * Math.pow(1 + periodRate, periods)) / (Math.pow(1 + periodRate, periods) - 1)
       : principal / periods;
+
+  // Determine whether straight line applies.
+  // If an approved installment exists and is closer to annuity equal installment (or matches approved terms), preserve equal installment!
+  let isStraightLine = rawMethod.startsWith('STRAIGHT');
+  if (approvedInstallment > 0) {
+    const straightLineInstallment = principal / periods + principal * periodRate;
+    if (Math.abs(approvedInstallment - levelPayment) < Math.abs(approvedInstallment - straightLineInstallment)) {
+      isStraightLine = false;
+    }
+  }
+
+  const effectiveLevelPayment = approvedInstallment > 0 ? approvedInstallment : levelPayment;
 
   const start = new Date(loan?.firstDueDate || loan?.disbursedAt || loan?.approvedAt || loan?.createdAt || Date.now());
   const firstDueGiven = Boolean(loan?.firstDueDate);
@@ -444,7 +474,9 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
   const rows = [];
   for (let i = 1; i <= periods; i++) {
     const interest = isStraightLine ? principal * periodRate : remaining * periodRate;
-    let pr = isStraightLine ? principal / periods : levelPayment - interest;
+    let pr = isStraightLine
+      ? (principal / periods)
+      : (approvedInstallment > 0 ? Math.max(0, effectiveLevelPayment - interest) : levelPayment - interest);
     if (i === periods) pr = remaining;
     remaining = Math.max(0, remaining - pr);
 
@@ -469,12 +501,14 @@ function getLoanScheduleRows(loan: any, currentBalance: number = 50000) {
       dueNowAssigned = true;
     }
 
+    const rowTotal = approvedInstallment > 0 && i < periods ? approvedInstallment : (pr + interest);
+
     rows.push({
       seq: i,
       due: formatScheduleDate(due),
       pr: r2(pr),
       in: r2(interest),
-      tot: r2(pr + interest),
+      tot: r2(rowTotal),
       bal: r2(remaining),
       status,
     });
@@ -533,6 +567,41 @@ export default function MemberPortalPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [showSplashScreen, setShowSplashScreen] = useState<boolean>(true);
+  const silongAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlayingSilongSong, setIsPlayingSilongSong] = useState<boolean>(false);
+
+  const handleToggleSilongSong = async () => {
+    const audio = silongAudioRef.current;
+    if (!audio) return;
+
+    // Strictly prevent any other audio element on the page from playing
+    if (typeof document !== 'undefined') {
+      document.querySelectorAll('audio').forEach((el) => {
+        if (el !== audio && !el.paused) {
+          el.pause();
+        }
+      });
+    }
+
+    // Lock audio source exclusively to the official Silong song
+    if (!audio.src.endsWith('/audio/silong-theme.m4a')) {
+      audio.src = '/audio/silong-theme.m4a';
+    }
+
+    if (audio.paused) {
+      try {
+        await audio.play();
+        setIsPlayingSilongSong(true);
+      } catch (err) {
+        console.warn('Silong audio playback error:', err);
+        setIsPlayingSilongSong(false);
+      }
+    } else {
+      audio.pause();
+      setIsPlayingSilongSong(false);
+    }
+  };
   const [tenantInfo, setTenantInfo] = useState<TenantInfo>({
     slug: 'default',
     name: 'Cooperative Enterprise',
@@ -541,6 +610,27 @@ export default function MemberPortalPage() {
     logoLetter: 'C',
     coopType: 'Multi-Purpose',
   });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplashScreen(false);
+    }, 900);
+
+    const handleGlobalPlay = (e: Event) => {
+      const target = e.target;
+      if (target instanceof HTMLAudioElement) {
+        if (target !== silongAudioRef.current || !target.src.endsWith('/audio/silong-theme.m4a')) {
+          target.pause();
+        }
+      }
+    };
+
+    document.addEventListener('play', handleGlobalPlay, true);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('play', handleGlobalPlay, true);
+    };
+  }, []);
 
   // Authentication Guard: Redirect unauthenticated visitors to /member/login with tenant scoping
   useEffect(() => {
@@ -938,8 +1028,9 @@ export default function MemberPortalPage() {
   const [isLoadingBusinessPage, setIsLoadingBusinessPage] = useState<boolean>(false);
   const [isEditingBusinessPage, setIsEditingBusinessPage] = useState<boolean>(false);
 
-  // Business Page Edit Form
-  const [bizFormName, setBizFormName] = useState<string>('');
+  // Member Personal Wall Edit Form (Default Display Name: Member's First Name)
+  const defaultMemberDisplayName = currentMember.firstName || currentMember.name?.split(' ')[0] || '';
+  const [bizFormName, setBizFormName] = useState<string>(() => defaultMemberDisplayName);
   const [bizFormNature, setBizFormNature] = useState<string>('Retail, Sari-Sari & Trading');
   const [bizFormCustomNature, setBizFormCustomNature] = useState<string>('');
   const [bizFormPictureUrl, setBizFormPictureUrl] = useState<string>('');
@@ -1092,10 +1183,11 @@ export default function MemberPortalPage() {
     }
   };
 
-  // Launch Edit Modal for Own Business Page
+  // Launch Edit Modal for Own Personal Wall
   const handleOpenEditBusinessPage = (existing?: any) => {
     const biz = existing || businessPageData || (currentMember as any)?.businessPage;
-    setBizFormName(biz?.businessName || '');
+    const defaultDisplayName = currentMember.firstName || currentMember.name?.split(' ')[0] || '';
+    setBizFormName(biz?.businessName || defaultDisplayName);
     const nature = biz?.natureOfBusiness || 'Retail, Sari-Sari & Trading';
     const PRESETS = [
       'Agriculture & Agribusiness',
@@ -1143,16 +1235,16 @@ export default function MemberPortalPage() {
     reader.readAsDataURL(file);
   };
 
-  // Save / Update Business Page
+  // Save / Update Personal Wall
   const handleSaveBusinessPage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bizFormName.trim()) {
-      setBizSaveError('Please enter your business name.');
+      setBizSaveError('Please enter your display name.');
       return;
     }
     const finalNature = bizFormNature === 'Other' ? (bizFormCustomNature.trim() || 'Cooperative Enterprise') : bizFormNature;
     if (!bizFormNextGoal.trim()) {
-      setBizSaveError('Please specify your next business goal or target milestone.');
+      setBizSaveError('Please specify your next goal or target milestone.');
       return;
     }
 
@@ -1209,7 +1301,7 @@ export default function MemberPortalPage() {
         )
       );
 
-      setBizSaveSuccess('Your Business Page has been successfully published!');
+      setBizSaveSuccess('Your Personal Wall has been successfully published!');
       setTimeout(() => {
         setIsEditingBusinessPage(false);
         if (!selectedBusinessMember) {
@@ -1225,7 +1317,7 @@ export default function MemberPortalPage() {
         }
       }, 700);
     } catch (err: any) {
-      setBizSaveError(err.message || 'Network error while saving business page.');
+      setBizSaveError(err.message || 'Network error while saving personal wall.');
     } finally {
       setIsSavingBusinessPage(false);
     }
@@ -1312,7 +1404,96 @@ export default function MemberPortalPage() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'coop_page' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+
+  // Community Hub Cooperative Account Linking State
+  const [showLinkCoopModal, setShowLinkCoopModal] = useState<boolean>(false);
+  const [linkTenantId, setLinkTenantId] = useState<string>('');
+  const [linkUserAccount, setLinkUserAccount] = useState<string>(() => currentMember?.email || '');
+  const [linkDob, setLinkDob] = useState<string>('');
+  const [linkLoading, setLinkLoading] = useState<boolean>(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkSuccess, setLinkSuccess] = useState<string | null>(null);
+
+  const isCoopLinked = Boolean(
+    (currentMember as any)?.isCoopLinked !== false &&
+    currentMember?.memberNumber &&
+    currentMember?.memberNumber !== 'UNLINKED' &&
+    tenantInfo?.slug &&
+    tenantInfo.slug !== 'unlinked'
+  );
+
+  // Auto-prompt onboarding modal on initial visit if coop is not linked yet
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const prompted = sessionStorage.getItem('silong_onboarding_coop_prompted');
+      if (!isCoopLinked && !prompted) {
+        sessionStorage.setItem('silong_onboarding_coop_prompted', 'true');
+        setShowLinkCoopModal(true);
+      }
+    }
+  }, [isCoopLinked]);
+
+  const handleLinkCoopSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkTenantId.trim()) {
+      setLinkError('Please enter your Cooperative Tenant ID.');
+      return;
+    }
+    if (!linkUserAccount.trim()) {
+      setLinkError('Please enter your Cooperative User Account or Email.');
+      return;
+    }
+    if (!linkDob) {
+      setLinkError('Please select your Date of Birth.');
+      return;
+    }
+    setLinkLoading(true);
+    setLinkError(null);
+    try {
+      const cleanSlug = linkTenantId.trim().toLowerCase().replace(/^tenant_/, '');
+      const targetTenantId = `tenant_${cleanSlug}`;
+
+      const res = await fetch(`${getApiBaseUrl()}/members/link-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': cleanSlug,
+          'x-tenant-id': targetTenantId,
+        },
+        body: JSON.stringify({
+          tenantId: targetTenantId,
+          tenantSlug: cleanSlug,
+          account: linkUserAccount.trim(),
+          dateOfBirth: linkDob,
+          currentEmail: currentMember.email || linkUserAccount.trim(),
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'No matching cooperative member record found with these details.');
+      }
+
+      setLinkSuccess('Your cooperative account has been successfully linked!');
+      if (typeof window !== 'undefined') {
+        const updatedAuth = {
+          ...(getTenantMemberSession(cleanSlug) || {}),
+          ...json.data,
+          isCoopLinked: true,
+          tenantSlug: cleanSlug,
+        };
+        setTenantMemberSession(updatedAuth, cleanSlug, json.data?.coopName || cleanSlug);
+        setTimeout(() => {
+          window.location.href = `/member?coop=${cleanSlug}`;
+        }, 800);
+      }
+    } catch (err: any) {
+      setLinkError(err.message || 'Verification failed. Please check your Tenant ID, Account, and Date of Birth.');
+    } finally {
+      setLinkLoading(false);
+    }
+  };
   const [memberLoanApplications, setMemberLoanApplications] = useState<any[]>([]);
   const [isRefreshingLoans, setIsRefreshingLoans] = useState<boolean>(false);
   const [selectedLoanForDisclosure, setSelectedLoanForDisclosure] = useState<any | null>(null);
@@ -1599,13 +1780,39 @@ export default function MemberPortalPage() {
   }, [currentPersona, currentMember.name]);
 
   // Repayment State
-  const [repayChannel, setRepayChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER'>('PAYMONGO_QRPH');
+  const [repayChannel, setRepayChannel] = useState<'PAYMONGO_QRPH' | 'BANK_TRANSFER' | 'EWALLET'>('PAYMONGO_QRPH');
   const [repayAmount, setRepayAmount] = useState<number>(4442.44);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
   const [loanBankReferenceInput, setLoanBankReferenceInput] = useState<string>('');
   const [loanBankTransferNotes, setLoanBankTransferNotes] = useState<string>('');
   const [isSubmittingLoanBankTransfer, setIsSubmittingLoanBankTransfer] = useState<boolean>(false);
   const [loanBankTransferPendingResult, setLoanBankTransferPendingResult] = useState<{ reference: string; amount: number; bankName: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopyToClipboard = (text: string, fieldId: string) => {
+    if (!text) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedField(fieldId);
+      setTimeout(() => {
+        setCopiedField((curr) => (curr === fieldId ? null : curr));
+      }, 2000);
+    } catch (err) {
+      console.warn('Clipboard copy error:', err);
+    }
+  };
 
   // Active Loan State (Synchronized strictly with the authenticated member's own active loans)
   const [loanBalance, setLoanBalance] = useState<number>(() => {
@@ -2329,8 +2536,15 @@ export default function MemberPortalPage() {
   };
 
   const handleSubmitLoanBankTransfer = async () => {
+    const isEwallet = repayChannel === 'EWALLET';
+    const ewalletProvider =
+      coopPaymentOptions?.products?.payLoan?.ewalletTransfer?.provider ||
+      coopPaymentOptions?.ewalletTransfer?.provider ||
+      'Maya';
+    const channelLabel = isEwallet ? ewalletProvider : 'Bank Transfer';
+
     if (!loanBankReferenceInput || !loanBankReferenceInput.trim()) {
-      alert('Please enter the Bank Transfer Reference / Trace Number for verification.');
+      alert(`Please enter the ${channelLabel} Reference / Trace Number for verification.`);
       return;
     }
 
@@ -2338,6 +2552,38 @@ export default function MemberPortalPage() {
     try {
       const targetTenantSlug = tenantInfo.slug || 'family-coop';
       const targetTenantId = (currentMember as any)?.tenantId || `tenant_${targetTenantSlug.replace(/[-_]coop$/, '')}`;
+      const destinationBankName = isEwallet
+        ? `${ewalletProvider} E-Wallet`
+        : (coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines');
+
+      const activeLoan =
+        memberLoanApplications.find(
+          (app: any) =>
+            app.status === 'DISBURSED' &&
+            matchesMember(app, currentMember) &&
+            Number(app.balanceRemaining ?? app.amount ?? 1) > 0
+        ) ||
+        memberLoanApplications.find(
+          (app: any) =>
+            ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'].includes(String(app.status || '').toUpperCase()) &&
+            matchesMember(app, currentMember) &&
+            Number(app.balanceRemaining ?? app.amount ?? 1) > 0
+        );
+      const effBal = activeLoan
+        ? pickNumber(activeLoan?.balanceRemaining, activeLoan?.principalAmount, activeLoan?.amount)
+        : loanBalance;
+      const schedRows = activeLoan ? getLoanScheduleRows(activeLoan, effBal) : [];
+      const nextDue = schedRows.find((r: any) => r.status !== 'PAID');
+      const penalty = nextDue
+        ? calculateOverduePenalty({
+            dueDate: nextDue.due,
+            installmentAmount: Number(nextDue.tot || 0),
+            monthlyFinesRate: activeLoan?.finesRateMonthly || 0.03,
+            gracePeriodDays: coopGracePeriodDays,
+          })
+        : null;
+      const appliedPenalty =
+        penalty && penalty.isOverdue && !penalty.isGracePeriodActive ? penalty.penaltyAmount : 0;
 
       const res = await fetch(`${getApiBaseUrl()}/payments/bank-transfer/submit`, {
         method: 'POST',
@@ -2352,11 +2598,17 @@ export default function MemberPortalPage() {
           memberNumber: currentMember.memberNumber,
           memberName: currentMember.name,
           amount: repayAmount,
-          loanId: 'LOAN-ACTIVE-001',
-          loanNumber: 'LN-2026-00001',
-          bankName: coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines',
+          loanId: activeLoan?.id || activeLoan?.loanNumber || 'LOAN-ACTIVE-001',
+          loanNumber: activeLoan?.loanNumber || activeLoan?.id || 'LN-2026-00001',
+          installmentNumber: nextDue?.seq || 1,
+          dueDate: nextDue?.due || new Date().toISOString().slice(0, 10),
+          penaltyAmount: appliedPenalty,
+          penaltyPortion: appliedPenalty,
+          bankName: destinationBankName,
           referenceNumber: loanBankReferenceInput.trim(),
-          notes: loanBankTransferNotes.trim() || 'Loan Amortization Repayment',
+          notes:
+            loanBankTransferNotes.trim() ||
+            `${channelLabel} Loan Amortization Repayment${appliedPenalty > 0 ? ` (Includes ₱${appliedPenalty.toFixed(2)} Overdue Penalty)` : ''}`,
         }),
       });
 
@@ -2365,12 +2617,12 @@ export default function MemberPortalPage() {
         setLoanBankTransferPendingResult({
           reference: json.data?.referenceNumber || loanBankReferenceInput.trim(),
           amount: repayAmount,
-          bankName: coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines',
+          bankName: destinationBankName,
         });
         setLoanBankReferenceInput('');
         setLoanBankTransferNotes('');
       } else {
-        alert(json.error || 'Failed to submit loan bank transfer payment.');
+        alert(json.error || `Failed to submit loan ${channelLabel} payment.`);
       }
     } catch (err: any) {
       alert(`Network error: ${err.message}`);
@@ -2443,13 +2695,16 @@ export default function MemberPortalPage() {
       ? directoryMembers.filter(
           (m) =>
             m.firstName.toLowerCase().includes(query) ||
-            m.lastName.toLowerCase().includes(query)
+            m.lastName.toLowerCase().includes(query) ||
+            (m.businessPage?.businessName && m.businessPage.businessName.toLowerCase().includes(query))
         )
       : directoryMembers;
 
     return [...list].sort((a, b) => {
-      const firstCmp = (a.firstName || '').localeCompare(b.firstName || '', undefined, { sensitivity: 'base' });
-      if (firstCmp !== 0) return firstCmp;
+      const nameA = a.businessPage?.businessName || a.firstName || '';
+      const nameB = b.businessPage?.businessName || b.firstName || '';
+      const cmp = nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
       return (a.lastName || '').localeCompare(b.lastName || '', undefined, { sensitivity: 'base' });
     });
   }, [directoryMembers, directorySearchQuery]);
@@ -2605,6 +2860,19 @@ export default function MemberPortalPage() {
     }
     return false; // Safe default false prevents button and card flickering on refresh
   });
+  const [coopGracePeriodDays, setCoopGracePeriodDays] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const tenant = resolveTenantCoop();
+        const cached = localStorage.getItem(`flexcoop_grace_period_days_${tenant.slug}`);
+        if (cached !== null) {
+          const num = Number(cached);
+          if (!isNaN(num) && num >= 0) return num;
+        }
+      } catch {}
+    }
+    return 3;
+  });
 
   // Check if Deposit Savings has available payment option(s) configured
   const hasDepositSavingsPaymentOptions = useMemo(() => {
@@ -2673,6 +2941,13 @@ export default function MemberPortalPage() {
               localStorage.setItem(`flexcoop_savings_deposit_enabled_${resolvedSlug}`, String(enabled));
             } catch {}
           }
+          if (res.data.gracePeriodDays !== undefined) {
+            const gDays = Math.max(0, Number(res.data.gracePeriodDays));
+            setCoopGracePeriodDays(gDays);
+            try {
+              localStorage.setItem(`flexcoop_grace_period_days_${resolvedSlug}`, String(gDays));
+            } catch {}
+          }
         }
       })
       .catch(() => {});
@@ -2720,6 +2995,12 @@ export default function MemberPortalPage() {
       if (e.key && e.key.includes('flexcoop_paymongo_fee_treatment')) {
         if (e.newValue === 'OPEX' || e.newValue === 'PASS_THROUGH') {
           setPaymongoFeeTreatment(e.newValue);
+        }
+      }
+      if (e.key && e.key.includes('flexcoop_grace_period_days')) {
+        const val = Number(e.newValue);
+        if (!isNaN(val) && val >= 0) {
+          setCoopGracePeriodDays(val);
         }
       }
     };
@@ -2917,6 +3198,11 @@ export default function MemberPortalPage() {
     dueDate?: string;
     principalPortion?: number;
     interestPortion?: number;
+    penaltyPortion?: number;
+    daysOverdue?: number;
+    isOverdue?: boolean;
+    isGracePeriodActive?: boolean;
+    baseInstallmentAmount?: number;
     qrImageUrl?: string;
     paymentIntentId?: string;
     checkoutUrl?: string;
@@ -3121,6 +3407,7 @@ export default function MemberPortalPage() {
     dueAmount: number;
     principalAmount?: number;
     interestAmount?: number;
+    penaltyAmount?: number;
   }) => {
     const resolvedSlug =
       tenantInfo.slug && tenantInfo.slug !== 'default'
@@ -3173,6 +3460,8 @@ export default function MemberPortalPage() {
           dueAmount: params.dueAmount,
           principalAmount: params.principalAmount,
           interestAmount: params.interestAmount,
+          penaltyAmount: params.penaltyAmount,
+          penaltyPortion: params.penaltyAmount,
           feeTreatment: currentFeeTreatment,
           feeEnabled: currentFeeEnabled,
         }),
@@ -3211,10 +3500,18 @@ export default function MemberPortalPage() {
     const targetLoanNumber = loan?.loanNumber || loan?.id || 'LN-2026-00001';
     const desc = `Installment #${instNum} Due ${dueStr} (${loan?.productName || 'Member Loan'})`;
 
+    const penaltyInfo = calculateOverduePenalty({
+      dueDate: dueStr,
+      installmentAmount: dueAmt,
+      monthlyFinesRate: loan?.finesRateMonthly || 0.03,
+      gracePeriodDays: coopGracePeriodDays,
+    });
+    const finalAmountToPay = penaltyInfo.totalWithPenalty;
+
     setPassbookPayModal({
       open: true,
       type: 'LOAN',
-      amount: dueAmt,
+      amount: finalAmountToPay,
       description: desc,
       lockedAmount: true,
       loanId: targetLoanId,
@@ -3223,6 +3520,11 @@ export default function MemberPortalPage() {
       dueDate: dueStr,
       principalPortion: prAmt,
       interestPortion: inAmt,
+      penaltyPortion: penaltyInfo.penaltyAmount,
+      daysOverdue: penaltyInfo.daysOverdue,
+      isOverdue: penaltyInfo.isOverdue,
+      isGracePeriodActive: penaltyInfo.isGracePeriodActive,
+      baseInstallmentAmount: dueAmt,
       isGeneratingQr: true,
       isVerifyingPayment: false,
       verificationError: null,
@@ -3233,9 +3535,10 @@ export default function MemberPortalPage() {
         loanId: targetLoanId,
         installmentNumber: instNum,
         dueDate: dueStr,
-        dueAmount: dueAmt,
+        dueAmount: finalAmountToPay,
         principalAmount: prAmt,
         interestAmount: inAmt,
+        penaltyAmount: penaltyInfo.penaltyAmount,
       });
       if (ok) return;
     } catch {}
@@ -3259,6 +3562,7 @@ export default function MemberPortalPage() {
         dueAmount: passbookPayModal.amount,
         principalAmount: passbookPayModal.principalPortion,
         interestAmount: passbookPayModal.interestPortion,
+        penaltyAmount: passbookPayModal.penaltyPortion,
       })
         .catch(() => {})
         .finally(() => {
@@ -3907,19 +4211,51 @@ export default function MemberPortalPage() {
     }
   };
 
-  if (isCheckingAuth || !isAuthenticated) {
+  if (showSplashScreen || isCheckingAuth || !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-slate-300">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-        <p className="text-xs font-mono uppercase tracking-widest text-slate-400">
-          Verifying Member Authorization...
-        </p>
+      <div className="min-h-screen bg-[#223a5e] flex flex-col items-center justify-between px-6 py-10 text-white select-none">
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-3xl bg-[#223a5e] flex items-center justify-center shadow-2xl shadow-slate-950/40 overflow-hidden mb-5 ring-2 ring-white/15">
+            <img
+              src="/icons/silong-icon-512.png"
+              alt="Silong"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-black tracking-widest text-white">
+            SILONG
+          </h1>
+          <p className="text-sm sm:text-base font-medium text-slate-200 mt-1.5">
+            Sa iisang bubong, sama-samang aahon
+          </p>
+          <div className="mt-8 flex flex-col items-center gap-2.5">
+            <div className="w-7 h-7 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+            <p className="text-[11px] font-mono uppercase tracking-widest text-slate-300">
+              {tenantInfo.name && tenantInfo.name !== 'Cooperative Enterprise'
+                ? tenantInfo.name
+                : 'Loading Silong Member Portal...'}
+            </p>
+          </div>
+        </div>
+        <footer className="text-center text-[11px] font-semibold text-slate-300/80 tracking-wide">
+          Silong - A Tuntong Tech Solution
+        </footer>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
+    <div className="silong-member-theme min-h-screen bg-[#f7f4ee] text-slate-800">
+      {/* Official Silong Theme Audio Element (Locked strictly to /audio/silong-theme.m4a) */}
+      <audio
+        ref={silongAudioRef}
+        src="/audio/silong-theme.m4a"
+        preload="metadata"
+        onPlay={() => setIsPlayingSilongSong(true)}
+        onPause={() => setIsPlayingSilongSong(false)}
+        onEnded={() => setIsPlayingSilongSong(false)}
+        className="hidden"
+      />
       {/* Main Body with Safe Bottom Padding for Mobile Navigation Bar */}
       <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-5 sm:pt-6 pb-28 sm:pb-32">
 
@@ -3955,53 +4291,208 @@ export default function MemberPortalPage() {
               </div>
             )}
 
-            {/* Member Account Card with Financial Overview (Moved from More) */}
-            <div className="bg-gradient-to-r from-emerald-800 to-slate-900 text-white rounded-2xl p-6 shadow-md">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-xl font-bold truncate text-white">{currentMember.name}</h2>
-                  <div className="text-xs text-slate-300 font-mono mt-0.5">
-                    {currentMember.memberNumber || (currentMember.applicantId ? `Applicant ID: ${currentMember.applicantId}` : '— (Pending Approval)')}
-                  </div>
-                </div>
-                <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 border ${
-                  !currentMember.memberNumber || currentMember.isApplicant
-                    ? 'bg-amber-500/30 text-amber-100 border-amber-400/40'
-                    : currentMember.classification === 'REGULAR'
-                    ? 'bg-emerald-500/30 text-emerald-100 border-emerald-400/40'
-                    : 'bg-amber-500/30 text-amber-100 border-amber-400/40'
-                }`}>
-                  {!currentMember.memberNumber || currentMember.isApplicant ? 'Membership Applicant' : (currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member')}
-                </span>
-              </div>
-
-              {/* Financial Quick Glance */}
-              <div className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-5 pt-4 border-t border-emerald-700/50 text-center`}>
-                <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
-                  <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Share Capital</div>
-                  <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
-                    ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </div>
-                </div>
-                {savingsDepositEnabled && (
-                  <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
-                    <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Savings</div>
-                    <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
-                      ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            {/* Member Cooperative Account Card (Silong Palette) or Unlinked Welcome Banner */}
+            {isCoopLinked ? (
+              <div className="bg-gradient-to-br from-[#223a5e] via-[#1c3150] to-[#15253d] border border-[#e68a38]/30 text-white rounded-2xl p-5 sm:p-6 shadow-xl shadow-[#223a5e]/15 relative overflow-hidden space-y-4">
+                <div className="flex items-start justify-between gap-4 relative z-10">
+                  <div
+                    onClick={() => setActiveTab('coop_page')}
+                    className="min-w-0 flex-1 cursor-pointer group"
+                    title="Click to view Cooperative Page & Services"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <img
+                        src="/icons/silong-icon-192.png"
+                        alt="Silong"
+                        className="w-5 h-5 rounded-md object-cover ring-1 ring-[#e68a38]/50 shrink-0"
+                      />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#e68a38] truncate group-hover:underline flex items-center gap-1">
+                        {tenantInfo.name}
+                        <ChevronRight className="w-3.5 h-3.5 inline text-[#e68a38]" />
+                      </span>
+                    </div>
+                    <h2 className="text-xl font-bold truncate text-[#f4efe6]">{currentMember.name}</h2>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <span className="text-xs text-slate-300 font-mono">
+                        {currentMember.memberNumber || (currentMember.applicantId ? `Applicant ID: ${currentMember.applicantId}` : '— (Pending Approval)')}
+                      </span>
+                      <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 border ${
+                        !currentMember.memberNumber || currentMember.isApplicant
+                          ? 'bg-[#e68a38]/25 text-[#f4efe6] border-[#e68a38]/50'
+                          : currentMember.classification === 'REGULAR'
+                          ? 'bg-[#78a89a]/25 text-[#f4efe6] border-[#78a89a]/50'
+                          : 'bg-[#e68a38]/25 text-[#f4efe6] border-[#e68a38]/50'
+                      }`}>
+                        {!currentMember.memberNumber || currentMember.isApplicant ? 'Membership Applicant' : (currentMember.classification === 'REGULAR' ? 'Regular Member' : 'Associate Member')}
+                      </span>
                     </div>
                   </div>
-                )}
-                <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
-                  <div className="text-[10px] uppercase font-semibold text-emerald-200 tracking-wider">Loan Balance</div>
-                  <div className="text-xs sm:text-sm font-bold text-white font-mono mt-0.5">
-                    ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  <button
+                    type="button"
+                    onClick={handleToggleSilongSong}
+                    aria-label={isPlayingSilongSong ? 'Pause Silong song' : 'Play Silong song'}
+                    title={isPlayingSilongSong ? 'Pause Silong Theme Song' : 'Play Silong Theme Song'}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer border shadow-md ${
+                      isPlayingSilongSong
+                        ? 'bg-[#e68a38] text-white border-[#f4efe6]/40 shadow-[#e68a38]/30 scale-105'
+                        : 'bg-white/10 hover:bg-[#e68a38] text-[#f4efe6] hover:text-white border-[#e68a38]/40'
+                    }`}
+                  >
+                    {isPlayingSilongSong ? (
+                      <Pause className="w-4 h-4 fill-current" />
+                    ) : (
+                      <Play className="w-4 h-4 fill-current ml-0.5" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Financial Quick Glance (Tapping opens Coop Page) */}
+                <div
+                  onClick={() => setActiveTab('coop_page')}
+                  className={`grid ${savingsDepositEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2 pt-3 border-t border-white/15 text-center relative z-10 cursor-pointer`}
+                  title="Click to view Cooperative Page & Services"
+                >
+                  <div className="bg-white/10 hover:bg-white/15 transition-colors rounded-xl p-2.5 backdrop-blur-sm border border-white/10">
+                    <div className="text-[10px] uppercase font-semibold text-[#e68a38] tracking-wider">Share Capital</div>
+                    <div className="text-xs sm:text-sm font-bold text-[#f4efe6] font-mono mt-0.5">
+                      ₱{paidUpCapital.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                  {savingsDepositEnabled && (
+                    <div className="bg-white/10 hover:bg-white/15 transition-colors rounded-xl p-2.5 backdrop-blur-sm border border-white/10">
+                      <div className="text-[10px] uppercase font-semibold text-[#78a89a] tracking-wider">Savings</div>
+                      <div className="text-xs sm:text-sm font-bold text-[#f4efe6] font-mono mt-0.5">
+                        ₱{savingsBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="bg-white/10 hover:bg-white/15 transition-colors rounded-xl p-2.5 backdrop-blur-sm border border-white/10">
+                    <div className="text-[10px] uppercase font-semibold text-[#e68a38] tracking-wider">Loan Balance</div>
+                    <div className="text-xs sm:text-sm font-bold text-[#f4efe6] font-mono mt-0.5">
+                      ₱{loanBalance.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Integrated Coop Card Quick Actions (Passbook, Members, Deposit, Shares, Loans) */}
+                <div className="pt-3 border-t border-white/15 relative z-10">
+                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+                    {/* 1. Passbook */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('passbook')}
+                      className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
+                      title="Digital Passbook & Ledger"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#e68a38] text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
+                        <BookOpen className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] sm:text-[11px] font-bold text-[#f4efe6] leading-tight text-center">
+                        Passbook
+                      </span>
+                    </button>
+
+                    {/* 2. Members Directory */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('members')}
+                      className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
+                      title="Members Directory"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#78a89a] text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
+                        <Users className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] sm:text-[11px] font-bold text-[#f4efe6] leading-tight text-center">
+                        Members
+                      </span>
+                    </button>
+
+                    {/* 3. Deposit Savings */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepositModalType('SAVINGS');
+                        setDepositSuccessResult(null);
+                      }}
+                      className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
+                      title="Deposit Savings"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500 text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
+                        <PiggyBank className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] sm:text-[11px] font-bold text-[#f4efe6] leading-tight text-center">
+                        Deposit
+                      </span>
+                    </button>
+
+                    {/* 4. Purchase Share */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepositModalType('SHARES');
+                        setPaymongoActivePayment(null);
+                        setDepositSuccessResult(null);
+                      }}
+                      className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
+                      title="Purchase Share Capital"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
+                        <Landmark className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] sm:text-[11px] font-bold text-[#f4efe6] leading-tight text-center">
+                        Shares
+                      </span>
+                    </button>
+
+                    {/* 5. Apply Loan */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('apply')}
+                      className="flex flex-col items-center justify-center py-2 px-1 rounded-xl bg-white/10 hover:bg-white/20 transition-all text-center group cursor-pointer border border-white/10"
+                      title="Apply for Loan"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-indigo-500 text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
+                        <CreditCard className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] sm:text-[11px] font-bold text-[#f4efe6] leading-tight text-center">
+                        Loans
+                      </span>
+                    </button>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              /* Unlinked Community Member Welcome Banner (No Coop Details) */
+              <div className="bg-gradient-to-br from-[#223a5e] via-[#1c3150] to-[#15253d] border border-[#e68a38]/30 text-white rounded-2xl p-6 shadow-xl space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#e68a38] text-white flex items-center justify-center font-black shadow-md shrink-0">
+                    <Landmark className="w-6 h-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-[#e68a38]">
+                      Silong Community Hub
+                    </div>
+                    <h3 className="font-bold text-base sm:text-lg text-[#f4efe6] leading-tight">
+                      Welcome, {currentMember.name || 'Community Member'}!
+                    </h3>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  You are currently logged in to Silong Community Hub. If you are a member of a registered cooperative, link your cooperative account to view your passbook ledger, submit loan applications, and receive dividends.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowLinkCoopModal(true)}
+                  className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer w-full sm:w-auto justify-center"
+                >
+                  <Link2 className="w-4 h-4" />
+                  <span>Link Existing Cooperative Account</span>
+                </button>
+              </div>
+            )}
 
             {/* Initial Share Capital Payment Alert for Verified Member with Pending Initial Share Capital */}
-            {paidUpCapital === 0 && (
+            {isCoopLinked && paidUpCapital === 0 && (
               <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-emerald-500/10 border-2 border-amber-500/30 rounded-2xl p-4 sm:p-5 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-start gap-3">
@@ -4036,7 +4527,7 @@ export default function MemberPortalPage() {
             )}
 
             {/* Active Loan Next Payment Due Date & Due Amount Reminder with PayMongo QR Ph "Pay Now" */}
-            {(() => {
+            {isCoopLinked && (() => {
               const ACTIVE_LOAN_STATUSES = ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'];
               const activeDisbursedLoan =
                 memberLoanApplications.find(
@@ -4071,18 +4562,50 @@ export default function MemberPortalPage() {
               const inAmount = Number(nextDueRow.in || 0);
               const paidCount = scheduleRows.filter((r: any) => r.status === 'PAID').length;
 
+              const penaltyInfo = calculateOverduePenalty({
+                dueDate: nextDueRow.due,
+                installmentAmount: dueAmount,
+                monthlyFinesRate: activeDisbursedLoan?.finesRateMonthly || 0.03,
+                gracePeriodDays: coopGracePeriodDays,
+              });
+              const isOverdue = penaltyInfo.isOverdue && !penaltyInfo.isGracePeriodActive;
+              const isGrace = penaltyInfo.isGracePeriodActive;
+              const displayDueAmount = penaltyInfo.totalWithPenalty;
+
               return (
-                <div className="bg-gradient-to-r from-amber-50 via-white to-emerald-50/70 border-2 border-amber-300 rounded-2xl p-5 shadow-sm space-y-4">
+                <div
+                  className={`border-2 rounded-2xl p-5 shadow-sm space-y-4 ${
+                    isOverdue
+                      ? 'bg-gradient-to-r from-rose-50 via-white to-rose-50/70 border-rose-300'
+                      : 'bg-gradient-to-r from-amber-50 via-white to-emerald-50/70 border-amber-300'
+                  }`}
+                >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3.5">
-                      <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 shadow-xs">
-                        <Calendar className="w-6 h-6" />
+                      <div
+                        className={`w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 shadow-xs ${
+                          isOverdue
+                            ? 'bg-rose-100 border-rose-300 text-rose-800'
+                            : 'bg-amber-100 border-amber-300 text-amber-800'
+                        }`}
+                      >
+                        {isOverdue ? <AlertTriangle className="w-6 h-6" /> : <Calendar className="w-6 h-6" />}
                       </div>
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="bg-amber-200/90 text-amber-950 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-400">
-                            Upcoming Loan Payment Reminder
-                          </span>
+                          {isOverdue ? (
+                            <span className="bg-rose-200 text-rose-950 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-rose-400 animate-pulse">
+                              Overdue Loan Payment • {penaltyInfo.daysOverdue} Days Late
+                            </span>
+                          ) : isGrace ? (
+                            <span className="bg-amber-200/90 text-amber-950 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-400">
+                              Grace Period Active • Day {penaltyInfo.daysOverdue} of {penaltyInfo.gracePeriodDays}
+                            </span>
+                          ) : (
+                            <span className="bg-amber-200/90 text-amber-950 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-400">
+                              Upcoming Loan Payment Reminder
+                            </span>
+                          )}
                           <span className="font-mono text-xs font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
                             {loanRef}
                           </span>
@@ -4091,8 +4614,14 @@ export default function MemberPortalPage() {
                           </span>
                         </div>
                         <div className="text-sm sm:text-base font-extrabold text-slate-900">
-                          Next Payment Due Date:{' '}
-                          <span className="text-amber-800 underline decoration-amber-400 underline-offset-4">
+                          {isOverdue ? 'Overdue Payment Since: ' : 'Next Payment Due Date: '}
+                          <span
+                            className={
+                              isOverdue
+                                ? 'text-rose-800 underline decoration-rose-400 underline-offset-4'
+                                : 'text-amber-800 underline decoration-amber-400 underline-offset-4'
+                            }
+                          >
                             {nextDueRow.due}
                           </span>{' '}
                           <span className="text-xs font-semibold text-slate-500">
@@ -4100,7 +4629,11 @@ export default function MemberPortalPage() {
                           </span>
                         </div>
                         <p className="text-xs text-slate-600">
-                          Principal: <strong className="font-mono text-slate-800">₱{prAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> + Interest: <strong className="font-mono text-amber-800">₱{inAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> • Remaining Principal Balance: <strong className="font-mono text-slate-900">₱{effectiveBal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                          Principal: <strong className="font-mono text-slate-800">₱{prAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> + Interest: <strong className="font-mono text-amber-800">₱{inAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                          {isOverdue && penaltyInfo.penaltyAmount > 0 && (
+                            <> + Late Overdue Penalty: <strong className="font-mono text-rose-700 font-bold">₱{penaltyInfo.penaltyAmount.toFixed(2)}</strong></>
+                          )}
+                          {' '}• Remaining Principal Balance: <strong className="font-mono text-slate-900">₱{effectiveBal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                         </p>
                       </div>
                     </div>
@@ -4108,16 +4641,29 @@ export default function MemberPortalPage() {
                     <div className="flex sm:flex-col items-center sm:items-end justify-between gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-amber-200/80 shrink-0">
                       <div className=" sm:text-right">
                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                          Exact Amount Due
+                          {isOverdue ? 'Total Due (With Penalty)' : 'Exact Amount Due'}
                         </div>
-                        <div className="text-xl sm:text-2xl font-black font-mono text-emerald-800">
-                          ₱{dueAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <div
+                          className={`text-xl sm:text-2xl font-black font-mono ${
+                            isOverdue ? 'text-rose-700' : 'text-emerald-800'
+                          }`}
+                        >
+                          ₱{displayDueAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
+                        {isOverdue && penaltyInfo.penaltyAmount > 0 && (
+                          <div className="text-[10px] text-rose-600 font-semibold">
+                            Includes ₱{penaltyInfo.penaltyAmount.toFixed(2)} late fee
+                          </div>
+                        )}
                       </div>
                       <button
                         type="button"
                         onClick={() => handleOpenLoanPayNow(activeDisbursedLoan, nextDueRow)}
-                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md shadow-emerald-700/20 transition flex items-center gap-2 cursor-pointer"
+                        className={`px-5 py-2.5 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer ${
+                          isOverdue
+                            ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-700/20'
+                            : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-700/20'
+                        }`}
                       >
                         <QrCode className="w-4 h-4" />
                         <span>Pay Now (QR Ph)</span>
@@ -4128,150 +4674,8 @@ export default function MemberPortalPage() {
               );
             })()}
 
-            {/* Quick Action Buttons Section */}
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between px-1">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Quick Actions
-                </h3>
-                <span className="text-[11px] text-emerald-700 font-semibold">Self-Service</span>
-              </div>
-
-              <div className={`grid ${hasDepositSavingsPaymentOptions ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5 sm:gap-2`}>
-                {/* Deposit Savings (Hidden if no available payment option) */}
-                {hasDepositSavingsPaymentOptions && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDepositModalType('SAVINGS');
-                      setDepositSuccessResult(null);
-                    }}
-                    className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-emerald-50/80 transition-all text-center group cursor-pointer"
-                  >
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-1 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-2xs">
-                      <PiggyBank className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                    </div>
-                    <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-emerald-700 transition-colors leading-tight text-center">
-                      Deposit Savings
-                    </span>
-                  </button>
-                )}
-
-                {/* Purchase Share */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDepositModalType('SHARES');
-                    setPaymongoActivePayment(null);
-                    setDepositSuccessResult(null);
-                  }}
-                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-amber-50/80 transition-all text-center group cursor-pointer"
-                >
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center mb-1 group-hover:bg-amber-600 group-hover:text-white transition-all shadow-2xs">
-                    <Landmark className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-amber-800 transition-colors leading-tight text-center">
-                    Purchase Share
-                  </span>
-                </button>
-
-                {/* Apply for Loan */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('apply')}
-                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-indigo-50/80 transition-all text-center group cursor-pointer"
-                >
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center mb-1 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-2xs">
-                    <CreditCard className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-indigo-700 transition-colors leading-tight text-center">
-                    Apply for Loan
-                  </span>
-                </button>
-
-                {/* My Business Page Quick Action */}
-                <button
-                  type="button"
-                  onClick={handleOpenMyBusiness}
-                  className="flex flex-col items-center justify-center py-2 px-1 rounded-xl hover:bg-emerald-50/80 transition-all text-center group cursor-pointer"
-                >
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-1 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-2xs">
-                    <Store className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-bold text-slate-800 group-hover:text-emerald-700 transition-colors leading-tight text-center">
-                    My Business
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {/* News and Announcements Section (Below Quick Action - Top 3 Recent) */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
-                    <Megaphone className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                      News and Announcements
-                    </h3>
-                    <p className="text-[10px] text-slate-500">Official bulletins &amp; updates for cooperative members</p>
-                  </div>
-                </div>
-              </div>
-
-              {topMemberAnnouncements.length === 0 ? (
-                <div className="text-center py-6 px-4 bg-slate-50/60 rounded-xl border border-dashed border-slate-200">
-                  <Megaphone className="w-6 h-6 text-slate-300 mx-auto mb-1" />
-                  <p className="text-xs font-medium text-slate-600">No active announcements at this time.</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Check back later for important cooperative updates.</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {topMemberAnnouncements.map((item) => (
-                    <div
-                      key={item.id}
-                      onClick={() => setSelectedAnnouncementModal(item)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelectedAnnouncementModal(item);
-                        }
-                      }}
-                      className="p-3.5 rounded-xl border border-slate-100 hover:border-emerald-300 bg-slate-50/50 hover:bg-emerald-50/30 flex items-center justify-between gap-3 cursor-pointer transition-all group shadow-2xs hover:shadow-xs"
-                    >
-                      <div className="flex-1 min-w-0">
-                        {/* Strictly title and date published only as requested */}
-                        <h4 className="text-xs font-bold text-slate-900 group-hover:text-emerald-800 transition-colors truncate">
-                          {item.title}
-                        </h4>
-                        <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
-                          <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>
-                            Published:{' '}
-                            {new Date(item.publishAt).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })}
-                          </span>
-                        </p>
-                      </div>
-
-                      <div className="flex items-center text-slate-400 group-hover:text-emerald-700 transition-colors shrink-0 pl-2">
-                        <ChevronRight className="w-4 h-4" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* Active Loan Applications & Underwriting Pipeline (Dashboard Section) */}
-            {(() => {
+            {isCoopLinked && (() => {
               const activeDashboardApplications = memberLoanApplications.filter((app) => {
                 const st = String(app.status || '').toUpperCase();
                 return st !== 'REJECTED' && st !== 'DISBURSED';
@@ -4981,29 +5385,90 @@ export default function MemberPortalPage() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                                {loanScheduleRows.map((row: any) => (
-                                  <tr key={row.seq} className={row.status === 'DUE_NOW' ? 'bg-amber-50/50 font-bold' : ''}>
-                                    <td className="p-3 text-slate-500 font-sans">{row.seq}</td>
-                                    <td className="p-3 font-sans font-medium text-slate-900">{row.due}</td>
-                                    <td className="p-3 text-right">₱{Number(row.pr).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td className="p-3 text-right text-amber-700">₱{Number(row.in).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td className="p-3 text-right font-black text-slate-900">₱{Number(row.tot).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td className="p-3 text-right text-slate-600">₱{Number(row.bal).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td className="p-3 text-center">
-                                      <span
-                                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                          row.status === 'PAID'
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : row.status === 'DUE_NOW'
-                                            ? 'bg-amber-200 text-amber-950 animate-pulse'
-                                            : 'bg-slate-100 text-slate-500'
-                                        }`}
-                                      >
-                                        {row.status}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
+                                {loanScheduleRows.map((row: any) => {
+                                  const isRowPaid = row.status === 'PAID';
+                                  const rowPenalty = !isRowPaid
+                                    ? calculateOverduePenalty({
+                                        dueDate: row.due,
+                                        installmentAmount: Number(row.tot || 0),
+                                        monthlyFinesRate: activeDisbursedLoan?.finesRateMonthly || 0.03,
+                                        gracePeriodDays: coopGracePeriodDays,
+                                      })
+                                    : null;
+                                  const isRowOverdue = Boolean(rowPenalty?.isOverdue && !rowPenalty?.isGracePeriodActive);
+                                  const isRowGrace = Boolean(rowPenalty?.isGracePeriodActive);
+
+                                  return (
+                                    <tr
+                                      key={row.seq}
+                                      className={
+                                        isRowOverdue
+                                          ? 'bg-rose-50/70 font-semibold'
+                                          : row.status === 'DUE_NOW'
+                                          ? 'bg-amber-50/50 font-bold'
+                                          : ''
+                                      }
+                                    >
+                                      <td className="p-3 text-slate-500 font-sans">{row.seq}</td>
+                                      <td className="p-3 font-sans font-medium text-slate-900">
+                                        <div>{row.due}</div>
+                                        {isRowOverdue && (
+                                          <span className="text-[10px] text-rose-700 font-bold block">
+                                            {rowPenalty?.daysOverdue}d overdue
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="p-3 text-right">
+                                        ₱{Number(row.pr).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="p-3 text-right text-amber-700">
+                                        ₱{Number(row.in).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="p-3 text-right font-black text-slate-900">
+                                        <div>
+                                          ₱{Number(row.tot).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </div>
+                                        {isRowOverdue && rowPenalty && rowPenalty.penaltyAmount > 0 && (
+                                          <div className="text-[10px] text-rose-700 font-bold font-mono">
+                                            +₱{rowPenalty.penaltyAmount.toFixed(2)} late fee
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="p-3 text-right text-slate-600">
+                                        ₱{Number(row.bal).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="p-3 text-center">
+                                        <div className="flex flex-col items-center gap-1">
+                                          <span
+                                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                              isRowPaid
+                                                ? 'bg-emerald-100 text-emerald-800'
+                                                : isRowOverdue
+                                                ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                                : isRowGrace
+                                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                : row.status === 'DUE_NOW'
+                                                ? 'bg-amber-200 text-amber-950 animate-pulse'
+                                                : 'bg-slate-100 text-slate-500'
+                                            }`}
+                                          >
+                                            {isRowPaid ? 'PAID' : isRowOverdue ? 'OVERDUE' : isRowGrace ? 'GRACE PERIOD' : row.status}
+                                          </span>
+                                          {!isRowPaid && (row.status === 'DUE_NOW' || isRowOverdue) && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleOpenLoanPayNow(activeDisbursedLoan, row)}
+                                              className="mt-0.5 text-[10px] px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded shadow-xs cursor-pointer flex items-center gap-1"
+                                            >
+                                              <QrCode className="w-2.5 h-2.5" />
+                                              <span>Pay ₱{(isRowOverdue && rowPenalty ? rowPenalty.totalWithPenalty : Number(row.tot)).toFixed(0)}</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -5037,7 +5502,7 @@ export default function MemberPortalPage() {
                   type="text"
                   value={directorySearchQuery}
                   onChange={(e) => setDirectorySearchQuery(e.target.value)}
-                  placeholder="Search by first or last name..."
+                  placeholder="Search members by name or display name..."
                   className="w-full pl-10 pr-8 py-2.5 text-xs bg-white border border-slate-200 rounded-xl shadow-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
                 />
                 {directorySearchQuery && (
@@ -5053,7 +5518,7 @@ export default function MemberPortalPage() {
               </div>
             </div>
 
-            {/* Members Grid (Displaying ONLY Selfie, First Name, and Last Name) */}
+            {/* Members Directory (Spread out across page width with Display Name below Avatar) */}
             {isLoadingDirectory ? (
               <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
                 <RefreshCw className="w-6 h-6 animate-spin text-emerald-600 mx-auto mb-2" />
@@ -5068,64 +5533,41 @@ export default function MemberPortalPage() {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-x-4 gap-y-6 w-full justify-items-center py-2">
                 {filteredDirectoryMembers.map((mem) => {
                   const initials = `${(mem.firstName?.[0] || 'M')}${(mem.lastName?.[0] || '')}`.toUpperCase();
                   const photoUrl = mem.selfieUrl || mem.selfiePreview;
-                  const hasBusiness = Boolean(mem.businessPage?.businessName);
+                  const memberDisplayName = mem.businessPage?.businessName || mem.firstName || `${mem.firstName || ''} ${mem.lastName || ''}`.trim() || 'Coop Member';
 
                   return (
-                    <div
+                    <button
                       key={mem.id}
+                      type="button"
                       onClick={() => handleOpenBusinessPage(mem)}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col items-center text-center shadow-xs hover:shadow-md hover:border-emerald-400 transition-all group cursor-pointer relative"
-                      title="Click to view Member's Business Page"
+                      className="group flex flex-col items-center justify-start text-center w-full max-w-[100px] cursor-pointer focus:outline-hidden transition-transform active:scale-95"
+                      title={`Click to view ${memberDisplayName}'s Personal Wall`}
+                      aria-label={`View ${memberDisplayName}'s Personal Wall`}
                     >
-                      {hasBusiness && (
-                        <div className="absolute top-2.5 right-2.5" title="Registered Cooperative Business">
-                          <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shadow-2xs border border-emerald-300">
-                            <Store className="w-3 h-3" />
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Selfie / Photo */}
-                      <div className="relative mb-3">
+                      <div className="relative">
                         {photoUrl ? (
                           <img
                             src={photoUrl}
-                            alt={`${mem.firstName} ${mem.lastName}`}
-                            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-2 border-emerald-500/30 group-hover:border-emerald-600 transition-colors shadow-sm"
+                            alt={memberDisplayName}
+                            className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-2 border-emerald-500/40 group-hover:border-emerald-600 group-hover:scale-105 group-hover:shadow-md transition-all shadow-xs"
                           />
                         ) : (
-                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 border-2 border-emerald-200/80 text-emerald-800 font-black text-xl sm:text-2xl flex items-center justify-center shadow-xs group-hover:border-emerald-500 transition-colors">
+                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 border-2 border-emerald-200/80 text-emerald-800 font-black text-lg sm:text-xl flex items-center justify-center shadow-xs group-hover:border-emerald-500 group-hover:scale-105 group-hover:shadow-md transition-all">
                             {initials}
                           </div>
                         )}
                       </div>
-
-                      {/* First Name & Last Name ONLY (Privacy-First Policy) */}
-                      <div className="w-full">
-                        <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-snug truncate" title={mem.firstName}>
-                          {mem.firstName}
-                        </h4>
-                        <p className="text-xs text-slate-600 font-medium truncate mt-0.5" title={mem.lastName}>
-                          {mem.lastName}
-                        </p>
-                      </div>
-
-                      {/* Business Badge */}
-                      {hasBusiness ? (
-                        <div className="mt-2.5 w-full pt-2 border-t border-slate-100 flex items-center justify-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50/70 rounded-lg py-1 px-1.5 truncate">
-                          <Store className="w-3 h-3 shrink-0 text-emerald-600" />
-                          <span className="truncate">{mem.businessPage.businessName}</span>
-                        </div>
-                      ) : (
-                        <div className="mt-2.5 w-full pt-2 border-t border-slate-100 text-[10px] text-slate-400 group-hover:text-emerald-600 transition-colors">
-                          View Business Page →
-                        </div>
-                      )}
-                    </div>
+                      <span
+                        className="text-[11px] sm:text-xs font-semibold text-slate-800 group-hover:text-emerald-700 transition-colors truncate w-full text-center mt-2 px-0.5 leading-tight block"
+                        title={memberDisplayName}
+                      >
+                        {memberDisplayName}
+                      </span>
+                    </button>
                   );
                 })}
               </div>
@@ -6313,82 +6755,189 @@ export default function MemberPortalPage() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Repayment Controls */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">Repayment Installment Amount (₱)</label>
-                    <input
-                      type="number"
-                      value={repayAmount}
-                      onChange={(e) => setRepayAmount(Math.max(100, Number(e.target.value)))}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                    />
-                  </div>
+              (() => {
+                const payActiveLoan =
+                  memberLoanApplications.find(
+                    (app: any) =>
+                      app.status === 'DISBURSED' &&
+                      matchesMember(app, currentMember) &&
+                      Number(app.balanceRemaining ?? app.amount ?? 1) > 0
+                  ) ||
+                  memberLoanApplications.find(
+                    (app: any) =>
+                      ['DISBURSED', 'RELEASED', 'ACTIVE', 'APPROVED', 'APPROVED_FOR_RELEASE', 'FOR_DISBURSEMENT'].includes(
+                        String(app.status || '').toUpperCase()
+                      ) &&
+                      matchesMember(app, currentMember) &&
+                      Number(app.balanceRemaining ?? app.amount ?? 1) > 0
+                  );
+                const payEffBal = payActiveLoan
+                  ? pickNumber(payActiveLoan?.balanceRemaining, payActiveLoan?.principalAmount, payActiveLoan?.amount)
+                  : loanBalance;
+                const paySchedRows = payActiveLoan ? getLoanScheduleRows(payActiveLoan, payEffBal) : [];
+                const payNextDueRow = paySchedRows.find((r: any) => r.status !== 'PAID');
+                const payPenaltyInfo = payNextDueRow
+                  ? calculateOverduePenalty({
+                      dueDate: payNextDueRow.due,
+                      installmentAmount: Number(payNextDueRow.tot || 0),
+                      monthlyFinesRate: payActiveLoan?.finesRateMonthly || 0.03,
+                      gracePeriodDays: coopGracePeriodDays,
+                    })
+                  : null;
+                const isOverdue = Boolean(payPenaltyInfo?.isOverdue && !payPenaltyInfo?.isGracePeriodActive);
 
-                  {(() => {
-                    const payLoanConfig = coopPaymentOptions?.products?.payLoan;
-                    const isPaymongoEnabled = payLoanConfig?.paymongo?.enabled ?? (coopPaymentOptions?.paymongo?.enabled ?? true);
-                    const isBankEnabled = payLoanConfig?.bankTransfer?.enabled ?? (coopPaymentOptions?.bankTransfer?.enabled ?? true);
-
-                    return (
-                      <div>
-                        <label className="text-xs font-bold text-slate-700 block mb-2">Payment Method</label>
-                        <div className="grid grid-cols-2 gap-3">
-                          {isPaymongoEnabled && (
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Repayment Controls */}
+                    <div className="space-y-4">
+                      {isOverdue && payPenaltyInfo && (
+                        <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl space-y-1.5 text-xs text-rose-950">
+                          <div className="flex items-center gap-2 font-bold">
+                            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                            <span>Overdue Installment #{payNextDueRow?.seq} ({payPenaltyInfo.daysOverdue} Days Late)</span>
+                            <span className="ml-auto bg-rose-200 text-rose-950 text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-rose-300">
+                              3.0%/mo Penalty
+                            </span>
+                          </div>
+                          <div className="text-slate-700">
+                            Due Date: <strong className="text-rose-900">{payNextDueRow?.due}</strong> • Base Installment: <strong>₱{payPenaltyInfo.baseInstallmentAmount.toFixed(2)}</strong> + Late Penalty: <strong className="text-rose-700">+₱{payPenaltyInfo.penaltyAmount.toFixed(2)}</strong>
+                          </div>
+                          <div className="flex items-center justify-between pt-1 text-[11px] border-t border-rose-200/80">
+                            <span className="text-slate-500">Cooperative credit policy overdue surcharge</span>
                             <button
                               type="button"
-                              onClick={() => setRepayChannel('PAYMONGO_QRPH')}
-                              className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
-                                repayChannel === 'PAYMONGO_QRPH'
-                                  ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
-                                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                              }`}
+                              onClick={() => setRepayAmount(payPenaltyInfo.totalWithPenalty)}
+                              className="text-rose-700 font-bold hover:underline cursor-pointer"
                             >
-                              <div className="flex items-center gap-2 mb-1">
-                                <QrCode className="w-4 h-4 text-emerald-600" /> QR PH
-                              </div>
-                              <div className="text-[11px] text-slate-500 font-normal">Instant settlement with dynamic QR</div>
+                              Sync Exact Total Due (₱{payPenaltyInfo.totalWithPenalty.toFixed(2)})
                             </button>
-                          )}
+                          </div>
+                        </div>
+                      )}
 
-                          {isBankEnabled && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-bold text-slate-700">Repayment Installment Amount (₱)</label>
+                          {payPenaltyInfo && (
                             <button
                               type="button"
-                              onClick={() => setRepayChannel('BANK_TRANSFER')}
-                              className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
-                                repayChannel === 'BANK_TRANSFER'
-                                  ? 'border-blue-600 bg-blue-50/70 font-bold text-blue-950 ring-2 ring-blue-500/20'
-                                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                              }`}
+                              onClick={() => setRepayAmount(isOverdue ? payPenaltyInfo.totalWithPenalty : payPenaltyInfo.baseInstallmentAmount)}
+                              className="text-[11px] font-semibold text-emerald-700 hover:underline cursor-pointer"
                             >
-                              <div className="flex items-center gap-2 mb-1">
-                                <Landmark className="w-4 h-4 text-blue-600" /> Bank Transfer
-                              </div>
-                              <div className="text-[11px] text-slate-500 font-normal">Direct deposit with trace reference</div>
+                              Reset to Schedule Due (₱{(isOverdue ? payPenaltyInfo.totalWithPenalty : payPenaltyInfo.baseInstallmentAmount).toFixed(2)})
                             </button>
                           )}
                         </div>
+                        <input
+                          type="number"
+                          value={repayAmount}
+                          onChange={(e) => setRepayAmount(Math.max(100, Number(e.target.value)))}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
                       </div>
-                    );
-                  })()}
 
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">Loan Credit:</span>
-                      <span className="font-bold text-slate-900">₱{repayAmount.toFixed(2)}</span>
-                    </div>
-                    {repayChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment !== 'OPEX' && passOnFee > 0 && (
-                      <div className="flex justify-between text-amber-700">
-                        <span>Convenience Fee:</span>
-                        <span className="font-bold">+ ₱{passOnFee.toFixed(2)}</span>
+                      {(() => {
+                        const payLoanConfig = coopPaymentOptions?.products?.payLoan;
+                        const isPaymongoEnabled = payLoanConfig?.paymongo?.enabled ?? (coopPaymentOptions?.paymongo?.enabled ?? true);
+                        const isBankEnabled = payLoanConfig?.bankTransfer?.enabled ?? (coopPaymentOptions?.bankTransfer?.enabled ?? true);
+                        const isEwalletEnabled =
+                          (payLoanConfig?.ewalletTransfer?.enabled ?? (coopPaymentOptions?.ewalletTransfer?.enabled ?? false)) &&
+                          (coopPaymentOptions?.ewalletTransfer?.enabled !== false);
+                        const ewalletProvider = payLoanConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'Maya';
+                        const isMaya = ewalletProvider.toLowerCase().includes('maya');
+
+                        return (
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-2">Payment Method</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              {isPaymongoEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRepayChannel('PAYMONGO_QRPH')}
+                                  className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
+                                    repayChannel === 'PAYMONGO_QRPH'
+                                      ? 'border-emerald-600 bg-emerald-50/70 font-bold text-emerald-950 ring-2 ring-emerald-500/20'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <QrCode className="w-4 h-4 text-emerald-600" /> QR PH
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 font-normal">Instant settlement with dynamic QR</div>
+                                </button>
+                              )}
+
+                              {isBankEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRepayChannel('BANK_TRANSFER')}
+                                  className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
+                                    repayChannel === 'BANK_TRANSFER'
+                                      ? 'border-blue-600 bg-blue-50/70 font-bold text-blue-950 ring-2 ring-blue-500/20'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Landmark className="w-4 h-4 text-blue-600" /> Bank Transfer
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 font-normal">Direct deposit with trace reference</div>
+                                </button>
+                              )}
+
+                              {isEwalletEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRepayChannel('EWALLET')}
+                                  className={`p-3.5 border rounded-xl text-left text-xs transition-colors ${
+                                    repayChannel === 'EWALLET'
+                                      ? `${isMaya ? 'border-purple-600 bg-purple-50/70 text-purple-950 ring-purple-500/20' : 'border-indigo-600 bg-indigo-50/70 text-indigo-950 ring-indigo-500/20'} font-bold ring-2`
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Smartphone className={`w-4 h-4 ${isMaya ? 'text-purple-600' : 'text-indigo-600'}`} /> {ewalletProvider}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 font-normal">Direct mobile transfer & QR code</div>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                        {isOverdue && payPenaltyInfo && payPenaltyInfo.penaltyAmount > 0 ? (
+                          <>
+                            <div className="flex justify-between text-slate-600">
+                              <span>Base Installment (Principal + Interest):</span>
+                              <span className="font-bold text-slate-900">₱{payPenaltyInfo.baseInstallmentAmount.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-rose-700 font-semibold">
+                              <span>Late Overdue Penalty ({payPenaltyInfo.daysOverdue}d late):</span>
+                              <span className="font-bold font-mono text-rose-700">+ ₱{payPenaltyInfo.penaltyAmount.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between border-t border-slate-200 pt-1 text-slate-700">
+                              <span>Loan Payment Credit:</span>
+                              <span className="font-bold text-slate-900">₱{repayAmount.toFixed(2)}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex justify-between">
+                            <span className="text-slate-600">Loan Credit:</span>
+                            <span className="font-bold text-slate-900">₱{repayAmount.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {repayChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment !== 'OPEX' && passOnFee > 0 && (
+                          <div className="flex justify-between text-amber-700">
+                            <span>Convenience Fee:</span>
+                            <span className="font-bold">+ ₱{passOnFee.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm text-slate-900">
+                          <span>Total Amount to Pay:</span>
+                          <span className="text-emerald-700">₱{(repayChannel === 'PAYMONGO_QRPH' ? totalCharge : repayAmount).toFixed(2)}</span>
+                        </div>
                       </div>
-                    )}
-                    <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm text-slate-900">
-                      <span>Total Amount to Pay:</span>
-                      <span className="text-emerald-700">₱{(repayChannel === 'PAYMONGO_QRPH' ? totalCharge : repayAmount).toFixed(2)}</span>
-                    </div>
-                  </div>
 
                   {repayChannel === 'PAYMONGO_QRPH' ? (
                     <button
@@ -6397,6 +6946,25 @@ export default function MemberPortalPage() {
                       className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors cursor-pointer"
                     >
                       Simulate Payment Settlement
+                    </button>
+                  ) : repayChannel === 'EWALLET' ? (
+                    <button
+                      type="button"
+                      disabled={isSubmittingLoanBankTransfer}
+                      onClick={handleSubmitLoanBankTransfer}
+                      className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isSubmittingLoanBankTransfer ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Submitting for Admin Confirmation...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Smartphone className="w-4 h-4" />
+                          <span>Submit {coopPaymentOptions?.products?.payLoan?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'Maya'} Repayment for Confirmation</span>
+                        </>
+                      )}
                     </button>
                   ) : (
                     <button
@@ -6420,7 +6988,7 @@ export default function MemberPortalPage() {
                   )}
                 </div>
 
-                {/* Right Column: QR Ph Code or Official Bank Transfer Form */}
+                {/* Right Column: QR Ph Code or Official Bank Transfer Form or e-Wallet Form */}
                 <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 flex flex-col items-center justify-center text-center">
                   {repayChannel === 'PAYMONGO_QRPH' ? (
                     <>
@@ -6436,7 +7004,138 @@ export default function MemberPortalPage() {
                         Scan with GCash, Maya, BDO, BPI, UnionBank, or any InstaPay-enabled mobile app.
                       </div>
                     </>
-                  ) : (
+                  ) : repayChannel === 'EWALLET' ? (() => {
+                    const payLoanConfig = coopPaymentOptions?.products?.payLoan;
+                    const ewalletProvider = payLoanConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'Maya';
+                    const accountName = payLoanConfig?.ewalletTransfer?.accountName || coopPaymentOptions?.ewalletTransfer?.accountName || tenantInfo.name;
+                    const accountNumber = payLoanConfig?.ewalletTransfer?.accountNumber || coopPaymentOptions?.ewalletTransfer?.accountNumber || '+63 920 965 0618';
+                    const qrCodeUrl = payLoanConfig?.ewalletTransfer?.qrCodeUrl || coopPaymentOptions?.ewalletTransfer?.qrCodeUrl;
+                    const instructions = payLoanConfig?.ewalletTransfer?.instructions || coopPaymentOptions?.ewalletTransfer?.instructions || `Send via Express Send to ${ewalletProvider}. State your Loan/Member Number in message note.`;
+                    const isMaya = ewalletProvider.toLowerCase().includes('maya');
+
+                    return (
+                      <div className="w-full space-y-4 text-left">
+                        <div className={`w-12 h-12 rounded-xl ${isMaya ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'} flex items-center justify-center mb-1`}>
+                          <Smartphone className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900 text-sm">Official {ewalletProvider} Repayment Instructions</div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            Transfer your loan installment directly to the cooperative's {ewalletProvider} account, then submit your reference number below.
+                          </div>
+                        </div>
+
+                        {qrCodeUrl && (
+                          <div className="flex flex-col items-center p-3 bg-white rounded-xl border border-purple-200 shadow-2xs">
+                            <img
+                              src={qrCodeUrl}
+                              alt={`${ewalletProvider} QR Code`}
+                              className="w-44 h-44 object-contain rounded-lg border border-slate-100"
+                            />
+                            <span className="text-[11px] font-bold text-slate-700 mt-2 flex items-center gap-1.5">
+                              <QrCode className="w-3.5 h-3.5 text-purple-600" />
+                              Scan QR Code using {ewalletProvider} app
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5 text-xs font-mono">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500 font-sans">Provider:</span>
+                            <strong className="text-slate-900">{ewalletProvider}</strong>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                            <span className="text-slate-500 font-sans">Account Name:</span>
+                            <div className="flex items-center gap-1.5">
+                              <strong className="text-slate-900">{accountName}</strong>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyToClipboard(accountName, 'loan_ewallet_acc_name')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                  copiedField === 'loan_ewallet_acc_name'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                                title="Copy Account Name"
+                              >
+                                {copiedField === 'loan_ewallet_acc_name' ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-600" />
+                                    <span>Copied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                            <span className="text-slate-500 font-sans">Mobile / Account No:</span>
+                            <div className="flex items-center gap-1.5">
+                              <strong className={`${isMaya ? 'text-purple-700' : 'text-indigo-700'} font-bold`}>{accountNumber}</strong>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyToClipboard(accountNumber, 'loan_ewallet_acc_num')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                  copiedField === 'loan_ewallet_acc_num'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                                title="Copy Mobile / Account Number"
+                              >
+                                {copiedField === 'loan_ewallet_acc_num' ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-600" />
+                                    <span>Copied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 text-[11px] text-purple-900 bg-purple-50/70 border border-purple-200 rounded-lg">
+                          {instructions}
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1">
+                              {ewalletProvider} Reference / Trace No. (Required):
+                            </label>
+                            <input
+                              type="text"
+                              value={loanBankReferenceInput}
+                              onChange={(e) => setLoanBankReferenceInput(e.target.value)}
+                              placeholder={`e.g. ${isMaya ? 'MAYA-9988112233' : 'GCASH-10029384756'}`}
+                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-purple-500 outline-none bg-white text-slate-900 font-medium"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1">
+                              Notes / Remarks (Optional):
+                            </label>
+                            <input
+                              type="text"
+                              value={loanBankTransferNotes}
+                              onChange={(e) => setLoanBankTransferNotes(e.target.value)}
+                              placeholder="e.g. Loan amortization installment payment"
+                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-purple-500 outline-none bg-white text-slate-900 font-medium"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })() : (
                     <div className="w-full space-y-4 text-left">
                       <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 mb-1">
                         <Landmark className="w-6 h-6" />
@@ -6449,17 +7148,65 @@ export default function MemberPortalPage() {
                       </div>
 
                       <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs font-mono">
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span className="text-slate-500 font-sans">Bank:</span>
                           <strong className="text-slate-900">{coopPaymentOptions?.bankTransfer?.bankName || 'Land Bank of the Philippines'}</strong>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center gap-2 border-t border-slate-100 pt-1.5">
                           <span className="text-slate-500 font-sans">Account Name:</span>
-                          <strong className="text-slate-900">{coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                          <div className="flex items-center gap-1.5">
+                            <strong className="text-slate-900">{coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyToClipboard(coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name, 'loan_bank_acc_name')}
+                              className={`px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                copiedField === 'loan_bank_acc_name'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                              title="Copy Account Name"
+                            >
+                              {copiedField === 'loan_bank_acc_name' ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  <span>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center gap-2 border-t border-slate-100 pt-1.5">
                           <span className="text-slate-500 font-sans">Account Number:</span>
-                          <strong className="text-blue-700 font-mono">{coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                          <div className="flex items-center gap-1.5">
+                            <strong className="text-blue-700 font-mono">{coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyToClipboard(coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22', 'loan_bank_acc_num')}
+                              className={`px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                copiedField === 'loan_bank_acc_num'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                              title="Copy Account Number"
+                            >
+                              {copiedField === 'loan_bank_acc_num' ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  <span>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -6501,9 +7248,10 @@ export default function MemberPortalPage() {
                   )}
                 </div>
               </div>
-            )}
-          </div>
-        )}
+            );
+          })())}
+        </div>
+      )}
 
         {/* TAB: MY SUBMITTED LOAN APPLICATIONS & STATUS TRACKER */}
         {activeTab === 'applications' && (
@@ -7455,17 +8203,35 @@ export default function MemberPortalPage() {
           </div>
         )}
 
-        {/* TAB: MORE SERVICES & ACCOUNT (Mobile PWA Hub) */}
-        {activeTab === 'more' && (
+        {/* TAB: COOP PAGE (ACCESSIBLE VIA COOP CARD) */}
+        {activeTab === 'coop_page' && (
           <div className="space-y-6">
-            {/* Cooperative Name & Identity Header (Moved from Header) */}
+            {/* Header with Back to Dashboard */}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('home');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-xl transition shadow-xs cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back to Community Dashboard</span>
+              </button>
+              <span className="text-[11px] font-bold text-[#e68a38] uppercase tracking-wider bg-[#223a5e] px-2.5 py-1 rounded-full">
+                Cooperative Hub
+              </span>
+            </div>
+
+            {/* Cooperative Name & Identity Header */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-3.5">
               <div className="flex items-center space-x-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-700 text-white font-black text-2xl flex items-center justify-center shadow-sm shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#223a5e] text-white font-black text-2xl flex items-center justify-center shadow-sm shrink-0">
                   {tenantInfo.logoLetter}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                  <div className="text-[10px] font-bold text-[#e68a38] uppercase tracking-wider">
                     Republic of the Philippines • CDA Registered
                   </div>
                   <h2 className="font-black text-base sm:text-lg text-slate-900 leading-tight">
@@ -7480,7 +8246,7 @@ export default function MemberPortalPage() {
               {/* Active Logged-In Member Badge */}
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-emerald-700 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-[#223a5e] text-white font-bold text-xs flex items-center justify-center shrink-0">
                     {currentMember.initials}
                   </div>
                   <div>
@@ -7494,7 +8260,68 @@ export default function MemberPortalPage() {
               </div>
             </div>
 
-            {/* Services Grid */}
+            {/* News and Announcements Section (Moved to Coop Page) */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-amber-100 text-[#e68a38] flex items-center justify-center">
+                    <Megaphone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                      News and Announcements
+                    </h3>
+                    <p className="text-[10px] text-slate-500">Official bulletins &amp; updates for cooperative members</p>
+                  </div>
+                </div>
+              </div>
+
+              {topMemberAnnouncements.length === 0 ? (
+                <div className="text-center py-6 px-4 bg-slate-50/60 rounded-xl border border-dashed border-slate-200">
+                  <Megaphone className="w-6 h-6 text-slate-300 mx-auto mb-1" />
+                  <p className="text-xs font-medium text-slate-600">No active announcements at this time.</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Check back later for important cooperative updates.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {topMemberAnnouncements.map((item) => (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedAnnouncementModal(item)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedAnnouncementModal(item);
+                        }
+                      }}
+                      className="p-3.5 rounded-xl border border-slate-100 hover:border-emerald-300 bg-slate-50/50 hover:bg-emerald-50/30 flex items-center justify-between gap-3 cursor-pointer transition-all group shadow-2xs hover:shadow-xs"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-xs font-bold text-slate-900 group-hover:text-emerald-800 transition-colors truncate">
+                          {item.title}
+                        </h4>
+                        <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+                          <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span>
+                            Published:{' '}
+                            {new Date(item.publishAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                          </span>
+                        </p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cooperative Services & Tools (Moved from More Tab) */}
             <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -7508,7 +8335,7 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('members')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
@@ -7523,38 +8350,12 @@ export default function MemberPortalPage() {
                   </div>
                   <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
                 </button>
-                {/* My Business Page */}
-                <button
-                  type="button"
-                  onClick={handleOpenMyBusiness}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                      <Store className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
-                          My Business Page
-                        </h4>
-                        {Boolean((currentMember as any)?.businessPage?.businessName || businessPageData?.businessName) && (
-                          <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-1.5 py-0.2 rounded-full">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500">Showcase enterprise, upload photos, set goals & engage members</p>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
-                </button>
 
                 {/* My Loan Applications & Status */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('applications')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
@@ -7574,7 +8375,7 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('apply')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
@@ -7594,7 +8395,7 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('comaker')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-amber-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-amber-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="relative w-11 h-11 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0 group-hover:bg-amber-600 group-hover:text-white transition-colors">
@@ -7626,7 +8427,7 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('surplus')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
@@ -7646,7 +8447,7 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('collateral')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
@@ -7666,7 +8467,7 @@ export default function MemberPortalPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('documents')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 group-hover:bg-slate-700 group-hover:text-white transition-colors">
@@ -7681,12 +8482,71 @@ export default function MemberPortalPage() {
                   </div>
                   <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
 
+        {/* TAB: MORE SERVICES & ACCOUNT (Silong Community Hub) */}
+        {activeTab === 'more' && (
+          <div className="space-y-6">
+            {/* Account & Community Identity Header */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-3.5">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-[#223a5e] text-white font-black text-2xl flex items-center justify-center shadow-sm shrink-0">
+                  {currentMember.initials || 'MB'}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-bold text-[#e68a38] uppercase tracking-wider">
+                    Silong Community Hub • Account Profile
+                  </div>
+                  <h2 className="font-black text-base sm:text-lg text-slate-900 leading-tight">
+                    {currentMember.name}
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                    {currentMember.email || currentMember.memberNumber}
+                  </p>
+                </div>
+              </div>
+
+              {/* Cooperative Linked Status Card */}
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Linked Cooperative Account</div>
+                  <div className="font-bold text-slate-900 mt-0.5">
+                    {isCoopLinked ? tenantInfo.name : 'No Cooperative Account Linked'}
+                  </div>
+                  {isCoopLinked && (
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      Member #{currentMember.memberNumber} • Reg #{tenantInfo.registrationNumber}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowLinkCoopModal(true)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 hover:border-[#e68a38] text-slate-700 hover:text-[#e68a38] rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>{isCoopLinked ? 'Switch / Re-link Coop' : 'Link Cooperative Account'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Account Services Grid */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Account & Identity
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* eKYC & Privacy Profile */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('profile')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group"
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
@@ -7759,16 +8619,20 @@ export default function MemberPortalPage() {
             {/* PWA Mobile App Card */}
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
-                  <Smartphone className="w-6 h-6" />
+                <div className="w-12 h-12 rounded-2xl bg-[#223a5e] flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                  <img
+                    src="/icons/silong-icon-192.png"
+                    alt="Silong"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
-                    <h4 className="font-bold text-sm text-emerald-950">Install Progressive Web App (PWA)</h4>
+                    <h4 className="font-bold text-sm text-emerald-950">Install Silong App (PWA)</h4>
                     <span className="bg-emerald-200 text-emerald-900 text-[10px] font-bold px-1.5 py-0.2 rounded">Fast & Offline</span>
                   </div>
                   <p className="text-xs text-emerald-800 mt-0.5">
-                    Add Flex Coop to your mobile home screen for instant biometric login and offline passbook access.
+                    Add Silong to your mobile home screen for instant biometric login and offline passbook access.
                   </p>
                 </div>
               </div>
@@ -8329,11 +9193,59 @@ export default function MemberPortalPage() {
                               </div>
                               <div>
                                 <span className="text-slate-500 block font-sans">Account Number:</span>
-                                <strong className="text-blue-900">{productConfig?.bankTransfer?.accountNumber || coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                                <div className="flex items-center justify-between gap-1 mt-0.5">
+                                  <strong className="text-blue-900">{productConfig?.bankTransfer?.accountNumber || coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22'}</strong>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyToClipboard(productConfig?.bankTransfer?.accountNumber || coopPaymentOptions?.bankTransfer?.accountNumber || '0012-9981-22', 'deposit_bank_acc_num')}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                      copiedField === 'deposit_bank_acc_num'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                                    }`}
+                                    title="Copy Account Number"
+                                  >
+                                    {copiedField === 'deposit_bank_acc_num' ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span>Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Copy</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               </div>
-                              <div className="col-span-2">
+                              <div className="col-span-2 border-t border-slate-100 pt-1">
                                 <span className="text-slate-500 block font-sans">Account Name:</span>
-                                <strong>{productConfig?.bankTransfer?.accountName || coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                                <div className="flex items-center justify-between gap-1 mt-0.5">
+                                  <strong>{productConfig?.bankTransfer?.accountName || coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name}</strong>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyToClipboard(productConfig?.bankTransfer?.accountName || coopPaymentOptions?.bankTransfer?.accountName || tenantInfo.name, 'deposit_bank_acc_name')}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                      copiedField === 'deposit_bank_acc_name'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                                    }`}
+                                    title="Copy Account Name"
+                                  >
+                                    {copiedField === 'deposit_bank_acc_name' ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span>Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Copy</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                             {productConfig?.bankTransfer?.instructions && (
@@ -8369,47 +9281,103 @@ export default function MemberPortalPage() {
                           depositModalType === 'SHARES'
                             ? coopPaymentOptions?.products?.shareCapital
                             : coopPaymentOptions?.products?.depositSavings;
-                        const providerName = productConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'GCash / Maya';
+                        const providerName = productConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'Maya';
                         const accountName = productConfig?.ewalletTransfer?.accountName || coopPaymentOptions?.ewalletTransfer?.accountName || tenantInfo.name;
                         const accountNumber = productConfig?.ewalletTransfer?.accountNumber || coopPaymentOptions?.ewalletTransfer?.accountNumber || '+63 920 965 0618';
                         const instructions = productConfig?.ewalletTransfer?.instructions || coopPaymentOptions?.ewalletTransfer?.instructions || `Send via Express Send to ${providerName}. State your Member Number in message note.`;
+                        const qrCodeUrl = productConfig?.ewalletTransfer?.qrCodeUrl || coopPaymentOptions?.ewalletTransfer?.qrCodeUrl;
+                        const isMaya = providerName.toLowerCase().includes('maya');
 
                         return (
-                          <div className="p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2 text-xs text-indigo-950">
-                            <div className="font-bold flex items-center justify-between text-indigo-950">
+                          <div className={`p-3.5 ${isMaya ? 'bg-purple-50/80 border-purple-200 text-purple-950' : 'bg-indigo-50/80 border-indigo-200 text-indigo-950'} border rounded-xl space-y-2.5 text-xs`}>
+                            <div className="font-bold flex items-center justify-between">
                               <div className="flex items-center gap-1.5">
-                                <Smartphone className="w-4 h-4 text-indigo-700" />
+                                <Smartphone className={`w-4 h-4 ${isMaya ? 'text-purple-700' : 'text-indigo-700'}`} />
                                 <span>Cooperative Official {providerName} Account</span>
                               </div>
-                              <span className="text-[10px] bg-indigo-200 text-indigo-950 px-2 py-0.5 rounded font-mono font-bold">
+                              <span className={`text-[10px] ${isMaya ? 'bg-purple-200 text-purple-950' : 'bg-indigo-200 text-indigo-950'} px-2 py-0.5 rounded font-mono font-bold`}>
                                 {providerName} Direct
                               </span>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                              <div>
-                                <span className="text-slate-500 block font-sans">Provider:</span>
-                                <strong>{providerName}</strong>
-                              </div>
-                              <div>
-                                <span className="text-slate-500 block font-sans">Mobile / Account No:</span>
-                                <strong className="text-indigo-900">{accountNumber}</strong>
-                              </div>
-                              <div className="col-span-2">
-                                <span className="text-slate-500 block font-sans">Account Name:</span>
-                                <strong>{accountName}</strong>
-                              </div>
-                            </div>
-                            {coopPaymentOptions?.ewalletTransfer?.qrCodeUrl && (
-                              <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-indigo-200">
+
+                            {/* QR Code Display when QR is available */}
+                            {qrCodeUrl && (
+                              <div className="flex flex-col items-center p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
                                 <img
-                                  src={coopPaymentOptions.ewalletTransfer.qrCodeUrl}
+                                  src={qrCodeUrl}
                                   alt={`${providerName} QR Code`}
-                                  className="w-36 h-36 object-contain"
+                                  className="w-44 h-44 object-contain rounded-lg border border-slate-100"
                                 />
-                                <span className="text-[10px] text-slate-500 mt-1">Scan QR Code using {providerName} app</span>
+                                <span className="text-[11px] font-bold text-slate-700 mt-2 flex items-center gap-1.5">
+                                  <QrCode className={`w-3.5 h-3.5 ${isMaya ? 'text-purple-600' : 'text-indigo-600'}`} />
+                                  Scan QR Code using {providerName} app
+                                </span>
                               </div>
                             )}
-                            <div className="text-[11px] text-indigo-800 bg-white/70 p-2 rounded-lg border border-indigo-200">
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono bg-white/70 p-2.5 rounded-lg border border-slate-200/70">
+                              <div>
+                                <span className="text-slate-500 block font-sans text-[10px]">Provider:</span>
+                                <strong className="text-slate-900">{providerName}</strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-500 block font-sans text-[10px]">Mobile / Account No:</span>
+                                <div className="flex items-center justify-between gap-1.5 mt-0.5">
+                                  <strong className={`${isMaya ? 'text-purple-900' : 'text-indigo-900'} font-bold`}>{accountNumber}</strong>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyToClipboard(accountNumber, 'deposit_ewallet_acc_num')}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                      copiedField === 'deposit_ewallet_acc_num'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                                    }`}
+                                    title={`Copy ${providerName} Account Number`}
+                                  >
+                                    {copiedField === 'deposit_ewallet_acc_num' ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span>Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Copy</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="sm:col-span-2 border-t border-slate-100 pt-1.5">
+                                <span className="text-slate-500 block font-sans text-[10px]">Account Name:</span>
+                                <div className="flex items-center justify-between gap-1.5 mt-0.5">
+                                  <strong className="text-slate-900">{accountName}</strong>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyToClipboard(accountName, 'deposit_ewallet_acc_name')}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1 transition cursor-pointer ${
+                                      copiedField === 'deposit_ewallet_acc_name'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                                    }`}
+                                    title={`Copy ${providerName} Account Name`}
+                                  >
+                                    {copiedField === 'deposit_ewallet_acc_name' ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span>Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Copy</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-slate-700 bg-white/70 p-2 rounded-lg border border-slate-200">
                               {instructions}
                             </div>
                             <div>
@@ -8420,8 +9388,8 @@ export default function MemberPortalPage() {
                                 type="text"
                                 value={bankReferenceInput}
                                 onChange={(e) => setBankReferenceInput(e.target.value)}
-                                placeholder="e.g. GCASH-10029384756"
-                                className="w-full px-3 py-1.5 bg-white border border-indigo-300 rounded-lg text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                                placeholder={`e.g. ${isMaya ? 'MAYA-9988112233' : 'GCASH-10029384756'}`}
+                                className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-purple-500"
                               />
                             </div>
                             <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-900 flex items-start gap-1.5">
@@ -8718,42 +9686,64 @@ export default function MemberPortalPage() {
 
                 {/* Amount Input — Strictly Non-Editable for Loan Due Amount */}
                 {passbookPayModal.type === 'LOAN' || passbookPayModal.lockedAmount ? (
-                  <div className="p-4 bg-indigo-50/70 border-2 border-indigo-200 rounded-2xl space-y-2.5">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-900">
-                        Scheduled Installment Due Amount
-                      </span>
-                      <span className="bg-indigo-200 text-indigo-950 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        Non-Editable • Locked to Due Amount
-                      </span>
-                    </div>
-                    <div className="flex items-baseline justify-between pt-1">
-                      <div className="text-xs text-slate-600 space-y-0.5">
-                        <div className="font-bold text-slate-900">{passbookPayModal.description}</div>
-                        {passbookPayModal.dueDate && (
+                  <div className="space-y-3">
+                    {passbookPayModal.penaltyPortion && passbookPayModal.penaltyPortion > 0 ? (
+                      <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-2xl flex items-start gap-2.5 text-xs text-rose-950">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <div className="font-bold flex items-center gap-1.5">
+                            <span>Overdue Installment Notice</span>
+                            <span className="bg-rose-200 text-rose-900 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                              {passbookPayModal.daysOverdue} Days Late
+                            </span>
+                          </div>
                           <div>
-                            Due Date: <strong className="text-amber-800">{passbookPayModal.dueDate}</strong>
+                            An overdue penalty of <strong className="text-rose-700">₱{passbookPayModal.penaltyPortion.toFixed(2)}</strong> (3%/mo pro-rated) has been assessed in accordance with cooperative lending guidelines.
                           </div>
-                        )}
-                        {passbookPayModal.principalPortion !== undefined && passbookPayModal.interestPortion !== undefined && (
-                          <div className="text-[11px] text-slate-500">
-                            Principal: <strong>₱{passbookPayModal.principalPortion.toFixed(2)}</strong> + Interest: <strong>₱{passbookPayModal.interestPortion.toFixed(2)}</strong>
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xl font-black font-mono text-indigo-950">
-                          ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                       </div>
+                    ) : null}
+
+                    <div className="p-4 bg-indigo-50/70 border-2 border-indigo-200 rounded-2xl space-y-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-900">
+                          Scheduled Installment Due Amount
+                        </span>
+                        <span className="bg-indigo-200 text-indigo-950 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          Non-Editable • Locked to Due Amount
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between pt-1">
+                        <div className="text-xs text-slate-600 space-y-0.5">
+                          <div className="font-bold text-slate-900">{passbookPayModal.description}</div>
+                          {passbookPayModal.dueDate && (
+                            <div>
+                              Due Date: <strong className="text-amber-800">{passbookPayModal.dueDate}</strong>
+                            </div>
+                          )}
+                          {passbookPayModal.principalPortion !== undefined && passbookPayModal.interestPortion !== undefined && (
+                            <div className="text-[11px] text-slate-500">
+                              Principal: <strong>₱{passbookPayModal.principalPortion.toFixed(2)}</strong> + Interest: <strong>₱{passbookPayModal.interestPortion.toFixed(2)}</strong>
+                              {passbookPayModal.penaltyPortion && passbookPayModal.penaltyPortion > 0 ? (
+                                <> + Penalty: <strong className="text-rose-700">₱{passbookPayModal.penaltyPortion.toFixed(2)}</strong></>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-black font-mono text-indigo-950">
+                            ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={`₱${passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        className="w-full border border-indigo-200 bg-white/80 rounded-xl px-3.5 py-2 font-bold font-mono text-sm text-slate-700 cursor-not-allowed select-none"
+                      />
                     </div>
-                    <input
-                      type="text"
-                      readOnly
-                      disabled
-                      value={`₱${passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                      className="w-full border border-indigo-200 bg-white/80 rounded-xl px-3.5 py-2 font-bold font-mono text-sm text-slate-700 cursor-not-allowed select-none"
-                    />
                   </div>
                 ) : (
                   <div>
@@ -8780,15 +9770,42 @@ export default function MemberPortalPage() {
                 {(() => {
                   const fee = calculateConvenienceFee(passbookPayModal.amount);
                   const total = Math.round((passbookPayModal.amount + fee) * 100) / 100;
+                  const hasPenalty = Boolean(passbookPayModal.penaltyPortion && passbookPayModal.penaltyPortion > 0);
+                  const baseAmt =
+                    passbookPayModal.baseInstallmentAmount ||
+                    (hasPenalty ? Math.round((passbookPayModal.amount - (passbookPayModal.penaltyPortion || 0)) * 100) / 100 : passbookPayModal.amount);
 
                   return (
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                      <div className="flex justify-between text-slate-600">
-                        <span>{passbookPayModal.type === 'LOAN' ? 'Loan Installment Due Amount:' : 'Net Account Credit:'}</span>
-                        <span className="font-mono font-bold text-slate-900">
-                          ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
+                      {hasPenalty ? (
+                        <>
+                          <div className="flex justify-between text-slate-600">
+                            <span>Base Installment (Principal + Interest):</span>
+                            <span className="font-mono font-bold text-slate-900">
+                              ₱{baseAmt.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-rose-700 font-semibold">
+                            <span>Late Overdue Penalty ({passbookPayModal.daysOverdue}d late):</span>
+                            <span className="font-mono font-bold text-rose-700">
+                              + ₱{(passbookPayModal.penaltyPortion || 0).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-slate-700 border-t border-slate-200 pt-1">
+                            <span>Total Loan Installment Due:</span>
+                            <span className="font-mono font-bold text-slate-950">
+                              ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between text-slate-600">
+                          <span>{passbookPayModal.type === 'LOAN' ? 'Loan Installment Due Amount:' : 'Net Account Credit:'}</span>
+                          <span className="font-mono font-bold text-slate-900">
+                            ₱{passbookPayModal.amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
                       {fee > 0 && paymongoFeeEnabled && paymongoFeeTreatment !== 'OPEX' && (
                         <div className="flex justify-between text-amber-800">
                           <span>Convenience Fee:</span>
@@ -9348,7 +10365,7 @@ export default function MemberPortalPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
-                          {businessPageData?.businessName || `${selectedBusinessMember.firstName || selectedBusinessMember.name}'s Business Page`}
+                          {businessPageData?.businessName || `${selectedBusinessMember.firstName || selectedBusinessMember.name}'s Personal Wall`}
                         </h3>
                         {businessPageData?.natureOfBusiness && (
                           <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
@@ -9357,7 +10374,7 @@ export default function MemberPortalPage() {
                         )}
                       </div>
                       <p className="text-[11px] text-slate-300 truncate mt-0.5">
-                        Cooperative Member Enterprise Showcase & Community Inquiries
+                        Cooperative Member Personal Wall & Community Inquiries
                       </p>
                     </div>
                   </div>
@@ -9371,7 +10388,7 @@ export default function MemberPortalPage() {
                         className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer border border-emerald-500/50"
                       >
                         <Briefcase className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Edit Details</span>
+                        <span className="hidden sm:inline">Edit Wall</span>
                         <span className="sm:hidden">Edit</span>
                       </button>
                     )}
@@ -9395,22 +10412,22 @@ export default function MemberPortalPage() {
                   {isLoadingBusinessPage ? (
                     <div className="py-16 text-center space-y-3">
                       <RefreshCw className="w-8 h-8 animate-spin text-emerald-600 mx-auto" />
-                      <p className="text-xs text-slate-500 font-medium">Loading member business page & inquiries...</p>
+                      <p className="text-xs text-slate-500 font-medium">Loading member personal wall & inquiries...</p>
                     </div>
                   ) : !businessPageData?.businessName ? (
-                    /* No Business Page Published Yet */
+                    /* No Personal Wall Published Yet */
                     <div className="py-12 px-4 text-center max-w-md mx-auto space-y-4">
                       <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
                         <Store className="w-8 h-8" />
                       </div>
                       <div>
                         <h4 className="font-bold text-base text-slate-900">
-                          No Business Page Published Yet
+                          No Personal Wall Published Yet
                         </h4>
                         <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                           {isViewingOwn
-                            ? 'You have not set up your public business page yet. Showcase your enterprise, upload a business picture, and share your next business goal with fellow cooperative members!'
-                            : `${selectedBusinessMember.firstName || selectedBusinessMember.name} has not published a business page yet. When they launch their showcase, their enterprise details and next milestone will appear here.`}
+                            ? 'You have not set up your Personal Wall yet. Share your story, photo, display name, and next milestone with fellow cooperative members!'
+                            : `${selectedBusinessMember.firstName || selectedBusinessMember.name} has not published a Personal Wall yet. When they share their wall, their updates and goals will appear here.`}
                         </p>
                       </div>
 
@@ -9421,7 +10438,7 @@ export default function MemberPortalPage() {
                           className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-md inline-flex items-center gap-2 cursor-pointer"
                         >
                           <Sparkles className="w-4 h-4" />
-                          <span>Set Up My Business Page Now</span>
+                          <span>Set Up My Personal Wall Now</span>
                         </button>
                       )}
                     </div>
@@ -9660,7 +10677,7 @@ export default function MemberPortalPage() {
         })()}
 
         {/* ========================================================================= */}
-        {/* SET UP / EDIT MY BUSINESS PAGE MODAL */}
+        {/* SET UP / EDIT MY PERSONAL WALL MODAL */}
         {/* ========================================================================= */}
         {isEditingBusinessPage && (
           <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
@@ -9673,10 +10690,10 @@ export default function MemberPortalPage() {
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-bold text-sm sm:text-base tracking-tight leading-tight truncate">
-                      {bizFormName ? `Edit ${bizFormName}` : 'Set Up Your Business Page'}
+                      {bizFormName ? `Edit ${bizFormName}'s Personal Wall` : 'Set Up Your Personal Wall'}
                     </h3>
                     <p className="text-[11px] text-slate-300 truncate mt-0.5">
-                      Showcase your enterprise to fellow cooperative members
+                      Share your story, updates, and goals with fellow cooperative members
                     </p>
                   </div>
                 </div>
@@ -9705,25 +10722,28 @@ export default function MemberPortalPage() {
                   </div>
                 )}
 
-                {/* 1. Business Name */}
+                {/* 1. Display Name (Default: Member's First Name) */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700 block">
-                    Business Name <span className="text-rose-500">*</span>
+                    Display Name <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={bizFormName}
                     onChange={(e) => setBizFormName(e.target.value)}
-                    placeholder="e.g. Santos Organic Agri-Farms, Cruz Sari-Sari Store"
+                    placeholder="e.g. Maria (or your preferred display name)"
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
                   />
+                  <p className="text-[10px] text-slate-400">
+                    Your display name on your Personal Wall (defaults to your first name).
+                  </p>
                 </div>
 
                 {/* 2. Nature of Business */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700 block">
-                    Nature of Business <span className="text-rose-500">*</span>
+                    Category / Enterprise <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={bizFormNature}
@@ -9745,16 +10765,16 @@ export default function MemberPortalPage() {
                       type="text"
                       value={bizFormCustomNature}
                       onChange={(e) => setBizFormCustomNature(e.target.value)}
-                      placeholder="Specify your business line or industry..."
+                      placeholder="Specify your category or line of work..."
                       className="w-full mt-1.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition"
                     />
                   )}
                 </div>
 
-                {/* 3. Picture of the Business */}
+                {/* 3. Picture of the Business / Wall Cover */}
                 <div className="space-y-1.5">
                   <label className="font-bold text-slate-700 block">
-                    Picture of the Business (Photo / Storefront / Farm)
+                    Personal Wall / Cover Photo
                   </label>
                   <div className="border-2 border-dashed border-slate-200 rounded-xl p-3 sm:p-4 text-center bg-slate-50/60 hover:bg-slate-50 transition space-y-2">
                     {bizFormPicturePreview ? (
@@ -9762,7 +10782,7 @@ export default function MemberPortalPage() {
                         <div className="relative h-36 w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-900">
                           <img
                             src={bizFormPicturePreview}
-                            alt="Business Preview"
+                            alt="Cover Preview"
                             className="w-full h-full object-cover"
                           />
                         </div>
@@ -9821,11 +10841,11 @@ export default function MemberPortalPage() {
                   />
                 </div>
 
-                {/* 4. Next Business Goal */}
+                {/* 4. Next Goal / Target Milestone */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-slate-700 block">
-                      Next Business Goal / Target Milestone <span className="text-rose-500">*</span>
+                      Next Goal / Target Milestone <span className="text-rose-500">*</span>
                     </label>
                     <span className="text-[10px] text-amber-700 font-semibold">Community Shared Goal</span>
                   </div>
@@ -9838,20 +10858,20 @@ export default function MemberPortalPage() {
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition resize-none"
                   />
                   <p className="text-[10px] text-slate-400">
-                    What milestone is your enterprise aiming for next with the help of cooperative services?
+                    What milestone or goal are you aiming for next with the help of cooperative services?
                   </p>
                 </div>
 
-                {/* 5. Business Description */}
+                {/* 5. Bio / Description */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700 block">
-                    Description & Offerings (Optional)
+                    Bio / Personal Story & Offerings (Optional)
                   </label>
                   <textarea
                     rows={2}
                     value={bizFormDescription}
                     onChange={(e) => setBizFormDescription(e.target.value)}
-                    placeholder="Briefly describe what your business offers and what makes your enterprise unique..."
+                    placeholder="Briefly share about yourself, what you offer, or what makes your work unique..."
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-slate-800 font-medium transition resize-none"
                   />
                 </div>
@@ -9872,7 +10892,7 @@ export default function MemberPortalPage() {
                   </div>
                   <div className="space-y-1">
                     <label className="font-bold text-slate-700 block">
-                      Physical Store / Farm Location
+                      Location / Community Area
                     </label>
                     <input
                       type="text"
@@ -9903,7 +10923,111 @@ export default function MemberPortalPage() {
                     ) : (
                       <Check className="w-3.5 h-3.5" />
                     )}
-                    <span>Publish Business Page</span>
+                    <span>Publish Personal Wall</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* LINK COOPERATIVE ACCOUNT MODAL DIALOG */}
+        {showLinkCoopModal && (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center shrink-0">
+                    <Link2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">Link Cooperative Account</h3>
+                    <p className="text-[11px] text-slate-500">Connect to your cooperative passbook &amp; loans</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowLinkCoopModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {linkError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{linkError}</span>
+                </div>
+              )}
+
+              {linkSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{linkSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleLinkCoopSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Cooperative Tenant ID <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={linkTenantId}
+                    onChange={(e) => setLinkTenantId(e.target.value)}
+                    placeholder="e.g. family-coop, bayani, or occidental"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Provided by your registered cooperative administration.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Cooperative User Account / Email <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={linkUserAccount}
+                    onChange={(e) => setLinkUserAccount(e.target.value)}
+                    placeholder="e.g. member email or MEM-2026-0001"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Defaults to your logged-in Google Account email.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Date of Birth <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={linkDob}
+                    onChange={(e) => setLinkDob(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Required for identity and membership verification.</p>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowLinkCoopModal(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition cursor-pointer"
+                  >
+                    I don&apos;t have a Coop (Skip)
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={linkLoading}
+                    className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {linkLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                    <span>{linkLoading ? 'Verifying...' : 'Verify & Link Account'}</span>
                   </button>
                 </div>
               </form>
@@ -9912,80 +11036,60 @@ export default function MemberPortalPage() {
         )}
       </div>
 
-      {/* FIXED BOTTOM NAVIGATION BAR (Mobile PWA) */}
+      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 3 Hubs) */}
       <nav
-        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl pt-2 px-4"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-[#223a5e] border-t border-[#e68a38]/30 shadow-2xl pt-2 px-4"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
-        <div className="max-w-md mx-auto grid grid-cols-4 gap-2">
-          {/* 1. Dashboard (My Portfolio) */}
+        <div className="max-w-md mx-auto grid grid-cols-3 gap-2">
+          {/* 1. Dashboard (Silong Community Hub) */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all ${
               activeTab === 'home'
-                ? 'text-emerald-700 font-bold bg-emerald-50/80'
-                : 'text-slate-500 hover:text-slate-900 font-medium'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
             }`}
           >
-            <LayoutDashboard className={`w-5 h-5 mb-1 ${activeTab === 'home' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+            <LayoutDashboard className={`w-5 h-5 mb-1 ${activeTab === 'home' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
             <span className="text-[10px] leading-tight">Dashboard</span>
           </button>
 
-          {/* 2. Passbook (Digital Passbook & SL) */}
+          {/* 2. My Personal Wall */}
           <button
             type="button"
-            onClick={() => {
-              setActiveTab('passbook');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
-              activeTab === 'passbook'
-                ? 'text-emerald-700 font-bold bg-emerald-50/80'
-                : 'text-slate-500 hover:text-slate-900 font-medium'
+            onClick={handleOpenMyBusiness}
+            className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all ${
+              Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber))
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
             }`}
           >
-            <BookOpen className={`w-5 h-5 mb-1 ${activeTab === 'passbook' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
-            <span className="text-[10px] leading-tight">Passbook</span>
+            <Store className={`w-5 h-5 mb-1 ${Boolean(selectedBusinessMember && (selectedBusinessMember.id === currentMember.id || selectedBusinessMember.memberNumber === currentMember.memberNumber)) ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+            <span className="text-[10px] leading-tight">My Personal Wall</span>
           </button>
 
-          {/* 3. Members (Directory) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('members');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className={`flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
-              activeTab === 'members'
-                ? 'text-emerald-700 font-bold bg-emerald-50/80'
-                : 'text-slate-500 hover:text-slate-900 font-medium'
-            }`}
-          >
-            <Users className={`w-5 h-5 mb-1 ${activeTab === 'members' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
-            <span className="text-[10px] leading-tight">Members</span>
-          </button>
-
-          {/* 4. More (All Other Services & Settings) */}
+          {/* 3. More (Account, Identity & Settings) */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('more');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`relative flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all ${
-              activeTab !== 'home' && activeTab !== 'passbook' && activeTab !== 'members'
-                ? 'text-emerald-700 font-bold bg-emerald-50/80'
-                : 'text-slate-500 hover:text-slate-900 font-medium'
+            className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all ${
+              activeTab === 'more'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
             }`}
           >
             <div className="relative">
-              <Menu className={`w-5 h-5 mb-1 ${activeTab !== 'home' && activeTab !== 'passbook' && activeTab !== 'members' ? 'text-emerald-700 stroke-[2.5]' : 'text-slate-500'}`} />
+              <Menu className={`w-5 h-5 mb-1 ${activeTab === 'more' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
               {endorsementRequests.some((r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING') && (
-                <span className="absolute -top-1 -right-2 bg-amber-500 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">
+                <span className="absolute -top-1 -right-2 bg-[#e68a38] text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-[#223a5e]">
                   1
                 </span>
               )}

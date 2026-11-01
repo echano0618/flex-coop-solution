@@ -11,8 +11,13 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/icons') ||
+    pathname.startsWith('/avatars') ||
+    pathname.startsWith('/audio') ||
     pathname === '/favicon.ico' ||
     pathname === '/favicon.png' ||
+    pathname === '/logo.png' ||
+    pathname === '/apple-touch-icon.png' ||
+    pathname === '/silong-apple-touch-icon.png' ||
     pathname === '/manifest.json' ||
     pathname === '/manifest.webmanifest'
   ) {
@@ -20,7 +25,7 @@ export function middleware(request: NextRequest) {
   }
 
   // 2. Multi-tenant Subdomain Resolution
-  let tenantSlug = 'bayani';
+  let tenantSlug = 'family';
   let isTenantSubdomain = false;
 
   const coopProdSuffix = '-coop.tuntongtech.com';
@@ -43,6 +48,12 @@ export function middleware(request: NextRequest) {
   } else if (cleanHost.endsWith('.localhost') && cleanHost !== 'localhost') {
     tenantSlug = cleanHost.slice(0, -'.localhost'.length);
     isTenantSubdomain = true;
+  }
+
+  // 2.5 Query parameter resolution (?coop= or ?tenant=) overrides fallback
+  const queryCoop = request.nextUrl.searchParams.get('coop') || request.nextUrl.searchParams.get('tenant');
+  if (queryCoop && queryCoop.trim()) {
+    tenantSlug = queryCoop.trim().toLowerCase().replace(/[-_]coop$/, '');
   }
 
   // 3. Security Route Guards: Prevent unauthenticated access across all portals

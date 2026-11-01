@@ -133,6 +133,7 @@ export interface MemberRegistrationFieldConfig {
 export interface Member {
   id: string;
   memberNumber: string;
+  name?: string;
   firstName: string;
   middleName?: string;
   lastName: string;
@@ -141,6 +142,7 @@ export interface Member {
   phone: string;
   landline?: string;
   birthdate: string;
+  dateOfBirth?: string;
   gender: 'MALE' | 'FEMALE' | 'OTHER';
   civilStatus: 'SINGLE' | 'MARRIED' | 'WIDOWED' | 'SEPARATED';
   address: string;
@@ -687,6 +689,8 @@ export interface Loan {
   totalPayable: number;
   balanceRemaining: number;
   schedule: AmortizationScheduleItem[];
+  periodicInstallment?: number;
+  monthlyAmortization?: number;
   coMaker?: CoMakerEndorsement;
   memberName?: string;
   memberNo?: string;
@@ -698,7 +702,7 @@ export interface Loan {
 // ==========================================
 // 5. PAYMENTS & PAYMONGO QR PH
 // ==========================================
-export type PaymentChannel = 'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER' | 'MANUAL_BANK_TRANSFER';
+export type PaymentChannel = 'PAYMONGO_QRPH' | 'IN_PERSON_CASHIER' | 'MANUAL_BANK_TRANSFER' | 'BANK_TRANSFER';
 export type PaymentAllocationType = 'PENALTY' | 'INTEREST' | 'PRINCIPAL' | 'EXCESS_SAVINGS';
 
 export interface PaymentTransaction {
@@ -1073,4 +1077,77 @@ export interface CoopPaymentOptions {
   };
   updatedAt?: string;
 }
+
+// ==========================================
+// 8. LOAN OVERDUE PENALTY & FINES ENGINE
+// ==========================================
+export interface OverduePenaltyResult {
+  isOverdue: boolean;
+  daysOverdue: number;
+  gracePeriodDays: number;
+  isGracePeriodActive: boolean;
+  monthlyFinesRate: number;
+  dailyPenaltyRate: number;
+  penaltyAmount: number;
+  baseInstallmentAmount: number;
+  totalWithPenalty: number;
+}
+
+export function calculateOverduePenalty(params: {
+  dueDate: string | Date;
+  installmentAmount: number;
+  monthlyFinesRate?: number;
+  gracePeriodDays?: number;
+  asOfDate?: string | Date;
+}): OverduePenaltyResult {
+  const asOf = params.asOfDate ? new Date(params.asOfDate) : new Date();
+  const due = new Date(params.dueDate);
+  // Default is 3 days. Explicit 0 means strictly no grace period.
+  const gracePeriodDays = params.gracePeriodDays !== undefined ? Math.max(0, Number(params.gracePeriodDays)) : 3;
+  const monthlyFinesRate = params.monthlyFinesRate ?? 0.03;
+  const baseInstallmentAmount = Math.max(0, Number(params.installmentAmount || 0));
+
+  if (isNaN(due.getTime())) {
+    return {
+      isOverdue: false,
+      daysOverdue: 0,
+      gracePeriodDays,
+      isGracePeriodActive: false,
+      monthlyFinesRate,
+      dailyPenaltyRate: monthlyFinesRate / 30,
+      penaltyAmount: 0,
+      baseInstallmentAmount,
+      totalWithPenalty: baseInstallmentAmount,
+    };
+  }
+
+  const asOfMidnight = new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate()).getTime();
+  const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+  const diffMs = asOfMidnight - dueMidnight;
+  const daysOverdue = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+
+  const isOverdue = daysOverdue > 0;
+  // If gracePeriodDays is 0, no grace period applies (penalties start immediately on Day 1 past due)
+  const isGracePeriodActive = isOverdue && gracePeriodDays > 0 && daysOverdue <= gracePeriodDays;
+
+  const dailyPenaltyRate = monthlyFinesRate / 30;
+  let penaltyAmount = 0;
+
+  if (isOverdue && !isGracePeriodActive) {
+    penaltyAmount = Math.round((baseInstallmentAmount * dailyPenaltyRate * daysOverdue) * 100) / 100;
+  }
+
+  return {
+    isOverdue,
+    daysOverdue,
+    gracePeriodDays,
+    isGracePeriodActive,
+    monthlyFinesRate,
+    dailyPenaltyRate,
+    penaltyAmount,
+    baseInstallmentAmount,
+    totalWithPenalty: Math.round((baseInstallmentAmount + penaltyAmount) * 100) / 100,
+  };
+}
+
 

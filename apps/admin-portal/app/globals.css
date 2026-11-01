@@ -14,6 +14,138 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* ============================================================================
+ * SILONG MEMBER & ADMIN PORTAL THEME PALETTE
+ * Derived from the Silong App Icon:
+ *   - Shelter Navy:   #223a5e / #1b2f4d / #15253d
+ *   - Warm Ochre:     #e68a38 / #d97724 / #c46618
+ *   - Warm Cream:     #f7f4ee / #f4efe6 / #ebe2d3
+ *   - Soft Sage Teal: #78a89a / #5e9485
+ * ============================================================================ */
+.silong-member-theme {
+  --silong-navy: #223a5e;
+  --silong-navy-dark: #1b2f4d;
+  --silong-navy-deep: #15253d;
+  --silong-ochre: #e68a38;
+  --silong-ochre-dark: #d97724;
+  --silong-cream: #f4efe6;
+  --silong-cream-light: #faf7f2;
+  --silong-sage: #78a89a;
+  background-color: #f7f4ee;
+}
+
+/* Admin Drawer & Dark Surface Overrides -> Silong Shelter Navy */
+.silong-member-theme aside.bg-slate-900,
+.silong-member-theme .bg-slate-900 {
+  background-color: #1b2f4d !important;
+}
+.silong-member-theme .bg-slate-950,
+.silong-member-theme .bg-slate-950\/40 {
+  background-color: #15253d !important;
+}
+.silong-member-theme .border-slate-800 {
+  border-color: rgba(244, 239, 230, 0.14) !important;
+}
+.silong-member-theme .hover\:bg-slate-800\/80:hover,
+.silong-member-theme .hover\:bg-slate-800:hover {
+  background-color: #223a5e !important;
+}
+
+/* Primary Buttons & Solid Fills -> Silong Navy & Warm Ochre */
+.silong-member-theme .bg-emerald-600 {
+  background-color: #223a5e !important;
+}
+.silong-member-theme .hover\:bg-emerald-700:hover {
+  background-color: #1b2f4d !important;
+}
+.silong-member-theme .bg-emerald-700 {
+  background-color: #1b2f4d !important;
+}
+.silong-member-theme .hover\:bg-emerald-800:hover {
+  background-color: #15253d !important;
+}
+.silong-member-theme .bg-emerald-800,
+.silong-member-theme .bg-emerald-900,
+.silong-member-theme .bg-emerald-950 {
+  background-color: #15253d !important;
+}
+.silong-member-theme .bg-emerald-500 {
+  background-color: #e68a38 !important;
+}
+
+/* Soft Surface Tints -> Silong Warm Cream & Soft Navy/Ochre Tints */
+.silong-member-theme .bg-emerald-50,
+.silong-member-theme .bg-emerald-50\/80,
+.silong-member-theme .bg-emerald-50\/60,
+.silong-member-theme .bg-emerald-50\/50,
+.silong-member-theme .bg-emerald-50\/40 {
+  background-color: #f4efe6 !important;
+}
+.silong-member-theme .hover\:bg-emerald-100:hover,
+.silong-member-theme .bg-emerald-100 {
+  background-color: #ebe2d3 !important;
+}
+.silong-member-theme .bg-emerald-200 {
+  background-color: #f6dec5 !important;
+}
+
+/* Gradients -> Silong Shelter Navy & Warm Ochre */
+.silong-member-theme .from-emerald-800,
+.silong-member-theme .from-emerald-700,
+.silong-member-theme .from-emerald-600 {
+  --tw-gradient-from: #223a5e var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(34 58 94 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.silong-member-theme .to-emerald-700,
+.silong-member-theme .to-emerald-600 {
+  --tw-gradient-to: #2d4c7a var(--tw-gradient-to-position) !important;
+}
+
+/* Text & Icon Colors -> Silong Navy & Warm Ochre */
+.silong-member-theme .text-emerald-950,
+.silong-member-theme .text-emerald-900,
+.silong-member-theme .text-emerald-800 {
+  color: #223a5e !important;
+}
+.silong-member-theme .text-emerald-700,
+.silong-member-theme .text-emerald-600 {
+  color: #c46618 !important;
+}
+.silong-member-theme .text-emerald-500,
+.silong-member-theme .text-emerald-400 {
+  color: #e68a38 !important;
+}
+.silong-member-theme .text-emerald-300,
+.silong-member-theme .text-emerald-200,
+.silong-member-theme .text-emerald-100 {
+  color: #f4efe6 !important;
+}
+
+/* Borders & Focus Rings -> Silong Ochre & Navy */
+.silong-member-theme .border-emerald-100,
+.silong-member-theme .border-emerald-200,
+.silong-member-theme .border-emerald-200\/80 {
+  border-color: #e2d5c1 !important;
+}
+.silong-member-theme .border-emerald-300,
+.silong-member-theme .border-emerald-400 {
+  border-color: #e68a38 !important;
+}
+.silong-member-theme .border-emerald-500,
+.silong-member-theme .border-emerald-600 {
+  border-color: #223a5e !important;
+}
+.silong-member-theme .border-emerald-700\/50 {
+  border-color: rgba(244, 239, 230, 0.2) !important;
+}
+.silong-member-theme .focus\:ring-emerald-500:focus {
+  --tw-ring-color: #223a5e !important;
+}
+.silong-member-theme .focus\:border-emerald-500:focus {
+  border-color: #223a5e !important;
+}
+
 @media print {
   @page {
     size: A4 portrait;

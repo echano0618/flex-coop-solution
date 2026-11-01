@@ -3,6 +3,7 @@ import { dbStore } from '../../core/store';
 import { PaymentService } from './payment.service';
 import { GeneralLedgerService } from '../accounting/ledger.service';
 import { RegulatoryReportsService } from '../reports/reports.service';
+import { MailerService } from '../../core/mailer.service';
 import { PaymentTransaction } from '@flexcoop/shared-types';
 
 export interface PayMongoWebhookPayload {
@@ -201,6 +202,26 @@ export class PayMongoWebhookService {
 
     // 7. Mark as processed for idempotency
     this.processedEventIds.add(eventId);
+
+    // 8. Dispatch digital payment receipt email to member
+    if (member?.email) {
+      const tenantRecord = dbStore.tenants.get(params.tenantId) || Array.from(dbStore.tenants.values()).find((t) => t.id === params.tenantId || t.slug === params.tenantId);
+      MailerService.sendLoanPaymentReceipt({
+        recipientEmail: member.email,
+        recipientName: `${member.firstName} ${member.lastName}`,
+        coopName: tenantRecord?.name || 'Cooperative Enterprise',
+        coopSlug: tenantRecord?.slug || params.tenantId,
+        loanNumber: loan.loanNumber || loan.id,
+        receiptNumber: paymentRecord.receiptNumber,
+        paymentAmount: netLoanPayment,
+        principalAmount: allocation.principalPortion,
+        interestAmount: allocation.interestPortion,
+        remainingBalance: loan.balanceRemaining,
+        paymentDate: new Date(paymentData.paid_at * 1000).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+        paymentChannel: 'PayMongo QR Ph',
+        isPaidOff: loan.balanceRemaining <= 0,
+      }).catch((err) => console.error('[MAILER ERROR] Webhook sendLoanPaymentReceipt failed:', err));
+    }
 
     return {
       success: true,

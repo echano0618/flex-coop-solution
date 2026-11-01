@@ -473,6 +473,7 @@ export class OperatorService {
     const gmMember: Member = {
       id: gmMemberId,
       memberNumber: gmMemberNumber,
+      name: gmFullName,
       firstName: reg.adminFirstName,
       middleName: reg.adminMiddleName,
       lastName: reg.adminLastName,
@@ -519,6 +520,36 @@ export class OperatorService {
       status: 'ACTIVE',
       username: adminUsername,
     });
+
+    // Save initial administrator credentials scoped strictly to this tenant
+    const adminCredPayload = {
+      id: adminUserId,
+      tenantId: tenant.id,
+      fullName: adminFullName,
+      email: adminEmail,
+      username: adminUsername,
+      password: oneTimePassword,
+      pin: '123456',
+      role: 'GENERAL_MANAGER',
+      roleTitle: 'General Manager / Primary Administrator',
+      isStaff: true,
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      memberId: gmMemberId,
+      memberNumber: gmMemberNumber,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      fsService.saveMemberCredential(tenant.id, adminCredPayload).catch(() => {});
+    } catch {}
+    if (!dbStore.memberCredentials.has(tenant.id)) {
+      dbStore.memberCredentials.set(tenant.id, new Map());
+    }
+    const tenantCredMap = dbStore.memberCredentials.get(tenant.id)!;
+    tenantCredMap.set(adminEmail.toLowerCase(), adminCredPayload);
+    tenantCredMap.set(adminUsername.toLowerCase(), adminCredPayload);
+    tenantCredMap.set(gmMemberNumber.toLowerCase(), adminCredPayload);
 
     // Initial Share Capital and Savings Account for the General Manager
     dbStore.shareAccounts.set(tenantId, [

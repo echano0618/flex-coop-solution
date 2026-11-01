@@ -393,7 +393,7 @@ export default function MemberRegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50/90 via-white to-emerald-100/40 text-slate-800 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
+    <div className="silong-member-theme min-h-screen bg-gradient-to-b from-[#f4efe6] via-[#faf7f2] to-[#eef3f9] text-slate-800 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
       {/* Hidden File Inputs for ID & Camera Upload */}
       <input
         type="file"
@@ -407,9 +407,9 @@ export default function MemberRegisterPage() {
       {/* Minimal Header (with App Logo Emblem) */}
       <div className="max-w-md w-full mx-auto flex items-center justify-between pt-2 sm:pt-4">
         <div className="flex items-center space-x-3 text-left">
-          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-emerald-600/20 shrink-0 overflow-hidden">
+          <div className="w-10 h-10 rounded-xl bg-[#223a5e] flex items-center justify-center text-white font-black text-xl shadow-md shadow-slate-900/20 shrink-0 overflow-hidden">
             <img
-              src="/logo.png"
+              src="/icons/silong-icon-192.png"
               alt={tenantInfo.name}
               className="w-full h-full object-cover"
               onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}

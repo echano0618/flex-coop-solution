@@ -225,7 +225,13 @@ export class FirestoreCoopService {
 
   public async saveMember(tenantId: string, member: Member): Promise<void> {
     if (!this.isConfigured()) return;
-    await this.membersCol(tenantId).doc(member.id).set(member, { merge: true });
+    const computedName =
+      (member as any).name ||
+      [member.firstName, member.middleName, member.lastName].filter(Boolean).join(' ') ||
+      (member as any).applicantName ||
+      '';
+    const payload = computedName ? { ...member, name: computedName } : member;
+    await this.membersCol(tenantId).doc(member.id).set(payload, { merge: true });
   }
 
   public async updateMember(tenantId: string, memberId: string, updates: Record<string, any>): Promise<void> {
@@ -241,6 +247,9 @@ export class FirestoreCoopService {
     const doc = await this.membersCol(tenantId).doc(cleanId).get();
     if (doc.exists) return { ...(doc.data() as any), id: doc.id } as Member;
 
+    const memAppDoc = await this.membersCol(tenantId).doc(cleanId.startsWith('mem_app_') ? cleanId.replace('mem_app_', '') : `mem_app_${cleanId}`).get();
+    if (memAppDoc.exists) return { ...(memAppDoc.data() as any), id: memAppDoc.id } as Member;
+
     if (cleanId === 'mem_gm_0001' || cleanId.toLowerCase() === 'admin' || cleanId.toLowerCase() === 'gm') {
       const gmDoc = await this.membersCol(tenantId).doc('MEM-2026-0001').get();
       if (gmDoc.exists) return { ...(gmDoc.data() as any), id: gmDoc.id } as Member;
@@ -250,6 +259,11 @@ export class FirestoreCoopService {
       const gmDoc2 = await this.membersCol(tenantId).doc('mem_gm_0001').get();
       if (gmDoc2.exists) return { ...(gmDoc2.data() as any), id: gmDoc2.id } as Member;
     }
+
+    try {
+      const qApp = await this.membersCol(tenantId).where('applicantId', '==', cleanId).limit(1).get();
+      if (!qApp.empty) return { ...(qApp.docs[0].data() as any), id: qApp.docs[0].id } as Member;
+    } catch {}
 
     try {
       const q1 = await this.membersCol(tenantId).where('memberNumber', '==', cleanId).limit(1).get();
@@ -273,7 +287,17 @@ export class FirestoreCoopService {
     if (!this.isConfigured()) return [];
     try {
       const snapshot = await this.membersCol(tenantId).get();
-      return snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ ...(doc.data() as any), id: doc.id } as Member));
+      return snapshot.docs
+        .map((doc: QueryDocumentSnapshot) => {
+          const data = doc.data() as any;
+          const computedName =
+            data.name ||
+            [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ') ||
+            data.applicantName ||
+            '';
+          return { ...data, id: doc.id, ...(computedName ? { name: computedName } : {}) } as Member;
+        })
+        .filter((m: any) => Boolean(m && (m.name || m.firstName || m.lastName || m.email)));
     } catch {
       return [];
     }
@@ -762,15 +786,57 @@ export class FirestoreCoopService {
   }
 
   public async getApplication(tenantId: string, applicationId: string): Promise<any | null> {
-    if (!this.isConfigured()) return null;
-    const doc = await this.applicationsCol(tenantId).doc(applicationId).get();
-    return doc.exists ? doc.data() : null;
+    if (!this.isConfigured() || !applicationId) return null;
+    const cleanId = applicationId.startsWith('mem_app_') ? applicationId.replace('mem_app_', '') : applicationId;
+
+    const doc = await this.applicationsCol(tenantId).doc(cleanId).get();
+    if (doc.exists) {
+      const data = doc.data() as any;
+      if (data && (data.applicantName || data.firstName || data.email)) {
+        return { ...data, id: data.id || doc.id };
+      }
+    }
+
+    // Fallback 1: search by applicantId field (e.g. A20263184 -> APP-2026-3184)
+    try {
+      const byApplicantId = await this.applicationsCol(tenantId).where('applicantId', '==', cleanId).limit(1).get();
+      if (!byApplicantId.empty) {
+        const matchDoc = byApplicantId.docs[0];
+        const data = matchDoc.data() as any;
+        if (data && (data.applicantName || data.firstName || data.email)) {
+          return { ...data, id: data.id || matchDoc.id };
+        }
+      }
+    } catch {}
+
+    // Fallback 2: legacy APP-2026-XXXX format when given A2026XXXX
+    if (/^A2026\d{4}$/i.test(cleanId)) {
+      const legacyId = `APP-2026-${cleanId.slice(-4)}`;
+      const legacyDoc = await this.applicationsCol(tenantId).doc(legacyId).get();
+      if (legacyDoc.exists) {
+        const data = legacyDoc.data() as any;
+        if (data && (data.applicantName || data.firstName || data.email)) {
+          return { ...data, id: data.id || legacyDoc.id };
+        }
+      }
+    }
+
+    return null;
   }
 
   public async listApplications(tenantId: string): Promise<any[]> {
     if (!this.isConfigured()) return [];
     const snapshot = await this.applicationsCol(tenantId).get();
-    const list = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
+    const list: any[] = [];
+    for (const doc of snapshot.docs) {
+      const data = doc.data() as any;
+      if (data && (data.applicantName || data.firstName || data.email)) {
+        list.push({ ...data, id: data.id || doc.id });
+      } else {
+        // Self-heal status-only phantom application documents
+        doc.ref.delete().catch(() => {});
+      }
+    }
     return list.sort((a, b) => new Date(b.dateSubmitted || 0).getTime() - new Date(a.dateSubmitted || 0).getTime());
   }
 
@@ -781,17 +847,36 @@ export class FirestoreCoopService {
     notes?: string,
     reviewedBy?: string
   ): Promise<void> {
-    if (!this.isConfigured()) return;
-    await this.applicationsCol(tenantId).doc(applicationId).set(
-      {
-        status,
-        reviewedBy: reviewedBy || 'Cooperative Administration',
-        reviewNotes: notes || '',
-        reviewDate: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    if (!this.isConfigured() || !applicationId) return;
+    const existing = await this.getApplication(tenantId, applicationId);
+    const targetDocId = existing?.id || applicationId;
+
+    // Only update if a valid application document exists (prevent creating status-only phantom documents)
+    if (existing) {
+      await this.applicationsCol(tenantId).doc(targetDocId).set(
+        {
+          status,
+          reviewedBy: reviewedBy || 'Cooperative Administration',
+          reviewNotes: notes || '',
+          reviewDate: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    }
+
+    // If a status-only phantom document was previously created under applicationId (different from targetDocId), remove it
+    if (targetDocId !== applicationId) {
+      try {
+        const phantomDoc = await this.applicationsCol(tenantId).doc(applicationId).get();
+        if (phantomDoc.exists) {
+          const pData = phantomDoc.data() as any;
+          if (!pData?.applicantName && !pData?.firstName && !pData?.email) {
+            await this.applicationsCol(tenantId).doc(applicationId).delete();
+          }
+        }
+      } catch {}
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -975,6 +1060,64 @@ export class FirestoreCoopService {
           if (!byEmail.empty) {
             for (const d of byEmail.docs) {
               await d.ref.update({ status, updatedAt: new Date().toISOString() });
+              updated = true;
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback gracefully
+      }
+    }
+
+    return updated;
+  }
+
+  public async updateStaffCredentialRole(tenantId: string, userId: string, role: string, roleTitle?: string): Promise<boolean> {
+    const cleanId = (userId || '').trim().toLowerCase();
+    let updated = false;
+
+    // 1. Update in-memory dbStore
+    const memCreds = dbStore.memberCredentials.get(tenantId);
+    if (memCreds) {
+      for (const [key, val] of Array.from(memCreds.entries())) {
+        if (
+          val.id?.toLowerCase() === cleanId ||
+          val.email?.toLowerCase() === cleanId ||
+          val.username?.toLowerCase() === cleanId ||
+          key.toLowerCase() === cleanId
+        ) {
+          val.role = role;
+          if (roleTitle) val.roleTitle = roleTitle;
+          val.updatedAt = new Date().toISOString();
+          updated = true;
+        }
+      }
+    }
+
+    // 2. Update in Firestore
+    if (this.isConfigured()) {
+      try {
+        const col = this.credentialsCol(tenantId);
+        const updatePayload: any = { role, updatedAt: new Date().toISOString() };
+        if (roleTitle) updatePayload.roleTitle = roleTitle;
+
+        const docRef = col.doc(cleanId);
+        const docSnap = await docRef.get();
+        if (docSnap.exists) {
+          await docRef.update(updatePayload);
+          updated = true;
+        } else {
+          const byId = await col.where('id', '==', userId).get();
+          if (!byId.empty) {
+            for (const d of byId.docs) {
+              await d.ref.update(updatePayload);
+              updated = true;
+            }
+          }
+          const byEmail = await col.where('email', '==', cleanId).get();
+          if (!byEmail.empty) {
+            for (const d of byEmail.docs) {
+              await d.ref.update(updatePayload);
               updated = true;
             }
           }

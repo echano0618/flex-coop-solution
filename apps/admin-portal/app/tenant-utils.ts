@@ -234,8 +234,14 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
     slug = (params.get('coop') || params.get('tenant') || '').trim().toLowerCase();
   }
 
-  // 3. Fallback to active member session or admin session if visiting custom domain or root path
-  if (!slug) {
+  // 3. Fallback to active member session or admin session if visiting root path (STRICTLY NOT on explicit login pages)
+  const isLoginPage = typeof window !== 'undefined' && (
+    window.location.pathname === '/login' ||
+    window.location.pathname === '/member/login' ||
+    window.location.pathname === '/operator/login'
+  );
+
+  if (!slug && !isLoginPage) {
     try {
       const memberSess = localStorage.getItem('flexcoop_auth_member');
       if (memberSess) {
@@ -247,7 +253,7 @@ export function resolveTenantCoop(searchParams?: URLSearchParams | null): Tenant
     } catch {}
   }
 
-  if (!slug) {
+  if (!slug && !isLoginPage) {
     try {
       const sess = localStorage.getItem('flexcoop_admin_session');
       if (sess) {
@@ -354,7 +360,7 @@ export function getTenantMemberSession(expectedSlug?: string): any | null {
     const parsed = JSON.parse(raw);
 
     if (expectedSlug && expectedSlug !== 'default') {
-      if (parsed.coopSlug && parsed.coopSlug.toLowerCase() !== expectedSlug.toLowerCase()) {
+      if (!parsed.coopSlug || !isCoopSlugMatch(parsed.coopSlug, expectedSlug)) {
         // Mismatch: Member belongs to a different coop!
         return null;
       }
@@ -417,7 +423,7 @@ export function getTenantAdminSession(expectedSlug?: string): any | null {
           }
           if (parsed && (parsed.token || parsed.role || parsed.email)) {
             if (expectedSlug && expectedSlug !== 'default') {
-              if (parsed.coopSlug && !isCoopSlugMatch(parsed.coopSlug, expectedSlug)) {
+              if (!parsed.coopSlug || !isCoopSlugMatch(parsed.coopSlug, expectedSlug)) {
                 continue;
               }
             }

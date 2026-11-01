@@ -36,6 +36,24 @@ export interface MemberApplicationDecisionData {
   actualDeposit?: number;
 }
 
+export interface LoanPaymentReceiptData {
+  recipientEmail: string;
+  recipientName: string;
+  coopName?: string;
+  coopSlug?: string;
+  loanNumber: string;
+  productName?: string;
+  receiptNumber: string;
+  paymentAmount: number;
+  principalAmount: number;
+  interestAmount: number;
+  penaltyAmount?: number;
+  remainingBalance: number;
+  paymentDate?: string;
+  paymentChannel?: string;
+  isPaidOff?: boolean;
+}
+
 export class MailerService {
   private static transporter: Transporter | null = null;
 
@@ -211,6 +229,132 @@ export class MailerService {
       } catch (err) {
         console.error('[MAILER ERROR] sendMemberApplicationDecision (REJECTED):', err);
       }
+    }
+  }
+
+  /**
+   * Dispatches official digital payment receipt to member when a loan payment is posted
+   */
+  public static async sendLoanPaymentReceipt(data: LoanPaymentReceiptData): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const cName = data.coopName || 'Cooperative Enterprise';
+    const amountStr = Number(data.paymentAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    const principalStr = Number(data.principalAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    const interestStr = Number(data.interestAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    const balanceStr = Number(data.remainingBalance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    const dateStr = data.paymentDate || new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+    const channelStr = data.paymentChannel || 'PayMongo QR Ph';
+
+    const subject = `[${cName}] Official Payment Receipt: Loan #${data.loanNumber} (${data.receiptNumber})`;
+
+    const text = `Dear ${data.recipientName},\n\n` +
+      `We have successfully received and posted your loan amortization payment for Loan #${data.loanNumber}.\n\n` +
+      `• PAYMENT CONFIRMATION & OFFICIAL RECEIPT DETAILS:\n` +
+      `- Official Receipt No.: ${data.receiptNumber}\n` +
+      `- Payment Date: ${dateStr}\n` +
+      `- Payment Channel: ${channelStr}\n` +
+      `- Total Amount Paid: ₱${amountStr}\n` +
+      `- Principal Reduction: ₱${principalStr}\n` +
+      `- Interest Payment: ₱${interestStr}\n` +
+      (Number(data.penaltyAmount || 0) > 0 ? `- Late Overdue Penalty: ₱${Number(data.penaltyAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}\n` : '') +
+      `- Remaining Loan Balance: ₱${balanceStr}\n` +
+      (data.isPaidOff ? `\n🎉 CONGRATULATIONS! This loan has been fully settled and paid in full. Your clearance certificate and release documents will be processed by the Credit Committee.\n` : '') +
+      `\n• Member Self-Service Portal Access:\n` +
+      `You can review your updated real-time amortization schedule, statement of account, and share capital balance anytime on the Member Portal:\n` +
+      `https://${data.coopSlug ? data.coopSlug + '-coop.' : ''}tuntongtech.com/member/login\n\n` +
+      `Pursuant to Republic Act No. 9520 (Philippine Cooperative Code of 2008) and CDA accounting rules, this digital receipt acknowledges credit to the cooperative General Ledger (Account 1-03-01 Loans Receivable).\n\n` +
+      `Thank you for your continuous commitment to ${cName}!\n\n` +
+      `Sincerely,\n` +
+      `${cName} Treasury & Credit Committee\n` +
+      `Powered by Tuntong Tech Cooperative Platform\n` +
+      `support@tuntongtech.com\n` +
+      `https://tuntongtech.com`;
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; background-color: #f8fafc; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #0f766e; margin: 0 0 4px 0; font-size: 22px;">${cName}</h2>
+          <p style="color: #64748b; font-size: 13px; margin: 0;">Official Digital Loan Repayment Receipt</p>
+        </div>
+
+        <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #cbd5e1; margin-bottom: 20px;">
+          <p style="font-size: 14px; margin-top: 0;">Dear <strong>${data.recipientName}</strong>,</p>
+          <p style="font-size: 13px; color: #334155;">
+            We are pleased to confirm that your amortization payment for <strong>Loan #${data.loanNumber}</strong> has been successfully credited and verified.
+          </p>
+
+          <div style="background-color: #f1f5f9; padding: 16px; border-radius: 8px; margin: 16px 0;">
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Official Receipt No.:</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: bold; font-family: monospace;">${data.receiptNumber}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Payment Date:</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: bold;">${dateStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Payment Channel:</td>
+                <td style="padding: 6px 0; text-align: right; font-weight: bold;">${channelStr}</td>
+              </tr>
+              <tr style="border-top: 1px solid #e2e8f0;">
+                <td style="padding: 8px 0 4px 0; color: #0f766e; font-weight: bold; font-size: 14px;">Total Paid:</td>
+                <td style="padding: 8px 0 4px 0; text-align: right; font-weight: bold; font-size: 16px; color: #0f766e;">₱${amountStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: #64748b; font-size: 12px;">• Principal Portion:</td>
+                <td style="padding: 4px 0; text-align: right; font-size: 12px; color: #334155;">₱${principalStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: #64748b; font-size: 12px;">• Interest Portion:</td>
+                <td style="padding: 4px 0; text-align: right; font-size: 12px; color: #334155;">₱${interestStr}</td>
+              </tr>
+              ${
+                Number(data.penaltyAmount || 0) > 0
+                  ? `<tr>
+                      <td style="padding: 4px 0; color: #b45309; font-size: 12px;">• Late Overdue Penalty:</td>
+                      <td style="padding: 4px 0; text-align: right; font-size: 12px; color: #b45309; font-weight: bold;">₱${Number(data.penaltyAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    </tr>`
+                  : ''
+              }
+              <tr style="border-top: 1px solid #e2e8f0;">
+                <td style="padding: 8px 0 0 0; color: #475569; font-weight: bold;">Remaining Loan Balance:</td>
+                <td style="padding: 8px 0 0 0; text-align: right; font-weight: bold; font-size: 15px; color: ${data.isPaidOff ? '#16a34a' : '#1e293b'};">
+                  ₱${balanceStr}
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          ${
+            data.isPaidOff
+              ? `<div style="background-color: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 12px; border-radius: 6px; font-size: 13px; font-weight: bold; text-align: center; margin: 16px 0;">
+                  🎉 CONGRATULATIONS! Your loan has been fully paid in full.
+                </div>`
+              : ''
+          }
+
+          <p style="font-size: 12px; color: #64748b; margin-bottom: 0;">
+            This transaction is officially certified and registered into the cooperative General Ledger (Account 1-03-01 Loans Receivable) under RA 9520 statutory accounting guidelines.
+          </p>
+        </div>
+
+        <div style="text-align: center; font-size: 11px; color: #94a3b8;">
+          <p style="margin: 0 0 4px 0;">${cName} • Cooperative Financial Operations</p>
+          <p style="margin: 0;">Powered by Tuntong Tech Cooperative SaaS • support@tuntongtech.com</p>
+        </div>
+      </div>
+    `;
+
+    try {
+      return await this.sendMail({
+        to: data.recipientEmail,
+        subject,
+        text,
+        html,
+      });
+    } catch (err: any) {
+      console.error('[MAILER ERROR] sendLoanPaymentReceipt:', err);
+      return { success: false, error: err.message };
     }
   }
 }

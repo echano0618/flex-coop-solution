@@ -132,6 +132,18 @@ export class AuthService {
     return false;
   }
 
+  static updateStaffAccountRole(tenantId: string, userId: string, role: UserRole, roleTitle?: string): boolean {
+    const list = this.customStaffAccounts.get(tenantId) || [];
+    const target = list.find((a) => a.id === userId || a.email.toLowerCase() === userId.toLowerCase());
+    if (target) {
+      target.role = role;
+      if (roleTitle) target.roleTitle = roleTitle;
+      target.updatedAt = new Date().toISOString();
+      return true;
+    }
+    return false;
+  }
+
   static clearStaffAccounts(tenantId: string) {
     this.customStaffAccounts.delete(tenantId);
   }
@@ -147,6 +159,10 @@ export class AuthService {
       { id: 'usr_dpo_01', email: 'compliance@bayanicoop.ph', fullName: 'Atty. Cristina Gomez', role: 'COMPLIANCE_OFFICER' as UserRole, tenantId, roleTitle: 'Compliance Officer & DPO', status: 'ACTIVE' as const },
     ];
     this.customStaffAccounts.set(tenantId, defaults);
+  }
+
+  static getTenantIdsWithStaff(): string[] {
+    return Array.from(this.customStaffAccounts.keys());
   }
 
   /**

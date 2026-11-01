@@ -68,16 +68,21 @@ export default function AdminLoginPage() {
     setIsLoading(true);
 
     try {
+      const tenantCleanSlug = tenantInfo.slug.replace(/[-_]coop$/, '');
+      const tenantIdStr = `tenant_${tenantCleanSlug}`;
+
       const res = await fetch(`${getApiBaseUrl()}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': tenantIdStr,
         },
         body: JSON.stringify({
           identifier: email.trim(),
           password: password.trim(),
           tenantSlug: tenantInfo.slug,
+          tenantId: tenantIdStr,
           targetPortal: 'ADMIN',
         }),
       });
@@ -162,30 +167,32 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-[#15253d] via-[#1b2f4d] to-[#223a5e] text-[#f4efe6] flex flex-col justify-between p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-6 border-b border-slate-800">
+      <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-6 border-b border-[#f4efe6]/15">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-indigo-600/30 shrink-0">
-            {tenantInfo.logoLetter}
-          </div>
+          <img
+            src="/icons/silong-icon-192.png"
+            alt="Silong Logo"
+            className="w-10 h-10 rounded-xl object-cover shadow-lg border border-[#e68a38]/50 shrink-0 bg-[#223a5e]"
+          />
           <div>
             <div className="font-bold text-base text-white flex items-center gap-2">
               <span>{tenantInfo.name}</span>
-              <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full font-mono">
+              <span className="text-[10px] bg-[#e68a38]/20 text-[#e68a38] border border-[#e68a38]/40 px-2 py-0.5 rounded-full font-mono">
                 Staff &amp; Admin
               </span>
             </div>
-            <div className="text-xs text-slate-400">Powered by Tuntong Tech Solution • {tenantInfo.registrationNumber}</div>
+            <div className="text-xs text-[#f4efe6]/70">Silong • Powered by Tuntong Tech Solution • {tenantInfo.registrationNumber}</div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Link
             href={tenantInfo.slug && tenantInfo.slug !== 'default' ? `/member/login?coop=${tenantInfo.slug}` : '/member/login'}
-            className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
+            className="text-xs font-semibold text-[#f4efe6] hover:text-white bg-[#223a5e] hover:bg-[#e68a38] border border-[#f4efe6]/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
           >
-            <Users className="w-3.5 h-3.5 text-emerald-400" />
+            <Users className="w-3.5 h-3.5 text-[#78a89a]" />
             <span>Member Portal</span>
           </Link>
         </div>
@@ -195,7 +202,7 @@ export default function AdminLoginPage() {
       <div className="max-w-4xl w-full mx-auto my-auto py-8 grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
         {/* Left Side: Compliance & Roles */}
         <div className="md:col-span-6 space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-medium">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#e68a38]/15 border border-[#e68a38]/40 text-[#e68a38] text-xs font-medium">
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>CDA Regulatory Standard &amp; NPC DPA Compliant</span>
           </div>
@@ -204,55 +211,55 @@ export default function AdminLoginPage() {
             Cooperative Enterprise Resource Planning &amp; Banking
           </h1>
 
-          <p className="text-sm text-slate-300 leading-relaxed">
+          <p className="text-sm text-[#f4efe6]/80 leading-relaxed">
             Secure administrative control plane for General Managers, Loan Officers, Cashiers, Accountants, and Board Members of <strong className="text-white">{tenantInfo.name}</strong>.
           </p>
 
           <div className="space-y-3 pt-2">
             <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
+              <div className="w-7 h-7 rounded-lg bg-[#e68a38]/20 border border-[#e68a38]/40 flex items-center justify-center text-[#e68a38] shrink-0 mt-0.5">
                 <CheckCircle2 className="w-4 h-4" />
               </div>
               <div className="text-xs">
                 <span className="font-semibold text-white block">Strict Dual-Control &amp; Fiduciary RBAC</span>
-                <span className="text-slate-400">Underwriting segregation, Board sign-offs, and cashier disbursement verification.</span>
+                <span className="text-[#f4efe6]/70">Underwriting segregation, Board sign-offs, and cashier disbursement verification.</span>
               </div>
             </div>
 
             <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
+              <div className="w-7 h-7 rounded-lg bg-[#78a89a]/20 border border-[#78a89a]/40 flex items-center justify-center text-[#78a89a] shrink-0 mt-0.5">
                 <Lock className="w-4 h-4" />
               </div>
               <div className="text-xs">
                 <span className="font-semibold text-white block">Automated Security Lockout Protection</span>
-                <span className="text-slate-400">5-attempt lockout enforcement with mandatory justification audit logging.</span>
+                <span className="text-[#f4efe6]/70">5-attempt lockout enforcement with mandatory justification audit logging.</span>
               </div>
             </div>
           </div>
 
           {/* Institutional Compliance Notice */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1.5 text-xs">
-            <div className="font-semibold text-slate-300 flex items-center gap-1.5">
-              <KeyRound className="w-4 h-4 text-emerald-400" />
+          <div className="p-4 rounded-xl bg-[#15253d]/80 border border-[#f4efe6]/15 space-y-1.5 text-xs">
+            <div className="font-semibold text-[#f4efe6] flex items-center gap-1.5">
+              <KeyRound className="w-4 h-4 text-[#e68a38]" />
               <span>Institutional RBAC Credential Access</span>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
+            <p className="text-[11px] text-[#f4efe6]/70 leading-relaxed">
               Log in using your designated cooperative officer email address. Role permissions are enforced pursuant to CDA MC 2015-06 and your cooperative&apos;s internal security policy.
             </p>
           </div>
         </div>
 
         {/* Right Side: Login Card */}
-        <div className="md:col-span-6 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+        <div className="md:col-span-6 bg-[#15253d]/90 border border-[#f4efe6]/15 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
           {/* Prominent Cooperative Identity Banner to ensure staff is in the right coop */}
-          <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-center">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 block">
+          <div className="p-4 bg-[#223a5e]/80 border border-[#e68a38]/40 rounded-xl text-center">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#e68a38] block">
               Official Officer Facility
             </span>
             <span className="font-extrabold text-base sm:text-lg text-white block mt-0.5">
               {tenantInfo.name}
             </span>
-            <div className="inline-flex items-center gap-1.5 text-[11px] text-indigo-300 font-mono mt-1 bg-indigo-950/60 border border-indigo-500/30 px-2.5 py-0.5 rounded-full">
+            <div className="inline-flex items-center gap-1.5 text-[11px] text-[#f4efe6] font-mono mt-1 bg-[#15253d]/80 border border-[#f4efe6]/20 px-2.5 py-0.5 rounded-full">
               <span>{tenantInfo.registrationNumber}</span>
               {tenantInfo.isSubdomain && <span>• Subdomain Scoped</span>}
             </div>
@@ -260,7 +267,7 @@ export default function AdminLoginPage() {
 
           <div>
             <h2 className="text-xl font-bold text-white">Staff Sign In</h2>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-[#f4efe6]/70 mt-1">
               Enter your designated cooperative staff credentials to access {tenantInfo.name}.
             </p>
           </div>
@@ -274,25 +281,31 @@ export default function AdminLoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              <label className="block text-xs font-medium text-[#f4efe6]/90 mb-1.5">
                 Staff Email, Username, or Member ID
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <Mail className="w-4 h-4 absolute left-3 top-3 text-[#78a89a]" />
                 <input
                   type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. admin@familycoop.ph, echano0618, or MEM-2026-0001"
+                  placeholder={
+                    tenantInfo.slug === 'bayani-coop' || tenantInfo.slug === 'bayani'
+                      ? 'e.g. gm@bayanicoop.ph or lo@bayanicoop.ph'
+                      : tenantInfo.slug === 'family-coop' || tenantInfo.slug === 'family'
+                      ? 'e.g. admin@familycoop.ph or echano0618'
+                      : `e.g. admin@${tenantInfo.slug.replace(/[-_]coop$/, '')}.ph or staff username`
+                  }
                   required
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  className="w-full bg-[#1b2f4d] border border-[#f4efe6]/20 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#e68a38] font-mono"
                 />
               </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-slate-300">
+                <label className="block text-xs font-medium text-[#f4efe6]/90">
                   Password or 6-Digit MPIN
                 </label>
                 <button
@@ -302,20 +315,20 @@ export default function AdminLoginPage() {
                     setForgotError('');
                     setForgotSuccess('');
                   }}
-                  className="text-[11px] text-indigo-400 hover:text-indigo-300 cursor-pointer hover:underline transition"
+                  className="text-[11px] text-[#e68a38] hover:text-[#f4efe6] cursor-pointer hover:underline transition"
                 >
                   Forgot password?
                 </button>
               </div>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <Lock className="w-4 h-4 absolute left-3 top-3 text-[#78a89a]" />
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter Password or 6-Digit MPIN"
                   required
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  className="w-full bg-[#1b2f4d] border border-[#f4efe6]/20 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#e68a38] font-mono"
                 />
               </div>
             </div>
@@ -323,7 +336,7 @@ export default function AdminLoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 text-sm"
+              className="w-full py-3 px-4 bg-[#e68a38] hover:bg-[#d97724] disabled:opacity-50 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-black/25 text-sm"
             >
               {isLoading ? (
                 <span>Verifying Credentials...</span>
@@ -336,10 +349,10 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          <div className="pt-4 border-t border-slate-800 text-center">
-            <p className="text-xs text-slate-400">
+          <div className="pt-4 border-t border-[#f4efe6]/15 text-center">
+            <p className="text-xs text-[#f4efe6]/70">
               Need onboarding for a new cooperative?{' '}
-              <Link href="/coop-register" className="text-indigo-400 font-semibold hover:underline">
+              <Link href="/coop-register" className="text-[#e68a38] font-semibold hover:underline">
                 Register Cooperative
               </Link>
             </p>

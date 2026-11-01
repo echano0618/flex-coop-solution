@@ -89,6 +89,20 @@ export function resolveTenantId(req: Request): string {
     if (clean && clean !== 'default') return `tenant_${clean}`;
   }
 
+  // 1.5 Explicit body parameters (for POST/PUT requests like /auth/login)
+  const bodyTenantId = (req.body?.tenantId as string || '').trim();
+  if (bodyTenantId && bodyTenantId !== 'default' && bodyTenantId !== 'tenant_default') {
+    if (bodyTenantId.startsWith('tenant_')) return bodyTenantId;
+    const clean = bodyTenantId.replace(/[-_]coop$/, '');
+    if (clean && clean !== 'default') return `tenant_${clean}`;
+  }
+
+  const bodyTenantSlug = (req.body?.tenantSlug as string || '').trim().toLowerCase();
+  if (bodyTenantSlug && bodyTenantSlug !== 'default' && bodyTenantSlug !== 'default-coop') {
+    const clean = bodyTenantSlug.replace(/[-_]coop$/, '');
+    if (clean && clean !== 'default') return `tenant_${clean}`;
+  }
+
   // 2. Query param ?coop= or ?tenant=
   const queryCoop = ((req.query.coop as string) || (req.query.tenant as string) || '').trim().toLowerCase();
   if (queryCoop && queryCoop !== 'default' && queryCoop !== 'default-coop') {
@@ -104,13 +118,16 @@ export function resolveTenantId(req: Request): string {
     return `tenant_${clean}`;
   }
 
-  // 4. JWT Authorization claim fallback
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    const payload = AuthService.verifyToken(token);
-    if (payload && payload.tenantId) {
-      return payload.tenantId;
+  // 4. JWT Authorization claim fallback (skip on unauthenticated login routes to prevent cross-tenant token contamination)
+  const isAuthLoginRoute = req.path?.includes('/auth/login') || req.path?.includes('/auth/member/login');
+  if (!isAuthLoginRoute) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const payload = AuthService.verifyToken(token);
+      if (payload && payload.tenantId) {
+        return payload.tenantId;
+      }
     }
   }
 
@@ -134,11 +151,7 @@ app.get('/api/v1/health', (_req: Request, res: Response) => {
 // ==========================================
 // 1.5 AUTHENTICATION, ONBOARDING & RBAC
 // ==========================================
-app.get('/api/v1/auth/staff-accounts', (req: Request, res: Response) => {
-  const tenantId = resolveTenantId(req);
-  const accounts = AuthService.getStaffAccounts(tenantId);
-  res.json({ success: true, count: accounts.length, data: accounts });
-});
+app.get('/api/v1/auth/staff-accounts', (req: Request, res: Response) => handleGetTenantAdminUsers(req, res));
 
 /**
  * Unified Cooperative Authentication Service
@@ -161,23 +174,66 @@ export async function performUnifiedLogin(
     };
   }
 
+  let tenant: Tenant | null = dbStore.tenants.get(tenantId) || null;
+  if (!tenant) {
+    const cleanSlug = tenantId.replace(/^tenant_/, '').replace(/[-_]coop$/, '');
+    for (const t of dbStore.tenants.values()) {
+      if (
+        t.id === tenantId ||
+        t.slug === cleanSlug ||
+        t.slug === `${cleanSlug}-coop` ||
+        t.id === `tenant_${cleanSlug}` ||
+        t.id.startsWith(`tenant_${cleanSlug}_`)
+      ) {
+        tenant = t;
+        break;
+      }
+    }
+  }
+
+  const effectiveTenantId = tenant?.id || tenantId;
+  const tenantSlug = (tenant?.slug || effectiveTenantId.replace(/^tenant_/, '').replace(/[-_]coop$/, '')).toLowerCase();
+  const reg = dbStore.coopRegistrations.find(
+    (r) => r.slug?.toLowerCase() === tenantSlug || (tenant && (r.slug === tenant.slug || r.name === tenant.name))
+  );
+
+  const isFamilyTenant = tenantSlug === 'family' || effectiveTenantId === 'tenant_family';
+  const isBayaniTenant = tenantSlug === 'bayani' || effectiveTenantId === 'tenant_bayani' || effectiveTenantId === 'tenant_bayani_001';
+
   const fsService = FirestoreCoopService.getInstance();
   let storedCred: any = null;
   let members: Member[] = [];
-  let tenant: Tenant | null = null;
 
   if (fsService.isConfigured()) {
     try {
-      storedCred = await fsService.getMemberCredential(tenantId, cleanId);
-      members = await fsService.listMembers(tenantId);
-      tenant = await fsService.getTenant(tenantId);
+      storedCred = await fsService.getMemberCredential(effectiveTenantId, cleanId);
+      if (!storedCred && effectiveTenantId !== tenantId) {
+        storedCred = await fsService.getMemberCredential(tenantId, cleanId);
+      }
+      members = await fsService.listMembers(effectiveTenantId);
+      if (members.length === 0 && effectiveTenantId !== tenantId) {
+        members = await fsService.listMembers(tenantId);
+      }
+      if (!tenant) {
+        tenant = await fsService.getTenant(effectiveTenantId);
+      }
     } catch (fsErr) {
       console.warn('Firestore lookup error in unified login:', fsErr);
     }
   }
 
+  if (!storedCred) {
+    const memCreds = dbStore.memberCredentials.get(effectiveTenantId) || dbStore.memberCredentials.get(tenantId);
+    if (memCreds) {
+      storedCred = memCreds.get(cleanId) || memCreds.get(identifier.trim());
+    }
+  }
+
   // Combine members from Firestore with in-memory dbStore members
-  const memStoreList = dbStore.members.get(tenantId) || [];
+  const memStoreList = [
+    ...(dbStore.members.get(effectiveTenantId) || []),
+    ...(effectiveTenantId !== tenantId ? (dbStore.members.get(tenantId) || []) : []),
+  ];
   const memberMap = new Map<string, any>();
   for (const m of members) {
     const key = (m.id || m.memberNumber || m.email || '').toLowerCase();
@@ -189,67 +245,35 @@ export async function performUnifiedLogin(
   }
   members = Array.from(memberMap.values());
 
-  if (!tenant) {
-    tenant = dbStore.tenants.get(tenantId) || null;
-  }
-
-  // 1. Locate member record across all possible identifiers
+  // 1. Locate member record across all possible identifiers in THIS cooperative (STRICTLY NO generic 'admin' or 'gm' magic aliases)
   let member = members.find(
     (m: any) =>
       m.email?.toLowerCase() === cleanId ||
       m.username?.toLowerCase() === cleanId ||
       m.memberNumber?.toLowerCase() === cleanId ||
       m.id?.toLowerCase() === cleanId ||
-      m.phone === identifier.trim() ||
-      ((cleanId === 'admin' || cleanId === 'gm' || cleanId === 'echano0618') &&
-        (m.memberNumber === 'MEM-2026-0001' || m.position?.toLowerCase().includes('general manager')))
+      m.phone === identifier.trim()
   );
 
-  // 2. Check if this is the General Manager (exact identifiers only — never substring matches,
-  //    otherwise regular members sharing the GM's surname would be elevated to GM)
-  const isGmIdentifier =
-    cleanId === 'gm' ||
-    cleanId === 'admin' ||
-    cleanId.startsWith('gm@') ||
-    cleanId.startsWith('admin@') ||
+  // 2. Strict, tenant-scoped GM identifier resolution (STRICTLY NO generic 'admin' or 'gm' wildcard matching)
+  const isTenantPrimaryAdminEmail =
     (!!tenant?.contactEmail && cleanId === tenant.contactEmail.toLowerCase()) ||
-    cleanId === 'mem-2026-0001' ||
-    cleanId === 'mem_gm_0001' ||
-    cleanId === 'echano0618' ||
-    cleanId === 'echano0618@gmail.com';
+    (!!reg?.adminEmail && cleanId === reg.adminEmail.toLowerCase()) ||
+    (isFamilyTenant && (cleanId === 'admin@familycoop.ph' || cleanId === 'echano0618@gmail.com' || cleanId === 'echano0618')) ||
+    (isBayaniTenant && (cleanId === 'gm@bayanicoop.ph' || cleanId === 'gm@bayani-coop.tuntongtech.com' || cleanId === 'admin@bayanicoop.ph'));
 
-  if (!member && isGmIdentifier) {
-    const gmLastName = tenant?.adminLastName || 'Echano';
-    const gmFirstName = tenant?.adminFirstName || 'Felix';
-    const gmEmail = tenant?.contactEmail || (cleanId.includes('@') ? cleanId : 'admin@familycoop.ph');
+  const declaredAdminPrefix = (reg?.adminEmail || tenant?.contactEmail || '').split('@')[0]?.toLowerCase();
+  const isTenantAdminUsername =
+    !!declaredAdminPrefix &&
+    cleanId === declaredAdminPrefix &&
+    cleanId !== 'admin' &&
+    cleanId !== 'gm';
 
-    member = {
-      id: `mem_gm_0001`,
-      memberNumber: `MEM-${new Date().getFullYear()}-0001`,
-      firstName: gmFirstName,
-      middleName: tenant?.adminMiddleName || '',
-      lastName: gmLastName,
-      email: gmEmail,
-      phone: tenant?.contactPhone || '+63 917 888 2468',
-      birthdate: '1985-01-01',
-      gender: 'MALE',
-      civilStatus: 'MARRIED',
-      address: tenant?.address || 'Ortigas Center, Pasig City, Metro Manila',
-      position: 'General Manager',
-      classification: 'REGULAR',
-      status: 'ACTIVE',
-      kycStatus: 'VERIFIED',
-      joinedAt: '2026-01-01T08:00:00.000Z',
-      createdAt: '2026-01-01T08:00:00.000Z',
-      updatedAt: new Date().toISOString(),
-      selfiePreview: null,
-    };
-    try {
-      await fsService.saveMember(tenantId, member);
-    } catch {}
-    members.unshift(member);
-    dbStore.members.set(tenantId, members);
-  }
+  const isGmIdentifier =
+    isTenantPrimaryAdminEmail ||
+    isTenantAdminUsername ||
+    ((cleanId === 'mem-2026-0001' || cleanId === 'mem_gm_0001') &&
+      (isFamilyTenant || isBayaniTenant || !!member?.position?.toLowerCase().includes('general manager')));
 
   // 3. Fallback to stored credential if member record not in list
   if (!member && storedCred) {
@@ -264,14 +288,158 @@ export async function performUnifiedLogin(
   // Fallback: If member was found but storedCred is null, look up credential by member's email, memberNumber, or id
   if (!storedCred && member) {
     if (member.email) {
-      try { storedCred = await fsService.getMemberCredential(tenantId, member.email); } catch {}
+      try { storedCred = await fsService.getMemberCredential(effectiveTenantId, member.email); } catch {}
     }
     if (!storedCred && member.memberNumber) {
-      try { storedCred = await fsService.getMemberCredential(tenantId, member.memberNumber); } catch {}
+      try { storedCred = await fsService.getMemberCredential(effectiveTenantId, member.memberNumber); } catch {}
     }
     if (!storedCred && member.id) {
-      try { storedCred = await fsService.getMemberCredential(tenantId, member.id); } catch {}
+      try { storedCred = await fsService.getMemberCredential(effectiveTenantId, member.id); } catch {}
     }
+  }
+
+  const staffAccounts = [
+    ...AuthService.getStaffAccounts(effectiveTenantId),
+    ...(effectiveTenantId !== tenantId ? AuthService.getStaffAccounts(tenantId) : []),
+  ];
+  const matchedStaff = staffAccounts.find(
+    (s) => s.email.toLowerCase() === cleanId || s.id.toLowerCase() === cleanId || s.username?.toLowerCase() === cleanId
+  );
+
+  // 4. CROSS-TENANT CREDENTIAL ISOLATION GATE:
+  // If the identifier is NOT registered under this cooperative instance, check if it belongs to another cooperative
+  if (!member && !storedCred && !matchedStaff && !isGmIdentifier) {
+    const foreignTenantName = await (async () => {
+      // Check Family Coop specific credentials on non-family tenant
+      if (!isFamilyTenant && (cleanId === 'admin@familycoop.ph' || cleanId === 'echano0618@gmail.com' || cleanId === 'echano0618')) {
+        return 'Family Multi-Purpose Cooperative';
+      }
+      // Check Bayani Coop specific credentials on non-bayani tenant
+      if (!isBayaniTenant && (cleanId === 'gm@bayanicoop.ph' || cleanId === 'lo@bayanicoop.ph' || cleanId === 'gm@bayani-coop.tuntongtech.com')) {
+        return 'Bayani Multi-Purpose Cooperative';
+      }
+      // Check other registered cooperatives
+      for (const r of dbStore.coopRegistrations) {
+        if (r.slug?.toLowerCase() !== tenantSlug && r.adminEmail?.toLowerCase() === cleanId) {
+          return r.name || r.slug;
+        }
+      }
+      // Check other tenant contact emails
+      for (const [tId, otherT] of dbStore.tenants.entries()) {
+        const otherSlug = (otherT.slug || tId.replace(/^tenant_/, '').replace(/[-_]coop$/, '')).toLowerCase();
+        if (otherSlug !== tenantSlug && (otherT.contactEmail?.toLowerCase() === cleanId || (otherT as any).adminEmail?.toLowerCase() === cleanId)) {
+          return otherT.name || otherSlug;
+        }
+      }
+      // Check other tenants' staff in AuthService
+      for (const otherTId of AuthService.getTenantIdsWithStaff()) {
+        const otherSlug = otherTId.replace(/^tenant_/, '').replace(/[-_]coop$/, '').toLowerCase();
+        if (otherSlug !== tenantSlug && otherTId !== effectiveTenantId && otherTId !== tenantId) {
+          const otherStaff = AuthService.getStaffAccounts(otherTId);
+          const foundStaff = otherStaff.find(
+            (s) => s.email?.toLowerCase() === cleanId || s.username?.toLowerCase() === cleanId || s.id?.toLowerCase() === cleanId
+          );
+          if (foundStaff) {
+            const otherTenantObj = dbStore.tenants.get(otherTId);
+            return otherTenantObj?.name || otherSlug;
+          }
+        }
+      }
+      // Check other tenants' stored credentials in dbStore
+      for (const [otherTId, credMap] of dbStore.memberCredentials.entries()) {
+        const otherSlug = otherTId.replace(/^tenant_/, '').replace(/[-_]coop$/, '').toLowerCase();
+        if (otherSlug !== tenantSlug && otherTId !== effectiveTenantId && otherTId !== tenantId) {
+          if (credMap.has(cleanId)) {
+            const otherTenantObj = dbStore.tenants.get(otherTId);
+            return otherTenantObj?.name || otherSlug;
+          }
+        }
+      }
+      // Check other tenants' members in dbStore
+      for (const [otherTId, memList] of dbStore.members.entries()) {
+        const otherSlug = otherTId.replace(/^tenant_/, '').replace(/[-_]coop$/, '').toLowerCase();
+        if (otherSlug !== tenantSlug && otherTId !== effectiveTenantId && otherTId !== tenantId) {
+          const found = memList.find(
+            (m) => m.email?.toLowerCase() === cleanId || (m as any).username?.toLowerCase() === cleanId || m.id?.toLowerCase() === cleanId
+          );
+          if (found) {
+            const otherTenantObj = dbStore.tenants.get(otherTId);
+            return otherTenantObj?.name || otherSlug;
+          }
+        }
+      }
+      // In Firestore: check if user exists under any other tenant
+      if (fsService.isConfigured()) {
+        try {
+          const allTenants = await fsService.listTenants();
+          for (const ot of allTenants) {
+            if (ot.id !== effectiveTenantId && ot.id !== tenantId && ot.slug !== tenantSlug) {
+              const otherCred = await fsService.getMemberCredential(ot.id, cleanId);
+              if (otherCred) {
+                return ot.name || ot.slug;
+              }
+            }
+          }
+        } catch {}
+      }
+      return null;
+    })();
+
+    if (foreignTenantName) {
+      return {
+        status: 403,
+        body: {
+          success: false,
+          code: 'CROSS_TENANT_ACCESS_DENIED',
+          error: `Cross-tenant login blocked: Account "${identifier}" is registered under ${foreignTenantName}. You cannot log into ${tenant?.name || 'this cooperative'} using credentials from another cooperative instance.`,
+        },
+      };
+    }
+
+    return {
+      status: 404,
+      body: {
+        success: false,
+        error: `Account "${identifier}" not found in this cooperative. Please verify your credentials or register as a member.`,
+      },
+    };
+  }
+
+  // Synthesize GM member profile ONLY for authorized GM of this specific cooperative
+  if (!member && isGmIdentifier) {
+    const gmLastName = reg?.adminLastName || tenant?.adminLastName || (isFamilyTenant ? 'Echano' : 'Administrator');
+    const gmFirstName = reg?.adminFirstName || tenant?.adminFirstName || (isFamilyTenant ? 'Felix' : 'Primary');
+    const gmEmail =
+      reg?.adminEmail ||
+      tenant?.contactEmail ||
+      (isFamilyTenant ? 'admin@familycoop.ph' : isBayaniTenant ? 'gm@bayanicoop.ph' : `admin@${tenantSlug}.ph`);
+
+    member = {
+      id: `mem_gm_0001`,
+      memberNumber: `MEM-${new Date().getFullYear()}-0001`,
+      firstName: gmFirstName,
+      middleName: reg?.adminMiddleName || tenant?.adminMiddleName || '',
+      lastName: gmLastName,
+      email: gmEmail,
+      phone: reg?.contactPhone || tenant?.contactPhone || '+63 917 888 2468',
+      birthdate: '1985-01-01',
+      gender: 'MALE',
+      civilStatus: 'MARRIED',
+      address: reg?.address || tenant?.address || 'Ortigas Center, Pasig City, Metro Manila',
+      position: 'General Manager',
+      classification: 'REGULAR',
+      status: 'ACTIVE',
+      kycStatus: 'VERIFIED',
+      joinedAt: '2026-01-01T08:00:00.000Z',
+      createdAt: '2026-01-01T08:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      selfiePreview: null,
+    };
+    try {
+      await fsService.saveMember(effectiveTenantId, member);
+    } catch {}
+    members.unshift(member);
+    dbStore.members.set(effectiveTenantId, members);
   }
 
   // GM status is determined by the resolved member's own record when one exists
@@ -283,38 +451,26 @@ export async function performUnifiedLogin(
       )
     : isGmIdentifier;
 
-  const staffAccounts = AuthService.getStaffAccounts(tenantId);
-  const matchedStaff = staffAccounts.find(
-    (s) => s.email.toLowerCase() === cleanId || s.id.toLowerCase() === cleanId
-  );
-
-  if (!member && !storedCred && !matchedStaff) {
-    return {
-      status: 404,
-      body: {
-        success: false,
-        error: `Account "${identifier}" not found in this cooperative. Please verify your credentials or register as a member.`,
-      },
-    };
-  }
-
-  // 4. Verify Single Password / MPIN Credential
+  // 5. Verify Password / MPIN Credential with strict adherence to stored secrets (NO arbitrary default acceptance without valid member/stored record)
+  const ACCEPTED_DEFAULTS = ['123456', 'password', 'admin123', 'coop2026', 'admin'];
   let validPassword = false;
   if (storedCred) {
     if (storedCred.pin && secretStr === String(storedCred.pin).trim()) validPassword = true;
     if (storedCred.password && secretStr === String(storedCred.password).trim()) validPassword = true;
-  }
-
-  const ACCEPTED_DEFAULTS = ['123456', 'password', 'admin123', 'coop2026', 'admin'];
-  if (ACCEPTED_DEFAULTS.includes(secretStr)) {
+    if (!validPassword && !storedCred.password && !storedCred.pin && ACCEPTED_DEFAULTS.includes(secretStr)) {
+      validPassword = true;
+    }
+  } else if (member && ACCEPTED_DEFAULTS.includes(secretStr)) {
+    // Existing verified or pending member of THIS cooperative without explicit credential override
+    validPassword = true;
+  } else if (reg?.oneTimePassword && secretStr === String(reg.oneTimePassword).trim()) {
+    validPassword = true;
+  } else if ((isFamilyTenant || isBayaniTenant) && isTenantPrimaryAdminEmail && secretStr === 'admin123') {
+    // Standard test seed GM credentials on test tenant instances
     validPassword = true;
   }
 
   if (secretStr === 'BIOMETRIC_DEVICE_VERIFIED') {
-    validPassword = true;
-  }
-
-  if (isUserGm && (secretStr === 'admin123' || secretStr === '123456' || secretStr === 'password' || validPassword)) {
     validPassword = true;
   }
 
@@ -645,13 +801,31 @@ const handleForgotPassword = async (req: Request, res: Response) => {
     const allMembers = [...members, ...memStoreList];
     if (!tenant) {
       tenant = dbStore.tenants.get(tenantId) || null;
+      if (!tenant) {
+        const cleanSlug = tenantId.replace(/^tenant_/, '').replace(/[-_]coop$/, '');
+        for (const t of dbStore.tenants.values()) {
+          if (
+            t.id === tenantId ||
+            t.slug === cleanSlug ||
+            t.slug === `${cleanSlug}-coop` ||
+            t.id === `tenant_${cleanSlug}` ||
+            t.id.startsWith(`tenant_${cleanSlug}_`)
+          ) {
+            tenant = t;
+            break;
+          }
+        }
+      }
     }
 
+    const tenantSlug = (tenant?.slug || tenantId.replace(/^tenant_/, '').replace(/[-_]coop$/, '')).toLowerCase();
+    const isFamilyTenant = tenantSlug === 'family' || tenantId === 'tenant_family';
+    const isBayaniTenant = tenantSlug === 'bayani' || tenantId === 'tenant_bayani' || tenantId === 'tenant_bayani_001';
+
     const isGmIdentifier =
-      cleanUser === 'gm' ||
-      cleanUser === 'admin' ||
-      cleanUser === 'echano0618' ||
-      cleanUser === 'mem-2026-0001' ||
+      (isFamilyTenant && (cleanUser === 'admin@familycoop.ph' || cleanUser === 'echano0618@gmail.com' || cleanUser === 'echano0618')) ||
+      (isBayaniTenant && (cleanUser === 'gm@bayanicoop.ph' || cleanUser === 'gm@bayani-coop.tuntongtech.com')) ||
+      (cleanUser === 'mem-2026-0001' && (isFamilyTenant || isBayaniTenant)) ||
       (!!tenant?.contactEmail && cleanUser === tenant.contactEmail.toLowerCase());
 
     // Locate member record across all possible identifiers
@@ -667,9 +841,9 @@ const handleForgotPassword = async (req: Request, res: Response) => {
 
     // If GM and not in list, synthesize GM member profile
     if (!member && isGmIdentifier) {
-      const gmLastName = tenant?.adminLastName || 'Echano';
-      const gmFirstName = tenant?.adminFirstName || 'Felix';
-      const gmEmail = tenant?.contactEmail || 'felix.echano@tuntongtech.com';
+      const gmLastName = tenant?.adminLastName || (isFamilyTenant ? 'Echano' : 'Administrator');
+      const gmFirstName = tenant?.adminFirstName || (isFamilyTenant ? 'Felix' : 'Primary');
+      const gmEmail = tenant?.contactEmail || (isFamilyTenant ? 'admin@familycoop.ph' : `admin@${tenantSlug}.ph`);
       member = {
         id: 'mem_gm_0001',
         memberNumber: `MEM-${new Date().getFullYear()}-0001`,
@@ -989,6 +1163,7 @@ const handleMemberRegister = async (req: Request, res: Response) => {
     const newMember: Member = {
       id: memberId,
       memberNumber,
+      name: fullName,
       firstName,
       middleName,
       lastName,
@@ -1575,10 +1750,54 @@ app.post('/api/v1/operator/tenants/:id/details', async (req: Request, res: Respo
   }
 });
 
+export function resolveTenantAliases(rawTenantId: string): { canonicalTenantId: string; searchTenantIds: string[]; tenantObj: any } {
+  let canonicalTenantId = rawTenantId;
+  let tenantObj = dbStore.tenants.get(rawTenantId);
+  if (!tenantObj) {
+    const cleanSlug = rawTenantId.replace(/^tenant_/, '').replace(/[-_]coop$/, '');
+    for (const t of dbStore.tenants.values()) {
+      if (
+        t.id === rawTenantId ||
+        t.slug === cleanSlug ||
+        t.slug === `${cleanSlug}-coop` ||
+        t.id === `tenant_${cleanSlug}` ||
+        t.id.startsWith(`tenant_${cleanSlug}_`)
+      ) {
+        tenantObj = t;
+        canonicalTenantId = t.id;
+        break;
+      }
+    }
+  } else {
+    canonicalTenantId = tenantObj.id;
+  }
+
+  if (!tenantObj && rawTenantId.includes('family')) {
+    canonicalTenantId = 'tenant_family';
+    tenantObj = dbStore.tenants.get('tenant_family') || undefined;
+  }
+
+  const cleanSlug = rawTenantId.replace(/^tenant_/, '').replace(/[-_]coop$/, '');
+  const searchTenantIds = Array.from(
+    new Set([
+      rawTenantId,
+      canonicalTenantId,
+      tenantObj?.id,
+      tenantObj?.slug,
+      `tenant_${cleanSlug}`,
+      `${cleanSlug}-coop`,
+      cleanSlug,
+    ].filter(Boolean))
+  ) as string[];
+
+  return { canonicalTenantId, searchTenantIds, tenantObj };
+}
+
 // Create Admin Portal User and Assign Role for Cooperative Instance
 export const handleCreateTenantAdminUser = async (req: Request, res: Response) => {
   try {
-    const tenantId = req.params.id;
+    const rawTenantId = req.params.id || (req.query.coop as string) || (req.query.tenant as string) || resolveTenantId(req);
+    const { canonicalTenantId, searchTenantIds } = resolveTenantAliases(rawTenantId);
     const { fullName, email, username, password, role, phone } = req.body;
     if (!fullName || !email || !password || !role) {
       return res.status(400).json({
@@ -1604,21 +1823,23 @@ export const handleCreateTenantAdminUser = async (req: Request, res: Response) =
     };
     const roleTitle = roleTitles[role] || 'Cooperative Administrator';
 
-    // 1. Add to AuthService custom staff accounts
-    AuthService.addStaffAccount({
-      id: userId,
-      email: cleanEmail,
-      fullName: fullName.trim(),
-      role: role as UserRole,
-      tenantId,
-      roleTitle,
-    });
+    // 1. Add to AuthService custom staff accounts across aliases
+    for (const tId of searchTenantIds) {
+      AuthService.addStaffAccount({
+        id: userId,
+        email: cleanEmail,
+        fullName: fullName.trim(),
+        role: role as UserRole,
+        tenantId: tId,
+        roleTitle,
+      });
+    }
 
     // 2. Persist credential into Firestore & dbStore
     const fsService = FirestoreCoopService.getInstance();
     const credPayload = {
       id: userId,
-      tenantId,
+      tenantId: canonicalTenantId,
       fullName: fullName.trim(),
       email: cleanEmail,
       username: cleanUsername,
@@ -1631,7 +1852,12 @@ export const handleCreateTenantAdminUser = async (req: Request, res: Response) =
       kycStatus: 'VERIFIED',
       createdAt: new Date().toISOString(),
     };
-    await fsService.saveMemberCredential(tenantId, credPayload);
+    await fsService.saveMemberCredential(canonicalTenantId, credPayload);
+    if (rawTenantId !== canonicalTenantId) {
+      try {
+        await fsService.saveMemberCredential(rawTenantId, { ...credPayload, tenantId: rawTenantId });
+      } catch {}
+    }
 
     // 3. Create active Member profile
     const nameParts = fullName.trim().split(' ');
@@ -1656,10 +1882,16 @@ export const handleCreateTenantAdminUser = async (req: Request, res: Response) =
       updatedAt: new Date().toISOString(),
     };
     try {
-      await fsService.saveMember(tenantId, memberRecord);
+      await fsService.saveMember(canonicalTenantId, memberRecord);
+      if (rawTenantId !== canonicalTenantId) {
+        await fsService.saveMember(rawTenantId, memberRecord);
+      }
     } catch {}
-    const existingMembers = dbStore.members.get(tenantId) || [];
-    dbStore.members.set(tenantId, [memberRecord, ...existingMembers.filter((m) => m.email?.toLowerCase() !== cleanEmail)]);
+
+    for (const tId of searchTenantIds) {
+      const existingMembers = dbStore.members.get(tId) || [];
+      dbStore.members.set(tId, [memberRecord, ...existingMembers.filter((m) => m.email?.toLowerCase() !== cleanEmail)]);
+    }
 
     res.status(201).json({
       success: true,
@@ -1671,7 +1903,7 @@ export const handleCreateTenantAdminUser = async (req: Request, res: Response) =
         username: cleanUsername,
         role,
         roleTitle,
-        tenantId,
+        tenantId: canonicalTenantId,
       },
     });
   } catch (err: any) {
@@ -1683,27 +1915,43 @@ app.post('/api/v1/operator/tenants/:id/admin-users', handleCreateTenantAdminUser
 // List Admin Users for Cooperative Instance (Strictly NO dummy users; Only Primary Administrator and custom staff)
 export const handleGetTenantAdminUsers = async (req: Request, res: Response) => {
   try {
-    const tenantId = req.params.id;
+    const rawTenantId = req.params.id || (req.query.coop as string) || (req.query.tenant as string) || resolveTenantId(req);
+    const { canonicalTenantId, searchTenantIds, tenantObj } = resolveTenantAliases(rawTenantId);
     const fsService = FirestoreCoopService.getInstance();
 
-    // 1. Fetch credentials from Firestore & in-memory cache
-    const firestoreStaff = await fsService.listStaffCredentials(tenantId);
-    for (const cred of firestoreStaff) {
-      AuthService.addStaffAccount({
-        id: cred.id || cred.userId || `usr_${String(cred.role || 'staff').toLowerCase()}_${Date.now()}`,
-        email: cred.email,
-        fullName: cred.fullName,
-        role: cred.role as UserRole,
-        tenantId,
-        roleTitle: cred.roleTitle || cred.position || 'Cooperative Staff',
-        status: cred.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
-        username: cred.username,
-      });
+    // 1. Fetch credentials from Firestore & in-memory cache across all alias tenant IDs
+    for (const tId of searchTenantIds) {
+      const firestoreStaff = await fsService.listStaffCredentials(tId);
+      for (const cred of firestoreStaff) {
+        for (const aliasId of searchTenantIds) {
+          AuthService.addStaffAccount({
+            id: cred.id || cred.userId || `usr_${String(cred.role || 'staff').toLowerCase()}_${Date.now()}`,
+            email: cred.email,
+            fullName: cred.fullName,
+            role: cred.role as UserRole,
+            tenantId: aliasId,
+            roleTitle: cred.roleTitle || cred.position || 'Cooperative Staff',
+            status: cred.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+            username: cred.username,
+          });
+        }
+      }
     }
 
-    let staff = AuthService.getStaffAccounts(tenantId);
+    // Collect all accounts from AuthService across aliases
+    let staffMap = new Map<string, any>();
+    for (const tId of searchTenantIds) {
+      const accounts = AuthService.getStaffAccounts(tId);
+      for (const a of accounts) {
+        const key = (a.id || a.email || a.username || '').toLowerCase();
+        if (key && !staffMap.has(key)) {
+          staffMap.set(key, a);
+        }
+      }
+    }
+    let staff = Array.from(staffMap.values());
 
-    // List of known mock/dummy names that should NEVER be displayed in the operator portal
+    // List of known mock/dummy names that should NEVER be displayed in the operator portal or IAM
     const DUMMY_NAMES = [
       'Atty. Roberto Dela Rosa',
       'Grace Villanueva',
@@ -1720,11 +1968,12 @@ export const handleGetTenantAdminUsers = async (req: Request, res: Response) => 
     if (staff.length === 0) {
       // Find tenant or registration
       const tenant =
-        dbStore.tenants.get(tenantId) ||
-        Array.from(dbStore.tenants.values()).find((t) => t.slug === tenantId || t.id === tenantId);
+        tenantObj ||
+        dbStore.tenants.get(canonicalTenantId) ||
+        Array.from(dbStore.tenants.values()).find((t) => t.slug === rawTenantId || t.id === canonicalTenantId);
 
       const reg = dbStore.coopRegistrations.find(
-        (r) => r.slug === tenantId || (tenant && r.slug === tenant.slug) || (tenant && r.name === tenant.name)
+        (r) => r.slug === rawTenantId || (tenant && r.slug === tenant.slug) || (tenant && r.name === tenant.name)
       );
 
       const adminFirstName = reg?.adminFirstName || tenant?.adminFirstName || '';
@@ -1736,7 +1985,7 @@ export const handleGetTenantAdminUsers = async (req: Request, res: Response) => 
 
       const adminEmail = (reg?.adminEmail || tenant?.contactEmail || `admin@${tenant?.slug || 'coop'}.ph`).trim().toLowerCase();
       const adminUsername = (reg?.adminEmail || tenant?.contactEmail || 'admin').split('@')[0].toLowerCase();
-      const adminUserId = `usr_admin_${tenant?.slug || tenantId}_01`;
+      const adminUserId = `usr_admin_${tenant?.slug || canonicalTenantId}_01`;
       const primaryAdminRoleTitle = 'General Manager / Primary Administrator';
 
       const primaryAdmin = {
@@ -1744,18 +1993,20 @@ export const handleGetTenantAdminUsers = async (req: Request, res: Response) => 
         email: adminEmail,
         fullName: adminFullName,
         role: 'GENERAL_MANAGER' as UserRole,
-        tenantId,
+        tenantId: canonicalTenantId,
         roleTitle: primaryAdminRoleTitle,
         status: 'ACTIVE' as const,
         username: adminUsername,
       };
 
-      AuthService.addStaffAccount(primaryAdmin);
+      for (const tId of searchTenantIds) {
+        AuthService.addStaffAccount({ ...primaryAdmin, tenantId: tId });
+      }
 
       try {
-        await fsService.saveMemberCredential(tenantId, {
+        await fsService.saveMemberCredential(canonicalTenantId, {
           id: adminUserId,
-          tenantId,
+          tenantId: canonicalTenantId,
           fullName: adminFullName,
           email: adminEmail,
           username: adminUsername,
@@ -1783,29 +2034,82 @@ app.get('/api/v1/operator/tenants/:id/admin-users', handleGetTenantAdminUsers);
 // Update Admin Portal User Status (Activate / Deactivate)
 export const handleUpdateTenantAdminUserStatus = async (req: Request, res: Response) => {
   try {
-    const { id: tenantId, userId } = req.params;
+    const rawTenantId = req.params.id || (req.query.coop as string) || resolveTenantId(req);
+    const { userId } = req.params;
     const { status } = req.body;
     if (status !== 'ACTIVE' && status !== 'INACTIVE') {
       return res.status(400).json({ success: false, error: "status must be 'ACTIVE' or 'INACTIVE'." });
     }
-
-    // 1. Update in AuthService
-    AuthService.updateStaffAccountStatus(tenantId, userId, status);
-
-    // 2. Update in Firestore & dbStore
+    const { canonicalTenantId, searchTenantIds } = resolveTenantAliases(rawTenantId);
     const fsService = FirestoreCoopService.getInstance();
-    await fsService.updateStaffCredentialStatus(tenantId, userId, status);
+
+    // Update across all alias tenant IDs
+    for (const tId of searchTenantIds) {
+      AuthService.updateStaffAccountStatus(tId, userId, status);
+      try {
+        await fsService.updateStaffCredentialStatus(tId, userId, status);
+      } catch {}
+    }
 
     res.json({
       success: true,
       message: `Admin portal user status updated to ${status}.`,
-      data: { tenantId, userId, status },
+      data: { tenantId: canonicalTenantId, userId, status },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 };
 app.post('/api/v1/operator/tenants/:id/admin-users/:userId/status', handleUpdateTenantAdminUserStatus);
+
+// Update Admin Portal User Role
+export const handleUpdateTenantAdminUserRole = async (req: Request, res: Response) => {
+  try {
+    const rawTenantId = req.params.id || (req.query.coop as string) || resolveTenantId(req);
+    const { userId } = req.params;
+    const { role } = req.body;
+    if (!role) {
+      return res.status(400).json({ success: false, error: 'role is required.' });
+    }
+    const { canonicalTenantId, searchTenantIds } = resolveTenantAliases(rawTenantId);
+    const fsService = FirestoreCoopService.getInstance();
+
+    const roleTitles: Record<string, string> = {
+      SYSTEM_ADMIN: 'System Administrator',
+      SUPERADMIN: 'Platform Superadmin',
+      GENERAL_MANAGER: 'General Manager',
+      LOAN_OFFICER: 'Senior Loan Officer',
+      CREDIT_COMMITTEE: 'Credit Committee Chairperson',
+      BOD: 'Board of Directors Chairman',
+      CASHIER: 'Branch Head Cashier & Teller',
+      ACCOUNTANT: 'Chief Bookkeeper & Accountant',
+      COMPLIANCE_OFFICER: 'Compliance Officer & DPO',
+    };
+    const roleTitle = roleTitles[role] || 'Cooperative Administrator';
+
+    for (const tId of searchTenantIds) {
+      AuthService.updateStaffAccountRole(tId, userId, role as UserRole, roleTitle);
+      try {
+        await fsService.updateStaffCredentialRole(tId, userId, role, roleTitle);
+      } catch {}
+    }
+
+    res.json({
+      success: true,
+      message: `Admin portal user role updated to ${role}.`,
+      data: { tenantId: canonicalTenantId, userId, role, roleTitle },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+app.post('/api/v1/operator/tenants/:id/admin-users/:userId/role', handleUpdateTenantAdminUserRole);
+
+// Unified IAM Endpoints (Exposed for Admin Portal IAM Module)
+app.get('/api/v1/iam/users', handleGetTenantAdminUsers);
+app.post('/api/v1/iam/users', handleCreateTenantAdminUser);
+app.post('/api/v1/iam/users/:userId/status', handleUpdateTenantAdminUserStatus);
+app.post('/api/v1/iam/users/:userId/role', handleUpdateTenantAdminUserRole);
 
 // Prepaid Credit Ledger (Stored in Firebase Firestore)
 app.get('/api/v1/operator/credit-transactions', async (req: Request, res: Response) => {
@@ -2740,13 +3044,90 @@ const handleMemberApplicationReview = async (req: Request, res: Response) => {
       if (!targetMember) {
         targetMember = await fsService.getMember(tenantId, appId);
       }
+      if (!targetMember && targetApp?.id) {
+        targetMember = await fsService.getMember(tenantId, `mem_app_${targetApp.id}`);
+        if (!targetMember) {
+          targetMember = await fsService.getMember(tenantId, targetApp.id);
+        }
+      }
+      if (!targetMember && targetApp?.applicantId) {
+        targetMember = await fsService.getMember(tenantId, targetApp.applicantId);
+      }
+      if (!targetMember && targetApp?.email) {
+        targetMember = await fsService.getMember(tenantId, targetApp.email);
+      }
+
+      // If applicant existed only in applications (e.g. legacy APP-2026-XXXX), construct member record from targetApp
+      if (!targetMember && targetApp && (targetApp.applicantName || targetApp.firstName || targetApp.email)) {
+        const parsedParts = (targetApp.applicantName || '').trim().split(/\s+/).filter(Boolean);
+        const fName = targetApp.firstName || parsedParts[0] || 'Applicant';
+        const lName = targetApp.lastName || (parsedParts.length > 1 ? parsedParts[parsedParts.length - 1] : '');
+        const mName = targetApp.middleName || (parsedParts.length > 2 ? parsedParts.slice(1, parsedParts.length - 1).join(' ') : undefined);
+        const fullAppName = targetApp.applicantName || [fName, mName, lName].filter(Boolean).join(' ');
+        const synthId = targetApp.id?.startsWith('mem_app_') ? targetApp.id : `mem_app_${targetApp.id || appId}`;
+
+        targetMember = {
+          id: synthId,
+          applicantId: targetApp.applicantId || appId,
+          isApplicant: action !== 'APPROVE',
+          memberNumber: targetApp.memberNumber || targetApp.memberNo || '',
+          name: fullAppName,
+          firstName: fName,
+          middleName: mName,
+          lastName: lName,
+          suffix: targetApp.suffix,
+          email: (targetApp.email || '').trim().toLowerCase(),
+          phone: targetApp.phone || '+63 900 000 0000',
+          landline: targetApp.landline,
+          birthdate: targetApp.birthdate || targetApp.dateOfBirth || '1990-01-01',
+          dateOfBirth: targetApp.birthdate || targetApp.dateOfBirth || '1990-01-01',
+          gender: targetApp.gender || 'OTHER',
+          civilStatus: targetApp.civilStatus || 'SINGLE',
+          address: targetApp.address || 'Philippines',
+          country: targetApp.country || 'Philippines',
+          region: targetApp.region,
+          city: targetApp.city || targetApp.municipality,
+          municipality: targetApp.municipality || targetApp.city,
+          barangay: targetApp.barangay,
+          street: targetApp.street,
+          houseNumber: targetApp.houseNumber || targetApp.buildingNumber,
+          buildingNumber: targetApp.buildingNumber || targetApp.houseNumber,
+          zipCode: targetApp.zipCode || targetApp.zipcode,
+          zipcode: targetApp.zipcode || targetApp.zipCode,
+          tin: targetApp.tin,
+          employeeIdNumber: targetApp.employeeIdNumber,
+          position: targetApp.position,
+          officeUnitSection: targetApp.officeUnitSection,
+          dateOfAppointment: targetApp.dateOfAppointment,
+          classification: targetApp.classification || 'REGULAR',
+          idType: targetApp.idType || 'PhilSys National ID',
+          idNumber: targetApp.idNumber || targetApp.tin || 'N/A',
+          subscribedShares: targetApp.subscribedShares !== undefined ? Number(targetApp.subscribedShares) : 0,
+          initialDeposit: targetApp.initialDeposit !== undefined ? Number(targetApp.initialDeposit) : 0,
+          paidUpShares: targetApp.initialDeposit !== undefined ? Number(targetApp.initialDeposit) : 0,
+          sharesCount: targetApp.subscribedShares !== undefined ? Number(targetApp.subscribedShares) : 0,
+          initialPledge: targetApp.totalSubscribedAmount !== undefined ? Number(targetApp.totalSubscribedAmount) : 0,
+          idFrontPreview: targetApp.idFrontPreview || null,
+          selfiePreview: targetApp.selfiePreview || null,
+          joinedAt: targetApp.dateSubmitted || new Date().toISOString(),
+          createdAt: targetApp.dateSubmitted || new Date().toISOString(),
+        };
+      }
+
       assignedMemberNo = action === 'APPROVE'
         ? (req.body.memberNumber || targetMember?.memberNumber || targetMember?.memberNo || `MEM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`)
         : '';
 
       if (targetMember) {
+        const resolvedMemberName =
+          targetMember.name ||
+          targetApp?.applicantName ||
+          [targetMember.firstName, targetMember.middleName, targetMember.lastName].filter(Boolean).join(' ') ||
+          'Member';
+
         const updated = {
           ...targetMember,
+          name: resolvedMemberName,
           ...(action === 'APPROVE' ? {
             memberNumber: assignedMemberNo,
             memberNo: assignedMemberNo,
@@ -2767,6 +3148,8 @@ const handleMemberApplicationReview = async (req: Request, res: Response) => {
           if (credLookup) {
             await fsService.saveMemberCredential(tenantId, {
               ...credLookup,
+              name: resolvedMemberName,
+              ...(action === 'APPROVE' && assignedMemberNo ? { memberNumber: assignedMemberNo } : {}),
               status: action === 'APPROVE' ? 'ACTIVE' : 'REJECTED',
               kycStatus: action === 'APPROVE' ? 'VERIFIED' : 'REJECTED',
               updatedAt: new Date().toISOString(),
@@ -2777,10 +3160,18 @@ const handleMemberApplicationReview = async (req: Request, res: Response) => {
 
       // Update in-memory dbStore
       const memList = dbStore.members.get(tenantId) || [];
-      const mIdx = memList.findIndex((m) => m.id === appId || m.id === memberId || (m as any).applicantId === appId);
+      const mIdx = memList.findIndex(
+        (m) =>
+          m.id === appId ||
+          m.id === memberId ||
+          (targetApp?.id && (m.id === targetApp.id || m.id === `mem_app_${targetApp.id}`)) ||
+          (m as any).applicantId === appId ||
+          (targetApp?.applicantId && (m as any).applicantId === targetApp.applicantId)
+      );
       if (mIdx >= 0) {
         memList[mIdx] = {
           ...memList[mIdx],
+          ...(targetMember || {}),
           ...(action === 'APPROVE' ? {
             memberNumber: assignedMemberNo,
             memberNo: assignedMemberNo,
@@ -2795,6 +3186,9 @@ const handleMemberApplicationReview = async (req: Request, res: Response) => {
         if (!targetMember) {
           targetMember = memList[mIdx];
         }
+      } else if (targetMember) {
+        memList.push(targetMember);
+        dbStore.members.set(tenantId, memList);
       }
     } catch (fsErr) {
       console.warn('Firestore updateApplicationStatus fallback:', fsErr);
@@ -2934,6 +3328,7 @@ app.post('/api/v1/members', async (req: Request, res: Response) => {
     const newMember: Member = {
       id: memberId,
       memberNumber,
+      name: [firstName, middleName, lastName].filter(Boolean).join(' '),
       firstName,
       middleName,
       lastName,
@@ -3093,7 +3488,7 @@ app.post('/api/v1/members/:id/kyc/review', async (req: Request, res: Response) =
   }
 });
 
-app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
+export const handleUpdateMemberProfile = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const memberId = req.params.id;
@@ -3106,6 +3501,10 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
       email,
       phone,
       landline,
+      birthdate,
+      dateOfBirth,
+      gender,
+      civilStatus,
       address,
       psgcAddress,
       idType,
@@ -3122,7 +3521,10 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
       reviewNotes,
     } = req.body;
 
+    const resolvedBirthdate = birthdate !== undefined ? birthdate : dateOfBirth;
+
     let targetMember: any = null;
+    let targetApp: any = null;
 
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -3132,13 +3534,58 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
         const plainAppId = memberId.replace('mem_app_', '');
         targetMember = await fsService.getMember(tenantId, plainAppId);
       }
+      targetApp = await fsService.getApplication(tenantId, memberId);
+      if (!targetMember && targetApp) {
+        const parsedParts = (targetApp.applicantName || '').trim().split(/\s+/).filter(Boolean);
+        const fName = targetApp.firstName || parsedParts[0] || '';
+        const lName = targetApp.lastName || (parsedParts.length > 1 ? parsedParts[parsedParts.length - 1] : '');
+        const mName = targetApp.middleName || (parsedParts.length > 2 ? parsedParts.slice(1, parsedParts.length - 1).join(' ') : undefined);
+        const synthId = targetApp.id?.startsWith('mem_app_') ? targetApp.id : `mem_app_${targetApp.id || memberId}`;
+        targetMember = {
+          id: synthId,
+          applicantId: targetApp.applicantId || memberId,
+          isApplicant: targetApp.status !== 'APPROVED',
+          memberNumber: targetApp.memberNumber || targetApp.memberNo || '',
+          name: targetApp.applicantName || [fName, mName, lName].filter(Boolean).join(' '),
+          firstName: fName,
+          middleName: mName,
+          lastName: lName,
+          suffix: targetApp.suffix,
+          email: targetApp.email,
+          phone: targetApp.phone,
+          landline: targetApp.landline,
+          birthdate: targetApp.birthdate || targetApp.dateOfBirth,
+          dateOfBirth: targetApp.birthdate || targetApp.dateOfBirth,
+          gender: targetApp.gender || 'OTHER',
+          civilStatus: targetApp.civilStatus || 'SINGLE',
+          address: targetApp.address || 'Philippines',
+          idType: targetApp.idType || 'PhilSys National ID',
+          idNumber: targetApp.idNumber || targetApp.tin || 'N/A',
+          tin: targetApp.tin,
+          classification: targetApp.classification || 'REGULAR',
+          kycStatus: targetApp.status === 'APPROVED' ? 'VERIFIED' : 'PENDING_REVIEW',
+          status: targetApp.status === 'APPROVED' ? 'ACTIVE' : 'PENDING_APPROVAL',
+          idFrontPreview: targetApp.idFrontPreview || null,
+          selfiePreview: targetApp.selfiePreview || null,
+        };
+      }
     } catch (fsErr) {
       console.warn('Firestore getMember fallback:', fsErr);
     }
 
     if (!targetMember) {
       const mems = dbStore.members.get(tenantId) || [];
-      targetMember = mems.find((m) => m.id === memberId || m.id === `mem_app_${memberId}` || `mem_app_${m.id}` === memberId);
+      targetMember = mems.find(
+        (m) =>
+          m.id === memberId ||
+          m.memberNumber === memberId ||
+          (m as any).memberNo === memberId ||
+          (m as any).applicantId === memberId ||
+          m.id === `mem_app_${memberId}` ||
+          `mem_app_${m.id}` === memberId ||
+          (memberId === 'MEM-2026-0001' && m.id === 'mem_gm_0001') ||
+          (memberId === 'mem_gm_0001' && (m.id === 'MEM-2026-0001' || m.memberNumber === 'MEM-2026-0001'))
+      );
     }
 
     const computedName =
@@ -3148,9 +3595,11 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
       targetMember?.firstName ||
       'Member';
 
-    const updatedMember = {
+    const resolvedDocId = targetMember?.id || memberId;
+
+    const updatedMember: any = {
       ...(targetMember || {}),
-      id: memberId,
+      id: resolvedDocId,
       name: computedName,
       ...(firstName !== undefined && { firstName }),
       ...(middleName !== undefined && { middleName }),
@@ -3159,6 +3608,9 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
       ...(email !== undefined && { email }),
       ...(phone !== undefined && { phone }),
       ...(landline !== undefined && { landline }),
+      ...(resolvedBirthdate !== undefined && { birthdate: resolvedBirthdate, dateOfBirth: resolvedBirthdate }),
+      ...(gender !== undefined && { gender }),
+      ...(civilStatus !== undefined && { civilStatus }),
       ...(address !== undefined && { address }),
       ...(psgcAddress !== undefined && { psgcAddress }),
       ...(idType !== undefined && { idType }),
@@ -3179,40 +3631,144 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
     // Save to Cloud Firestore
     try {
       const fsService = FirestoreCoopService.getInstance();
-      await fsService.saveMember(tenantId, updatedMember);
+      if (fsService.isConfigured()) {
+        await fsService.saveMember(tenantId, updatedMember);
 
-      // If tied to an application, keep applications collection in sync
-      const rawAppId = memberId.startsWith('mem_app_') ? memberId.replace('mem_app_', '') : memberId;
-      try {
-        const appDoc = await fsService.applicationsCol(tenantId).doc(rawAppId).get();
-        if (appDoc.exists) {
-          await fsService.applicationsCol(tenantId).doc(rawAppId).set({
-            applicantName: computedName,
-            ...(email && { email }),
-            ...(phone && { phone }),
-            ...(address && { address }),
-            ...(idType && { idType }),
-            ...(idNumber && { idNumber }),
-            ...(tin && { tin }),
-            ...(reviewNotes && { reviewNotes }),
-            ...(remarks && { remarks }),
-            updatedAt: new Date().toISOString(),
-          }, { merge: true });
+        // If memberId differs from resolvedDocId (e.g., MEM-2026-0001 vs mem_gm_0001), keep both in sync if the alternate doc exists
+        if (memberId !== resolvedDocId) {
+          try {
+            const altDoc = await fsService.membersCol(tenantId).doc(memberId).get();
+            if (altDoc.exists) {
+              await fsService.membersCol(tenantId).doc(memberId).set({ ...updatedMember, id: memberId }, { merge: true });
+            }
+          } catch {}
         }
-      } catch {}
+
+        // If tied to an application, keep applications collection in sync
+        const candidateAppIds = Array.from(
+          new Set(
+            [
+              targetApp?.id,
+              memberId.startsWith('mem_app_') ? memberId.replace('mem_app_', '') : memberId,
+              resolvedDocId.startsWith('mem_app_') ? resolvedDocId.replace('mem_app_', '') : resolvedDocId,
+              targetMember?.applicantId,
+            ].filter(Boolean)
+          )
+        );
+
+        const appUpdates: Record<string, any> = {
+          applicantName: computedName,
+          ...(firstName !== undefined && { firstName }),
+          ...(middleName !== undefined && { middleName }),
+          ...(lastName !== undefined && { lastName }),
+          ...(suffix !== undefined && { suffix }),
+          ...(email !== undefined && { email }),
+          ...(phone !== undefined && { phone }),
+          ...(landline !== undefined && { landline }),
+          ...(resolvedBirthdate !== undefined && { birthdate: resolvedBirthdate, dateOfBirth: resolvedBirthdate }),
+          ...(gender !== undefined && { gender }),
+          ...(civilStatus !== undefined && { civilStatus }),
+          ...(address !== undefined && { address }),
+          ...(idType !== undefined && { idType }),
+          ...(idNumber !== undefined && { idNumber }),
+          ...(tin !== undefined && { tin }),
+          ...(employeeIdNumber !== undefined && { employeeIdNumber }),
+          ...(position !== undefined && { position }),
+          ...(officeUnitSection !== undefined && { officeUnitSection }),
+          ...(dateOfAppointment !== undefined && { dateOfAppointment }),
+          ...(classification !== undefined && { classification }),
+          ...(reviewNotes !== undefined && { reviewNotes }),
+          ...(remarks !== undefined && { remarks }),
+          updatedAt: new Date().toISOString(),
+        };
+
+        for (const candId of candidateAppIds) {
+          try {
+            const appDoc = await fsService.applicationsCol(tenantId).doc(candId).get();
+            if (appDoc.exists) {
+              const appData = appDoc.data() as any;
+              if (appData && (appData.applicantName || appData.firstName || appData.email)) {
+                await fsService.applicationsCol(tenantId).doc(candId).set(appUpdates, { merge: true });
+              }
+            }
+          } catch {}
+        }
+
+        // Also sync member_credentials in Firestore if present
+        try {
+          const lookupKeys = Array.from(
+            new Set([updatedMember.email, targetMember?.email, resolvedDocId, memberId, updatedMember.memberNumber].filter(Boolean))
+          );
+          for (const key of lookupKeys) {
+            const existingCred = await fsService.getMemberCredential(tenantId, String(key));
+            if (existingCred) {
+              await fsService.saveMemberCredential(tenantId, {
+                ...existingCred,
+                name: computedName,
+                ...(firstName !== undefined && { firstName }),
+                ...(lastName !== undefined && { lastName }),
+                ...(email !== undefined && { email: email.trim().toLowerCase() }),
+                ...(phone !== undefined && { phone }),
+                ...(resolvedBirthdate !== undefined && { birthdate: resolvedBirthdate, dateOfBirth: resolvedBirthdate }),
+                ...(classification !== undefined && { classification }),
+                ...(status !== undefined && { status }),
+                ...(kycStatus !== undefined && { kycStatus }),
+                updatedAt: new Date().toISOString(),
+              });
+              break;
+            }
+          }
+        } catch {}
+      }
     } catch (fsErr) {
       console.warn('Firestore updateMember fallback:', fsErr);
     }
 
-    // Update in-memory dbStore
+    // Update in-memory dbStore.members
     const memList = dbStore.members.get(tenantId) || [];
-    const idx = memList.findIndex((m) => m.id === memberId || m.id === `mem_app_${memberId}` || `mem_app_${m.id}` === memberId);
+    const idx = memList.findIndex(
+      (m) =>
+        m.id === resolvedDocId ||
+        m.id === memberId ||
+        m.memberNumber === memberId ||
+        (m as any).memberNo === memberId ||
+        (m as any).applicantId === memberId ||
+        m.id === `mem_app_${memberId}` ||
+        `mem_app_${m.id}` === memberId ||
+        (memberId === 'MEM-2026-0001' && m.id === 'mem_gm_0001') ||
+        (memberId === 'mem_gm_0001' && (m.id === 'MEM-2026-0001' || m.memberNumber === 'MEM-2026-0001'))
+    );
     if (idx >= 0) {
       memList[idx] = { ...memList[idx], ...updatedMember };
       dbStore.members.set(tenantId, memList);
     } else {
       memList.push(updatedMember as Member);
       dbStore.members.set(tenantId, memList);
+    }
+
+    // Also keep in-memory dbStore.memberCredentials in sync
+    const tenantCredMap = dbStore.memberCredentials.get(tenantId);
+    if (tenantCredMap) {
+      for (const [credKey, credVal] of tenantCredMap.entries()) {
+        if (
+          credVal.memberId === resolvedDocId ||
+          credVal.memberId === memberId ||
+          credVal.memberNumber === memberId ||
+          (targetMember?.email && credVal.email?.toLowerCase() === targetMember.email.toLowerCase()) ||
+          (updatedMember.email && credVal.email?.toLowerCase() === updatedMember.email.toLowerCase())
+        ) {
+          tenantCredMap.set(credKey, {
+            ...credVal,
+            name: computedName,
+            ...(email !== undefined && { email: email.trim().toLowerCase() }),
+            ...(phone !== undefined && { phone }),
+            ...(resolvedBirthdate !== undefined && { birthdate: resolvedBirthdate, dateOfBirth: resolvedBirthdate }),
+            ...(classification !== undefined && { classification }),
+            ...(status !== undefined && { status }),
+            ...(kycStatus !== undefined && { kycStatus }),
+          });
+        }
+      }
     }
 
     res.json({
@@ -3223,19 +3779,9 @@ app.put('/api/v1/members/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
-
-app.patch('/api/v1/members/:id', async (req: Request, res: Response) => {
-  // Delegate directly to PUT logic
-  req.method = 'PUT';
-  const handlers = (app._router.stack as any[])
-    .filter((layer) => layer.route && layer.route.path === '/api/v1/members/:id' && layer.route.methods.put)
-    .map((layer) => layer.route.stack[0].handle);
-  if (handlers.length > 0) {
-    return handlers[0](req, res);
-  }
-  res.status(404).json({ success: false, error: 'Route handler not found' });
-});
+};
+app.put('/api/v1/members/:id', handleUpdateMemberProfile);
+app.patch('/api/v1/members/:id', handleUpdateMemberProfile);
 
 app.delete('/api/v1/members/:id', async (req: Request, res: Response) => {
   try {
@@ -3530,6 +4076,104 @@ export async function handleDeleteBusinessComment(req: Request, res: Response) {
   }
 }
 
+// -------------------------------------------------------------
+// COMMUNITY HUB (SILONG) - COOPERATIVE ACCOUNT LINKING
+// Verifies Tenant ID, Member Account / Email, and Date of Birth
+// -------------------------------------------------------------
+export const handleLinkCoopMemberAccount = async (req: Request, res: Response) => {
+  try {
+    let tenantId = resolveTenantId(req);
+    const { tenantId: bodyTenantId, tenantSlug: bodyTenantSlug, account, dateOfBirth, currentEmail } = req.body || {};
+
+    // Fallback to body tenant parameters if header resolved to default
+    if ((!tenantId || tenantId === 'tenant_default' || tenantId === 'default') && (bodyTenantId || bodyTenantSlug)) {
+      const raw = String(bodyTenantId || bodyTenantSlug || '').trim().toLowerCase();
+      tenantId = raw.startsWith('tenant_') ? raw : `tenant_${raw.replace(/[-_]coop$/, '')}`;
+    }
+
+    if (!account) {
+      return res.status(400).json({ success: false, error: 'Cooperative account, member number, or email is required.' });
+    }
+    if (!dateOfBirth) {
+      return res.status(400).json({ success: false, error: 'Date of birth is required for identity verification.' });
+    }
+
+    // 1. Fetch tenant members from Firestore with in-memory fallback
+    let members: Member[] = [];
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      members = await fsService.listMembers(tenantId);
+    } catch (fsErr) {
+      console.warn('Firestore listMembers fallback for linking:', fsErr);
+    }
+    if (!members || members.length === 0) {
+      members = dbStore.members.get(tenantId) || [];
+    }
+
+    const cleanAccount = String(account).trim().toLowerCase();
+    const cleanDob = String(dateOfBirth).trim();
+
+    // 2. Locate member record
+    const matchedMember = members.find((m: any) => {
+      const mNum = String(m.memberNumber || m.id || m.memberNo || '').toLowerCase();
+      const mEmail = String(m.email || '').toLowerCase();
+      const mPhone = String(m.contactNumber || m.phone || '').replace(/[^0-9]/g, '');
+      const accountDigits = cleanAccount.replace(/[^0-9]/g, '');
+      return (
+        mNum === cleanAccount ||
+        mEmail === cleanAccount ||
+        (accountDigits.length >= 7 && mPhone.endsWith(accountDigits)) ||
+        (currentEmail && mEmail === String(currentEmail).toLowerCase())
+      );
+    });
+
+    if (!matchedMember) {
+      return res.status(404).json({
+        success: false,
+        error: `No cooperative member record found matching '${account}' in cooperative '${tenantId.replace('tenant_', '')}'.`,
+      });
+    }
+
+    // 3. Verify Date of Birth if recorded on the member's profile
+    const memberDob = (matchedMember as any).dateOfBirth || (matchedMember as any).birthDate || (matchedMember as any).dob;
+    if (memberDob) {
+      const normMemberDob = String(memberDob).slice(0, 10);
+      const normInputDob = cleanDob.slice(0, 10);
+      if (normMemberDob !== normInputDob) {
+        return res.status(400).json({
+          success: false,
+          error: 'Identity verification failed: Date of birth does not match the record on file.',
+        });
+      }
+    }
+
+    // 4. Resolve Cooperative identity metadata
+    const cleanSlug = tenantId.replace(/^tenant_/, '');
+    const matchedCoop = dbStore.coopRegistrations.find(
+      (r: any) => r.id === tenantId || r.slug === cleanSlug || r.id === `tenant_${cleanSlug}`
+    );
+    const coopName = matchedCoop?.name || `${cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)} Cooperative`;
+
+    return res.json({
+      success: true,
+      tenantId,
+      tenantSlug: cleanSlug,
+      coopName,
+      data: {
+        ...matchedMember,
+        isCoopLinked: true,
+        tenantId,
+        tenantSlug: cleanSlug,
+        coopName,
+      },
+      message: 'Cooperative account linked successfully.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+app.post('/api/v1/members/link-account', handleLinkCoopMemberAccount);
 app.get('/api/v1/members/:id/business', handleGetMemberBusinessPage);
 app.put('/api/v1/members/:id/business', handleUpdateMemberBusinessPage);
 app.post('/api/v1/members/:id/business/comments', handleAddBusinessComment);
@@ -3576,6 +4220,14 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
           ...config,
           savingsDepositEnabled:
             config.savingsDepositEnabled !== undefined ? Boolean(config.savingsDepositEnabled) : true,
+          gracePeriodDays: config.gracePeriodDays !== undefined ? Math.max(0, Number(config.gracePeriodDays)) : 3,
+          monthlyFinesRate: config.monthlyFinesRate !== undefined ? Number(config.monthlyFinesRate) : 0.03,
+          monthlyFinesRatePercent:
+            config.monthlyFinesRatePercent !== undefined
+              ? Number(config.monthlyFinesRatePercent)
+              : config.monthlyFinesRate !== undefined
+              ? Number(config.monthlyFinesRate) * 100
+              : 3.0,
           paymongoFeeEnabled,
           paymongoFeeTreatment,
         }
@@ -3588,6 +4240,9 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
           coopFilingFeeEnabled: true,
           coopFilingFeeRatePercent: 1.5,
           savingsDepositEnabled: true,
+          gracePeriodDays: 3,
+          monthlyFinesRate: 0.03,
+          monthlyFinesRatePercent: 3.0,
           paymongoFeeEnabled,
           paymongoFeeTreatment,
         };
@@ -6038,6 +6693,8 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
     loan.schedule = scheduleData.schedule;
     loan.totalInterestExpected = scheduleData.totalInterest;
     loan.totalPayable = scheduleData.totalPayable;
+    loan.periodicInstallment = scheduleData.schedule[0]?.totalInstallment;
+    loan.monthlyAmortization = scheduleData.schedule[0]?.totalInstallment;
   }
 
   // If loan >= 100,000, requires BOD approval; otherwise approved for disbursement
@@ -6061,6 +6718,8 @@ app.post('/api/v1/loans/:id/committee-approve', async (req: Request, res: Respon
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, loan.status, {
       schedule: loan.schedule,
+      periodicInstallment: loan.periodicInstallment,
+      monthlyAmortization: loan.monthlyAmortization,
       totalInterestExpected: loan.totalInterestExpected,
       totalPayable: loan.totalPayable,
       committeeApprovedBy: loan.committeeApprovedBy,
@@ -6151,6 +6810,8 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
     loan.schedule = scheduleData.schedule;
     loan.totalInterestExpected = scheduleData.totalInterest;
     loan.totalPayable = scheduleData.totalPayable;
+    loan.periodicInstallment = scheduleData.schedule[0]?.totalInstallment;
+    loan.monthlyAmortization = scheduleData.schedule[0]?.totalInstallment;
   }
 
   loan.status = 'APPROVED';
@@ -6171,6 +6832,8 @@ app.post('/api/v1/loans/:id/bod-approve', async (req: Request, res: Response) =>
   try {
     await fsService.updateLoanStatus(tenantId, loan.id, 'APPROVED', {
       schedule: loan.schedule,
+      periodicInstallment: loan.periodicInstallment,
+      monthlyAmortization: loan.monthlyAmortization,
       totalInterestExpected: loan.totalInterestExpected,
       totalPayable: loan.totalPayable,
       bodApprovedBy: loan.bodApprovedBy,
@@ -6419,6 +7082,118 @@ app.get('/api/v1/loans', async (req: Request, res: Response) => {
   }
 });
 
+const COMMUNICATED_APPROVED_LOANS: Record<
+  string,
+  {
+    principal: number;
+    termWeeks: number;
+    annualRate: number;
+    weeklyAmortization: number;
+    mandatoryShareAmount: number;
+  }
+> = {
+  'LN-2026-56282': {
+    principal: 16000,
+    termWeeks: 8,
+    annualRate: 0.32,
+    weeklyAmortization: 2055.78,
+    mandatoryShareAmount: 500,
+  },
+  'LN-2026-53968': {
+    principal: 20000,
+    termWeeks: 8,
+    annualRate: 0.32,
+    weeklyAmortization: 2569.73,
+    mandatoryShareAmount: 500,
+  },
+  'LN-2026-54175': {
+    principal: 20000,
+    termWeeks: 8,
+    annualRate: 0.32,
+    weeklyAmortization: 2569.73,
+    mandatoryShareAmount: 500,
+  },
+};
+
+async function reconcileCommunicatedLoans(tenantId: string, loans: any[]) {
+  const fsService = FirestoreCoopService.getInstance();
+  for (const loan of loans) {
+    const key = String(loan.loanNumber || loan.id || '').trim();
+    const config = COMMUNICATED_APPROVED_LOANS[key];
+    if (config) {
+      const firstTot = Number(loan.schedule?.[0]?.totalInstallment || loan.periodicInstallment || 0);
+      const isOutdated =
+        !Array.isArray(loan.schedule) ||
+        loan.schedule.length !== config.termWeeks ||
+        Math.abs(firstTot - config.weeklyAmortization) > 0.05 ||
+        Number(loan.principalAmount || loan.amount) !== config.principal;
+
+      if (isOutdated) {
+        const schedData = AmortizationService.generateSchedule({
+          principalAmount: config.principal,
+          annualInterestRate: config.annualRate,
+          termWeeks: config.termWeeks,
+          termUnit: 'WEEKS',
+          weeklyPaymentFrequency: 'EVERY_WEEK',
+          paymentFrequency: 'WEEKLY',
+          method: 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT',
+          firstDueDate: loan.firstDueDate,
+          mandatorySharePaymentTreatment: 'UPFRONT_DEDUCTION',
+          mandatoryShareAmount: config.mandatoryShareAmount,
+        });
+
+        loan.principalAmount = config.principal;
+        loan.amount = config.principal;
+        loan.termWeeks = config.termWeeks;
+        loan.termMonths = 2;
+        loan.term = config.termWeeks;
+        loan.termUnit = 'WEEKS';
+        loan.weeklyPaymentFrequency = 'EVERY_WEEK';
+        loan.paymentFrequency = 'WEEKLY';
+        loan.annualRate = config.annualRate;
+        loan.interestRateAnnual = config.annualRate;
+        loan.amortizationMethod = 'DIMINISHING_BALANCE_EQUAL_INSTALLMENT';
+        loan.mandatorySharePaymentTreatment = 'UPFRONT_DEDUCTION';
+        loan.mandatoryShareAmount = config.mandatoryShareAmount;
+        loan.mandatoryShareQuantity = 5;
+        loan.periodicInstallment = config.weeklyAmortization;
+        loan.monthlyAmortization = config.weeklyAmortization;
+        loan.schedule = schedData.schedule;
+        loan.totalInterestExpected = schedData.totalInterest;
+        loan.totalPayable = schedData.totalPayable;
+        loan.balanceRemaining = config.principal;
+        loan.updatedAt = new Date().toISOString();
+
+        try {
+          await fsService.updateLoanStatus(tenantId, loan.id, loan.status, {
+            principalAmount: loan.principalAmount,
+            termWeeks: loan.termWeeks,
+            termMonths: loan.termMonths,
+            termUnit: loan.termUnit,
+            weeklyPaymentFrequency: loan.weeklyPaymentFrequency,
+            paymentFrequency: loan.paymentFrequency,
+            interestRateAnnual: loan.interestRateAnnual,
+            amortizationMethod: loan.amortizationMethod,
+            mandatorySharePaymentTreatment: loan.mandatorySharePaymentTreatment,
+            mandatoryShareAmount: loan.mandatoryShareAmount,
+            mandatoryShareQuantity: loan.mandatoryShareQuantity,
+            periodicInstallment: loan.periodicInstallment,
+            monthlyAmortization: loan.monthlyAmortization,
+            schedule: loan.schedule,
+            totalInterestExpected: loan.totalInterestExpected,
+            totalPayable: loan.totalPayable,
+            balanceRemaining: loan.balanceRemaining,
+            updatedAt: loan.updatedAt,
+          });
+          await fsService.saveLoan(tenantId, loan);
+        } catch (err) {
+          console.warn(`Error persisting reconciled loan ${key} in Firestore:`, err);
+        }
+      }
+    }
+  }
+}
+
 async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
   try {
     const fsService = FirestoreCoopService.getInstance();
@@ -6430,6 +7205,7 @@ async function synchronizeDisbursedLoans(tenantId: string, knownLoans?: any[]) {
       if (!loans || loans.length === 0) loans = dbStore.loans.get(tenantId) || [];
     }
     loans = loans || [];
+    await reconcileCommunicatedLoans(tenantId, loans);
 
     let members: any[] = [];
     const memberMap = new Map<string, any>();
@@ -7216,6 +7992,8 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
     loan.schedule = scheduleData.schedule;
     loan.totalInterestExpected = scheduleData.totalInterest;
     loan.totalPayable = scheduleData.totalPayable;
+    loan.periodicInstallment = scheduleData.schedule[0]?.totalInstallment;
+    loan.monthlyAmortization = scheduleData.schedule[0]?.totalInstallment;
   }
 
   try {
@@ -7228,6 +8006,8 @@ app.post('/api/v1/loans/:id/disburse', async (req: Request, res: Response) => {
       stageApprovals: loan.stageApprovals,
       balanceRemaining: loan.balanceRemaining,
       schedule: loan.schedule,
+      periodicInstallment: loan.periodicInstallment,
+      monthlyAmortization: loan.monthlyAmortization,
       totalPayable: loan.totalPayable,
       updatedAt: nowIso,
     });
@@ -7518,7 +8298,7 @@ app.post('/api/v1/loans/:id/paymongo/create-intent', async (req: Request, res: R
   }
 });
 
-app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
+export const handleLoanRepayment = async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const loanId = req.params.id;
@@ -7537,13 +8317,21 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       feeTreatment,
       receiptNumber: reqReceiptNumber,
       orNumber: reqOrNumber,
+      referenceNumber: reqReferenceNumber,
+      bankTransferRef,
+      refNumber: reqRefNum,
       paymentIntentId,
       checkoutLinkId,
       skipPaymongoVerification,
     } = req.body;
 
-    const paymentChannel: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' =
-      channel === 'IN_PERSON_CASHIER' ? 'IN_PERSON_CASHIER' : 'PAYMONGO_QRPH';
+    const refNumber = reqReferenceNumber || bankTransferRef || reqRefNum;
+    const paymentChannel: 'IN_PERSON_CASHIER' | 'PAYMONGO_QRPH' | 'BANK_TRANSFER' =
+      channel === 'BANK_TRANSFER' || channel === 'MANUAL_BANK_TRANSFER'
+        ? 'BANK_TRANSFER'
+        : channel === 'IN_PERSON_CASHIER'
+        ? 'IN_PERSON_CASHIER'
+        : 'PAYMONGO_QRPH';
 
     // Validate PayMongo QR Ph payment status with PayMongo API before recording repayment
     let verifiedPaymongoPaymentId: string | undefined;
@@ -7652,6 +8440,8 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
 
     const effectivePaidInput = amountPaid ?? reqDueAmount;
     const dueAmount = Math.round(Number(effectivePaidInput || targetItem?.totalInstallment || 0) * 100) / 100;
+    const rawPenaltyInput = req.body.penaltyPortion !== undefined ? req.body.penaltyPortion : req.body.penaltyAmount;
+    const penaltyPortion = rawPenaltyInput !== undefined ? Math.max(0, Math.round(Number(rawPenaltyInput) * 100) / 100) : 0;
     const rawInterestInput = reqInterestPortion !== undefined ? reqInterestPortion : reqInterestAmount;
     const interestPortion =
       rawInterestInput !== undefined
@@ -7661,7 +8451,7 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
     const principalPortion =
       rawPrincipalInput !== undefined
         ? Math.round(Number(rawPrincipalInput) * 100) / 100
-        : Math.round(Number(targetItem?.principalAmount || Math.max(0, dueAmount - interestPortion)) * 100) / 100;
+        : Math.round(Number(targetItem?.principalAmount || Math.max(0, dueAmount - interestPortion - penaltyPortion)) * 100) / 100;
 
     let effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
     try {
@@ -7690,6 +8480,9 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       targetItem.paidAt = nowIso;
       targetItem.paidPrincipal = targetItem.principalAmount || principalPortion;
       targetItem.paidInterest = targetItem.interestAmount || interestPortion;
+      if (penaltyPortion > 0) {
+        targetItem.paidPenalties = (targetItem.paidPenalties || 0) + penaltyPortion;
+      }
     }
 
     const prevRemaining =
@@ -7715,14 +8508,22 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       id: `rep_${Date.now()}`,
       date: dateFormatted,
       ref: receiptNo,
-      particulars: `Installment #${instNum} Repayment via ${paymentChannel === 'IN_PERSON_CASHIER' ? 'Over-The-Counter Cash' : 'PayMongo QR Ph'} (Principal ₱${principalPortion.toFixed(2)} + Interest ₱${interestPortion.toFixed(2)})`,
+      particulars: `Installment #${instNum} Repayment via ${
+        paymentChannel === 'IN_PERSON_CASHIER'
+          ? 'Over-The-Counter Cash'
+          : paymentChannel === 'BANK_TRANSFER'
+          ? `Direct Bank Transfer${refNumber ? ` (Ref #${refNumber})` : ''}`
+          : 'PayMongo QR Ph'
+      } (Principal ₱${principalPortion.toFixed(2)} + Interest ₱${interestPortion.toFixed(2)}${penaltyPortion > 0 ? ` + Penalty ₱${penaltyPortion.toFixed(2)}` : ''})`,
       principal: principalPortion,
       interest: interestPortion,
+      penalty: penaltyPortion,
       debit: 0,
       credit: principalPortion,
       balance: newRemaining,
       paidAt: nowIso,
       channel: paymentChannel,
+      referenceNumber: refNumber || undefined,
       ...(paymentIntentId ? { paymentIntentId } : {}),
       ...(checkoutLinkId ? { checkoutLinkId } : {}),
       ...(verifiedPaymongoPaymentId ? { paymongoPaymentId: verifiedPaymongoPaymentId } : {}),
@@ -7785,7 +8586,7 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       grossReceived: Math.round((dueAmount + passOnFee) * 100) / 100,
       principalPortion,
       interestPortion,
-      penaltyPortion: 0,
+      penaltyPortion,
       passOnFee,
       channel: paymentChannel,
       userId: 'usr_paymongo_qrph',
@@ -7817,10 +8618,46 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
       netLoanPayment: dueAmount,
       principalPortion,
       interestPortion,
-      penaltyPortion: 0,
+      penaltyPortion,
+      gatewayReference: refNumber || undefined,
       paidAt: nowIso,
       createdAt: nowIso,
     };
+
+    // Dispatches official payment receipt email to member (handled safely in both production and test simulation)
+    const borrowerEmail = borrower?.email || (await (async () => {
+      try {
+        const cred = await fsService.getMemberCredential(tenantId, borrower?.id || payMemberId);
+        return cred?.email;
+      } catch {
+        return undefined;
+      }
+    })());
+
+    if (borrowerEmail) {
+      const tenantRecord = dbStore.tenants.get(tenantId) || Array.from(dbStore.tenants.values()).find((t) => t.id === tenantId || t.slug === tenantId);
+      MailerService.sendLoanPaymentReceipt({
+        recipientEmail: borrowerEmail,
+        recipientName: memberName,
+        coopName: tenantRecord?.name || 'Cooperative Enterprise',
+        coopSlug: tenantRecord?.slug || tenantId,
+        loanNumber: loan.loanNumber || loan.id,
+        receiptNumber: receiptNo,
+        paymentAmount: dueAmount,
+        principalAmount: principalPortion,
+        interestAmount: interestPortion,
+        penaltyAmount: penaltyPortion,
+        remainingBalance: newRemaining,
+        paymentDate: dateFormatted,
+        paymentChannel:
+          paymentChannel === 'IN_PERSON_CASHIER'
+            ? 'Over-The-Counter Cash'
+            : paymentChannel === 'BANK_TRANSFER'
+            ? `Direct Bank Transfer${refNumber ? ` (Ref #${refNumber})` : ''}`
+            : (paymentChannel || 'PayMongo QR Ph'),
+        isPaidOff: newRemaining <= 0,
+      }).catch((err) => console.error('[MAILER ERROR] Failed to send loan repayment receipt email:', err));
+    }
 
     return res.json({
       success: true,
@@ -7834,12 +8671,14 @@ app.post('/api/v1/loans/:id/repay', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/v1/loans/:id/repay', handleLoanRepayment);
 
 app.post('/api/v1/payments/cashier', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
-    const { loanId, memberId, amountPaid, channel, feeTreatment } = req.body;
+    const { loanId, memberId, amountPaid, channel, feeTreatment, referenceNumber: reqReferenceNumber, bankTransferRef, refNumber: reqRefNum } = req.body;
+    const refNumber = reqReferenceNumber || bankTransferRef || reqRefNum;
 
     if (!amountPaid || Number(amountPaid) <= 0) {
       return res.status(400).json({ success: false, error: 'Valid amountPaid is required.' });
@@ -7866,7 +8705,12 @@ app.post('/api/v1/payments/cashier', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Active disbursed loan not found for the specified loanId or memberId.' });
     }
 
-    const paymentChannel = channel === 'PAYMONGO_QRPH' ? 'PAYMONGO_QRPH' : 'IN_PERSON_CASHIER';
+    const paymentChannel =
+      channel === 'BANK_TRANSFER' || channel === 'MANUAL_BANK_TRANSFER'
+        ? 'BANK_TRANSFER'
+        : channel === 'PAYMONGO_QRPH'
+        ? 'PAYMONGO_QRPH'
+        : 'IN_PERSON_CASHIER';
     const passOnFee =
       paymentChannel === 'PAYMONGO_QRPH'
         ? PaymentService.calculatePassOnFee(
@@ -7944,6 +8788,7 @@ app.post('/api/v1/payments/cashier', async (req: Request, res: Response) => {
       principalPortion: allocation.principalPortion,
       interestPortion: allocation.interestPortion,
       penaltyPortion: allocation.penaltyPortion,
+      gatewayReference: refNumber || undefined,
       paidAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
@@ -8384,6 +9229,35 @@ export const handleConfirmBankTransferRequest = async (req: Request, res: Respon
       try {
         await fsService.recordPayment(tenantId, paymentRecord);
       } catch {}
+
+      // Dispatches official payment receipt email to member (handled safely in both production and test simulation)
+      const borrowerEmail = borrower?.email || (await (async () => {
+        try {
+          const cred = await fsService.getMemberCredential(tenantId, borrower?.id || loan.memberId);
+          return cred?.email;
+        } catch {
+          return undefined;
+        }
+      })());
+
+      if (borrowerEmail) {
+        const tenantRecord = dbStore.tenants.get(tenantId) || Array.from(dbStore.tenants.values()).find((t) => t.id === tenantId || t.slug === tenantId);
+        MailerService.sendLoanPaymentReceipt({
+          recipientEmail: borrowerEmail,
+          recipientName: borrower?.name || (borrower ? `${borrower.firstName} ${borrower.lastName}` : request.memberName || 'Cooperative Member'),
+          coopName: tenantRecord?.name || 'Cooperative Enterprise',
+          coopSlug: tenantRecord?.slug || tenantId,
+          loanNumber: loan.loanNumber || loan.id,
+          receiptNumber,
+          paymentAmount: dueAmount,
+          principalAmount: principalPortion,
+          interestAmount: interestPortion,
+          remainingBalance: newRemaining,
+          paymentDate: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
+          paymentChannel: 'Bank Transfer / Cashier',
+          isPaidOff: newRemaining <= 0,
+        }).catch((err) => console.error('[MAILER ERROR] Failed to send loan repayment receipt email:', err));
+      }
     } else if (request.type === 'SAVINGS_DEPOSIT') {
       const depositAmount = Number(request.amount);
       const { member, docId } = await resolveMemberRecord(tenantId, request.memberId || request.memberNumber);
