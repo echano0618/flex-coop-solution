@@ -2652,6 +2652,80 @@ export default function MemberPortalPage() {
   }>>([]);
   const [isLoadingDirectory, setIsLoadingDirectory] = useState<boolean>(false);
   const [directorySearchQuery, setDirectorySearchQuery] = useState<string>('');
+  const [circleSearchQuery, setCircleSearchQuery] = useState<string>('');
+  const [coopSearchQuery, setCoopSearchQuery] = useState<string>('');
+
+  const filteredCircleMembers = useMemo(() => {
+    const q = circleSearchQuery.trim().toLowerCase();
+    if (!q) return circleMembers;
+    return circleMembers.filter((m) => {
+      const name = String(m.name || '').toLowerCase();
+      const displayName = String(m.displayName || '').toLowerCase();
+      const role = String(m.role || '').toLowerCase();
+      const coop = String(m.coopName || '').toLowerCase();
+      return name.includes(q) || displayName.includes(q) || role.includes(q) || coop.includes(q);
+    });
+  }, [circleMembers, circleSearchQuery]);
+
+  const availableCoopsList = useMemo(() => {
+    const map = new Map<string, any>();
+
+    // Default registered cooperatives
+    map.set('family-coop', {
+      slug: 'family-coop',
+      name: 'Family Multi-Purpose Cooperative',
+      regNo: 'CDA-NCR-2024-00892',
+      type: 'Multi-Purpose',
+      location: 'Pasig City, Metro Manila',
+      description: 'Leading credit, savings, and microfinance cooperative empowerment.',
+    });
+    map.set('bayani-coop', {
+      slug: 'bayani-coop',
+      name: 'Bayani Multi-Purpose Cooperative',
+      regNo: 'CDA-R4A-2023-00451',
+      type: 'Multi-Purpose',
+      location: 'Calamba, Laguna (Region IV-A)',
+      description: 'Community-driven livelihood loans and transport sector financing.',
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        const regStr = localStorage.getItem('tuntong_coop_registrations');
+        if (regStr) {
+          const regs = JSON.parse(regStr);
+          if (Array.isArray(regs)) {
+            for (const r of regs) {
+              const s = (r.slug || '').toLowerCase().trim();
+              if (s && !map.has(s)) {
+                map.set(s, {
+                  slug: s,
+                  name: r.name || `${s} Cooperative`,
+                  regNo: r.cdaRegistrationNumber || r.registrationNumber || 'CDA Registered',
+                  type: r.coopType || 'Multi-Purpose',
+                  location: r.address || r.city || 'Philippines',
+                  description: r.description || 'Verified registered cooperative partner on Tuntong Network.',
+                });
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    return Array.from(map.values());
+  }, []);
+
+  const filteredCoops = useMemo(() => {
+    const q = coopSearchQuery.trim().toLowerCase();
+    if (!q) return availableCoopsList;
+    return availableCoopsList.filter((c) =>
+      c.name.toLowerCase().includes(q) ||
+      c.slug.toLowerCase().includes(q) ||
+      c.regNo.toLowerCase().includes(q) ||
+      c.type.toLowerCase().includes(q) ||
+      c.location.toLowerCase().includes(q)
+    );
+  }, [coopSearchQuery, availableCoopsList]);
 
   useEffect(() => {
     const slug = tenantInfo.slug || 'default';
@@ -5156,163 +5230,162 @@ export default function MemberPortalPage() {
       />
       {/* Main Body with Safe Bottom Padding for Mobile Navigation Bar */}
       <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 pb-28 sm:pb-32">
-        {/* TOP BAR: MY WALL (Top Left) & COMMUNITY FEED POST COMPOSER */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-3 sm:p-3.5 shadow-sm mb-4">
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Top Left: My Wall Menu Trigger (User Display Name + Actual Google Picture) */}
-            <button
-              type="button"
-              onClick={handleOpenMyBusiness}
-              title="Open My Personal Wall"
-              className="flex items-center gap-2 py-1 px-1.5 sm:px-2 rounded-xl hover:bg-slate-100 transition-all group shrink-0 cursor-pointer"
-            >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden flex items-center justify-center ring-2 ring-[#e68a38] shrink-0 bg-[#223a5e] shadow-2xs">
-                {googleAvatarUrl ? (
-                  <img
-                    src={googleAvatarUrl}
-                    alt={currentMember?.name || 'User'}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <span className="text-white font-bold text-xs uppercase tracking-wider">
-                    {currentMember?.initials || currentMember?.name?.substring(0, 2).toUpperCase() || 'U'}
-                  </span>
-                )}
-              </div>
-              <div className="text-left hidden xs:block sm:block max-w-[100px] sm:max-w-[150px] md:max-w-[200px]">
-                <div className="font-extrabold text-xs sm:text-sm text-slate-800 truncate group-hover:text-[#e68a38] transition-colors leading-tight">
-                  {currentMember?.name || 'Community Member'}
-                </div>
-                <div className="text-[10px] text-slate-400 font-medium truncate">My Wall</div>
-              </div>
-            </button>
-
-            {/* Besides the user avatar: Text field to input his post (expands to 3 lines with scrollbar when typing) */}
-            <div
-              className={`flex-1 min-w-0 flex gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 transition-all ${
-                articleText.length > 0
-                  ? 'flex-col sm:flex-row items-stretch sm:items-end rounded-2xl p-2.5 sm:p-3 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20'
-                  : 'items-center rounded-full pl-3 sm:pl-4 pr-1.5 py-1 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20'
-              }`}
-            >
-              {articleText.length > 0 ? (
-                <textarea
-                  rows={3}
-                  value={articleText}
-                  onChange={(e) => {
-                    setArticleText(e.target.value);
-                    if (postArticleError) setPostArticleError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && articleText.trim() && !isPostingArticle) {
-                      e.preventDefault();
-                      handlePublishArticle();
-                    }
-                  }}
-                  placeholder="post to inspire your community"
-                  className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400 resize-none overflow-y-auto max-h-[72px] leading-relaxed scrollbar-thin"
-                  autoFocus
-                />
-              ) : (
-                <input
-                  type="text"
-                  value={articleText}
-                  onChange={(e) => {
-                    setArticleText(e.target.value);
-                    if (postArticleError) setPostArticleError(null);
-                  }}
-                  placeholder="post to inspire your community"
-                  className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400"
-                />
-              )}
-
-              <div className="flex items-center justify-end gap-1 shrink-0 self-end">
-                {/* Hidden file input for 1 image up to 5MB */}
-                <input
-                  type="file"
-                  ref={articleFileInputRef}
-                  accept="image/*"
-                  onChange={handleSelectArticleImage}
-                  className="hidden"
-                  aria-label="Upload article image (up to 5MB)"
-                />
-
-                {/* Add Photo Button: Icon Only, No Text Label */}
-                <button
-                  type="button"
-                  onClick={() => articleFileInputRef.current?.click()}
-                  title="Add photo (up to 5MB)"
-                  className={`p-2 rounded-full transition-all shrink-0 cursor-pointer ${
-                    articleImage
-                      ? 'bg-[#e68a38]/15 text-[#e68a38]'
-                      : 'text-slate-400 hover:text-[#e68a38] hover:bg-slate-200/50'
-                  }`}
-                >
-                  <ImageIcon className="w-4 h-4 text-[#e68a38]" />
-                </button>
-
-                {/* Post Button: Icon Only, No Text Label */}
-                <button
-                  type="button"
-                  onClick={() => handlePublishArticle()}
-                  disabled={isPostingArticle || !articleText.trim()}
-                  title="Post Article"
-                  className="p-2 rounded-full bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs shrink-0 cursor-pointer"
-                >
-                  {isPostingArticle ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Selected Image Preview (if image attached) */}
-          {articleImage && (
-            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 px-1">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
-                  <img src={articleImage} alt="Attachment" className="w-full h-full object-cover" />
-                </div>
-                <div className="min-w-0 text-xs">
-                  <div className="font-semibold text-slate-700 truncate">{articleImageName || 'Photo attached'}</div>
-                  <div className="text-[10px] text-slate-400">{(articleImageSize / (1024 * 1024)).toFixed(2)} MB (Max 5MB)</div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleRemoveArticleImage}
-                className="p-1 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                title="Remove photo"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {/* Feedback messages */}
-          {postArticleError && (
-            <div className="mt-2 p-2 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>{postArticleError}</span>
-            </div>
-          )}
-          {postArticleSuccess && (
-            <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2">
-              <Check className="w-3.5 h-3.5 shrink-0" />
-              <span>{postArticleSuccess}</span>
-            </div>
-          )}
-        </div>
-
-        {/* TAB 1: MY PORTFOLIO (Dashboard) */}
+        {/* TAB 1: MY PORTFOLIO (Dashboard) - Only Dashboard shows the Top Bar with User Avatar & Text Input */}
         {activeTab === 'home' && (
           <div className="space-y-5">
+            {/* TOP BAR: MY WALL (Top Left) & COMMUNITY FEED POST COMPOSER */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-3 sm:p-3.5 shadow-sm mb-4">
+              <div className="flex items-center gap-2 sm:gap-3">
+                {/* Top Left: My Wall Menu Trigger (User Display Name + Actual Google Picture) */}
+                <button
+                  type="button"
+                  onClick={handleOpenMyBusiness}
+                  title="Open My Personal Wall"
+                  className="flex items-center gap-2 py-1 px-1.5 sm:px-2 rounded-xl hover:bg-slate-100 transition-all group shrink-0 cursor-pointer"
+                >
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden flex items-center justify-center ring-2 ring-[#e68a38] shrink-0 bg-[#223a5e] shadow-2xs">
+                    {googleAvatarUrl ? (
+                      <img
+                        src={googleAvatarUrl}
+                        alt={currentMember?.name || 'User'}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-white font-bold text-xs uppercase tracking-wider">
+                        {currentMember?.initials || currentMember?.name?.substring(0, 2).toUpperCase() || 'U'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-left hidden xs:block sm:block max-w-[100px] sm:max-w-[150px] md:max-w-[200px]">
+                    <div className="font-extrabold text-xs sm:text-sm text-slate-800 truncate group-hover:text-[#e68a38] transition-colors leading-tight">
+                      {currentMember?.name || 'Community Member'}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-medium truncate">My Wall</div>
+                  </div>
+                </button>
+
+                {/* Besides the user avatar: Text field to input his post (expands to 3 lines with scrollbar when typing) */}
+                <div
+                  className={`flex-1 min-w-0 flex gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 transition-all ${
+                    articleText.length > 0
+                      ? 'flex-col sm:flex-row items-stretch sm:items-end rounded-2xl p-2.5 sm:p-3 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20'
+                      : 'items-center rounded-full pl-3 sm:pl-4 pr-1.5 py-1 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20'
+                  }`}
+                >
+                  {articleText.length > 0 ? (
+                    <textarea
+                      rows={3}
+                      value={articleText}
+                      onChange={(e) => {
+                        setArticleText(e.target.value);
+                        if (postArticleError) setPostArticleError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && articleText.trim() && !isPostingArticle) {
+                          e.preventDefault();
+                          handlePublishArticle();
+                        }
+                      }}
+                      placeholder="post to inspire your community"
+                      className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400 resize-none overflow-y-auto max-h-[72px] leading-relaxed scrollbar-thin"
+                      autoFocus
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={articleText}
+                      onChange={(e) => {
+                        setArticleText(e.target.value);
+                        if (postArticleError) setPostArticleError(null);
+                      }}
+                      placeholder="post to inspire your community"
+                      className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400"
+                    />
+                  )}
+
+                  <div className="flex items-center justify-end gap-1 shrink-0 self-end">
+                    {/* Hidden file input for 1 image up to 5MB */}
+                    <input
+                      type="file"
+                      ref={articleFileInputRef}
+                      accept="image/*"
+                      onChange={handleSelectArticleImage}
+                      className="hidden"
+                      aria-label="Upload article image (up to 5MB)"
+                    />
+
+                    {/* Add Photo Button: Icon Only, No Text Label */}
+                    <button
+                      type="button"
+                      onClick={() => articleFileInputRef.current?.click()}
+                      title="Add photo (up to 5MB)"
+                      className={`p-2 rounded-full transition-all shrink-0 cursor-pointer ${
+                        articleImage
+                          ? 'bg-[#e68a38]/15 text-[#e68a38]'
+                          : 'text-slate-400 hover:text-[#e68a38] hover:bg-slate-200/50'
+                      }`}
+                    >
+                      <ImageIcon className="w-4 h-4 text-[#e68a38]" />
+                    </button>
+
+                    {/* Post Button: Icon Only, No Text Label */}
+                    <button
+                      type="button"
+                      onClick={() => handlePublishArticle()}
+                      disabled={isPostingArticle || !articleText.trim()}
+                      title="Post Article"
+                      className="p-2 rounded-full bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs shrink-0 cursor-pointer"
+                    >
+                      {isPostingArticle ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Selected Image Preview (if image attached) */}
+              {articleImage && (
+                <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 px-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
+                      <img src={articleImage} alt="Attachment" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="min-w-0 text-xs">
+                      <div className="font-semibold text-slate-700 truncate">{articleImageName || 'Photo attached'}</div>
+                      <div className="text-[10px] text-slate-400">{(articleImageSize / (1024 * 1024)).toFixed(2)} MB (Max 5MB)</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveArticleImage}
+                    className="p-1 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                    title="Remove photo"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Feedback messages */}
+              {postArticleError && (
+                <div className="mt-2 p-2 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{postArticleError}</span>
+                </div>
+              )}
+              {postArticleSuccess && (
+                <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  <span>{postArticleSuccess}</span>
+                </div>
+              )}
+            </div>
             {/* Pending Co-Maker Notice Banner */}
             {endorsementRequests.some(
               (r) => r.designatedCoMakerMemberNumber === currentMember.memberNumber && r.status === 'PENDING'
@@ -5991,6 +6064,134 @@ export default function MemberPortalPage() {
               </div>
             );
           })()}
+
+            {/* SEARCH COOP & COOPERATIVE NETWORK DIRECTORY */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm sm:text-base text-slate-900">Search &amp; Discover Cooperatives</h3>
+                    <p className="text-xs text-slate-500">Explore accredited cooperatives or register your cooperative enterprise</p>
+                  </div>
+                </div>
+
+                {/* "Register your Cooperative" button - redirects to external URL */}
+                <a
+                  href="https://coop.tuntongtech.com/coop-register"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer shrink-0"
+                >
+                  <Building2 className="w-4 h-4" />
+                  <span>Register your Cooperative</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              {/* Search Coop input */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={coopSearchQuery}
+                  onChange={(e) => setCoopSearchQuery(e.target.value)}
+                  placeholder="Search cooperatives by name, location, or CDA registration number..."
+                  className="w-full pl-10 pr-8 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38] outline-none text-slate-800 transition"
+                />
+                {coopSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setCoopSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Searched Coops List */}
+              <div className="space-y-3">
+                {filteredCoops.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200">
+                    <Building2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">No cooperatives found</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      No cooperatives match &quot;{coopSearchQuery}&quot;. Try another keyword or register your cooperative.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {filteredCoops.map((coop) => {
+                      const isCurrentCoop = isCoopLinked && isCoopSlugMatch(coop.slug, tenantInfo.slug);
+                      const isLinked = memberships.some((m: any) => isCoopSlugMatch(m.tenantSlug || m.tenantId, coop.slug));
+
+                      return (
+                        <div
+                          key={coop.slug}
+                          className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                            isCurrentCoop
+                              ? 'bg-[#223a5e]/5 border-[#e68a38]/60 shadow-xs'
+                              : 'bg-white hover:bg-slate-50/80 border-slate-200 shadow-xs'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-9 h-9 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs">
+                                  {coop.name.charAt(0)}
+                                </div>
+                                <div className="min-w-0">
+                                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                                    {coop.name}
+                                  </h4>
+                                  <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
+                                    <span>{coop.regNo}</span>
+                                    <span>•</span>
+                                    <span>{coop.type}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {isCurrentCoop ? (
+                                <span className="text-[9px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full shrink-0">
+                                  Active Coop
+                                </span>
+                              ) : isLinked ? (
+                                <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-full shrink-0">
+                                  Linked
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 line-clamp-2">
+                              {coop.description || coop.location}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {coop.location}
+                            </div>
+                            {/* "Apply for Membership" menu button */}
+                            <a
+                              href={`/member/register?coop=${coop.slug}`}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#223a5e] hover:bg-[#1b2f4d] text-white text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
+                            >
+                              <UserPlus className="w-3.5 h-3.5 text-[#e68a38]" />
+                              <span>Apply for Membership</span>
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
 
           </div>
         )}
@@ -9725,465 +9926,203 @@ export default function MemberPortalPage() {
           </div>
         )}
 
-        {/* TAB: MY CIRCLE (SOCIAL NETWORK GRAPH) */}
-        {activeTab === 'circle' && (() => {
-          // Calculate node coordinates on an 800x640 canvas
-          const cx = 400;
-          const cy = 320;
-          const radius = 200;
-          const totalOrbitItems = circleMembers.length + 1; // connected members + 1 empty circle with plus icon
-
-          const orbitNodes = [
-            ...circleMembers.map((m, idx) => {
-              const angle = (idx * 2 * Math.PI) / totalOrbitItems - Math.PI / 2;
-              return {
-                type: 'MEMBER' as const,
-                data: m,
-                x: cx + radius * Math.cos(angle),
-                y: cy + radius * Math.sin(angle),
-              };
-            }),
-            (() => {
-              const angle = (circleMembers.length * 2 * Math.PI) / totalOrbitItems - Math.PI / 2;
-              return {
-                type: 'EMPTY_ADD' as const,
-                data: null,
-                x: cx + radius * Math.cos(angle),
-                y: cy + radius * Math.sin(angle),
-              };
-            })(),
-          ];
-
-          const myAvatarUrl =
-            googleAvatarUrl ||
-            `data:image/svg+xml;utf8,${encodeURIComponent(
-              `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60"><rect width="60" height="60" fill="#223a5e"/><text x="50%" y="55%" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${(currentMember?.name || 'ME').substring(0, 2).toUpperCase()}</text></svg>`
-            )}`;
-
-          return (
-            <div className="relative w-full h-[calc(100vh-140px)] sm:h-[calc(100vh-150px)] min-h-[580px] bg-gradient-to-b from-[#142338] via-[#1a2f4a] to-[#223a5e] rounded-3xl border border-[#e68a38]/30 overflow-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden touch-pan-x touch-pan-y shadow-2xl flex items-center justify-center p-4">
-              {/* Graph Background Decor / Grid lines */}
-              <div className="absolute inset-0 opacity-15 pointer-events-none bg-[radial-gradient(#e68a38_1px,transparent_1px)] [background-size:24px_24px]" />
-
-              {/* Top Floating Controls */}
-              <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
-                <div className="pointer-events-auto flex items-center gap-2 bg-[#223a5e]/90 backdrop-blur-md border border-white/10 px-3.5 py-1.5 rounded-full text-white text-xs shadow-md">
-                  <Network className="w-4 h-4 text-[#e68a38]" />
-                  <span className="font-bold text-[11px] tracking-wide">Interactive Social Graph</span>
-                  <span className="text-[10px] text-slate-300 font-mono">({circleMembers.length} Connections)</span>
+        {/* TAB: MY CIRCLE (Directory Format Matching Coop Members Directory) */}
+        {activeTab === 'circle' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                  <Network className="w-5 h-5" />
                 </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900">My Circle</h2>
+                  <p className="text-xs text-slate-500">Your trusted connections &amp; community peers ({circleMembers.length})</p>
+                </div>
+              </div>
 
-                <div className="pointer-events-auto flex items-center gap-2">
+              {/* Search bar for circle */}
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={circleSearchQuery}
+                  onChange={(e) => setCircleSearchQuery(e.target.value)}
+                  placeholder="Search connections by name or coop..."
+                  className="w-full pl-10 pr-8 py-2.5 text-xs bg-white border border-slate-200 rounded-xl shadow-xs focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38] outline-none text-slate-800 font-medium transition"
+                />
+                {circleSearchQuery && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowInviteModal(true);
-                      setInviteSuccess(null);
-                      setInviteError(null);
-                    }}
-                    className="px-3.5 py-1.5 bg-[#e68a38] hover:bg-[#d97c2c] text-white font-bold text-xs rounded-full shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                    onClick={() => setCircleSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                    title="Clear search"
                   >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>Invite</span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                </div>
+                )}
               </div>
+            </div>
 
-              {/* SVG Visual Canvas (Scrollable in all directions) */}
-              <div className="relative z-10 flex items-center justify-center py-4 my-auto select-none">
-                <svg
-                  viewBox="0 0 800 640"
-                  className="w-full h-auto select-none"
-                  style={{ minWidth: '780px', minHeight: '620px' }}
-                >
-                  <defs>
-                    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
-                      <stop offset="0%" stopColor="#e68a38" stopOpacity="0.35" />
-                      <stop offset="100%" stopColor="#223a5e" stopOpacity="0" />
-                    </radialGradient>
-                    <linearGradient id="edgeLineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#e68a38" stopOpacity="0.8" />
-                      <stop offset="100%" stopColor="#78a89a" stopOpacity="0.4" />
-                    </linearGradient>
-                    <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
-                      <feGaussianBlur stdDeviation="3" result="blur" />
-                      <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                    </filter>
-                    <clipPath id="avatarClipMe">
-                      <circle cx={cx} cy={cy} r="34" />
-                    </clipPath>
-                    {orbitNodes.map((node) => {
-                      if (node.type === 'MEMBER') {
-                        return (
-                          <clipPath key={`clip_${node.data.id}`} id={`avatarClip_${node.data.id}`}>
-                            <circle cx={node.x} cy={node.y} r="25" />
-                          </clipPath>
-                        );
-                      }
-                      return null;
-                    })}
-                  </defs>
-
-                  {/* Orbit Guideline Circle */}
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={radius}
-                    fill="none"
-                    stroke="rgba(255, 255, 255, 0.08)"
-                    strokeWidth="1.5"
-                    strokeDasharray="6 6"
-                  />
-
-                  {/* Connection Edges from Center to Each Node */}
-                  {orbitNodes.map((node, i) => {
-                    if (node.type === 'EMPTY_ADD') {
-                      return (
-                        <line
-                          key={`edge_empty_${i}`}
-                          x1={cx}
-                          y1={cy}
-                          x2={node.x}
-                          y2={node.y}
-                          stroke="#e68a38"
-                          strokeWidth="2"
-                          strokeDasharray="4 4"
-                          strokeOpacity="0.6"
-                        />
-                      );
-                    }
-                    const isSelected = selectedCircleMember?.id === node.data.id;
-                    return (
-                      <line
-                        key={`edge_${node.data.id}`}
-                        x1={cx}
-                        y1={cy}
-                        x2={node.x}
-                        y2={node.y}
-                        stroke={isSelected ? '#e68a38' : 'url(#edgeLineGrad)'}
-                        strokeWidth={isSelected ? '3' : '1.75'}
-                        strokeDasharray={isSelected ? 'none' : '4 2'}
-                        strokeOpacity={isSelected ? 1 : 0.65}
-                        filter={isSelected ? 'url(#glowEffect)' : undefined}
-                      />
-                    );
-                  })}
-
-                  {/* Center Node: Logged-In User with Avatar */}
-                  <g
-                    onClick={() => setSelectedCircleMember(null)}
-                    className="cursor-pointer transition-transform hover:scale-105"
-                  >
-                    <circle cx={cx} cy={cy} r="46" fill="url(#centerGlow)" />
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r="36"
-                      fill="#223a5e"
-                      stroke="#e68a38"
-                      strokeWidth="3.5"
-                      filter="url(#glowEffect)"
-                    />
-                    <image
-                      href={myAvatarUrl}
-                      x={cx - 34}
-                      y={cy - 34}
-                      width="68"
-                      height="68"
-                      clipPath="url(#avatarClipMe)"
-                      preserveAspectRatio="xMidYMid slice"
-                    />
-
-                    {/* "YOU" badge banner */}
-                    <rect
-                      x={cx - 24}
-                      y={cy - 52}
-                      width="48"
-                      height="18"
-                      rx="9"
-                      fill="#e68a38"
-                      stroke="#ffffff"
-                      strokeWidth="1"
-                    />
-                    <text
-                      x={cx}
-                      y={cy - 40}
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="9"
-                      fontWeight="900"
-                      letterSpacing="1"
-                    >
-                      YOU
-                    </text>
-
-                    {/* User's Name label */}
-                    <text
-                      x={cx}
-                      y={cy + 54}
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="12"
-                      fontWeight="bold"
-                    >
-                      {currentMember?.name ? currentMember.name.split(' ')[0] : 'You'}
-                    </text>
-                  </g>
-
-                  {/* Orbit Nodes: Circle Members with Avatar and Empty Add Circle */}
-                  {orbitNodes.map((node) => {
-                    if (node.type === 'EMPTY_ADD') {
-                      return (
-                        <g
-                          key="node_empty_add"
-                          onClick={() => {
-                            setShowInviteModal(true);
-                            setInviteSuccess(null);
-                            setInviteError(null);
-                          }}
-                          className="cursor-pointer group"
-                        >
-                          {/* Pulsing ring aura */}
-                          <circle
-                            cx={node.x}
-                            cy={node.y}
-                            r="32"
-                            fill="rgba(230, 138, 56, 0.15)"
-                            stroke="#e68a38"
-                            strokeWidth="1.5"
-                            strokeDasharray="3 3"
-                            className="animate-pulse"
-                          />
-                          {/* Empty circle with dashed border */}
-                          <circle
-                            cx={node.x}
-                            cy={node.y}
-                            r="26"
-                            fill="#1c3150"
-                            stroke="#e68a38"
-                            strokeWidth="2.5"
-                            strokeDasharray="5 4"
-                            className="group-hover:fill-[#223a5e] group-hover:stroke-white transition-all"
-                          />
-                          {/* Plus Icon inside Empty Circle */}
-                          <line
-                            x1={node.x - 9}
-                            y1={node.y}
-                            x2={node.x + 9}
-                            y2={node.y}
-                            stroke="#e68a38"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                            className="group-hover:stroke-white transition-colors"
-                          />
-                          <line
-                            x1={node.x}
-                            y1={node.y - 9}
-                            x2={node.x}
-                            y2={node.y + 9}
-                            stroke="#e68a38"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                            className="group-hover:stroke-white transition-colors"
-                          />
-
-                          {/* Node Label underneath */}
-                          <text
-                            x={node.x}
-                            y={node.y + 42}
-                            textAnchor="middle"
-                            fill="#e68a38"
-                            fontSize="11"
-                            fontWeight="bold"
-                            className="group-hover:fill-white transition-colors"
-                          >
-                            Add to Circle
-                          </text>
-                          <text
-                            x={node.x}
-                            y={node.y + 54}
-                            textAnchor="middle"
-                            fill="#cbd5e1"
-                            fontSize="9"
-                          >
-                            + Invite User
-                          </text>
-                        </g>
-                      );
-                    }
-
-                    const m = node.data;
-                    const isSelected = selectedCircleMember?.id === m.id;
-                    const memberAvatarUrl =
-                      m.avatarUrl ||
-                      m.pictureUrl ||
-                      m.selfieUrl ||
-                      `data:image/svg+xml;utf8,${encodeURIComponent(
-                        `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60"><rect width="60" height="60" fill="#223a5e"/><text x="50%" y="55%" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">${(m.name || 'MB').substring(0, 2).toUpperCase()}</text></svg>`
-                      )}`;
-
-                    return (
-                      <g
-                        key={`node_${m.id}`}
-                        onClick={() => setSelectedCircleMember(m)}
-                        className="cursor-pointer group"
-                      >
-                        {/* Selection indicator aura */}
-                        {isSelected && (
-                          <circle
-                            cx={node.x}
-                            cy={node.y}
-                            r="33"
-                            fill="none"
-                            stroke="#e68a38"
-                            strokeWidth="2.5"
-                            strokeDasharray="4 2"
-                          />
-                        )}
-
-                        {/* Base Member Circle with Avatar Image */}
-                        <circle
-                          cx={node.x}
-                          cy={node.y}
-                          r="26"
-                          fill="#1c3150"
-                          stroke={isSelected ? '#e68a38' : '#78a89a'}
-                          strokeWidth={isSelected ? '3' : '2'}
-                          className="group-hover:stroke-white transition-colors"
-                        />
-
-                        {/* Avatar Image */}
-                        <image
-                          href={memberAvatarUrl}
-                          x={node.x - 25}
-                          y={node.y - 25}
-                          width="50"
-                          height="50"
-                          clipPath={`url(#avatarClip_${m.id})`}
-                          preserveAspectRatio="xMidYMid slice"
-                        />
-
-                        {/* Label below node (Name only, No TID) */}
-                        <text
-                          x={node.x}
-                          y={node.y + 42}
-                          textAnchor="middle"
-                          fill="#f4efe6"
-                          fontSize="11"
-                          fontWeight="bold"
-                          className="group-hover:fill-[#e68a38] transition-colors"
-                        >
-                          {m.displayName || m.name.split(' ')[0]}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-
-              {/* Bottom Instruction Note */}
-              <div className="absolute bottom-4 left-4 right-4 z-20 pointer-events-none flex items-center justify-center">
-                <div className="bg-[#223a5e]/80 backdrop-blur-md border border-white/10 px-4 py-1.5 rounded-full text-slate-300 text-[11px] flex items-center gap-2 shadow-sm">
-                  <Sparkles className="w-3.5 h-3.5 text-[#e68a38]" />
-                  <span>Tap any circle to view profile • Tap <strong>(+)</strong> to invite</span>
-                </div>
-              </div>
-
-              {/* POP-UP MODAL FOR SELECTED MEMBER DETAILS */}
-              {selectedCircleMember && (
-                <div
-                  className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150"
-                  onClick={() => setSelectedCircleMember(null)}
-                >
-                  <div
-                    className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-12 h-12 rounded-2xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 border border-[#e68a38]/40 shadow-xs">
-                          {selectedCircleMember.avatarUrl || selectedCircleMember.pictureUrl || selectedCircleMember.selfieUrl ? (
-                            <img
-                              src={selectedCircleMember.avatarUrl || selectedCircleMember.pictureUrl || selectedCircleMember.selfieUrl}
-                              alt={selectedCircleMember.name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-white font-bold text-sm uppercase">
-                              {(selectedCircleMember.name || 'MB').substring(0, 2).toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="font-bold text-base text-slate-900 leading-tight truncate">
-                            {selectedCircleMember.name}
-                          </h3>
-                          <p className="text-xs text-slate-500 mt-0.5 truncate">
-                            {selectedCircleMember.role || selectedCircleMember.relationship || 'Connected Peer'}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCircleMember(null)}
-                        className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-
-                    <div className="space-y-2.5 text-xs">
-                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">Affiliation</span>
-                        <div className="font-bold text-slate-800 mt-0.5">
-                          {selectedCircleMember.coopName || 'Community Network'}
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">Connected Since</span>
-                        <div className="font-bold text-slate-800 mt-0.5">
-                          {selectedCircleMember.connectedAt || 'Recent Connection'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const memberToOpen = selectedCircleMember;
-                          setSelectedCircleMember(null);
-                          handleOpenBusinessPage({
-                            ...memberToOpen,
-                            businessPage: {
-                              businessName: `${memberToOpen.name}'s Personal Wall`,
-                              description: 'Community hub member showcasing projects and micro-enterprise collaborations.',
-                            },
-                          });
-                        }}
-                        className="flex-1 py-2.5 px-3 bg-white border border-slate-300 hover:border-[#e68a38] text-slate-700 hover:text-[#e68a38] font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Store className="w-3.5 h-3.5" />
-                        <span>Personal Wall</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          alert(`Direct message channel opened with ${selectedCircleMember.name}`);
-                          setSelectedCircleMember(null);
-                        }}
-                        className="flex-1 py-2.5 px-3 bg-[#223a5e] hover:bg-[#1a2f4a] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Message</span>
-                      </button>
-                    </div>
+            {/* Circle Members Directory Grid (Format Identical to Coop Members Directory) */}
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-x-4 gap-y-6 w-full justify-items-center py-2">
+              {/* 1. First circle in the list: + sign for Invite */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInviteModal(true);
+                  setInviteSuccess(null);
+                  setInviteError(null);
+                }}
+                className="group flex flex-col items-center justify-start text-center w-full max-w-[100px] cursor-pointer focus:outline-hidden transition-transform active:scale-95"
+                title="Invite a new connection to your circle"
+                aria-label="Invite to Circle"
+              >
+                <div className="relative">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-dashed border-[#e68a38] bg-[#e68a38]/10 group-hover:bg-[#e68a38]/20 group-hover:border-[#e68a38] group-hover:scale-105 group-hover:shadow-md transition-all shadow-xs flex items-center justify-center text-[#e68a38]">
+                    <Plus className="w-7 h-7 sm:w-8 sm:h-8 text-[#e68a38]" />
                   </div>
                 </div>
-              )}
+                <span className="text-[11px] sm:text-xs font-bold text-[#e68a38] group-hover:underline transition-colors truncate w-full text-center mt-2 px-0.5 leading-tight block">
+                  + Invite
+                </span>
+              </button>
+
+              {/* Connected Circle Members */}
+              {filteredCircleMembers.map((m) => {
+                const initials = (m.name || 'MB').substring(0, 2).toUpperCase();
+                const photoUrl = m.avatarUrl || m.pictureUrl || m.selfieUrl;
+                const memberDisplayName = m.displayName || m.name || 'Circle Member';
+
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSelectedCircleMember(m)}
+                    className="group flex flex-col items-center justify-start text-center w-full max-w-[100px] cursor-pointer focus:outline-hidden transition-transform active:scale-95"
+                    title={`Click to view ${memberDisplayName}'s details`}
+                    aria-label={`View ${memberDisplayName}`}
+                  >
+                    <div className="relative">
+                      {photoUrl ? (
+                        <img
+                          src={photoUrl}
+                          alt={memberDisplayName}
+                          className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-2 border-[#223a5e]/40 group-hover:border-[#e68a38] group-hover:scale-105 group-hover:shadow-md transition-all shadow-xs"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-[#223a5e] to-[#15253d] border-2 border-[#e68a38]/40 text-[#e68a38] font-black text-lg sm:text-xl flex items-center justify-center shadow-xs group-hover:border-[#e68a38] group-hover:scale-105 group-hover:shadow-md transition-all">
+                          {initials}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      className="text-[11px] sm:text-xs font-semibold text-slate-800 group-hover:text-[#e68a38] transition-colors truncate w-full text-center mt-2 px-0.5 leading-tight block"
+                      title={memberDisplayName}
+                    >
+                      {memberDisplayName}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          );
-        })()}
+
+            {/* POP-UP MODAL FOR SELECTED MEMBER DETAILS */}
+            {selectedCircleMember && (
+              <div
+                className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150"
+                onClick={() => setSelectedCircleMember(null)}
+              >
+                <div
+                  className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-2xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 border border-[#e68a38]/40 shadow-xs">
+                        {selectedCircleMember.avatarUrl || selectedCircleMember.pictureUrl || selectedCircleMember.selfieUrl ? (
+                          <img
+                            src={selectedCircleMember.avatarUrl || selectedCircleMember.pictureUrl || selectedCircleMember.selfieUrl}
+                            alt={selectedCircleMember.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-white font-bold text-sm uppercase">
+                            {(selectedCircleMember.name || 'MB').substring(0, 2).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-base text-slate-900 leading-tight truncate">
+                          {selectedCircleMember.name}
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5 truncate">
+                          {selectedCircleMember.role || selectedCircleMember.relationship || 'Connected Peer'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCircleMember(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5 text-xs">
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                      <span className="text-[10px] uppercase font-bold text-slate-400">Affiliation</span>
+                      <div className="font-bold text-slate-800 mt-0.5">
+                        {selectedCircleMember.coopName || 'Community Network'}
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                      <span className="text-[10px] uppercase font-bold text-slate-400">Connected Since</span>
+                      <div className="font-bold text-slate-800 mt-0.5">
+                        {selectedCircleMember.connectedAt || 'Recent Connection'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const memberToOpen = selectedCircleMember;
+                        setSelectedCircleMember(null);
+                        handleOpenBusinessPage({
+                          ...memberToOpen,
+                          businessPage: {
+                            businessName: `${memberToOpen.name}'s Personal Wall`,
+                            description: 'Community hub member showcasing projects and micro-enterprise collaborations.',
+                          },
+                        });
+                      }}
+                      className="flex-1 py-2.5 px-3 bg-white border border-slate-300 hover:border-[#e68a38] text-slate-700 hover:text-[#e68a38] font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Store className="w-3.5 h-3.5" />
+                      <span>Personal Wall</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        alert(`Direct message channel opened with ${selectedCircleMember.name}`);
+                        setSelectedCircleMember(null);
+                      }}
+                      className="flex-1 py-2.5 px-3 bg-[#223a5e] hover:bg-[#1a2f4a] text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Message</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* TAB: MORE SERVICES & ACCOUNT (Silong Community Hub) */}
         {activeTab === 'more' && (
