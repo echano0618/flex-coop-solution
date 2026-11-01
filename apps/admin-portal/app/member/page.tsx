@@ -1440,7 +1440,7 @@ export default function MemberPortalPage() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'home' | 'coop_page' | 'circle' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'community' | 'coop_page' | 'circle' | 'passbook' | 'members' | 'more' | 'apply' | 'pay' | 'comaker' | 'documents' | 'profile' | 'surplus' | 'collateral' | 'applications'>('home');
 
   // -------------------------------------------------------------
   // MY CIRCLE (SOCIAL NETWORK GRAPH & INVITATION SYSTEM)
@@ -5190,63 +5190,85 @@ export default function MemberPortalPage() {
               </div>
             </button>
 
-            {/* Besides the user avatar: Text field to input his post */}
-            <div className="flex-1 min-w-0 flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 rounded-full pl-3 sm:pl-4 pr-1.5 py-1 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20 transition-all">
-              <input
-                type="text"
-                value={articleText}
-                onChange={(e) => {
-                  setArticleText(e.target.value);
-                  if (postArticleError) setPostArticleError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && articleText.trim() && !isPostingArticle) {
-                    e.preventDefault();
-                    handlePublishArticle();
-                  }
-                }}
-                placeholder="post to inspire your community"
-                className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400"
-              />
+            {/* Besides the user avatar: Text field to input his post (expands to 3 lines with scrollbar when typing) */}
+            <div
+              className={`flex-1 min-w-0 flex gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 transition-all ${
+                articleText.length > 0
+                  ? 'flex-col sm:flex-row items-stretch sm:items-end rounded-2xl p-2.5 sm:p-3 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20'
+                  : 'items-center rounded-full pl-3 sm:pl-4 pr-1.5 py-1 focus-within:bg-white focus-within:border-[#e68a38] focus-within:ring-2 focus-within:ring-[#e68a38]/20'
+              }`}
+            >
+              {articleText.length > 0 ? (
+                <textarea
+                  rows={3}
+                  value={articleText}
+                  onChange={(e) => {
+                    setArticleText(e.target.value);
+                    if (postArticleError) setPostArticleError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && articleText.trim() && !isPostingArticle) {
+                      e.preventDefault();
+                      handlePublishArticle();
+                    }
+                  }}
+                  placeholder="post to inspire your community"
+                  className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400 resize-none overflow-y-auto max-h-[72px] leading-relaxed scrollbar-thin"
+                  autoFocus
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={articleText}
+                  onChange={(e) => {
+                    setArticleText(e.target.value);
+                    if (postArticleError) setPostArticleError(null);
+                  }}
+                  placeholder="post to inspire your community"
+                  className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-slate-800 placeholder:text-slate-400"
+                />
+              )}
 
-              {/* Hidden file input for 1 image up to 5MB */}
-              <input
-                type="file"
-                ref={articleFileInputRef}
-                accept="image/*"
-                onChange={handleSelectArticleImage}
-                className="hidden"
-                aria-label="Upload article image (up to 5MB)"
-              />
+              <div className="flex items-center justify-end gap-1 shrink-0 self-end">
+                {/* Hidden file input for 1 image up to 5MB */}
+                <input
+                  type="file"
+                  ref={articleFileInputRef}
+                  accept="image/*"
+                  onChange={handleSelectArticleImage}
+                  className="hidden"
+                  aria-label="Upload article image (up to 5MB)"
+                />
 
-              {/* Add Photo Button: Icon Only, No Text Label */}
-              <button
-                type="button"
-                onClick={() => articleFileInputRef.current?.click()}
-                title="Add photo (up to 5MB)"
-                className={`p-2 rounded-full transition-all shrink-0 cursor-pointer ${
-                  articleImage
-                    ? 'bg-[#e68a38]/15 text-[#e68a38]'
-                    : 'text-slate-400 hover:text-[#e68a38] hover:bg-slate-200/50'
-                }`}
-              >
-                <ImageIcon className="w-4 h-4 text-[#e68a38]" />
-              </button>
+                {/* Add Photo Button: Icon Only, No Text Label */}
+                <button
+                  type="button"
+                  onClick={() => articleFileInputRef.current?.click()}
+                  title="Add photo (up to 5MB)"
+                  className={`p-2 rounded-full transition-all shrink-0 cursor-pointer ${
+                    articleImage
+                      ? 'bg-[#e68a38]/15 text-[#e68a38]'
+                      : 'text-slate-400 hover:text-[#e68a38] hover:bg-slate-200/50'
+                  }`}
+                >
+                  <ImageIcon className="w-4 h-4 text-[#e68a38]" />
+                </button>
 
-              {/* Post Button: Icon Only, No Text Label */}
-              <button
-                type="button"
-                onClick={() => handlePublishArticle()}
-                disabled={isPostingArticle || !articleText.trim()}
-                title="Post Article"
-                className="p-2 rounded-full bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs shrink-0 cursor-pointer"
-              >
-                {isPostingArticle ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-              </button>
+                {/* Post Button: Icon Only, No Text Label */}
+                <button
+                  type="button"
+                  onClick={() => handlePublishArticle()}
+                  disabled={isPostingArticle || !articleText.trim()}
+                  title="Post Article"
+                  className="p-2 rounded-full bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs shrink-0 cursor-pointer"
+                >
+                  {isPostingArticle ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -5320,6 +5342,157 @@ export default function MemberPortalPage() {
               </div>
             )}
 
+            {/* --------------------------------------------------------- */}
+            {/* COMMUNITY FEED SECTION (Silong Community Hub)             */}
+            {/* Posts visible to user's circle; supports 1 image <= 5MB   */}
+            {/* --------------------------------------------------------- */}
+            <div className="space-y-4 pt-1">
+              {/* Scope Toggle: Circle vs All */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs w-fit">
+                <button
+                  type="button"
+                  onClick={() => setFeedScope('circle')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    feedScope === 'circle'
+                      ? 'bg-white text-[#223a5e] shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  My Circle ({circleMembers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedScope('all')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    feedScope === 'all'
+                      ? 'bg-white text-[#223a5e] shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All Community ({communityArticles.length})
+                </button>
+              </div>
+
+              {/* ARTICLES FEED STREAM */}
+              <div className="space-y-4">
+                {visibleArticles.length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
+                      <Sparkles className="w-6 h-6 text-[#e68a38]" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800">No Articles in Feed Yet</h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                        Be the first to post an inspiring article to your circle network!
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  visibleArticles.map((article) => {
+                    const isOwnArticle = article.authorTid === userTid || article.authorId === currentMember.id;
+                    const isLiked = Array.isArray(article.likes) && article.likes.includes(userTid);
+                    const isInCircle = circleMembers.some((m) => m.tid === article.authorTid);
+
+                    return (
+                      <article
+                        key={article.id}
+                        className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 transition-all hover:border-slate-300"
+                      >
+                        {/* Author Header */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 shadow-2xs border border-slate-200">
+                              {article.authorAvatar || article.authorPictureUrl ? (
+                                <img
+                                  src={article.authorAvatar || article.authorPictureUrl}
+                                  alt={article.authorName || 'Author'}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <span className="text-white font-bold text-xs uppercase">
+                                  {article.authorName ? article.authorName.substring(0, 2).toUpperCase() : 'CM'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                                  {article.authorName}
+                                </h4>
+                                {isOwnArticle && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-[#e68a38] text-white px-1.5 py-0.5 rounded">
+                                    You
+                                  </span>
+                                )}
+                                {isInCircle && !isOwnArticle && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                    <Network className="w-2.5 h-2.5" />
+                                    In Circle
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                <span>{new Date(article.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Provenance Pill */}
+                          <span className="text-[9px] font-mono font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full shrink-0 hidden sm:inline-block">
+                            Central Cloud: 581563779021
+                          </span>
+                        </div>
+
+                        {/* Article Text Content */}
+                        <p className="text-xs sm:text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
+                          {article.content}
+                        </p>
+
+                        {/* Article Image (up to 5MB, 1 image) */}
+                        {article.imageUrl && (
+                          <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 max-h-96 flex items-center justify-center">
+                            <img
+                              src={article.imageUrl}
+                              alt="Article visual attachment"
+                              className="w-full max-h-96 object-cover rounded-xl hover:scale-[1.01] transition-transform duration-200"
+                            />
+                          </div>
+                        )}
+
+                        {/* Interaction Footer Bar */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                          <div className="flex items-center gap-2">
+                            {/* Like / Inspire button */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleArticleLike(article.id)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
+                                isLiked
+                                  ? 'bg-rose-50 text-rose-600 border-rose-200 font-bold'
+                                  : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-rose-500 text-rose-500' : 'text-slate-400'}`} />
+                              <span>{article.likesCount || 0}</span>
+                              <span className="hidden sm:inline">Inspire</span>
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: COMMUNITY (Cooperative Card, Share Capital & Loan Management) */}
+        {activeTab === 'community' && (
+          <div className="space-y-5">
             {/* Member Cooperative Account Card (Silong Palette) - Compact Height */}
             {isCoopLinked ? (
               <div className="bg-gradient-to-br from-[#223a5e] via-[#1c3150] to-[#15253d] border border-[#e68a38]/30 text-white rounded-2xl p-3.5 sm:p-4 shadow-lg shadow-[#223a5e]/15 relative overflow-hidden space-y-2.5">
@@ -5819,338 +5992,6 @@ export default function MemberPortalPage() {
             );
           })()}
 
-            {/* --------------------------------------------------------- */}
-            {/* COMMUNITY FEED SECTION (Silong Community Hub)             */}
-            {/* Posts visible to user's circle; supports 1 image <= 5MB   */}
-            {/* Placeholder: "post to inspire your community"             */}
-            {/* --------------------------------------------------------- */}
-            <div className="space-y-4 pt-2">
-              {/* Feed Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#223a5e] to-[#15253d] text-[#e68a38] flex items-center justify-center font-black shadow-xs shrink-0 border border-[#e68a38]/30">
-                    <Sparkles className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-sm sm:text-base text-slate-900">
-                        Community Feed
-                      </h3>
-                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[#223a5e] text-white px-2 py-0.5 rounded-full">
-                        Circle Network
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Inspiring stories, updates & collaborations from you and your circle
-                    </p>
-                  </div>
-                </div>
-
-                {/* Scope Toggle: Circle vs All */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs self-start sm:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setFeedScope('circle')}
-                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                      feedScope === 'circle'
-                        ? 'bg-white text-[#223a5e] shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    My Circle ({circleMembers.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFeedScope('all')}
-                    className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                      feedScope === 'all'
-                        ? 'bg-white text-[#223a5e] shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    All Community ({communityArticles.length})
-                  </button>
-                </div>
-              </div>
-
-              {/* ARTICLE COMPOSER CARD */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 shadow-2xs border border-[#e68a38]/30">
-                    {googleAvatarUrl ? (
-                      <img
-                        src={googleAvatarUrl}
-                        alt={currentMember?.name || 'User'}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <span className="text-white font-bold text-xs uppercase">
-                        {currentMember?.initials || currentMember?.name?.substring(0, 2).toUpperCase() || 'U'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-xs text-slate-900 truncate">
-                          {currentMember?.name || 'Community Member'}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Network className="w-3 h-3 text-[#e68a38]" />
-                        <span>Visible to Circle</span>
-                      </span>
-                    </div>
-
-                    {/* Textarea with mandatory placeholder "post to inspire your community" */}
-                    <div className="relative">
-                      <textarea
-                        value={articleText}
-                        onChange={(e) => {
-                          setArticleText(e.target.value);
-                          if (postArticleError) setPostArticleError(null);
-                        }}
-                        rows={3}
-                        placeholder="post to inspire your community"
-                        className="w-full text-xs sm:text-sm p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38] transition-all resize-none text-slate-800 placeholder:text-slate-400 bg-slate-50/50"
-                      />
-                    </div>
-
-                    {/* Selected Image Preview (1 image up-to 5mb) */}
-                    {articleImage && (
-                      <div className="mt-2 relative rounded-xl overflow-hidden border border-slate-200 bg-slate-900/5 p-2">
-                        <div className="flex items-center justify-between gap-2 pb-1.5">
-                          <div className="flex items-center gap-1.5 text-xs text-slate-600 truncate">
-                            <ImageIcon className="w-3.5 h-3.5 text-[#e68a38] shrink-0" />
-                            <span className="truncate font-medium">{articleImageName || 'Selected image'}</span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              ({(articleImageSize / (1024 * 1024)).toFixed(2)} MB / 5MB max)
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleRemoveArticleImage}
-                            title="Remove image"
-                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="relative max-h-48 rounded-lg overflow-hidden flex items-center justify-center bg-slate-100">
-                          <img
-                            src={articleImage}
-                            alt="Article attachment preview"
-                            className="max-h-48 w-full object-contain rounded-lg"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Error and Success feedback messages */}
-                    {postArticleError && (
-                      <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0" />
-                        <span>{postArticleError}</span>
-                      </div>
-                    )}
-
-                    {postArticleSuccess && (
-                      <div className="mt-2 p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2">
-                        <Check className="w-4 h-4 shrink-0" />
-                        <span>{postArticleSuccess}</span>
-                      </div>
-                    )}
-
-                    {/* Bottom Actions Bar */}
-                    <div className="flex items-center justify-between gap-2 pt-2.5 mt-1 border-t border-slate-100">
-                      <div className="flex items-center gap-2">
-                        {/* Hidden file input for 1 image up to 5mb */}
-                        <input
-                          type="file"
-                          ref={articleFileInputRef}
-                          accept="image/*"
-                          onChange={handleSelectArticleImage}
-                          className="hidden"
-                          aria-label="Upload article image (up to 5MB)"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => articleFileInputRef.current?.click()}
-                          className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                            articleImage
-                              ? 'bg-[#e68a38]/15 text-[#e68a38] border-[#e68a38]/30'
-                              : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-[#e68a38] border-slate-200 hover:border-slate-300'
-                          }`}
-                          title="Add photo (up to 5MB)"
-                          aria-label="Add photo"
-                        >
-                          <ImageIcon className="w-4 h-4 text-[#e68a38]" />
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handlePublishArticle()}
-                        disabled={isPostingArticle || !articleText.trim()}
-                        className="p-2 rounded-xl bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-xs cursor-pointer"
-                        title="Post Article"
-                        aria-label="Post Article"
-                      >
-                        {isPostingArticle ? (
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Send className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ARTICLES FEED STREAM */}
-              <div className="space-y-4">
-                {visibleArticles.length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
-                      <Sparkles className="w-6 h-6 text-[#e68a38]" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-800">No Articles in Feed Yet</h4>
-                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                        Be the first to post an inspiring article to your circle network!
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  visibleArticles.map((article) => {
-                    const isOwnArticle = article.authorTid === userTid || article.authorId === currentMember.id;
-                    const isLiked = Array.isArray(article.likes) && article.likes.includes(userTid);
-                    const isInCircle = circleMembers.some((m) => m.tid === article.authorTid);
-
-                    return (
-                      <article
-                        key={article.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 transition-all hover:border-slate-300"
-                      >
-                        {/* Author Header */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 rounded-xl bg-[#223a5e] overflow-hidden flex items-center justify-center shrink-0 shadow-2xs border border-slate-200">
-                              {article.authorAvatar || article.authorPictureUrl ? (
-                                <img
-                                  src={article.authorAvatar || article.authorPictureUrl}
-                                  alt={article.authorName || 'Author'}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                  }}
-                                />
-                              ) : (
-                                <span className="text-white font-bold text-xs uppercase">
-                                  {article.authorName ? article.authorName.substring(0, 2).toUpperCase() : 'CM'}
-                                </span>
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
-                                  {article.authorName}
-                                </h4>
-                                {isOwnArticle && (
-                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-[#e68a38] text-white px-1.5 py-0.5 rounded">
-                                    You
-                                  </span>
-                                )}
-                                {isInCircle && !isOwnArticle && (
-                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                                    <Network className="w-2.5 h-2.5" />
-                                    In Circle
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                                <span>{new Date(article.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Provenance Pill */}
-                          <span className="text-[9px] font-mono font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full shrink-0 hidden sm:inline-block">
-                            Central Cloud: 581563779021
-                          </span>
-                        </div>
-
-                        {/* Article Text Content */}
-                        <p className="text-xs sm:text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
-                          {article.content}
-                        </p>
-
-                        {/* Article Image (up to 5MB, 1 image) */}
-                        {article.imageUrl && (
-                          <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 max-h-96 flex items-center justify-center">
-                            <img
-                              src={article.imageUrl}
-                              alt="Article visual attachment"
-                              className="w-full max-h-96 object-cover rounded-xl hover:scale-[1.01] transition-transform duration-200"
-                            />
-                          </div>
-                        )}
-
-                        {/* Interaction Footer Bar */}
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                          <div className="flex items-center gap-2">
-                            {/* Like / Inspire button */}
-                            <button
-                              type="button"
-                              onClick={() => handleToggleArticleLike(article.id)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
-                                isLiked
-                                  ? 'bg-rose-50 text-rose-600 border-rose-200 font-bold'
-                                  : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
-                              }`}
-                            >
-                              <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-rose-500 text-rose-500' : 'text-slate-400'}`} />
-                              <span>{article.likesCount || 0}</span>
-                              <span className="hidden sm:inline">Inspire</span>
-                            </button>
-
-                            {/* View author's personal wall */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleOpenBusinessPage({
-                                  id: article.authorId,
-                                  memberNumber: article.authorTid,
-                                  name: article.authorName,
-                                  businessPage: {
-                                    businessName: `${article.authorName}'s Personal Wall`,
-                                    natureOfBusiness: article.authorRole,
-                                    description: article.content,
-                                  },
-                                });
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl hover:bg-slate-50 text-slate-600 border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
-                              title="View author's personal wall"
-                            >
-                              <Store className="w-3.5 h-3.5 text-[#e68a38]" />
-                              <span className="hidden sm:inline">Personal Wall</span>
-                            </button>
-                          </div>
-
-                          <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-[#e68a38]" />
-                            <span>Silong Community Hub</span>
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-            </div>
           </div>
         )}
 
@@ -13201,12 +13042,12 @@ export default function MemberPortalPage() {
         )}
       </div>
 
-      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 3 Hubs: More, Dashboard, My Circle) */}
+      {/* FIXED BOTTOM NAVIGATION BAR (Silong Community Hub - 4 Hubs: More, Dashboard, Community, My Circle) */}
       <nav
         className="fixed bottom-0 left-0 right-0 z-40 bg-[#223a5e] border-t border-[#e68a38]/30 shadow-2xl pt-2 px-3"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
-        <div className="max-w-md mx-auto grid grid-cols-3 gap-1.5">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5">
           {/* 1. More (Account, Identity & Settings) - Leftmost */}
           <button
             type="button"
@@ -13214,7 +13055,7 @@ export default function MemberPortalPage() {
               setActiveTab('more');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
               activeTab === 'more'
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
@@ -13231,14 +13072,14 @@ export default function MemberPortalPage() {
             <span className="text-[10px] leading-tight">More</span>
           </button>
 
-          {/* 2. Dashboard (Silong Community Hub) */}
+          {/* 2. Dashboard (Silong Community Hub Feed) */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
               activeTab === 'home'
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
@@ -13248,14 +13089,31 @@ export default function MemberPortalPage() {
             <span className="text-[10px] leading-tight">Dashboard</span>
           </button>
 
-          {/* 3. My Circle (Social Network Graph) */}
+          {/* 3. Community (Cooperative Card, Ledger & Services) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('community');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
+              activeTab === 'community'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
+            }`}
+          >
+            <Building2 className={`w-5 h-5 mb-1 ${activeTab === 'community' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+            <span className="text-[10px] leading-tight">Community</span>
+          </button>
+
+          {/* 4. My Circle (Social Network Graph) */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('circle');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
               activeTab === 'circle'
                 ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
                 : 'text-slate-300 hover:text-white font-medium'
