@@ -5496,6 +5496,42 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     assert(validLinkBody.coopName !== undefined, 'Returns coopName metadata');
     console.log('  ✅ 48.4 Silong Community Hub cooperative account linking verified successfully');
 
+    // 48.5 Password verification for linking: invalid password returns HTTP 401
+    console.log('  48.5 Testing password verification rejection with wrong password...');
+    // Ensure test member has a known password credential
+    const fs = FirestoreCoopService.getInstance();
+    await fs.saveMemberCredential(linkTenant, {
+      memberNumber: testMember.memberNumber,
+      email: testMember.email,
+      password: 'coop_secret_password',
+      pin: '123456',
+    });
+
+    const wrongPassMock = createMockHttp({
+      body: {
+        tenantId: linkTenant,
+        account: testMember.memberNumber,
+        password: 'incorrect_password_999',
+      },
+    });
+    await handleLinkCoopMemberAccount(wrongPassMock.req, wrongPassMock.res);
+    assert(wrongPassMock.getStatus() === 401, 'Incorrect password returns HTTP 401');
+    assert(wrongPassMock.getBody().success === false, 'Returns success: false');
+
+    // 48.6 Password verification for linking: valid password succeeds with HTTP 200
+    console.log('  48.6 Testing password verification with valid cooperative password...');
+    const validPassMock = createMockHttp({
+      body: {
+        tenantId: linkTenant,
+        account: testMember.memberNumber,
+        password: 'coop_secret_password',
+      },
+    });
+    await handleLinkCoopMemberAccount(validPassMock.req, validPassMock.res);
+    assert(validPassMock.getStatus() === 200, 'Valid password returns HTTP 200');
+    assert(validPassMock.getBody().success === true, 'Returns success: true');
+    assert(validPassMock.getBody().data.isCoopLinked === true, 'Sets isCoopLinked: true');
+
     console.log('  ✅ ALL SECTION 48 SILONG COOPERATIVE ACCOUNT LINKING TESTS PASSED!');
   }
 
