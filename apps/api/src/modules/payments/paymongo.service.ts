@@ -38,8 +38,13 @@ export class PayMongoService {
       if (doc) {
         const isEnabledVal = doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : DEFAULT_PAYMONGO_CONFIG.isEnabled;
         const feeEnabledVal = doc.feeEnabled !== undefined ? Boolean(doc.feeEnabled) : isEnabledVal;
-        const feeTreatmentVal =
-          doc.feeTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+        const isAbsorbed =
+          doc.feeTreatment === 'OPEX' ||
+          doc.feeTreatment === 'CAPEX' ||
+          doc.feeTreatment === 'ABSORBED' ||
+          !isEnabledVal ||
+          !feeEnabledVal;
+        const feeTreatmentVal = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
         const isLive = (doc.environment || 'test') === 'live';
         const liveSecretKey = doc.liveSecretKey || (isLive ? doc.secretKey : '');
         const livePublicKey = doc.livePublicKey || (isLive ? doc.publicKey : '');
@@ -110,8 +115,13 @@ export class PayMongoService {
       if (doc) {
         const isEnabledVal = doc.isEnabled !== undefined ? Boolean(doc.isEnabled) : platformConfig.isEnabled;
         const feeEnabledVal = doc.feeEnabled !== undefined ? Boolean(doc.feeEnabled) : isEnabledVal;
-        const feeTreatmentVal =
-          doc.feeTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+        const isAbsorbed =
+          doc.feeTreatment === 'OPEX' ||
+          doc.feeTreatment === 'CAPEX' ||
+          doc.feeTreatment === 'ABSORBED' ||
+          !isEnabledVal ||
+          !feeEnabledVal;
+        const feeTreatmentVal = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
         const tenantCfg: PayMongoConfig = {
           secretKey: doc.secretKey || platformConfig.secretKey,
           publicKey: doc.publicKey || platformConfig.publicKey,
@@ -241,13 +251,14 @@ export class PayMongoService {
         : updated.isEnabled !== undefined
         ? Boolean(updated.isEnabled)
         : (current.feeEnabled ?? isEnabledVal);
-    const rawTreatment =
-      updated.feeTreatment === 'OPEX'
-        ? 'OPEX'
-        : updated.feeTreatment === 'PASS_THROUGH'
-        ? 'PASS_THROUGH'
-        : current.feeTreatment || 'PASS_THROUGH';
-    const effectiveFeeTreatment = rawTreatment === 'OPEX' || !isEnabledVal || !feeEnabledVal ? 'OPEX' : 'PASS_THROUGH';
+    const isAbsorbed =
+      updated.feeTreatment === 'OPEX' ||
+      updated.feeTreatment === 'CAPEX' ||
+      updated.feeTreatment === 'ABSORBED' ||
+      (!updated.feeTreatment && (current.feeTreatment === 'OPEX' || current.feeTreatment === 'CAPEX')) ||
+      !isEnabledVal ||
+      !feeEnabledVal;
+    const effectiveFeeTreatment = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
 
     const newConfig: PayMongoConfig = {
       secretKey: updated.secretKey && updated.secretKey.trim() ? updated.secretKey.trim() : current.secretKey,

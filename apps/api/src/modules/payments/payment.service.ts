@@ -2,15 +2,24 @@ import { PaymentChannel, PaymentTransaction } from '@flexcoop/shared-types';
 
 export class PaymentService {
   /**
-   * Calculates convenience fee for PayMongo QR Ph (1.5% with no minimum floor, or ₱0 when OPEX)
+   * Calculates convenience fee for PayMongo QR Ph (1.5% with no minimum floor, or ₱0 when OPEX / CAPEX absorbed)
    */
   static calculatePassOnFee(
     amount: number,
     channel: PaymentChannel,
-    feeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH'
+    feeTreatment: 'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string = 'PASS_THROUGH'
   ): number {
-    if (channel !== 'PAYMONGO_QRPH' || feeTreatment === 'OPEX') {
-      return 0.0; // In-person, bank transfer, or OPEX gateway fee policy have NO pass-on fee to member
+    const isAbsorbed =
+      feeTreatment === 'OPEX' ||
+      feeTreatment === 'CAPEX' ||
+      feeTreatment === 'ABSORBED' ||
+      feeTreatment === 'COOP_ABSORBED' ||
+      String(feeTreatment).toUpperCase().includes('OPEX') ||
+      String(feeTreatment).toUpperCase().includes('CAPEX') ||
+      String(feeTreatment).toUpperCase().includes('ABSORB');
+
+    if (channel !== 'PAYMONGO_QRPH' || isAbsorbed) {
+      return 0.0; // In-person, bank transfer, or OPEX/CAPEX gateway fee policy have NO pass-on fee to member
     }
     // PayMongo QR Ph fee: 1.5% with no minimum ₱15 floor
     return Math.round(amount * 0.015 * 100) / 100;
@@ -24,7 +33,7 @@ export class PaymentService {
     memberId: string;
     installmentAmount: number;
     description: string;
-    feeTreatment?: 'PASS_THROUGH' | 'OPEX';
+    feeTreatment?: 'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string;
   }): {
     intentId: string;
     loanInstallmentAmount: number;

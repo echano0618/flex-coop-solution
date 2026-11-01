@@ -1567,11 +1567,11 @@ export default function AdminDashboard() {
     webhookSecret: string;
     environment: 'test' | 'live';
     isEnabled: boolean;
-    feeTreatment: 'PASS_THROUGH' | 'OPEX';
+    feeTreatment: 'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string;
     updatedAt?: string;
     updatedBy?: string;
   }>(() => {
-    let initialFeeTreatment: 'PASS_THROUGH' | 'OPEX' = 'PASS_THROUGH';
+    let initialFeeTreatment: 'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string = 'PASS_THROUGH';
     let initialIsEnabled = true;
     if (typeof window !== 'undefined') {
       try {
@@ -1622,8 +1622,12 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok && data.success && data.data) {
         const resolvedIsEnabled = data.data.isEnabled !== undefined ? Boolean(data.data.isEnabled) : true;
-        const resolvedFeeTreatment =
-          data.data.feeTreatment === 'OPEX' || !resolvedIsEnabled ? 'OPEX' : 'PASS_THROUGH';
+        const isAbsorbed =
+          data.data.feeTreatment === 'OPEX' ||
+          data.data.feeTreatment === 'CAPEX' ||
+          data.data.feeTreatment === 'ABSORBED' ||
+          !resolvedIsEnabled;
+        const resolvedFeeTreatment = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
         setTenantPaymongoConfig({
           secretKey: data.data.secretKey || '',
           publicKey: data.data.publicKey || '',
@@ -1647,14 +1651,18 @@ export default function AdminDashboard() {
   };
 
   const handleSaveTenantPaymongoConfig = async (
-    overrideFeeTreatment?: 'PASS_THROUGH' | 'OPEX',
+    overrideFeeTreatment?: 'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string,
     overrideIsEnabled?: boolean
   ) => {
     const effectiveIsEnabled =
       overrideIsEnabled !== undefined ? overrideIsEnabled : tenantPaymongoConfig.isEnabled;
     const rawTreatment = overrideFeeTreatment || tenantPaymongoConfig.feeTreatment || 'PASS_THROUGH';
-    const effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' =
-      !effectiveIsEnabled || rawTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+    const isAbsorbed =
+      rawTreatment === 'OPEX' ||
+      rawTreatment === 'CAPEX' ||
+      rawTreatment === 'ABSORBED' ||
+      !effectiveIsEnabled;
+    const effectiveFeeTreatment: 'PASS_THROUGH' | 'OPEX' = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
 
     setTenantPaymongoSaving(true);
     setTenantPaymongoNotification(null);
@@ -19191,7 +19199,8 @@ export default function AdminDashboard() {
                                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold"
                                   >
                                     <option value="PASS_THROUGH">Pass-Through to Member (Exact 1.5% added to invoice)</option>
-                                    <option value="OPEX">Cooperative OPEX (Absorbed by Coop - ₱0 Member Fee)</option>
+                                    <option value="OPEX">Cooperative OPEX / CAPEX (Absorbed by Coop - ₱0 Member Fee)</option>
+                                    <option value="CAPEX">Cooperative CAPEX (Absorbed by Coop - ₱0 Member Fee)</option>
                                   </select>
                                   <p className="text-[10px] text-slate-400">
                                     Product-level override for the 1.5% PayMongo gateway transaction fee.
@@ -19630,6 +19639,27 @@ export default function AdminDashboard() {
                               <option value="test">Sandbox Test Mode</option>
                               <option value="live">Live Production</option>
                             </select>
+                          </div>
+
+                          {/* Gateway Fee Policy */}
+                          <div className="space-y-1.5 lg:col-span-2">
+                            <label className="font-bold text-slate-700 block">Gateway Fee Policy (Pass-Through vs Cooperative Absorbed)</label>
+                            <select
+                              value={tenantPaymongoConfig.feeTreatment || 'PASS_THROUGH'}
+                              onChange={(e) =>
+                                setTenantPaymongoConfig((prev) => ({
+                                  ...prev,
+                                  feeTreatment: e.target.value as 'PASS_THROUGH' | 'OPEX',
+                                }))
+                              }
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                            >
+                              <option value="PASS_THROUGH">Pass-Through to Member (1.5% added to member invoice)</option>
+                              <option value="OPEX">Cooperative OPEX / CAPEX (Absorbed by Coop - ₱0.00 Member Fee)</option>
+                            </select>
+                            <p className="text-[11px] text-slate-400">
+                              When set to Absorbed (Cooperative OPEX / CAPEX), members pay exactly ₱0.00 in gateway fees across all loans, deposits, and share capital payments.
+                            </p>
                           </div>
                         </div>
 

@@ -164,7 +164,7 @@ export interface PayMongoConfig {
   environment: 'test' | 'live';
   isEnabled: boolean;
   feeEnabled?: boolean;
-  feeTreatment?: 'PASS_THROUGH' | 'OPEX';
+  feeTreatment?: 'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string;
   updatedAt: string;
   updatedBy: string;
   // Dual environment configuration support

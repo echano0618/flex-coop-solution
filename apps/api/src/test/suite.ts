@@ -5962,7 +5962,163 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 51 GOOGLE SIGN-IN & TUNTONG TECH CENTRAL AUTH TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50 & 51) PASSED SUCCESSFULLY!\n');
+  // ==========================================
+  // SECTION 52: PAYMONGO QR PH LOAN REPAYMENT AUTO-POSTING & FEE ABSORPTION (OPEX / CAPEX)
+  // ==========================================
+  console.log('\n--- 52. PayMongo QR Ph Loan Repayment Auto-Posting & Fee Absorption (OPEX / CAPEX) ---');
+  {
+    // 52.1 Fee Absorption Logic: OPEX returns 0.0 fee
+    console.log('  52.1 Verifying PaymentService.calculatePassOnFee for OPEX absorption...');
+    const feeOpex = PaymentService.calculatePassOnFee(4500, 'PAYMONGO_QRPH', 'OPEX');
+    assert(feeOpex === 0.0, 'OPEX fee treatment returns ₱0.00 pass-on fee');
+
+    // 52.2 Fee Absorption Logic: CAPEX returns 0.0 fee
+    console.log('  52.2 Verifying PaymentService.calculatePassOnFee for CAPEX absorption...');
+    const feeCapex = PaymentService.calculatePassOnFee(4500, 'PAYMONGO_QRPH', 'CAPEX');
+    assert(feeCapex === 0.0, 'CAPEX fee treatment returns ₱0.00 pass-on fee');
+
+    // 52.3 Fee Absorption Logic: ABSORBED returns 0.0 fee
+    console.log('  52.3 Verifying PaymentService.calculatePassOnFee for ABSORBED...');
+    const feeAbsorbed = PaymentService.calculatePassOnFee(4500, 'PAYMONGO_QRPH', 'ABSORBED');
+    assert(feeAbsorbed === 0.0, 'ABSORBED fee treatment returns ₱0.00 pass-on fee');
+
+    // 52.4 Pass-through fee treatment returns exactly 1.5%
+    console.log('  52.4 Verifying PaymentService.calculatePassOnFee for PASS_THROUGH...');
+    const feePass = PaymentService.calculatePassOnFee(1000, 'PAYMONGO_QRPH', 'PASS_THROUGH');
+    assert(feePass === 15.0, 'PASS_THROUGH returns exact 1.5% fee (₱15.00 on ₱1,000.00)');
+
+    // 52.5 PayMongo Webhook signature verification with candidate secrets
+    console.log('  52.5 Verifying PayMongo HMAC signature with multiple candidate secrets...');
+    const samplePayload = JSON.stringify({ test: 'payload_52' });
+    const secretA = 'whsec_primary_live_123';
+    const secretB = 'whsec_backup_test_456';
+    const sig = PayMongoWebhookService.generateTestSignature(samplePayload, secretB);
+    const isValid = PayMongoWebhookService.verifySignature({
+      rawPayload: samplePayload,
+      signatureHeader: sig,
+      webhookSecret: [secretA, secretB],
+    });
+    assert(isValid === true, 'Signature matches candidate secret in array');
+
+    // 52.6 Asynchronous webhook processing with loan schedule settlement & CDA ledger
+    console.log('  52.6 Verifying PayMongoWebhookService.processPaymentWebhookAsync loan auto-posting...');
+    const sec52TenantId = 'tenant_sec52_coop';
+    const sec52Loan: any = {
+      id: 'loan_sec52_001',
+      loanNumber: 'LN-2026-SEC52',
+      memberId: 'mem_sec52_001',
+      productId: 'prod_regular',
+      productName: 'Regular Multi-Purpose Loan',
+      principalAmount: 20000,
+      termMonths: 6,
+      interestRateAnnual: 0.12,
+      status: 'DISBURSED',
+      balanceRemaining: 20000,
+      disbursedAt: new Date().toISOString(),
+      schedule: [
+        {
+          installmentNumber: 1,
+          dueDate: '2026-03-01',
+          beginningBalance: 20000,
+          principalAmount: 3236.44,
+          interestAmount: 200.00,
+          totalInstallment: 3436.44,
+          endingBalance: 16763.56,
+          paidPrincipal: 0,
+          paidInterest: 0,
+          paidPenalties: 0,
+          isPaid: false,
+        },
+        {
+          installmentNumber: 2,
+          dueDate: '2026-04-01',
+          beginningBalance: 16763.56,
+          principalAmount: 3268.80,
+          interestAmount: 167.64,
+          totalInstallment: 3436.44,
+          endingBalance: 13494.76,
+          paidPrincipal: 0,
+          paidInterest: 0,
+          paidPenalties: 0,
+          isPaid: false,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    dbStore.loans.set(sec52TenantId, [sec52Loan]);
+
+    const webhookRes = await PayMongoWebhookService.processPaymentWebhookAsync({
+      payload: {
+        data: {
+          id: 'evt_sec52_test_001',
+          type: 'event',
+          attributes: {
+            type: 'payment.paid',
+            livemode: false,
+            data: {
+              id: 'pay_sec52_mock_123',
+              type: 'payment',
+              attributes: {
+                amount: 343644, // ₱3,436.44 in centavos
+                fee: 0, // fee absorbed
+                currency: 'PHP',
+                status: 'paid',
+                description: 'Loan Installment #1 (LN-2026-SEC52)',
+                payment_intent_id: 'pi_sec52_mock_intent',
+                paid_at: Math.floor(Date.now() / 1000),
+                metadata: {
+                  tenantId: sec52TenantId,
+                  loanId: 'loan_sec52_001',
+                  installmentNumber: 1,
+                  baseAmount: 3436.44,
+                  feeTreatment: 'OPEX',
+                },
+              },
+            },
+          },
+        },
+      },
+      tenantId: sec52TenantId,
+    });
+
+    assert(webhookRes.success === true, 'Webhook processes loan repayment successfully');
+    assert(webhookRes.loan !== undefined, 'Updated loan is returned in result');
+    assert(Boolean(webhookRes.loan && webhookRes.loan.balanceRemaining < 20000), 'Loan balanceRemaining is reduced by principal payment');
+    const schedule1 = webhookRes.loan?.schedule.find((s: any) => s.installmentNumber === 1);
+    assert(schedule1?.isPaid === true, 'Installment #1 is marked as paid');
+
+    // 52.7 Idempotency test: Replay of same eventId is safely ignored
+    console.log('  52.7 Verifying PayMongo webhook idempotency protection...');
+    const replayRes = await PayMongoWebhookService.processPaymentWebhookAsync({
+      payload: {
+        data: {
+          id: 'evt_sec52_test_001',
+          type: 'event',
+          attributes: {
+            type: 'payment.paid',
+            livemode: false,
+            data: {
+              id: 'pay_sec52_mock_123',
+              type: 'payment',
+              attributes: {
+                amount: 343644,
+                fee: 0,
+                status: 'paid',
+                payment_intent_id: 'pi_sec52_mock_intent',
+              },
+            },
+          },
+        },
+      },
+      tenantId: sec52TenantId,
+    });
+    assert(replayRes.alreadyProcessed === true, 'Replay of event is idempotently ignored');
+
+    console.log('  ✅ ALL SECTION 52 PAYMONGO QR PH LOAN REPAYMENT AUTO-POSTING & FEE ABSORPTION TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51 & 52) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

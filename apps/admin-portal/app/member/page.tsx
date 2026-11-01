@@ -3308,7 +3308,7 @@ export default function MemberPortalPage() {
     }
     return true;
   });
-  const [paymongoFeeTreatment, setPaymongoFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX'>(() => {
+  const [paymongoFeeTreatment, setPaymongoFeeTreatment] = useState<'PASS_THROUGH' | 'OPEX' | 'CAPEX' | string>(() => {
     if (typeof window !== 'undefined') {
       try {
         const tenant = resolveTenantCoop();
@@ -3319,7 +3319,7 @@ export default function MemberPortalPage() {
         const cached =
           localStorage.getItem(`flexcoop_paymongo_fee_treatment_${tenant.slug}`) ||
           localStorage.getItem('flexcoop_paymongo_fee_treatment_global');
-        if (cached === 'OPEX' || cached === 'PASS_THROUGH') {
+        if (cached === 'OPEX' || cached === 'CAPEX' || cached === 'PASS_THROUGH') {
           return cached;
         }
       } catch {}
@@ -3407,11 +3407,22 @@ export default function MemberPortalPage() {
               localStorage.setItem('flexcoop_paymongo_fee_enabled_global', String(feeEn));
             } catch {}
           }
-          if (res.data.paymongoFeeTreatment === 'OPEX' || res.data.paymongoFeeTreatment === 'PASS_THROUGH') {
-            setPaymongoFeeTreatment(res.data.paymongoFeeTreatment);
+          if (
+            res.data.paymongoFeeTreatment === 'OPEX' ||
+            res.data.paymongoFeeTreatment === 'CAPEX' ||
+            res.data.paymongoFeeTreatment === 'ABSORBED' ||
+            res.data.paymongoFeeTreatment === 'PASS_THROUGH'
+          ) {
+            const isAbsorbed =
+              res.data.paymongoFeeTreatment === 'OPEX' ||
+              res.data.paymongoFeeTreatment === 'CAPEX' ||
+              res.data.paymongoFeeTreatment === 'ABSORBED' ||
+              res.data.paymongoFeeEnabled === false;
+            const treatment = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
+            setPaymongoFeeTreatment(treatment);
             try {
-              localStorage.setItem(`flexcoop_paymongo_fee_treatment_${resolvedSlug}`, res.data.paymongoFeeTreatment);
-              localStorage.setItem('flexcoop_paymongo_fee_treatment_global', res.data.paymongoFeeTreatment);
+              localStorage.setItem(`flexcoop_paymongo_fee_treatment_${resolvedSlug}`, treatment);
+              localStorage.setItem('flexcoop_paymongo_fee_treatment_global', treatment);
             } catch {}
           }
           if (res.data.savingsDepositEnabled !== undefined) {
@@ -3447,8 +3458,12 @@ export default function MemberPortalPage() {
               : res.data.isEnabled !== undefined
               ? Boolean(res.data.isEnabled)
               : true;
-          const treatment =
-            !isFeeEnabled || res.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+          const isAbsorbed =
+            !isFeeEnabled ||
+            res.data.feeTreatment === 'OPEX' ||
+            res.data.feeTreatment === 'CAPEX' ||
+            res.data.feeTreatment === 'ABSORBED';
+          const treatment = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
           setPaymongoFeeEnabled(isFeeEnabled);
           setPaymongoFeeTreatment(treatment);
           try {
@@ -3646,12 +3661,265 @@ export default function MemberPortalPage() {
   const eirTenure = Math.round(((totalInterest + totalDeductions) / Math.max(1, netProceeds)) * 10000) / 100;
   const eir = eirTenure;
 
-  // Pass-On Fee for QR Ph (1.5%, no ₱15 minimum floor, respects PASS_THROUGH vs OPEX)
+  // Memoized check for whether loan QR Ph gateway fee is absorbed by the cooperative (OPEX / CAPEX)
+  const isLoanPaymongoFeeAbsorbed = useMemo(() => {
+    if (!paymongoFeeEnabled) return true;
+    if (
+      paymongoFeeTreatment === 'OPEX' ||
+      paymongoFeeTreatment === 'CAPEX' ||
+      String(paymongoFeeTreatment).toUpperCase().includes('ABSORB')
+    ) {
+      return true;
+    }
+    const payLoanConfig = coopPaymentOptions?.products?.payLoan;
+    if (payLoanConfig?.paymongo?.enabled !== undefined && !payLoanConfig.paymongo.enabled) return true;
+    const treat = payLoanConfig?.paymongo?.feeTreatment || coopPaymentOptions?.paymongo?.feeTreatment;
+    if (treat === 'OPEX' || treat === 'CAPEX' || String(treat).toUpperCase().includes('ABSORB')) return true;
+    if (payLoanConfig?.paymongo?.feeEnabled === false || coopPaymentOptions?.paymongo?.feeEnabled === false) return true;
+    return false;
+  }, [paymongoFeeEnabled, paymongoFeeTreatment, coopPaymentOptions]);
+
+  // Pass-On Fee for QR Ph (1.5%, respects PASS_THROUGH vs OPEX / CAPEX absorbed)
   const passOnFee =
-    repayChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment === 'PASS_THROUGH'
+    repayChannel === 'PAYMONGO_QRPH' && !isLoanPaymongoFeeAbsorbed
       ? Math.round(repayAmount * 0.015 * 100) / 100
       : 0.0;
   const totalCharge = Math.round((repayAmount + passOnFee) * 100) / 100;
+
+  // Live Dynamic PayMongo QR Ph state for Loan Repayment
+  const [loanQrData, setLoanQrData] = useState<{
+    qrImageUrl: string;
+    paymentIntentId: string;
+    checkoutUrl: string;
+    checkoutLinkId: string;
+    isGenerating: boolean;
+    isPolling: boolean;
+    isVerifying: boolean;
+    error: string | null;
+  }>({
+    qrImageUrl: '',
+    paymentIntentId: '',
+    checkoutUrl: '',
+    checkoutLinkId: '',
+    isGenerating: false,
+    isPolling: false,
+    isVerifying: false,
+    error: null,
+  });
+
+  // Automatically generate real PayMongo QR Ph intent when Loan Repayment channel is PAYMONGO_QRPH
+  useEffect(() => {
+    if (repayChannel !== 'PAYMONGO_QRPH' || activeTab !== 'pay') return;
+    const targetLoan =
+      memberLoanApplications.find((app: any) => app.status === 'DISBURSED') ||
+      memberLoanApplications[0];
+    const loanId = targetLoan?.id || targetLoan?.loanNumber || 'LN-2026-00001';
+    const computedRows = targetLoan ? getLoanScheduleRows(targetLoan, loanBalance) : [];
+    const nextRow = computedRows.find((r: any) => r.status !== 'PAID');
+    const instNum = nextRow?.seq || 1;
+
+    let isCancelled = false;
+    setLoanQrData((prev) => ({ ...prev, isGenerating: true, error: null }));
+
+    const resolvedSlug =
+      tenantInfo.slug && tenantInfo.slug !== 'default'
+        ? tenantInfo.slug
+        : resolveTenantCoop().slug || 'family-coop';
+    const targetTenantId =
+      (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+        ? (currentMember as any)?.tenantId
+        : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+
+    fetch(`${getApiBaseUrl()}/loans/${encodeURIComponent(loanId)}/paymongo/create-intent?coop=${resolvedSlug}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-slug': resolvedSlug,
+        'x-tenant-id': targetTenantId,
+      },
+      body: JSON.stringify({
+        memberId: currentMember.id,
+        installmentNumber: instNum,
+        amount: repayAmount,
+        dueAmount: repayAmount,
+        feeTreatment: isLoanPaymongoFeeAbsorbed ? 'OPEX' : 'PASS_THROUGH',
+        feeEnabled: !isLoanPaymongoFeeAbsorbed,
+      }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (!isCancelled && res.ok && res.data) {
+          setLoanQrData({
+            qrImageUrl: res.data.qrImageUrl || '',
+            paymentIntentId: res.data.paymentIntentId || '',
+            checkoutUrl: res.data.checkoutUrl || '',
+            checkoutLinkId: res.data.checkoutLinkId || '',
+            isGenerating: false,
+            isPolling: true,
+            isVerifying: false,
+            error: null,
+          });
+        } else if (!isCancelled) {
+          setLoanQrData((prev) => ({ ...prev, isGenerating: false, error: res.error || 'Failed to generate QR code' }));
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          setLoanQrData((prev) => ({ ...prev, isGenerating: false, error: err.message }));
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [repayChannel, repayAmount, activeTab, isLoanPaymongoFeeAbsorbed]);
+
+  // Live polling of PayMongo QR Ph loan repayment status (checks every 3 seconds)
+  useEffect(() => {
+    if (repayChannel !== 'PAYMONGO_QRPH' || !loanQrData.paymentIntentId || paymentSuccess) return;
+    const intentId = loanQrData.paymentIntentId;
+    if (!intentId.startsWith('pi_') || intentId.startsWith('pi_qrph_')) return;
+
+    const resolvedSlug =
+      tenantInfo.slug && tenantInfo.slug !== 'default'
+        ? tenantInfo.slug
+        : resolveTenantCoop().slug || 'family-coop';
+    const targetTenantId =
+      (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+        ? (currentMember as any)?.tenantId
+        : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+
+    let isCancelled = false;
+    const interval = setInterval(async () => {
+      if (isCancelled || paymentSuccess) return;
+      try {
+        const linkQuery = loanQrData.checkoutLinkId
+          ? `&linkId=${encodeURIComponent(loanQrData.checkoutLinkId)}`
+          : '';
+        const targetLoan =
+          memberLoanApplications.find((app: any) => app.status === 'DISBURSED') ||
+          memberLoanApplications[0];
+        const loanIdQuery = targetLoan?.id ? `&loanId=${encodeURIComponent(targetLoan.id)}` : '';
+        const memberQuery = currentMember.id ? `&memberId=${encodeURIComponent(currentMember.id)}` : '';
+        const amountQuery = `&amount=${encodeURIComponent(repayAmount)}`;
+
+        const res = await fetch(
+          `${getApiBaseUrl()}/loans/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}${loanIdQuery}${memberQuery}${amountQuery}`,
+          {
+            headers: {
+              'x-tenant-slug': resolvedSlug,
+              'x-tenant-id': targetTenantId,
+            },
+          }
+        );
+        const json = await res.json();
+        if (!isCancelled && res.ok && json.success && json.data?.isPaid === true) {
+          clearInterval(interval);
+          setPaymentSuccess(true);
+          setLoanQrData((prev) => ({ ...prev, isPolling: false, isVerifying: false }));
+          if (json.data.loanBalanceRemaining !== undefined) {
+            setLoanBalance(Number(json.data.loanBalanceRemaining));
+          } else {
+            setLoanBalance((prev) => Math.max(0, Math.round((prev - (repayAmount - 500)) * 100) / 100));
+          }
+          const orNum = json.data.receiptNumber || `OR-PM-${Date.now().toString(36).toUpperCase()}`;
+          const now = new Date();
+          setPassbookReceipt({
+            orNumber: orNum,
+            date: now.toISOString().split('T')[0],
+            time: now.toLocaleTimeString(),
+            accountCode: '1-02-01',
+            accountName: 'Loans Receivable - Members',
+            baseAmount: repayAmount,
+            convenienceFee: passOnFee,
+            totalAmount: Math.round((repayAmount + passOnFee) * 100) / 100,
+            newBalance: json.data.loanBalanceRemaining !== undefined ? Number(json.data.loanBalanceRemaining) : loanBalance - repayAmount,
+            reference: loanQrData.paymentIntentId,
+            description: `PayMongo QR Ph Repayment (${targetLoan?.loanNumber || 'Member Loan'})`,
+          });
+          try {
+            fetchMemberLoanApplications();
+          } catch {}
+        }
+      } catch {}
+    }, 3000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [repayChannel, loanQrData.paymentIntentId, loanQrData.checkoutLinkId, paymentSuccess, repayAmount, passOnFee]);
+
+  // Manual payment verification trigger for member
+  const handleVerifyLoanPaymentManually = async () => {
+    if (!loanQrData.paymentIntentId) return;
+    setLoanQrData((prev) => ({ ...prev, isVerifying: true, error: null }));
+    try {
+      const resolvedSlug =
+        tenantInfo.slug && tenantInfo.slug !== 'default'
+          ? tenantInfo.slug
+          : resolveTenantCoop().slug || 'family-coop';
+      const targetTenantId =
+        (currentMember as any)?.tenantId && (currentMember as any)?.tenantId !== 'tenant_default'
+          ? (currentMember as any)?.tenantId
+          : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
+      const linkQuery = loanQrData.checkoutLinkId
+        ? `&linkId=${encodeURIComponent(loanQrData.checkoutLinkId)}`
+        : '';
+      const targetLoan =
+        memberLoanApplications.find((app: any) => app.status === 'DISBURSED') ||
+        memberLoanApplications[0];
+      const loanIdQuery = targetLoan?.id ? `&loanId=${encodeURIComponent(targetLoan.id)}` : '';
+      const memberQuery = currentMember.id ? `&memberId=${encodeURIComponent(currentMember.id)}` : '';
+      const amountQuery = `&amount=${encodeURIComponent(repayAmount)}`;
+
+      const res = await fetch(
+        `${getApiBaseUrl()}/loans/paymongo/status/${encodeURIComponent(loanQrData.paymentIntentId)}?coop=${resolvedSlug}${linkQuery}${loanIdQuery}${memberQuery}${amountQuery}`,
+        {
+          headers: {
+            'x-tenant-slug': resolvedSlug,
+            'x-tenant-id': targetTenantId,
+          },
+        }
+      );
+      const json = await res.json();
+      if (res.ok && json.success && json.data?.isPaid === true) {
+        setPaymentSuccess(true);
+        setLoanQrData((prev) => ({ ...prev, isPolling: false, isVerifying: false }));
+        if (json.data.loanBalanceRemaining !== undefined) {
+          setLoanBalance(Number(json.data.loanBalanceRemaining));
+        } else {
+          setLoanBalance((prev) => Math.max(0, Math.round((prev - (repayAmount - 500)) * 100) / 100));
+        }
+        const orNum = json.data.receiptNumber || `OR-PM-${Date.now().toString(36).toUpperCase()}`;
+        const now = new Date();
+        setPassbookReceipt({
+          orNumber: orNum,
+          date: now.toISOString().split('T')[0],
+          time: now.toLocaleTimeString(),
+          accountCode: '1-02-01',
+          accountName: 'Loans Receivable - Members',
+          baseAmount: repayAmount,
+          convenienceFee: passOnFee,
+          totalAmount: Math.round((repayAmount + passOnFee) * 100) / 100,
+          newBalance: json.data.loanBalanceRemaining !== undefined ? Number(json.data.loanBalanceRemaining) : loanBalance - repayAmount,
+          reference: loanQrData.paymentIntentId,
+          description: `PayMongo QR Ph Repayment (${targetLoan?.loanNumber || 'Member Loan'})`,
+        });
+        try {
+          fetchMemberLoanApplications();
+        } catch {}
+      } else {
+        setLoanQrData((prev) => ({
+          ...prev,
+          isVerifying: false,
+          error: `Payment has not been confirmed by PayMongo yet (Status: ${json?.data?.status || 'pending'}). Please scan the QR code and complete your payment in GCash / Maya first.`,
+        }));
+      }
+    } catch (err: any) {
+      setLoanQrData((prev) => ({ ...prev, isVerifying: false, error: err.message }));
+    }
+  };
 
   const handleSimulatePayment = () => {
     setPaymentSuccess(true);
@@ -3873,10 +4141,10 @@ export default function MemberPortalPage() {
 
   // Convenience Fee Calculator for PayMongo QR Ph (1.5%, NO minimum ₱15 floor; 0 when OPEX or Gateway Fee disabled)
   const calculateConvenienceFee = (amount: number) => {
-    if (!paymongoFeeEnabled || paymongoFeeTreatment === 'OPEX') return 0.0;
     if (passbookPayModal.convenienceFeeOverride !== undefined) {
       return passbookPayModal.convenienceFeeOverride;
     }
+    if (!paymongoFeeEnabled || isLoanPaymongoFeeAbsorbed || paymongoFeeTreatment === 'OPEX' || paymongoFeeTreatment === 'CAPEX') return 0.0;
     return Math.round(amount * 0.015 * 100) / 100;
   };
 
@@ -3916,8 +4184,13 @@ export default function MemberPortalPage() {
             : cfgJson.data.isEnabled !== undefined
             ? Boolean(cfgJson.data.isEnabled)
             : true;
-        currentFeeTreatment =
-          !currentFeeEnabled || cfgJson.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+        const isAbsorbed =
+          !currentFeeEnabled ||
+          isLoanPaymongoFeeAbsorbed ||
+          cfgJson.data.feeTreatment === 'OPEX' ||
+          cfgJson.data.feeTreatment === 'CAPEX' ||
+          cfgJson.data.feeTreatment === 'ABSORBED';
+        currentFeeTreatment = isAbsorbed ? 'OPEX' : 'PASS_THROUGH';
         setPaymongoFeeEnabled(currentFeeEnabled);
         setPaymongoFeeTreatment(currentFeeTreatment);
       }
@@ -3942,16 +4215,21 @@ export default function MemberPortalPage() {
           interestAmount: params.interestAmount,
           penaltyAmount: params.penaltyAmount,
           penaltyPortion: params.penaltyAmount,
-          feeTreatment: currentFeeTreatment,
-          feeEnabled: currentFeeEnabled,
+          feeTreatment: isLoanPaymongoFeeAbsorbed ? 'OPEX' : currentFeeTreatment,
+          feeEnabled: !isLoanPaymongoFeeAbsorbed && currentFeeEnabled,
         }),
       }
     );
     const json = await res.json();
     if (res.ok && json.success && json.data) {
       const respFeeEnabled = json.data.feeEnabled !== undefined ? Boolean(json.data.feeEnabled) : currentFeeEnabled;
-      const respTreatment =
-        !respFeeEnabled || json.data.feeTreatment === 'OPEX' ? 'OPEX' : 'PASS_THROUGH';
+      const isRespAbsorbed =
+        !respFeeEnabled ||
+        isLoanPaymongoFeeAbsorbed ||
+        json.data.feeTreatment === 'OPEX' ||
+        json.data.feeTreatment === 'CAPEX' ||
+        json.data.feeTreatment === 'ABSORBED';
+      const respTreatment = isRespAbsorbed ? 'OPEX' : 'PASS_THROUGH';
       setPaymongoFeeEnabled(respFeeEnabled);
       setPaymongoFeeTreatment(respTreatment);
       setPassbookPayModal((prev) => ({
@@ -4073,8 +4351,9 @@ export default function MemberPortalPage() {
         const linkQuery = passbookPayModal.checkoutLinkId
           ? `&linkId=${encodeURIComponent(passbookPayModal.checkoutLinkId)}`
           : '';
+        const statusEndpoint = passbookPayModal.type === 'LOAN' ? 'loans' : 'shares';
         const res = await fetch(
-          `${getApiBaseUrl()}/shares/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}`,
+          `${getApiBaseUrl()}/${statusEndpoint}/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}`,
           {
             headers: {
               'x-tenant-slug': resolvedSlug,
@@ -4134,8 +4413,9 @@ export default function MemberPortalPage() {
           : `tenant_${resolvedSlug.replace(/[-_]coop$/, '')}`;
 
       const linkQuery = linkId ? `&linkId=${encodeURIComponent(linkId)}` : '';
+      const statusEndpoint = passbookPayModal.type === 'LOAN' ? 'loans' : 'shares';
       const res = await fetch(
-        `${getApiBaseUrl()}/shares/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}`,
+        `${getApiBaseUrl()}/${statusEndpoint}/paymongo/status/${encodeURIComponent(intentId)}?coop=${resolvedSlug}${linkQuery}`,
         {
           headers: {
             'x-tenant-slug': resolvedSlug,
@@ -7837,10 +8117,14 @@ export default function MemberPortalPage() {
                             <span className="font-bold text-slate-900">₱{repayAmount.toFixed(2)}</span>
                           </div>
                         )}
-                        {repayChannel === 'PAYMONGO_QRPH' && paymongoFeeTreatment !== 'OPEX' && passOnFee > 0 && (
-                          <div className="flex justify-between text-amber-700">
-                            <span>Convenience Fee:</span>
-                            <span className="font-bold">+ ₱{passOnFee.toFixed(2)}</span>
+                        {repayChannel === 'PAYMONGO_QRPH' && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-600">
+                              Gateway Convenience Fee {isLoanPaymongoFeeAbsorbed ? '(Coop OPEX / CAPEX Absorbed)' : '(1.5% Pass-Through)'}:
+                            </span>
+                            <span className={`font-bold ${isLoanPaymongoFeeAbsorbed ? 'text-emerald-700 font-mono' : 'text-amber-700'}`}>
+                              {isLoanPaymongoFeeAbsorbed ? '₱0.00' : `+ ₱${passOnFee.toFixed(2)}`}
+                            </span>
                           </div>
                         )}
                         <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm text-slate-900">
@@ -7852,10 +8136,21 @@ export default function MemberPortalPage() {
                   {repayChannel === 'PAYMONGO_QRPH' ? (
                     <button
                       type="button"
-                      onClick={handleSimulatePayment}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors cursor-pointer"
+                      disabled={loanQrData.isGenerating || loanQrData.isVerifying}
+                      onClick={handleVerifyLoanPaymentManually}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      Simulate Payment Settlement
+                      {loanQrData.isVerifying ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Verifying & Posting Repayment...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Check & Complete PayMongo Repayment</span>
+                        </>
+                      )}
                     </button>
                   ) : repayChannel === 'EWALLET' ? (
                     <button
@@ -7901,19 +8196,61 @@ export default function MemberPortalPage() {
                 {/* Right Column: QR Ph Code or Official Bank Transfer Form or e-Wallet Form */}
                 <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 flex flex-col items-center justify-center text-center">
                   {repayChannel === 'PAYMONGO_QRPH' ? (
-                    <>
-                      <div className="w-52 h-52 bg-white border-2 border-emerald-600 rounded-2xl p-4 shadow-md flex flex-col items-center justify-center">
-                        <div className="w-44 h-44 bg-slate-900 rounded-xl flex items-center justify-center text-white text-xs font-mono p-2 text-center">
-                          [Official QR Ph Payload]
-                          <br />
-                          ₱{totalCharge.toFixed(2)}
+                    <div className="w-full flex flex-col items-center justify-center space-y-3">
+                      {loanQrData.isGenerating ? (
+                        <div className="w-56 h-56 bg-white border-2 border-dashed border-emerald-400 rounded-2xl p-4 shadow-sm flex flex-col items-center justify-center gap-2">
+                          <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin" />
+                          <span className="text-xs font-bold text-slate-700 text-center">Generating PayMongo QR Ph Code...</span>
+                        </div>
+                      ) : loanQrData.qrImageUrl ? (
+                        <div className="w-56 h-56 bg-white border-2 border-emerald-600 rounded-2xl p-3 shadow-md flex flex-col items-center justify-center relative">
+                          <img
+                            src={loanQrData.qrImageUrl}
+                            alt="PayMongo Dynamic QR Ph Code"
+                            className="w-48 h-48 object-contain rounded-xl"
+                          />
+                          <div className="absolute top-1.5 right-2 bg-emerald-600 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow">
+                            QR PH
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-56 h-56 bg-slate-900 rounded-2xl p-4 shadow-md flex flex-col items-center justify-center text-white text-xs font-mono text-center">
+                          <QrCode className="w-10 h-10 text-emerald-400 mb-2" />
+                          <span>PayMongo Dynamic QR Ph</span>
+                          <span className="text-emerald-400 font-bold mt-1">₱{totalCharge.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="font-bold text-slate-900 text-sm">PayMongo Dynamic QR Ph Code</div>
+                        <div className="text-xs text-slate-500 max-w-xs mt-0.5">
+                          Scan with GCash, Maya, BDO, BPI, UnionBank, or any InstaPay app.
                         </div>
                       </div>
-                      <div className="mt-4 font-bold text-slate-900 text-sm">PayMongo Dynamic QR Ph Code</div>
-                      <div className="text-xs text-slate-500 max-w-xs mt-1">
-                        Scan with GCash, Maya, BDO, BPI, UnionBank, or any InstaPay-enabled mobile app.
+
+                      {loanQrData.checkoutUrl && (
+                        <a
+                          href={loanQrData.checkoutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Open PayMongo Checkout Page</span>
+                        </a>
+                      )}
+
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                        <span>Awaiting payment... Auto-checks every 3s</span>
                       </div>
-                    </>
+
+                      {loanQrData.error && (
+                        <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-700 max-w-xs text-left">
+                          {loanQrData.error}
+                        </div>
+                      )}
+                    </div>
                   ) : repayChannel === 'EWALLET' ? (() => {
                     const payLoanConfig = coopPaymentOptions?.products?.payLoan;
                     const ewalletProvider = payLoanConfig?.ewalletTransfer?.provider || coopPaymentOptions?.ewalletTransfer?.provider || 'Maya';
