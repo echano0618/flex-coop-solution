@@ -1519,3 +1519,137 @@ export class FirestoreCoopService {
   }
 }
 
+// =============================================================
+// TUNTONG TECH CENTRAL FIREBASE FIRESTORE SERVICE
+// Project ID: tuntong-tech (Project Number: 581563779021)
+// Dedicated storage for Central Community Identity & Personal Walls
+// =============================================================
+export class FirestoreTuntongService {
+  private static instance: FirestoreTuntongService;
+  private db: Firestore;
+  public readonly projectId: string = 'tuntong-tech';
+  public readonly projectNumber: string = '581563779021';
+
+  private constructor() {
+    const APP_NAME = 'tuntong-tech';
+    const projectId =
+      process.env.TUNTONG_FIREBASE_PROJECT_ID ||
+      'tuntong-tech';
+
+    const existingApp = getApps().find((a) => a.name === APP_NAME);
+    const app = existingApp || initializeApp({ projectId }, APP_NAME);
+
+    this.db = getFirestore(app);
+    try {
+      this.db.settings({ ignoreUndefinedProperties: true });
+    } catch {}
+  }
+
+  public static getInstance(): FirestoreTuntongService {
+    if (!FirestoreTuntongService.instance) {
+      FirestoreTuntongService.instance = new FirestoreTuntongService();
+    }
+    return FirestoreTuntongService.instance;
+  }
+
+  public getFirestore(): Firestore {
+    return this.db;
+  }
+
+  public isConfigured(): boolean {
+    return !!(
+      process.env.FIRESTORE_EMULATOR_HOST ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+      process.env.TUNTONG_FIREBASE_CREDENTIALS ||
+      process.env.K_SERVICE ||
+      process.env.NODE_ENV === 'production'
+    );
+  }
+
+  public personalWallsCol() {
+    return this.db.collection('personal_walls');
+  }
+
+  public personalWallDoc(userIdOrTid: string) {
+    const cleanId = encodeURIComponent(String(userIdOrTid).trim().toLowerCase());
+    return this.personalWallsCol().doc(cleanId);
+  }
+
+  public async getPersonalWall(userIdOrTid: string): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const doc = await this.personalWallDoc(userIdOrTid).get();
+      return doc.exists ? doc.data() : null;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] getPersonalWall fallback:', err);
+      return null;
+    }
+  }
+
+  public async savePersonalWall(userIdOrTid: string, wallData: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      await this.personalWallDoc(userIdOrTid).set(
+        {
+          ...wallData,
+          firebaseProjectId: this.projectId,
+          firebaseProjectNumber: this.projectNumber,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] savePersonalWall fallback:', err);
+    }
+  }
+
+  public async addWallComment(userIdOrTid: string, comment: any): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    try {
+      const docRef = this.personalWallDoc(userIdOrTid);
+      const snapshot = await docRef.get();
+      const existing = snapshot.exists ? snapshot.data() : {};
+      const comments = [comment, ...(existing?.comments || [])];
+      await docRef.set(
+        {
+          ...existing,
+          comments,
+          updatedAt: new Date().toISOString(),
+          firebaseProjectId: this.projectId,
+          firebaseProjectNumber: this.projectNumber,
+        },
+        { merge: true }
+      );
+      return comments;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] addWallComment fallback:', err);
+      return [];
+    }
+  }
+
+  public async deleteWallComment(userIdOrTid: string, commentId: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    try {
+      const docRef = this.personalWallDoc(userIdOrTid);
+      const snapshot = await docRef.get();
+      if (!snapshot.exists) return [];
+      const existing = snapshot.data();
+      const comments = (existing?.comments || []).filter((c: any) => c.id !== commentId);
+      await docRef.set(
+        {
+          ...existing,
+          comments,
+          updatedAt: new Date().toISOString(),
+          firebaseProjectId: this.projectId,
+          firebaseProjectNumber: this.projectNumber,
+        },
+        { merge: true }
+      );
+      return comments;
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] deleteWallComment fallback:', err);
+      return [];
+    }
+  }
+}
+

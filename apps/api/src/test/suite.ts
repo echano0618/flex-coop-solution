@@ -5481,7 +5481,128 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 48 SILONG COOPERATIVE ACCOUNT LINKING TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47 & 48) PASSED SUCCESSFULLY!\n');
+  // -------------------------------------------------------------
+  // 49. Silong Community Hub Personal Wall Central Storage (tuntong-tech: 581563779021)
+  // -------------------------------------------------------------
+  console.log('\n--- 49. Silong Community Hub Personal Wall Central Storage (tuntong-tech: 581563779021) ---');
+  {
+    const createMockHttp = (overrides: {
+      params?: any;
+      headers?: any;
+      body?: any;
+      query?: any;
+    }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        params: overrides.params || {},
+        headers: overrides.headers || {},
+        body: overrides.body || {},
+        query: overrides.query || {},
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    const targetMemberId = 'MEM-2026-0001';
+    const wallTenant = 'bayani';
+
+    // 49.1 Update personal wall and verify routing to Tuntong Tech Central Project
+    console.log('  49.1 Testing personal wall publishing to Tuntong Tech central project (581563779021)...');
+    const updateWallMock = createMockHttp({
+      params: { id: targetMemberId },
+      headers: { 'x-tenant-id': wallTenant },
+      body: {
+        businessName: 'Silong Organic Coffee & Honey',
+        natureOfBusiness: 'Agri-Enterprise & Specialty Coffee',
+        nextGoal: 'Expand to 5 cooperative community hubs across Luzon',
+        description: 'Locally grown organic Arabica and pure raw honey sourced directly from cooperative farmers.',
+        contactNumber: '+63 917 555 0199',
+        email: 'silong.coffee@tuntongtech.com',
+        location: 'Baguio City & Silang, Cavite',
+      },
+    });
+
+    await handleUpdateMemberBusinessPage(updateWallMock.req, updateWallMock.res);
+    assert(updateWallMock.getStatus() === 200, 'Updating personal wall returns HTTP 200');
+    const updateBody = updateWallMock.getBody();
+    assert(updateBody.success === true, 'Wall update success is true');
+    assert(updateBody.firebaseProjectId === 'tuntong-tech', 'Wall response specifies firebaseProjectId: tuntong-tech');
+    assert(updateBody.firebaseProjectNumber === '581563779021', 'Wall response specifies firebaseProjectNumber: 581563779021');
+    assert(updateBody.data.businessName === 'Silong Organic Coffee & Honey', 'Wall persists business name correctly');
+
+    // Verify stored in central in-memory store
+    const storedWall = dbStore.personalWalls.get(targetMemberId.toLowerCase());
+    assert(storedWall !== undefined, 'Wall is persisted in central dbStore.personalWalls map');
+    assert(storedWall.firebaseProjectId === 'tuntong-tech', 'Stored wall in cache carries tuntong-tech project id');
+    console.log('  ✅ 49.1 Personal wall successfully persisted to Tuntong Tech central storage (581563779021)');
+
+    // 49.2 Retrieve personal wall and verify central provenance metadata
+    console.log('  49.2 Testing personal wall retrieval with central provenance metadata...');
+    const getWallMock = createMockHttp({
+      params: { id: targetMemberId },
+      headers: { 'x-tenant-id': wallTenant },
+    });
+    await handleGetMemberBusinessPage(getWallMock.req, getWallMock.res);
+    assert(getWallMock.getStatus() === 200, 'Get personal wall returns HTTP 200');
+    const getBody = getWallMock.getBody();
+    assert(getBody.success === true, 'Get wall success is true');
+    assert(getBody.firebaseProjectId === 'tuntong-tech', 'Get wall returns firebaseProjectId: tuntong-tech');
+    assert(getBody.firebaseProjectNumber === '581563779021', 'Get wall returns firebaseProjectNumber: 581563779021');
+    assert(getBody.data.businessName === 'Silong Organic Coffee & Honey', 'Retrieved wall business name matches');
+    console.log('  ✅ 49.2 Personal wall retrieval confirms central Tuntong Tech provenance');
+
+    // 49.3 Community comments interactions on central personal wall
+    console.log('  49.3 Testing community comments dispatch and removal on central wall...');
+    const commentMock = createMockHttp({
+      params: { id: targetMemberId },
+      headers: { 'x-tenant-id': wallTenant },
+      body: {
+        text: 'Congratulations! Would love to feature your honey in our Silong Community Hub marketplace.',
+        authorMemberId: 'mem_002',
+        authorMemberName: 'Elena Cruz',
+        authorMemberNumber: 'MEM-2026-0002',
+      },
+    });
+    await handleAddBusinessComment(commentMock.req, commentMock.res);
+    assert(commentMock.getStatus() === 201, 'Add comment returns HTTP 201');
+    const commentBody = commentMock.getBody();
+    assert(commentBody.success === true, 'Add comment success is true');
+    assert(commentBody.firebaseProjectId === 'tuntong-tech', 'Add comment confirms tuntong-tech project');
+    assert(commentBody.comments.length >= 1, 'Wall comments list contains added comment');
+    const createdCommentId = commentBody.data.id;
+
+    // Delete comment
+    const deleteCommentMock = createMockHttp({
+      params: { id: targetMemberId, commentId: createdCommentId },
+      headers: { 'x-tenant-id': wallTenant },
+      query: { requesterMemberId: 'mem_002' },
+    });
+    await handleDeleteBusinessComment(deleteCommentMock.req, deleteCommentMock.res);
+    assert(deleteCommentMock.getStatus() === 200, 'Delete comment returns HTTP 200');
+    const deleteBody = deleteCommentMock.getBody();
+    assert(deleteBody.success === true, 'Delete comment success is true');
+    assert(deleteBody.firebaseProjectId === 'tuntong-tech', 'Delete comment confirms tuntong-tech project');
+    console.log('  ✅ 49.3 Community comments on central wall successfully added and deleted');
+
+    console.log('  ✅ ALL SECTION 49 SILONG COMMUNITY HUB PERSONAL WALL TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48 & 49) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

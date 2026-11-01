@@ -84,6 +84,7 @@ export class AppDataStore {
   public bankTransferRequests: Map<string, BankTransferPaymentRequest[]> = new Map(); // tenantId -> requests
   public announcements: Map<string, any[]> = new Map(); // tenantId -> announcements
   public deletedAnnouncements: Map<string, Set<string>> = new Map(); // tenantId -> Set<annId>
+  public personalWalls: Map<string, any> = new Map(); // userId / memberId / tid -> Personal Wall (Tuntong Tech Central Firebase: 581563779021)
 
   constructor() {
     this.seedDefaultPaymentMethods();

@@ -12,7 +12,7 @@ import { CDAExportService } from './modules/reports/cda_export.service';
 import { DisclosureService } from './modules/lending/disclosure.service';
 import { NPCEncryptionService } from './core/npc-encryption';
 import { AuthService, UserRole } from './core/auth';
-import { FirestoreCoopService } from './core/firestore.service';
+import { FirestoreCoopService, FirestoreTuntongService } from './core/firestore.service';
 import { CDACoAManager } from '@flexcoop/cda-coa';
 import { TenantProvisioner } from '@flexcoop/db-migrations';
 import { JournalEntry, Loan, LoanProduct, LoanStatus, Member, PaymentTransaction, Tenant, TenantBillingMode, CollateralItem, SurplusDistributionResult, PSGCAddress, validatePSGCAddress, formatPSGCAddress, BankTransferPaymentRequest } from '@flexcoop/shared-types';
@@ -3821,7 +3821,22 @@ export async function handleGetMemberBusinessPage(req: Request, res: Response) {
   try {
     const tenantId = resolveTenantId(req);
     const memberId = req.params.id;
+    const cleanKey = String(memberId).trim().toLowerCase();
 
+    // 1. First, lookup Personal Wall in Tuntong Tech Central Firebase (581563779021)
+    let personalWall: any = dbStore.personalWalls.get(cleanKey);
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      const fsWall = await tuntongFs.getPersonalWall(cleanKey);
+      if (fsWall) {
+        personalWall = fsWall;
+        dbStore.personalWalls.set(cleanKey, fsWall);
+      }
+    } catch (fsErr) {
+      console.warn('[FirestoreTuntongService] getPersonalWall error:', fsErr);
+    }
+
+    // 2. Fetch member from cooperative records (coop-solution) for summary metadata
     let member: any = null;
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -3841,24 +3856,36 @@ export async function handleGetMemberBusinessPage(req: Request, res: Response) {
       );
     }
 
-    if (!member) {
+    // 3. Migration fallback: If not yet in Tuntong Tech, read from existing member.businessPage
+    if (!personalWall && member?.businessPage) {
+      personalWall = {
+        ...member.businessPage,
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      };
+      dbStore.personalWalls.set(cleanKey, personalWall);
+    }
+
+    if (!member && !personalWall) {
       return res.status(404).json({ success: false, error: 'Member not found' });
     }
 
     const memberSummary = {
-      id: member.id,
-      memberNumber: member.memberNumber || member.memberNo,
-      firstName: member.firstName,
-      lastName: member.lastName,
-      name: member.name || `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Coop Member',
-      selfiePreview: member.selfiePreview || null,
-      classification: member.classification,
+      id: member?.id || memberId,
+      memberNumber: member?.memberNumber || member?.memberNo || memberId,
+      firstName: member?.firstName,
+      lastName: member?.lastName,
+      name: member?.name || `${member?.firstName || ''} ${member?.lastName || ''}`.trim() || 'Coop Member',
+      selfiePreview: member?.selfiePreview || null,
+      classification: member?.classification,
     };
 
     res.json({
       success: true,
-      data: member.businessPage || null,
+      data: personalWall || null,
       member: memberSummary,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -3869,6 +3896,7 @@ export async function handleUpdateMemberBusinessPage(req: Request, res: Response
   try {
     const tenantId = resolveTenantId(req);
     const memberId = req.params.id;
+    const cleanKey = String(memberId).trim().toLowerCase();
     const {
       businessName,
       natureOfBusiness,
@@ -3884,6 +3912,15 @@ export async function handleUpdateMemberBusinessPage(req: Request, res: Response
       return res.status(400).json({ success: false, error: 'Business name is required.' });
     }
 
+    // 1. Fetch existing Personal Wall from Tuntong Tech Central Firebase
+    let existingWall: any = dbStore.personalWalls.get(cleanKey);
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      const fsWall = await tuntongFs.getPersonalWall(cleanKey);
+      if (fsWall) existingWall = fsWall;
+    } catch {}
+
+    // 2. Fetch member from cooperative records
     let member: any = null;
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -3903,15 +3940,15 @@ export async function handleUpdateMemberBusinessPage(req: Request, res: Response
       );
     }
 
-    if (!member) {
+    if (!member && !existingWall) {
       return res.status(404).json({ success: false, error: 'Member not found.' });
     }
 
-    const existingComments = member.businessPage?.comments || [];
-    const updatedBusinessPage = {
+    const existingComments = existingWall?.comments || member?.businessPage?.comments || [];
+    const updatedPersonalWall = {
       businessName: businessName.trim(),
       natureOfBusiness: (natureOfBusiness || 'General Enterprise').trim(),
-      pictureUrl: pictureUrl || member.businessPage?.pictureUrl || '',
+      pictureUrl: pictureUrl || existingWall?.pictureUrl || member?.businessPage?.pictureUrl || '',
       nextGoal: (nextGoal || '').trim(),
       description: (description || '').trim(),
       contactNumber: (contactNumber || '').trim(),
@@ -3919,32 +3956,44 @@ export async function handleUpdateMemberBusinessPage(req: Request, res: Response
       location: (location || '').trim(),
       comments: existingComments,
       updatedAt: new Date().toISOString(),
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
     };
 
-    member.businessPage = updatedBusinessPage;
-    member.updatedAt = new Date().toISOString();
+    // 3. PERSIST EXCLUSIVELY TO TUNTONG TECH CENTRAL FIREBASE (581563779021)
+    dbStore.personalWalls.set(cleanKey, updatedPersonalWall);
+    if (member?.email) {
+      dbStore.personalWalls.set(member.email.toLowerCase(), updatedPersonalWall);
+    }
+    if (member?.memberNumber) {
+      dbStore.personalWalls.set(member.memberNumber.toLowerCase(), updatedPersonalWall);
+    }
 
-    // Persist to Firestore & memory
     try {
-      const fsService = FirestoreCoopService.getInstance();
-      await fsService.saveMember(tenantId, member);
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      await tuntongFs.savePersonalWall(cleanKey, updatedPersonalWall);
+      if (member?.email && member.email.toLowerCase() !== cleanKey) {
+        await tuntongFs.savePersonalWall(member.email.toLowerCase(), updatedPersonalWall);
+      }
     } catch (fsErr) {
-      console.warn('Firestore saveMember business page fallback:', fsErr);
+      console.warn('[FirestoreTuntongService] savePersonalWall fallback:', fsErr);
     }
 
-    const mems = dbStore.members.get(tenantId) || [];
-    const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
-    if (idx !== -1) {
-      mems[idx] = member;
-    } else {
-      mems.push(member);
+    // Mirror to member in-memory cache for fast local reads
+    if (member) {
+      member.businessPage = updatedPersonalWall;
+      const mems = dbStore.members.get(tenantId) || [];
+      const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
+      if (idx !== -1) mems[idx] = member;
+      dbStore.members.set(tenantId, mems);
     }
-    dbStore.members.set(tenantId, mems);
 
     res.json({
       success: true,
-      message: 'Business page successfully published and saved.',
-      data: updatedBusinessPage,
+      message: 'Personal wall successfully published and saved to Tuntong Tech central storage.',
+      data: updatedPersonalWall,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -3955,12 +4004,22 @@ export async function handleAddBusinessComment(req: Request, res: Response) {
   try {
     const tenantId = resolveTenantId(req);
     const memberId = req.params.id;
+    const cleanKey = String(memberId).trim().toLowerCase();
     const { text, authorMemberId, authorMemberName, authorMemberNumber, authorAvatarUrl } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ success: false, error: 'Comment text cannot be empty.' });
     }
 
+    // 1. Fetch current wall from Tuntong Tech Central Firebase
+    let wall: any = dbStore.personalWalls.get(cleanKey);
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      const fsWall = await tuntongFs.getPersonalWall(cleanKey);
+      if (fsWall) wall = fsWall;
+    } catch {}
+
+    // 2. Fetch member from cooperative records
     let member: any = null;
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -3980,50 +4039,60 @@ export async function handleAddBusinessComment(req: Request, res: Response) {
       );
     }
 
-    if (!member) {
+    if (!member && !wall) {
       return res.status(404).json({ success: false, error: 'Member not found.' });
     }
 
-    if (!member.businessPage) {
-      member.businessPage = {
-        businessName: `${member.firstName || 'Member'}'s Business`,
+    if (!wall) {
+      wall = member?.businessPage || {
+        businessName: `${member?.firstName || 'Member'}'s Personal Wall`,
         natureOfBusiness: 'Cooperative Enterprise',
-        nextGoal: 'Grow and expand cooperative trade',
+        nextGoal: 'Grow and expand community collaboration',
         comments: [],
         updatedAt: new Date().toISOString(),
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
       };
     }
 
     const newComment = {
       id: `comm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       memberId: authorMemberId || 'guest',
-      memberName: authorMemberName || 'Coop Member',
+      memberName: authorMemberName || 'Community Member',
       memberNumber: authorMemberNumber || '',
       avatarUrl: authorAvatarUrl || '',
       text: text.trim(),
       createdAt: new Date().toISOString(),
     };
 
-    member.businessPage.comments = [newComment, ...(member.businessPage.comments || [])];
-    member.updatedAt = new Date().toISOString();
+    const updatedComments = [newComment, ...(wall.comments || [])];
+    wall.comments = updatedComments;
+    wall.updatedAt = new Date().toISOString();
 
+    // Persist to Tuntong Tech Central Firebase
+    dbStore.personalWalls.set(cleanKey, wall);
     try {
-      const fsService = FirestoreCoopService.getInstance();
-      await fsService.saveMember(tenantId, member);
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      await tuntongFs.addWallComment(cleanKey, newComment);
     } catch (fsErr) {
-      console.warn('Firestore saveMember comment fallback:', fsErr);
+      console.warn('[FirestoreTuntongService] addWallComment fallback:', fsErr);
     }
 
-    const mems = dbStore.members.get(tenantId) || [];
-    const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
-    if (idx !== -1) mems[idx] = member;
-    dbStore.members.set(tenantId, mems);
+    if (member) {
+      member.businessPage = wall;
+      const mems = dbStore.members.get(tenantId) || [];
+      const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
+      if (idx !== -1) mems[idx] = member;
+      dbStore.members.set(tenantId, mems);
+    }
 
     res.status(201).json({
       success: true,
-      message: 'Comment posted successfully.',
+      message: 'Comment posted successfully to Tuntong Tech central personal wall.',
       data: newComment,
-      comments: member.businessPage.comments,
+      comments: updatedComments,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -4034,7 +4103,17 @@ export async function handleDeleteBusinessComment(req: Request, res: Response) {
   try {
     const tenantId = resolveTenantId(req);
     const { id: memberId, commentId } = req.params;
+    const cleanKey = String(memberId).trim().toLowerCase();
 
+    // 1. Fetch current wall from Tuntong Tech Central Firebase
+    let wall: any = dbStore.personalWalls.get(cleanKey);
+    try {
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      const fsWall = await tuntongFs.getPersonalWall(cleanKey);
+      if (fsWall) wall = fsWall;
+    } catch {}
+
+    // 2. Fetch member from cooperative records
     let member: any = null;
     try {
       const fsService = FirestoreCoopService.getInstance();
@@ -4054,22 +4133,38 @@ export async function handleDeleteBusinessComment(req: Request, res: Response) {
       );
     }
 
-    if (!member || !member.businessPage) {
-      return res.status(404).json({ success: false, error: 'Business page not found.' });
+    const targetWall = wall || member?.businessPage;
+    if (!targetWall) {
+      return res.status(404).json({ success: false, error: 'Personal wall not found.' });
     }
 
-    member.businessPage.comments = (member.businessPage.comments || []).filter((c: any) => c.id !== commentId);
-    member.updatedAt = new Date().toISOString();
+    const filteredComments = (targetWall.comments || []).filter((c: any) => c.id !== commentId);
+    targetWall.comments = filteredComments;
+    targetWall.updatedAt = new Date().toISOString();
 
+    // Persist to Tuntong Tech Central Firebase
+    dbStore.personalWalls.set(cleanKey, targetWall);
     try {
-      const fsService = FirestoreCoopService.getInstance();
-      await fsService.saveMember(tenantId, member);
-    } catch {}
+      const tuntongFs = FirestoreTuntongService.getInstance();
+      await tuntongFs.deleteWallComment(cleanKey, commentId);
+    } catch (fsErr) {
+      console.warn('[FirestoreTuntongService] deleteWallComment fallback:', fsErr);
+    }
+
+    if (member) {
+      member.businessPage = targetWall;
+      const mems = dbStore.members.get(tenantId) || [];
+      const idx = mems.findIndex((m) => m.id === member.id || m.memberNumber === member.memberNumber);
+      if (idx !== -1) mems[idx] = member;
+      dbStore.members.set(tenantId, mems);
+    }
 
     res.json({
       success: true,
-      message: 'Comment deleted successfully.',
-      comments: member.businessPage.comments,
+      message: 'Comment deleted successfully from Tuntong Tech central personal wall.',
+      comments: filteredComments,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
