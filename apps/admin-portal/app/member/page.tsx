@@ -6074,21 +6074,9 @@ export default function MemberPortalPage() {
                   </div>
                   <div>
                     <h3 className="font-bold text-sm sm:text-base text-slate-900">Search &amp; Discover Cooperatives</h3>
-                    <p className="text-xs text-slate-500">Explore accredited cooperatives or register your cooperative enterprise</p>
+                    <p className="text-xs text-slate-500">Explore accredited cooperatives</p>
                   </div>
                 </div>
-
-                {/* "Register your Cooperative" button - redirects to external URL */}
-                <a
-                  href="https://coop.tuntongtech.com/coop-register"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer shrink-0"
-                >
-                  <Building2 className="w-4 h-4" />
-                  <span>Register your Cooperative</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
               </div>
 
               {/* Search Coop input */}
@@ -6120,7 +6108,7 @@ export default function MemberPortalPage() {
                     <Building2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-700">No cooperatives found</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      No cooperatives match &quot;{coopSearchQuery}&quot;. Try another keyword or register your cooperative.
+                      No cooperatives match &quot;{coopSearchQuery}&quot;. Try another keyword.
                     </p>
                   </div>
                 ) : (
@@ -9790,6 +9778,26 @@ export default function MemberPortalPage() {
                   <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
                 </button>
 
+                {/* eKYC & Privacy Profile */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('profile')}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                        eKYC &amp; Privacy Profile
+                      </h4>
+                      <p className="text-[11px] text-slate-500">National ID encryption &amp; NPC compliance record</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+                </button>
+
                 {/* My Loan Applications & Status */}
                 <button
                   type="button"
@@ -10128,86 +10136,19 @@ export default function MemberPortalPage() {
         {activeTab === 'more' && (
           <div className="space-y-6">
             {/* Account & Community Identity Header */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-3.5">
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm">
               <div className="flex items-center space-x-3.5">
                 <div className="w-12 h-12 rounded-2xl bg-[#223a5e] text-white font-black text-2xl flex items-center justify-center shadow-sm shrink-0">
                   {currentMember.initials || 'MB'}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-bold text-[#e68a38] uppercase tracking-wider">
-                    Silong Community Hub • Account Profile
-                  </div>
                   <h2 className="font-black text-base sm:text-lg text-slate-900 leading-tight">
                     {currentMember.name}
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5 truncate">
-                    {currentMember.email || currentMember.memberNumber}
+                  <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                    TID: {userTid}
                   </p>
                 </div>
-              </div>
-
-              {/* Cooperative Linked Status Card */}
-              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-400">Linked Cooperative Account</div>
-                  <div className="font-bold text-slate-900 mt-0.5">
-                    {isCoopLinked ? tenantInfo.name : 'No Cooperative Account Linked'}
-                  </div>
-                  {isCoopLinked && (
-                    <div className="text-[11px] text-slate-500 font-mono">
-                      Member #{currentMember.memberNumber} • Reg #{tenantInfo.registrationNumber}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isCoopLinked && memberships.length > 0) {
-                      setShowCoopSwitcherModal(true);
-                    } else {
-                      setShowLinkCoopModal(true);
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-white border border-slate-300 hover:border-[#e68a38] text-slate-700 hover:text-[#e68a38] rounded-lg font-bold text-xs transition shrink-0 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-                >
-                  <Building2 className="w-3.5 h-3.5" />
-                  <span>
-                    {isCoopLinked
-                      ? `Manage Coops (${memberships.length || 1})`
-                      : 'Link Cooperative Account'}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {/* Account Services Grid */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Account & Identity
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* eKYC & Privacy Profile */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('profile')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all flex items-center justify-between text-left group cursor-pointer"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                      <ShieldCheck className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
-                        eKYC & Privacy Profile
-                      </h4>
-                      <p className="text-[11px] text-slate-500">National ID encryption & NPC compliance record</p>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors shrink-0" />
-                </button>
               </div>
             </div>
 
@@ -12987,7 +12928,63 @@ export default function MemberPortalPage() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
       >
         <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5">
-          {/* 1. More (Account, Identity & Settings) - Leftmost */}
+          {/* 1. Dashboard (Silong Community Hub Feed) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('home');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
+              activeTab === 'home'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
+            }`}
+          >
+            <LayoutDashboard className={`w-5 h-5 mb-1 ${activeTab === 'home' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+            <span className="text-[10px] leading-tight">Dashboard</span>
+          </button>
+
+          {/* 2. My Circle (Social Directory & Connections) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('circle');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
+              activeTab === 'circle'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
+            }`}
+          >
+            <div className="relative">
+              <Network className={`w-5 h-5 mb-1 ${activeTab === 'circle' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+              <span className="absolute -top-1 -right-2 bg-[#e68a38] text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-[#223a5e]">
+                {circleMembers.length}
+              </span>
+            </div>
+            <span className="text-[10px] leading-tight">My Circle</span>
+          </button>
+
+          {/* 3. Community (Cooperative Card, Ledger & Services) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('community');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
+              activeTab === 'community'
+                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
+                : 'text-slate-300 hover:text-white font-medium'
+            }`}
+          >
+            <Building2 className={`w-5 h-5 mb-1 ${activeTab === 'community' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
+            <span className="text-[10px] leading-tight">Community</span>
+          </button>
+
+          {/* 4. More (Account, Identity & Settings) - Rightmost */}
           <button
             type="button"
             onClick={() => {
@@ -13009,62 +13006,6 @@ export default function MemberPortalPage() {
               )}
             </div>
             <span className="text-[10px] leading-tight">More</span>
-          </button>
-
-          {/* 2. Dashboard (Silong Community Hub Feed) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('home');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
-              activeTab === 'home'
-                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
-                : 'text-slate-300 hover:text-white font-medium'
-            }`}
-          >
-            <LayoutDashboard className={`w-5 h-5 mb-1 ${activeTab === 'home' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
-            <span className="text-[10px] leading-tight">Dashboard</span>
-          </button>
-
-          {/* 3. Community (Cooperative Card, Ledger & Services) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('community');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
-              activeTab === 'community'
-                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
-                : 'text-slate-300 hover:text-white font-medium'
-            }`}
-          >
-            <Building2 className={`w-5 h-5 mb-1 ${activeTab === 'community' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
-            <span className="text-[10px] leading-tight">Community</span>
-          </button>
-
-          {/* 4. My Circle (Social Network Graph) */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('circle');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all ${
-              activeTab === 'circle'
-                ? 'text-[#f4efe6] font-bold bg-white/15 ring-1 ring-[#e68a38]/50'
-                : 'text-slate-300 hover:text-white font-medium'
-            }`}
-          >
-            <div className="relative">
-              <Network className={`w-5 h-5 mb-1 ${activeTab === 'circle' ? 'text-[#e68a38] stroke-[2.5]' : 'text-slate-300'}`} />
-              <span className="absolute -top-1 -right-2 bg-[#e68a38] text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-[#223a5e]">
-                {circleMembers.length}
-              </span>
-            </div>
-            <span className="text-[10px] leading-tight">My Circle</span>
           </button>
         </div>
       </nav>
