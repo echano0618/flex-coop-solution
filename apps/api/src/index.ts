@@ -5084,6 +5084,244 @@ app.put('/api/v1/members/:id/business', handleUpdateMemberBusinessPage);
 app.post('/api/v1/members/:id/business/comments', handleAddBusinessComment);
 app.delete('/api/v1/members/:id/business/comments/:commentId', handleDeleteBusinessComment);
 
+// -------------------------------------------------------------
+// MY CIRCLE CONNECTIONS & INVITATIONS (Tuntong Tech Central Firebase: 581563779021)
+// Key-in 11-digit TID creates PENDING invitation requiring recipient acceptance
+// -------------------------------------------------------------
+export const handleListCircleConnections = async (req: Request, res: Response) => {
+  try {
+    const rawTid = (req.query.tid || req.headers['x-user-tid'] || req.body?.tid || '').toString().trim();
+    const cleanTid = rawTid.replace(/[^0-9]/g, '');
+
+    if (!cleanTid) {
+      return res.json({
+        success: true,
+        active: [],
+        pendingIncoming: [],
+        pendingOutgoing: [],
+        count: 0,
+        firebaseProjectId: 'tuntong-tech',
+        firebaseProjectNumber: '581563779021',
+      });
+    }
+
+    // 1. Fetch from Firestore with in-memory fallback
+    const fsService = FirestoreTuntongService.getInstance();
+    let firestoreList: any[] = [];
+    try {
+      firestoreList = await fsService.listCircleConnections(cleanTid);
+    } catch {}
+
+    const memoryList = Array.from(dbStore.circleConnections.values()).filter(
+      (c: any) => c.senderTid === cleanTid || c.recipientTid === cleanTid
+    );
+
+    const mergedMap = new Map<string, any>();
+    for (const c of firestoreList) mergedMap.set(c.id, c);
+    for (const c of memoryList) mergedMap.set(c.id, c);
+
+    const all = Array.from(mergedMap.values());
+
+    // 2. Partition into active, pendingIncoming, pendingOutgoing
+    const active: any[] = [];
+    const pendingIncoming: any[] = [];
+    const pendingOutgoing: any[] = [];
+
+    for (const c of all) {
+      if (c.status === 'ACCEPTED') {
+        const isSender = c.senderTid === cleanTid;
+        const peerTid = isSender ? c.recipientTid : c.senderTid;
+        const peerName = isSender ? (c.recipientName || `Member ${peerTid.slice(-4)}`) : (c.senderName || `Member ${peerTid.slice(-4)}`);
+        const peerAvatar = isSender ? (c.recipientAvatar || '') : (c.senderAvatar || '');
+        active.push({
+          id: c.id,
+          tid: peerTid,
+          name: peerName,
+          displayName: peerName,
+          avatarUrl: peerAvatar,
+          role: 'Connected Member',
+          relationship: 'Direct Connection (via TID)',
+          connectedAt: c.acceptedAt ? new Date(c.acceptedAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Recently',
+          status: 'ONLINE',
+          coopName: 'Silong Community',
+          connectionId: c.id,
+        });
+      } else if (c.status === 'PENDING') {
+        if (c.recipientTid === cleanTid) {
+          pendingIncoming.push({
+            id: c.id,
+            senderTid: c.senderTid,
+            senderName: c.senderName || `Member ${c.senderTid.slice(-4)}`,
+            senderAvatar: c.senderAvatar || '',
+            createdAt: c.createdAt,
+          });
+        } else if (c.senderTid === cleanTid) {
+          pendingOutgoing.push({
+            id: c.id,
+            recipientTid: c.recipientTid,
+            recipientName: c.recipientName || `Member ${c.recipientTid.slice(-4)}`,
+            createdAt: c.createdAt,
+            status: 'PENDING',
+          });
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      active,
+      pendingIncoming,
+      pendingOutgoing,
+      count: active.length,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const handleSendCircleInvite = async (req: Request, res: Response) => {
+  try {
+    const { senderTid, senderName, senderAvatar, recipientTid } = req.body || {};
+    const cleanSender = String(senderTid || '').replace(/[^0-9]/g, '');
+    const cleanRecipient = String(recipientTid || '').replace(/[^0-9]/g, '');
+
+    if (!cleanSender || cleanSender.length !== 11) {
+      return res.status(400).json({ success: false, error: 'Valid 11-digit Sender TID is required.' });
+    }
+    if (!cleanRecipient || cleanRecipient.length !== 11) {
+      return res.status(400).json({ success: false, error: 'Valid 11-digit numeric Recipient TID is required.' });
+    }
+    if (cleanSender === cleanRecipient) {
+      return res.status(400).json({ success: false, error: 'You cannot send a circle connection request to your own TID.' });
+    }
+
+    // Check existing connections
+    const fsService = FirestoreTuntongService.getInstance();
+    let existingList: any[] = [];
+    try {
+      existingList = await fsService.listCircleConnections(cleanSender);
+    } catch {}
+    const memList = Array.from(dbStore.circleConnections.values());
+    const combined = [...existingList, ...memList];
+
+    const match = combined.find(
+      (c) =>
+        (c.senderTid === cleanSender && c.recipientTid === cleanRecipient) ||
+        (c.senderTid === cleanRecipient && c.recipientTid === cleanSender)
+    );
+
+    if (match) {
+      if (match.status === 'ACCEPTED') {
+        return res.status(400).json({ success: false, error: 'You are already connected with this member in your circle.' });
+      }
+      if (match.status === 'PENDING') {
+        return res.status(400).json({ success: false, error: 'A connection request is already pending acceptance between you and this member.' });
+      }
+    }
+
+    const connId = `conn_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+    const newConnection = {
+      id: connId,
+      senderTid: cleanSender,
+      senderName: senderName || `Member ${cleanSender.slice(-4)}`,
+      senderAvatar: senderAvatar || '',
+      recipientTid: cleanRecipient,
+      recipientName: `Member ${cleanRecipient.slice(-4)}`,
+      recipientAvatar: '',
+      status: 'PENDING' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    };
+
+    dbStore.circleConnections.set(connId, newConnection);
+    try {
+      await fsService.saveCircleConnection(newConnection);
+    } catch (fsErr) {
+      console.warn('Firestore saveCircleConnection fallback:', fsErr);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `Circle connection request sent to TID ${cleanRecipient}! The other party must accept your invitation before joining your circle.`,
+      data: newConnection,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const handleRespondCircleInvite = async (req: Request, res: Response) => {
+  try {
+    const { connectionId, userTid, action } = req.body || {};
+    const cleanTid = String(userTid || '').replace(/[^0-9]/g, '');
+
+    if (!connectionId) {
+      return res.status(400).json({ success: false, error: 'Connection ID is required.' });
+    }
+    if (action !== 'ACCEPT' && action !== 'DECLINE') {
+      return res.status(400).json({ success: false, error: 'Action must be either ACCEPT or DECLINE.' });
+    }
+
+    const fsService = FirestoreTuntongService.getInstance();
+    let conn = dbStore.circleConnections.get(connectionId);
+    if (!conn) {
+      try {
+        const snap = await fsService.circleConnectionDoc(connectionId).get();
+        if (snap.exists) conn = { id: snap.id, ...snap.data() };
+      } catch {}
+    }
+
+    if (!conn) {
+      return res.status(404).json({ success: false, error: 'Circle connection request not found.' });
+    }
+
+    // Verify authorized party (recipient accepts, or sender cancels)
+    if (cleanTid && conn.recipientTid !== cleanTid && conn.senderTid !== cleanTid) {
+      return res.status(403).json({ success: false, error: 'You are not authorized to respond to this connection request.' });
+    }
+
+    const newStatus = action === 'ACCEPT' ? 'ACCEPTED' : 'DECLINED';
+    const updated = {
+      ...conn,
+      status: newStatus,
+      updatedAt: new Date().toISOString(),
+      ...(newStatus === 'ACCEPTED' ? { acceptedAt: new Date().toISOString() } : {}),
+    };
+
+    dbStore.circleConnections.set(connectionId, updated);
+    try {
+      await fsService.updateCircleConnectionStatus(connectionId, newStatus);
+    } catch (fsErr) {
+      console.warn('Firestore updateCircleConnectionStatus fallback:', fsErr);
+    }
+
+    return res.json({
+      success: true,
+      message: newStatus === 'ACCEPTED'
+        ? 'Connection request accepted! You are now connected in each other\'s circle.'
+        : 'Connection request declined.',
+      data: updated,
+      firebaseProjectId: 'tuntong-tech',
+      firebaseProjectNumber: '581563779021',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+app.get('/api/v1/community/circles', handleListCircleConnections);
+app.get('/community/circles', handleListCircleConnections);
+app.post('/api/v1/community/circles/invite', handleSendCircleInvite);
+app.post('/community/circles/invite', handleSendCircleInvite);
+app.post('/api/v1/community/circles/respond', handleRespondCircleInvite);
+app.post('/community/circles/respond', handleRespondCircleInvite);
+
 // Community Feed Articles (Central Tuntong Tech Firebase: 581563779021)
 app.get('/api/v1/community/articles', handleListCommunityArticles);
 app.post('/api/v1/community/articles', handleCreateCommunityArticle);

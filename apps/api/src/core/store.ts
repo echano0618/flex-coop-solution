@@ -87,6 +87,7 @@ export class AppDataStore {
   public personalWalls: Map<string, any> = new Map(); // userId / memberId / tid -> Personal Wall (Tuntong Tech Central Firebase: 581563779021)
   public communityArticles: Map<string, any> = new Map(); // articleId -> Community Feed Article (Tuntong Tech Central Firebase: 581563779021)
   public userCoopMemberships: Map<string, any> = new Map(); // tid / email -> Multi-Coop Memberships (Tuntong Tech Central Firebase: 581563779021)
+  public circleConnections: Map<string, any> = new Map(); // connectionId -> Circle Connection (Tuntong Tech Central Firebase: 581563779021)
 
   constructor() {
     this.seedDefaultPaymentMethods();

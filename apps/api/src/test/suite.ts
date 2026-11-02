@@ -56,6 +56,9 @@ import {
   handleDeleteCommunityArticle,
   handleMemberGoogleLogin,
   handleVerifyCoopInviteCode,
+  handleListCircleConnections,
+  handleSendCircleInvite,
+  handleRespondCircleInvite,
   resolveTenantId,
 } from '../index';
 import {
@@ -6398,7 +6401,162 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 54 COOPERATIVE REGISTRATION INVITE CODES & TENANT SETTINGS TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53 & 54) PASSED SUCCESSFULLY!\n');
+  // =========================================================================
+  // 55. COMMUNITY HUB: MY CIRCLE CENTRAL CONNECTIONS & APPROVAL WORKFLOW (TUNTONG-TECH FIREBASE)
+  // =========================================================================
+  {
+    console.log('\n--- 55. COMMUNITY HUB: MY CIRCLE CENTRAL CONNECTIONS & APPROVAL WORKFLOW (TUNTONG-TECH FIREBASE) ---');
+    const userATid = '99911122233';
+    const userBTid = '99944455566';
+
+    const createMockHttp = (options: { headers?: any; body?: any; params?: any; query?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        headers: options.headers || {},
+        body: options.body || {},
+        params: options.params || {},
+        query: options.query || {},
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    // 55.1 List circles returns empty by default for fresh TID
+    console.log('  55.1 Testing empty circle list by default for unlinked/fresh TID...');
+    const emptyMock = createMockHttp({
+      query: { tid: userATid },
+    });
+    await handleListCircleConnections(emptyMock.req, emptyMock.res);
+    assert(emptyMock.getStatus() === 200, 'List circles returns HTTP 200');
+    assert(emptyMock.getBody().success === true, 'Success flag true');
+    assert(Array.isArray(emptyMock.getBody().active) && emptyMock.getBody().active.length === 0, 'Active circle list is empty by default');
+    assert(emptyMock.getBody().pendingIncoming.length === 0, 'Pending incoming is empty');
+    assert(emptyMock.getBody().pendingOutgoing.length === 0, 'Pending outgoing is empty');
+    assert(emptyMock.getBody().firebaseProjectId === 'tuntong-tech', 'Grounding project tuntong-tech verified');
+    assert(emptyMock.getBody().firebaseProjectNumber === '581563779021', 'Grounding project number 581563779021 verified');
+
+    // 55.2 Sender self-invitation is rejected
+    console.log('  55.2 Testing self-invitation rejection...');
+    const selfMock = createMockHttp({
+      body: {
+        senderTid: userATid,
+        recipientTid: userATid,
+      },
+    });
+    await handleSendCircleInvite(selfMock.req, selfMock.res);
+    assert(selfMock.getStatus() === 400, 'Self-invite returns HTTP 400');
+    assert(selfMock.getBody().success === false, 'Self-invite fails');
+
+    // 55.3 Invalid TID format rejection
+    console.log('  55.3 Testing invalid TID format rejection...');
+    const invalidTidMock = createMockHttp({
+      body: {
+        senderTid: userATid,
+        recipientTid: '123', // invalid length
+      },
+    });
+    await handleSendCircleInvite(invalidTidMock.req, invalidTidMock.res);
+    assert(invalidTidMock.getStatus() === 400, 'Short TID returns HTTP 400');
+
+    // 55.4 Send valid circle invite creates PENDING connection
+    console.log('  55.4 Testing valid invitation creates PENDING status...');
+    const inviteMock = createMockHttp({
+      body: {
+        senderTid: userATid,
+        senderName: 'Lex Echano',
+        senderAvatar: 'https://lh3.googleusercontent.com/test-avatar',
+        recipientTid: userBTid,
+      },
+    });
+    await handleSendCircleInvite(inviteMock.req, inviteMock.res);
+    assert(inviteMock.getStatus() === 201, 'Invite returns HTTP 201 Created');
+    assert(inviteMock.getBody().success === true, 'Invite succeeds');
+    const createdConn = inviteMock.getBody().data;
+    assert(createdConn.status === 'PENDING', 'Created connection status is PENDING');
+    assert(createdConn.senderTid === userATid, 'Sender TID matches');
+    assert(createdConn.recipientTid === userBTid, 'Recipient TID matches');
+    assert(createdConn.firebaseProjectId === 'tuntong-tech', 'Stored in tuntong-tech project');
+
+    // 55.5 Duplicate invitation is rejected while pending
+    console.log('  55.5 Testing duplicate invitation is rejected...');
+    const dupMock = createMockHttp({
+      body: {
+        senderTid: userATid,
+        recipientTid: userBTid,
+      },
+    });
+    await handleSendCircleInvite(dupMock.req, dupMock.res);
+    assert(dupMock.getStatus() === 400, 'Duplicate invite returns HTTP 400');
+
+    // 55.6 Sender queries circle and sees pendingOutgoing
+    console.log('  55.6 Testing sender view shows pendingOutgoing...');
+    const senderViewMock = createMockHttp({
+      query: { tid: userATid },
+    });
+    await handleListCircleConnections(senderViewMock.req, senderViewMock.res);
+    assert(senderViewMock.getBody().active.length === 0, 'Active is still 0 pending acceptance');
+    assert(senderViewMock.getBody().pendingOutgoing.length === 1, 'Sender has 1 pending outgoing invitation');
+    assert(senderViewMock.getBody().pendingOutgoing[0].recipientTid === userBTid, 'Recipient matches user B');
+
+    // 55.7 Recipient queries circle and sees pendingIncoming
+    console.log('  55.7 Testing recipient view shows pendingIncoming...');
+    const recipientViewMock = createMockHttp({
+      query: { tid: userBTid },
+    });
+    await handleListCircleConnections(recipientViewMock.req, recipientViewMock.res);
+    assert(recipientViewMock.getBody().active.length === 0, 'Recipient active is 0');
+    assert(recipientViewMock.getBody().pendingIncoming.length === 1, 'Recipient has 1 pending incoming request');
+    assert(recipientViewMock.getBody().pendingIncoming[0].senderTid === userATid, 'Sender is user A');
+    assert(recipientViewMock.getBody().pendingIncoming[0].senderName === 'Lex Echano', 'Sender name displayed');
+
+    // 55.8 Recipient accepts invitation via POST /community/circles/respond
+    console.log('  55.8 Testing recipient acceptance flow...');
+    const respondMock = createMockHttp({
+      body: {
+        connectionId: createdConn.id,
+        userTid: userBTid,
+        action: 'ACCEPT',
+      },
+    });
+    await handleRespondCircleInvite(respondMock.req, respondMock.res);
+    assert(respondMock.getStatus() === 200, 'Respond returns HTTP 200');
+    assert(respondMock.getBody().success === true, 'Acceptance succeeds');
+    assert(respondMock.getBody().data.status === 'ACCEPTED', 'Status updated to ACCEPTED');
+
+    // 55.9 Both users now have the other in their active circle
+    console.log('  55.9 Testing active circle membership for both parties after acceptance...');
+    const userACircles = createMockHttp({ query: { tid: userATid } });
+    await handleListCircleConnections(userACircles.req, userACircles.res);
+    assert(userACircles.getBody().active.length === 1, 'User A has 1 active circle connection');
+    assert(userACircles.getBody().active[0].tid === userBTid, 'User A connected to user B');
+    assert(userACircles.getBody().pendingOutgoing.length === 0, 'User A pending outgoing cleared');
+
+    const userBCircles = createMockHttp({ query: { tid: userBTid } });
+    await handleListCircleConnections(userBCircles.req, userBCircles.res);
+    assert(userBCircles.getBody().active.length === 1, 'User B has 1 active circle connection');
+    assert(userBCircles.getBody().active[0].tid === userATid, 'User B connected to user A');
+    assert(userBCircles.getBody().active[0].displayName === 'Lex Echano', 'User B sees User A display name');
+    assert(userBCircles.getBody().pendingIncoming.length === 0, 'User B pending incoming cleared');
+
+    console.log('  ✅ ALL SECTION 55 COMMUNITY HUB MY CIRCLE & APPROVAL WORKFLOW TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54 & 55) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);

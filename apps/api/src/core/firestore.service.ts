@@ -1870,5 +1870,79 @@ export class FirestoreTuntongService {
       return null;
     }
   }
+
+  // -------------------------------------------------------------
+  // MY CIRCLE CONNECTIONS (Stored in tuntong-tech: 581563779021)
+  // -------------------------------------------------------------
+  public circleConnectionsCol() {
+    return this.db.collection('circle_connections');
+  }
+
+  public circleConnectionDoc(connectionId: string) {
+    return this.circleConnectionsCol().doc(connectionId);
+  }
+
+  public async listCircleConnections(userTid: string): Promise<any[]> {
+    if (!this.isConfigured()) return [];
+    try {
+      const cleanTid = String(userTid || '').trim();
+      if (!cleanTid) return [];
+      const [senderSnap, recipientSnap] = await Promise.all([
+        this.circleConnectionsCol().where('senderTid', '==', cleanTid).get(),
+        this.circleConnectionsCol().where('recipientTid', '==', cleanTid).get(),
+      ]);
+      const map = new Map<string, any>();
+      senderSnap.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
+      recipientSnap.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
+      return Array.from(map.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] listCircleConnections fallback:', err);
+      return [];
+    }
+  }
+
+  public async saveCircleConnection(conn: any): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      await this.circleConnectionDoc(conn.id).set(
+        {
+          ...conn,
+          firebaseProjectId: this.projectId,
+          firebaseProjectNumber: this.projectNumber,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] saveCircleConnection fallback:', err);
+    }
+  }
+
+  public async updateCircleConnectionStatus(
+    connectionId: string,
+    status: 'ACCEPTED' | 'DECLINED'
+  ): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const docRef = this.circleConnectionDoc(connectionId);
+      const snap = await docRef.get();
+      if (!snap.exists) return null;
+      const data = snap.data() as any;
+      const updateData: any = {
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+      if (status === 'ACCEPTED') {
+        updateData.acceptedAt = new Date().toISOString();
+      }
+      await docRef.update(updateData);
+      return { ...data, ...updateData };
+    } catch (err) {
+      console.warn('[FirestoreTuntongService] updateCircleConnectionStatus fallback:', err);
+      return null;
+    }
+  }
 }
 

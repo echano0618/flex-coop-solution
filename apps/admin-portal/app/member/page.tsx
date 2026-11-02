@@ -1463,69 +1463,25 @@ export default function MemberPortalPage() {
         const cached = localStorage.getItem('silong_circle_members');
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          if (Array.isArray(parsed)) {
+            // Remove legacy dummy accounts
+            const cleaned = parsed.filter((m: any) => !String(m.id || '').startsWith('circ_0'));
+            if (cleaned.length !== parsed.length) {
+              localStorage.setItem('silong_circle_members', JSON.stringify(cleaned));
+            }
+            return cleaned;
+          }
         }
       } catch {}
     }
-    return [
-      {
-        id: 'circ_01',
-        tid: '09178291049',
-        name: 'Maria Santos',
-        displayName: 'Maria S.',
-        email: 'maria.santos@tuntongtech.com',
-        initials: 'MS',
-        role: 'Cooperative Peer',
-        relationship: 'Direct Connection',
-        connectedAt: 'Oct 2026',
-        status: 'ONLINE',
-        coopName: 'Bayani Cooperative',
-      },
-      {
-        id: 'circ_02',
-        tid: '09189204182',
-        name: 'Juan Dela Cruz',
-        displayName: 'Juan D.',
-        email: 'juan.delacruz@tuntongtech.com',
-        initials: 'JD',
-        role: 'Micro-Enterprise Partner',
-        relationship: 'Business Circle',
-        connectedAt: 'Sep 2026',
-        status: 'ACTIVE',
-        coopName: 'Family Multi-Purpose Cooperative',
-      },
-      {
-        id: 'circ_03',
-        tid: '09203810815',
-        name: 'Elena Reyes',
-        displayName: 'Elena R.',
-        email: 'elena.reyes@tuntongtech.com',
-        initials: 'ER',
-        role: 'Community Leader',
-        relationship: 'Mutual Member',
-        connectedAt: 'Oct 2026',
-        status: 'ONLINE',
-        coopName: 'Occidental Cooperative',
-      },
-      {
-        id: 'circ_04',
-        tid: '09194821902',
-        name: 'Ricardo Dalisay',
-        displayName: 'Cardo D.',
-        email: 'ricardo.dalisay@tuntongtech.com',
-        initials: 'RD',
-        role: 'Co-Maker & Endorser',
-        relationship: 'Trusted Circle',
-        connectedAt: 'Aug 2026',
-        status: 'ACTIVE',
-        coopName: 'Bayani Cooperative',
-      },
-    ];
+    return [];
   });
 
+  const [pendingIncomingRequests, setPendingIncomingRequests] = useState<any[]>([]);
+  const [pendingOutgoingRequests, setPendingOutgoingRequests] = useState<any[]>([]);
   const [selectedCircleMember, setSelectedCircleMember] = useState<any | null>(null);
   const [showInviteModal, setShowInviteModal] = useState<boolean>(false);
-  const [inviteMethod, setInviteMethod] = useState<'TID' | 'EMAIL' | 'LINK'>('TID');
+  const [inviteMethod, setInviteMethod] = useState<'TID' | 'LINK'>('TID');
   const [inviteTidInput, setInviteTidInput] = useState<string>('');
   const [inviteEmailInput, setInviteEmailInput] = useState<string>('');
   const [inviteMessageInput, setInviteMessageInput] = useState<string>('Join my trusted circle on Silong Community Hub');
@@ -1535,90 +1491,92 @@ export default function MemberPortalPage() {
   const [hasCopiedLink, setHasCopiedLink] = useState<boolean>(false);
   const [hasCopiedTid, setHasCopiedTid] = useState<boolean>(false);
 
-  const handleSendInvite = (e: React.FormEvent) => {
+  // Sync circle connections with Tuntong Tech Central Firebase
+  const fetchCircleConnections = async (tidOverride?: string) => {
+    const tid = (tidOverride || userTid || '').replace(/[^0-9]/g, '');
+    if (!tid || tid.length !== 11) return;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/community/circles?tid=${tid}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setCircleMembers(data.active || []);
+          setPendingIncomingRequests(data.pendingIncoming || []);
+          setPendingOutgoingRequests(data.pendingOutgoing || []);
+          try {
+            localStorage.setItem('silong_circle_members', JSON.stringify(data.active || []));
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching circle connections:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (userTid) {
+      fetchCircleConnections(userTid);
+    }
+  }, [userTid]);
+
+  const handleRespondCircleRequest = async (connectionId: string, action: 'ACCEPT' | 'DECLINE') => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/community/circles/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId, userTid, action }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchCircleConnections(userTid);
+      }
+    } catch (err) {
+      console.warn('Error responding to circle request:', err);
+    }
+  };
+
+  const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     setInviteError(null);
     setInviteSuccess(null);
     setInviteLoading(true);
 
-    setTimeout(() => {
-      if (inviteMethod === 'TID') {
-        const cleanTid = inviteTidInput.trim().replace(/[^0-9]/g, '');
-        if (cleanTid.length !== 11) {
-          setInviteError('Please enter a valid 11-digit Tuntong Tech ID (TID).');
-          setInviteLoading(false);
-          return;
-        }
-        if (cleanTid === userTid) {
-          setInviteError('You cannot add your own TID to your circle.');
-          setInviteLoading(false);
-          return;
-        }
-        if (circleMembers.some((m) => m.tid === cleanTid)) {
-          setInviteError(`User with TID ${cleanTid} is already in your circle.`);
-          setInviteLoading(false);
-          return;
-        }
-
-        const newMember = {
-          id: `circ_${Date.now()}`,
-          tid: cleanTid,
-          name: `User ${cleanTid.slice(-4)}`,
-          displayName: `Member ${cleanTid.slice(-4)}`,
-          email: `user.${cleanTid}@tuntongtech.com`,
-          initials: 'TT',
-          role: 'Connected Member',
-          relationship: 'Direct Connection (via TID)',
-          connectedAt: 'Just now',
-          status: 'ONLINE' as const,
-          coopName: tenantInfo.name || 'Silong Community',
-        };
-
-        const updated = [...circleMembers, newMember];
-        setCircleMembers(updated);
-        try {
-          localStorage.setItem('silong_circle_members', JSON.stringify(updated));
-        } catch {}
-
-        setInviteSuccess(`Successfully connected with TID ${cleanTid}! Added to your Social Network Graph.`);
-        setInviteTidInput('');
-      } else if (inviteMethod === 'EMAIL') {
-        const cleanEmail = inviteEmailInput.trim().toLowerCase();
-        if (!cleanEmail || !cleanEmail.includes('@')) {
-          setInviteError('Please enter a valid email address.');
-          setInviteLoading(false);
-          return;
-        }
-
-        const randomTid = String(Math.floor(10000000000 + Math.random() * 89999999999));
-        const namePart = cleanEmail.split('@')[0];
-        const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-
-        const newMember = {
-          id: `circ_${Date.now()}`,
-          tid: randomTid,
-          name: formattedName,
-          displayName: formattedName,
-          email: cleanEmail,
-          initials: formattedName.slice(0, 2).toUpperCase(),
-          role: 'Invited Community Peer',
-          relationship: 'Invited via Email',
-          connectedAt: 'Just now',
-          status: 'ACTIVE' as const,
-          coopName: 'Silong Community Hub',
-        };
-
-        const updated = [...circleMembers, newMember];
-        setCircleMembers(updated);
-        try {
-          localStorage.setItem('silong_circle_members', JSON.stringify(updated));
-        } catch {}
-
-        setInviteSuccess(`Invitation sent to ${cleanEmail}! Added to your circle network graph.`);
-        setInviteEmailInput('');
-      }
+    const cleanTid = inviteTidInput.trim().replace(/[^0-9]/g, '');
+    if (cleanTid.length !== 11) {
+      setInviteError('Please enter a valid 11-digit Tuntong Tech ID (TID).');
       setInviteLoading(false);
-    }, 600);
+      return;
+    }
+    if (cleanTid === userTid) {
+      setInviteError('You cannot add your own TID to your circle.');
+      setInviteLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/community/circles/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderTid: userTid,
+          senderName: currentMember?.displayName || currentMember?.name || 'Community Peer',
+          senderAvatar: (currentMember as any)?.photoURL || (currentMember as any)?.pictureUrl || currentMember?.selfieUrl || '',
+          recipientTid: cleanTid,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setInviteSuccess(`Connection request sent to TID ${cleanTid}! The other party must accept your invitation before joining your circle.`);
+        setInviteTidInput('');
+        fetchCircleConnections(userTid);
+      } else {
+        setInviteError(data.error || 'Failed to send connection request.');
+      }
+    } catch (err: any) {
+      setInviteError(err.message || 'Network error sending invitation.');
+    } finally {
+      setInviteLoading(false);
+    }
   };
 
   const handleCopyInviteLink = () => {
@@ -5805,16 +5763,8 @@ export default function MemberPortalPage() {
                   </div>
                 </div>
                 <p className="text-xs text-slate-200 leading-relaxed">
-                  You are currently logged in to Silong Community Hub. If you are a member of a registered cooperative, link your cooperative account to view your passbook ledger, submit loan applications, and receive dividends.
+                  You are currently logged in to Silong Community Hub. Explore accredited cooperatives in the Community tab to apply for membership or link your account with an official cooperative invite code.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setShowLinkCoopModal(true)}
-                  className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer w-full sm:w-auto justify-center"
-                >
-                  <Link2 className="w-4 h-4" />
-                  <span>Link Existing Cooperative Account</span>
-                </button>
               </div>
             )}
 
@@ -6277,12 +6227,10 @@ export default function MemberPortalPage() {
                           setModalInviteCode(val);
                           handleVerifyInviteCode(val, selectedCoopForModal.slug);
                         }}
-                        placeholder="Enter invite code (e.g. FAMILY2026)"
+                        placeholder=""
                         className={`w-full pl-9 pr-8 py-2.5 text-xs font-mono font-bold uppercase rounded-xl border outline-none transition ${
                           modalInviteStatus === 'valid'
                             ? 'bg-emerald-50/50 border-emerald-400 text-emerald-900 focus:ring-2 focus:ring-emerald-400'
-                            : modalInviteStatus === 'invalid'
-                            ? 'bg-red-50/50 border-red-300 text-red-900 focus:ring-2 focus:ring-red-400'
                             : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38]'
                         }`}
                       />
@@ -6292,32 +6240,22 @@ export default function MemberPortalPage() {
                       {modalInviteStatus === 'valid' && (
                         <CheckCircle2 className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       )}
-                      {modalInviteStatus === 'invalid' && (
-                        <AlertCircle className="w-4 h-4 text-red-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      )}
                     </div>
 
                     {modalInviteStatus === 'valid' && (
                       <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-1.5 animate-in fade-in">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span className="font-semibold text-[11px]">Valid invite code! You may now apply for membership.</span>
-                      </div>
-                    )}
-
-                    {modalInviteStatus === 'invalid' && (
-                      <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs flex items-center gap-1.5 animate-in fade-in">
-                        <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                        <span className="text-[11px]">{modalInviteError || 'Incorrect invite code. Please check with the cooperative.'}</span>
+                        <span className="font-semibold text-[11px]">Valid invite code! You may now apply for membership or link your account.</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
+                  {/* Actions: Apply for Membership & Link Existing Cooperative Account */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-3 border-t border-slate-100">
                     <button
                       type="button"
                       onClick={handleCloseCoopModal}
-                      className="flex-1 py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+                      className="py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -6333,6 +6271,22 @@ export default function MemberPortalPage() {
                     >
                       <UserPlus className="w-3.5 h-3.5 text-[#e68a38]" />
                       <span>Apply for Membership</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={modalInviteStatus !== 'valid'}
+                      onClick={() => {
+                        if (modalInviteStatus === 'valid' && selectedCoopForModal) {
+                          const cleanSlug = selectedCoopForModal.slug.replace(/[-_]coop$/, '');
+                          setLinkTenantId(cleanSlug);
+                          handleCloseCoopModal();
+                          setShowLinkCoopModal(true);
+                        }
+                      }}
+                      className="flex-1 py-2.5 px-3 rounded-xl bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Link2 className="w-3.5 h-3.5 text-white" />
+                      <span>Link Existing Account</span>
                     </button>
                   </div>
                 </div>
@@ -10129,6 +10083,73 @@ export default function MemberPortalPage() {
               </div>
             </div>
 
+            {/* INCOMING CIRCLE CONNECTION REQUESTS */}
+            {pendingIncomingRequests.length > 0 && (
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                  <h3 className="font-bold text-xs sm:text-sm text-slate-900">
+                    Incoming Circle Connection Requests ({pendingIncomingRequests.length})
+                  </h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {pendingIncomingRequests.map((req) => (
+                    <div
+                      key={req.id}
+                      className="bg-white p-3 rounded-xl border border-amber-100 flex items-center justify-between gap-3 shadow-2xs"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-10 h-10 rounded-full bg-[#223a5e] text-[#e68a38] flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                          {(req.senderName || 'MB').substring(0, 2).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs text-slate-900 truncate">
+                            {req.senderName}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            TID: {req.senderTid}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleRespondCircleRequest(req.id, 'ACCEPT')}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Accept</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRespondCircleRequest(req.id, 'DECLINE')}
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg font-bold text-xs cursor-pointer transition"
+                          title="Decline request"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* OUTGOING PENDING INVITATIONS BADGE */}
+            {pendingOutgoingRequests.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 sm:p-4 text-xs text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                <span className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span>
+                    You have <strong>{pendingOutgoingRequests.length}</strong> connection request{pendingOutgoingRequests.length > 1 ? 's' : ''} awaiting peer acceptance.
+                  </span>
+                </span>
+                <span className="text-[10px] font-mono text-slate-600 bg-slate-200/70 px-2.5 py-0.5 rounded-full shrink-0">
+                  Awaiting Acceptance
+                </span>
+              </div>
+            )}
+
             {/* Circle Members Directory Grid (Format Identical to Coop Members Directory) */}
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-x-4 gap-y-6 w-full justify-items-center py-2">
               {/* 1. First circle in the list: + sign for Invite */}
@@ -10194,6 +10215,18 @@ export default function MemberPortalPage() {
                 );
               })}
             </div>
+
+            {filteredCircleMembers.length === 0 && (
+              <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center">
+                  <Network className="w-6 h-6 text-slate-400" />
+                </div>
+                <h4 className="font-bold text-xs sm:text-sm text-slate-800">Your Circle is Empty</h4>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Connect with trusted peers and community members by tapping the <strong>+ Invite</strong> button above and keying in their 11-digit TID.
+                </p>
+              </div>
+            )}
 
             {/* POP-UP MODAL FOR SELECTED MEMBER DETAILS */}
             {selectedCircleMember && (
@@ -12889,8 +12922,8 @@ export default function MemberPortalPage() {
                 </button>
               </div>
 
-              {/* 3 Invitation Method Tabs */}
-              <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl">
+              {/* 2 Invitation Method Tabs (Via E-mail removed) */}
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
                 <button
                   type="button"
                   onClick={() => {
@@ -12905,21 +12938,6 @@ export default function MemberPortalPage() {
                   }`}
                 >
                   Key-in TID
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setInviteMethod('EMAIL');
-                    setInviteError(null);
-                    setInviteSuccess(null);
-                  }}
-                  className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
-                    inviteMethod === 'EMAIL'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  Via E-mail
                 </button>
                 <button
                   type="button"
@@ -12969,7 +12987,7 @@ export default function MemberPortalPage() {
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs font-mono tracking-wider"
                     />
                     <p className="text-[10px] text-slate-400 mt-1">
-                      Enter the 11-digit numeric Tuntong Tech ID (TID) with no prefixes.
+                      A circle connection request will be sent to this TID. The other party must accept your invitation before the connection is established.
                     </p>
                   </div>
 
@@ -12986,57 +13004,8 @@ export default function MemberPortalPage() {
                       disabled={inviteLoading}
                       className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
                     >
-                      {inviteLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                      <span>Add to Circle</span>
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* METHOD 2: VIA E-MAIL */}
-              {inviteMethod === 'EMAIL' && (
-                <form onSubmit={handleSendInvite} className="space-y-3.5">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Peer E-mail Address <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={inviteEmailInput}
-                      onChange={(e) => setInviteEmailInput(e.target.value)}
-                      placeholder="e.g. colleague@example.com"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Personal Message (Optional)
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={inviteMessageInput}
-                      onChange={(e) => setInviteMessageInput(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#e68a38] text-xs"
-                    />
-                  </div>
-
-                  <div className="pt-2 flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowInviteModal(false)}
-                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition cursor-pointer"
-                    >
-                      Close
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={inviteLoading}
-                      className="px-5 py-2.5 bg-[#e68a38] hover:bg-[#d97c2c] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
-                    >
                       {inviteLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                      <span>Send E-mail Invite</span>
+                      <span>Send Connection Request</span>
                     </button>
                   </div>
                 </form>
