@@ -92,10 +92,17 @@ export default function MemberRegisterPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [applicationId, setApplicationId] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
     const info = resolveTenantCoop();
     setTenantInfo(info);
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code') || params.get('inviteCode') || '';
+      if (code) setInviteCode(code.trim().toUpperCase());
+    }
 
     // Optionally load coop system config (e.g. stock par value)
     async function loadConfig() {
@@ -372,6 +379,7 @@ export default function MemberRegisterPage() {
           isDividendEligible: false,
           coopSlug: slug,
           coopName: tenantInfo.name,
+          inviteCode: inviteCode || undefined,
         }),
       });
 
@@ -437,6 +445,16 @@ export default function MemberRegisterPage() {
       {/* Main Registration Card */}
       <div className="max-w-md w-full mx-auto my-auto py-4 sm:py-6">
         <div className="bg-white/95 backdrop-blur-md border border-emerald-100/80 rounded-3xl p-5 sm:p-7 shadow-xl shadow-emerald-950/5 space-y-5">
+          {inviteCode && (
+            <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-900">
+              <span className="flex items-center gap-1.5 font-medium">
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Verified Invite Code:</span>
+              </span>
+              <span className="font-mono font-bold tracking-wider">{inviteCode}</span>
+            </div>
+          )}
+
           {/* Progress Indicator (Steps 1 to 3) */}
           {step < 4 && (
             <div>

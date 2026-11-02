@@ -5138,9 +5138,18 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
       payLoanProd?.paymongo?.feeEnabled === false;
     const paymongoFeeTreatment = isFeeAbsorbed ? 'OPEX' : 'PASS_THROUGH';
 
+    const defaultInviteCode =
+      tenantId.includes('bayani')
+        ? 'BAYANI2026'
+        : tenantId.includes('family')
+        ? 'FAMILY2026'
+        : `${tenantId.replace('tenant_', '').replace(/[-_]coop$/, '').toUpperCase()}2026`;
+    const effectiveInviteCode = (config?.inviteCode || defaultInviteCode).trim().toUpperCase();
+
     const effectiveConfig = config
       ? {
           ...config,
+          inviteCode: effectiveInviteCode,
           savingsDepositEnabled:
             config.savingsDepositEnabled !== undefined ? Boolean(config.savingsDepositEnabled) : true,
           gracePeriodDays: config.gracePeriodDays !== undefined ? Math.max(0, Number(config.gracePeriodDays)) : 3,
@@ -5155,6 +5164,7 @@ app.get('/api/v1/system-config', async (req: Request, res: Response) => {
           paymongoFeeTreatment,
         }
       : {
+          inviteCode: defaultInviteCode,
           techFeeTreatment: 'PASS_THROUGH',
           techFeeRatePercent: 1,
           stockParValue: 100,
@@ -5184,7 +5194,13 @@ app.post('/api/v1/system-config', async (req: Request, res: Response) => {
   try {
     const tenantId = resolveTenantId(req);
     const existing = dbStore.systemConfigs.get(tenantId) || {};
-    const merged = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
+    const sanitizedInviteCode = req.body.inviteCode ? String(req.body.inviteCode).trim().toUpperCase() : undefined;
+    const merged = {
+      ...existing,
+      ...req.body,
+      ...(sanitizedInviteCode ? { inviteCode: sanitizedInviteCode } : {}),
+      updatedAt: new Date().toISOString(),
+    };
     dbStore.systemConfigs.set(tenantId, merged);
 
     if (req.body.paymongoFeeTreatment !== undefined || req.body.paymongoFeeEnabled !== undefined) {
@@ -5225,6 +5241,52 @@ app.post('/api/v1/system-config', async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// Verify Cooperative Registration Invite Code
+export const handleVerifyCoopInviteCode = async (req: Request, res: Response) => {
+  try {
+    const rawSlug = (req.params.slug || req.body.coopSlug || req.body.slug || req.query.coop || '').toString().trim().toLowerCase();
+    const cleanSlug = rawSlug.replace(/[-_]coop$/, '');
+    const tenantId = cleanSlug ? `tenant_${cleanSlug}` : resolveTenantId(req);
+    const enteredCode = (req.body.inviteCode || req.body.code || '').toString().trim().toUpperCase();
+
+    let config: any = null;
+    try {
+      const fsService = FirestoreCoopService.getInstance();
+      config = await fsService.getSystemConfig(tenantId);
+      if (config) dbStore.systemConfigs.set(tenantId, config);
+    } catch {}
+    if (!config) config = dbStore.systemConfigs.get(tenantId) || null;
+
+    const defaultInviteCode =
+      tenantId.includes('bayani')
+        ? 'BAYANI2026'
+        : tenantId.includes('family')
+        ? 'FAMILY2026'
+        : `${cleanSlug ? cleanSlug.toUpperCase() : 'COOP'}2026`;
+
+    const expectedInviteCode = (config?.inviteCode || defaultInviteCode).trim().toUpperCase();
+    const isValid = Boolean(enteredCode && enteredCode === expectedInviteCode);
+
+    return res.json({
+      success: true,
+      valid: isValid,
+      coopSlug: rawSlug || cleanSlug,
+      tenantId,
+      message: isValid
+        ? 'Invite code verified successfully.'
+        : 'Invalid invite code for this cooperative. Please request an invitation code from the cooperative administration.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+app.post('/api/v1/cooperatives/verify-invite', handleVerifyCoopInviteCode);
+app.post('/cooperatives/verify-invite', handleVerifyCoopInviteCode);
+app.post('/api/v1/cooperatives/:slug/verify-invite', handleVerifyCoopInviteCode);
+app.post('/cooperatives/:slug/verify-invite', handleVerifyCoopInviteCode);
+app.get('/api/v1/cooperatives/:slug/verify-invite', handleVerifyCoopInviteCode);
 
 app.delete('/api/v1/accounting/ledger', async (req: Request, res: Response) => {
   try {

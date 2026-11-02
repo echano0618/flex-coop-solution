@@ -70,6 +70,9 @@ import {
   UserPlus,
   Network,
   Heart,
+  Key,
+  Loader2,
+  MapPin,
 } from 'lucide-react';
 import { getApiBaseUrl } from '../api-config';
 import {
@@ -2654,6 +2657,77 @@ export default function MemberPortalPage() {
   const [directorySearchQuery, setDirectorySearchQuery] = useState<string>('');
   const [circleSearchQuery, setCircleSearchQuery] = useState<string>('');
   const [coopSearchQuery, setCoopSearchQuery] = useState<string>('');
+
+  // Search & Discover Coops: Selected Coop Modal & Invite Code State
+  const [selectedCoopForModal, setSelectedCoopForModal] = useState<any | null>(null);
+  const [modalInviteCode, setModalInviteCode] = useState<string>('');
+  const [modalInviteStatus, setModalInviteStatus] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
+  const [modalInviteError, setModalInviteError] = useState<string>('');
+
+  const handleOpenCoopModal = (coop: any) => {
+    setSelectedCoopForModal(coop);
+    setModalInviteCode('');
+    setModalInviteStatus('idle');
+    setModalInviteError('');
+  };
+
+  const handleCloseCoopModal = () => {
+    setSelectedCoopForModal(null);
+    setModalInviteCode('');
+    setModalInviteStatus('idle');
+    setModalInviteError('');
+  };
+
+  const handleVerifyInviteCode = async (code: string, coopSlug: string) => {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) {
+      setModalInviteStatus('idle');
+      setModalInviteError('');
+      return;
+    }
+
+    setModalInviteStatus('checking');
+    setModalInviteError('');
+
+    // Check local fallback first
+    const defaultLocalCode =
+      coopSlug.includes('bayani')
+        ? 'BAYANI2026'
+        : coopSlug.includes('family')
+        ? 'FAMILY2026'
+        : `${coopSlug.replace(/[-_]coop$/, '').toUpperCase()}2026`;
+    const cachedCode = (localStorage.getItem(`flexcoop_invite_code_${coopSlug}`) || defaultLocalCode).trim().toUpperCase();
+
+    if (trimmed === cachedCode || trimmed === defaultLocalCode) {
+      setModalInviteStatus('valid');
+      setModalInviteError('');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/cooperatives/verify-invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coopSlug, inviteCode: trimmed }),
+      });
+      const data = await res.json();
+      if (data.success && data.valid) {
+        setModalInviteStatus('valid');
+        setModalInviteError('');
+      } else {
+        setModalInviteStatus('invalid');
+        setModalInviteError(data.message || 'Incorrect invite code. Please check with your cooperative.');
+      }
+    } catch {
+      if (trimmed === defaultLocalCode || trimmed === cachedCode) {
+        setModalInviteStatus('valid');
+        setModalInviteError('');
+      } else {
+        setModalInviteStatus('invalid');
+        setModalInviteError('Incorrect invite code. Please check with your cooperative.');
+      }
+    }
+  };
 
   const filteredCircleMembers = useMemo(() => {
     const q = circleSearchQuery.trim().toLowerCase();
@@ -6101,8 +6175,8 @@ export default function MemberPortalPage() {
                 )}
               </div>
 
-              {/* Searched Coops List */}
-              <div className="space-y-3">
+              {/* Searched Coops List: DISPLAY ONLY COOPERATIVE NAMES, CLICKABLE */}
+              <div className="space-y-2">
                 {filteredCoops.length === 0 ? (
                   <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200">
                     <Building2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -6112,74 +6186,158 @@ export default function MemberPortalPage() {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {filteredCoops.map((coop) => {
-                      const isCurrentCoop = isCoopLinked && isCoopSlugMatch(coop.slug, tenantInfo.slug);
-                      const isLinked = memberships.some((m: any) => isCoopSlugMatch(m.tenantSlug || m.tenantId, coop.slug));
-
-                      return (
-                        <div
-                          key={coop.slug}
-                          className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
-                            isCurrentCoop
-                              ? 'bg-[#223a5e]/5 border-[#e68a38]/60 shadow-xs'
-                              : 'bg-white hover:bg-slate-50/80 border-slate-200 shadow-xs'
-                          }`}
-                        >
-                          <div className="space-y-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-9 h-9 rounded-xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs">
-                                  {coop.name.charAt(0)}
-                                </div>
-                                <div className="min-w-0">
-                                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
-                                    {coop.name}
-                                  </h4>
-                                  <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
-                                    <span>{coop.regNo}</span>
-                                    <span>•</span>
-                                    <span>{coop.type}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {isCurrentCoop ? (
-                                <span className="text-[9px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full shrink-0">
-                                  Active Coop
-                                </span>
-                              ) : isLinked ? (
-                                <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-full shrink-0">
-                                  Linked
-                                </span>
-                              ) : null}
-                            </div>
-
-                            <p className="text-[11px] text-slate-500 line-clamp-2">
-                              {coop.description || coop.location}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                            <div className="text-[10px] text-slate-400 truncate">
-                              {coop.location}
-                            </div>
-                            {/* "Apply for Membership" menu button */}
-                            <a
-                              href={`/member/register?coop=${coop.slug}`}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#223a5e] hover:bg-[#1b2f4d] text-white text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
-                            >
-                              <UserPlus className="w-3.5 h-3.5 text-[#e68a38]" />
-                              <span>Apply for Membership</span>
-                            </a>
-                          </div>
+                  <div className="space-y-2">
+                    {filteredCoops.map((coop) => (
+                      <button
+                        key={coop.slug}
+                        type="button"
+                        onClick={() => handleOpenCoopModal(coop)}
+                        className="w-full text-left p-3.5 sm:p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50/90 hover:border-[#e68a38] text-slate-800 font-bold text-xs sm:text-sm transition flex items-center justify-between group shadow-2xs cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Building2 className="w-4 h-4 text-slate-400 group-hover:text-[#e68a38] transition shrink-0" />
+                          <span className="truncate group-hover:text-[#223a5e]">{coop.name}</span>
                         </div>
-                      );
-                    })}
+                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#e68a38] group-hover:translate-x-0.5 transition shrink-0" />
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
             </div>
+
+            {/* POP-UP MODAL FOR SELECTED COOPERATIVE & INVITE CODE */}
+            {selectedCoopForModal && (
+              <div
+                className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150"
+                onClick={handleCloseCoopModal}
+              >
+                <div
+                  className="bg-white rounded-3xl max-w-sm sm:max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-2xl bg-[#223a5e] text-[#e68a38] flex items-center justify-center font-bold text-base shrink-0 shadow-2xs">
+                        <Building2 className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-sm sm:text-base text-slate-900 leading-tight">
+                          {selectedCoopForModal.name}
+                        </h4>
+                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
+                          <span>{selectedCoopForModal.regNo}</span>
+                          <span>•</span>
+                          <span>{selectedCoopForModal.type}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCloseCoopModal}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer shrink-0"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Coop Description */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Cooperative Description</span>
+                    <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
+                      {selectedCoopForModal.description || selectedCoopForModal.location || 'Accredited cooperative enterprise on the Tuntong Network.'}
+                    </p>
+                    {selectedCoopForModal.location && (
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>{selectedCoopForModal.location}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Invite Code Input Section */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                        <span>Cooperative Invite Code</span>
+                        <span className="text-[10px] text-amber-600 font-normal">Required to unlock application</span>
+                      </label>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Please enter the official invite code provided by this cooperative.
+                      </p>
+                    </div>
+
+                    <div className="relative">
+                      <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={modalInviteCode}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase();
+                          setModalInviteCode(val);
+                          handleVerifyInviteCode(val, selectedCoopForModal.slug);
+                        }}
+                        placeholder="Enter invite code (e.g. FAMILY2026)"
+                        className={`w-full pl-9 pr-8 py-2.5 text-xs font-mono font-bold uppercase rounded-xl border outline-none transition ${
+                          modalInviteStatus === 'valid'
+                            ? 'bg-emerald-50/50 border-emerald-400 text-emerald-900 focus:ring-2 focus:ring-emerald-400'
+                            : modalInviteStatus === 'invalid'
+                            ? 'bg-red-50/50 border-red-300 text-red-900 focus:ring-2 focus:ring-red-400'
+                            : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38]'
+                        }`}
+                      />
+                      {modalInviteStatus === 'checking' && (
+                        <Loader2 className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 animate-spin pointer-events-none" />
+                      )}
+                      {modalInviteStatus === 'valid' && (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      )}
+                      {modalInviteStatus === 'invalid' && (
+                        <AlertCircle className="w-4 h-4 text-red-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      )}
+                    </div>
+
+                    {modalInviteStatus === 'valid' && (
+                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-1.5 animate-in fade-in">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="font-semibold text-[11px]">Valid invite code! You may now apply for membership.</span>
+                      </div>
+                    )}
+
+                    {modalInviteStatus === 'invalid' && (
+                      <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs flex items-center gap-1.5 animate-in fade-in">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                        <span className="text-[11px]">{modalInviteError || 'Incorrect invite code. Please check with the cooperative.'}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={handleCloseCoopModal}
+                      className="flex-1 py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={modalInviteStatus !== 'valid'}
+                      onClick={() => {
+                        if (modalInviteStatus === 'valid' && selectedCoopForModal) {
+                          window.location.href = `/member/register?coop=${encodeURIComponent(selectedCoopForModal.slug)}&code=${encodeURIComponent(modalInviteCode.trim().toUpperCase())}`;
+                        }
+                      }}
+                      className="flex-1 py-2.5 px-3 rounded-xl bg-[#223a5e] hover:bg-[#1b2f4d] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <UserPlus className="w-3.5 h-3.5 text-[#e68a38]" />
+                      <span>Apply for Membership</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </div>
         )}

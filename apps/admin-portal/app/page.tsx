@@ -73,6 +73,7 @@ import {
   Sparkles,
   Briefcase,
   Save,
+  Copy,
   Loader2,
   PiggyBank,
   Zap,
@@ -1323,6 +1324,45 @@ export default function AdminDashboard() {
     if (confirm('Reset all membership registration fields to standard cooperative defaults?')) {
       setRegistrationFields(DEFAULT_MEMBER_REGISTRATION_FIELDS);
       saveRegistrationFieldsOnline(DEFAULT_MEMBER_REGISTRATION_FIELDS, 'Registration fields reset to default CDA template & saved to Cloud Firestore.');
+    }
+  };
+
+  // Cooperative Registration Invite Code State (Tenant Configurable via Cloud Firestore)
+  const [tenantInviteCode, setTenantInviteCode] = useState<string>('FAMILY2026');
+  const [isSavingInviteCode, setIsSavingInviteCode] = useState<boolean>(false);
+  const [inviteCodeNotification, setInviteCodeNotification] = useState<string | null>(null);
+  const [hasCopiedInviteCode, setHasCopiedInviteCode] = useState<boolean>(false);
+
+  const handleSaveInviteCode = async (codeToSave: string) => {
+    setIsSavingInviteCode(true);
+    const tenantInfo = resolveTenantCoop();
+    const cleanSlug = tenantInfo.slug.replace(/[-_]coop$/, '');
+    const tenantId = `tenant_${cleanSlug}`;
+    const cleanCode = (codeToSave || '').trim().toUpperCase();
+    try {
+      localStorage.setItem(`flexcoop_invite_code_${tenantInfo.slug}`, cleanCode);
+    } catch {}
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/system-config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-slug': tenantInfo.slug,
+          'x-tenant-id': tenantId,
+        },
+        body: JSON.stringify({ inviteCode: cleanCode }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setInviteCodeNotification(`Cooperative registration invite code updated to "${cleanCode}" and saved to Cloud Firestore.`);
+      } else {
+        setInviteCodeNotification('Saved locally (offline fallback).');
+      }
+    } catch (e: any) {
+      setInviteCodeNotification(`Saved locally (${e.message}).`);
+    } finally {
+      setIsSavingInviteCode(false);
+      setTimeout(() => setInviteCodeNotification(null), 4000);
     }
   };
 
@@ -4072,6 +4112,20 @@ export default function AdminDashboard() {
               setLoanMonthlyFinesRatePercent(Number(data.monthlyFinesRatePercent));
             } else if (data.monthlyFinesRate !== undefined) {
               setLoanMonthlyFinesRatePercent(Number(data.monthlyFinesRate) * 100);
+            }
+            if (data.inviteCode) {
+              const code = String(data.inviteCode).trim().toUpperCase();
+              setTenantInviteCode(code);
+              try {
+                localStorage.setItem(`flexcoop_invite_code_${tenantInfo.slug}`, code);
+              } catch {}
+            } else {
+              const defaultCode = tenantInfo.slug.includes('bayani')
+                ? 'BAYANI2026'
+                : tenantInfo.slug.includes('family')
+                ? 'FAMILY2026'
+                : `${cleanSlug.toUpperCase()}2026`;
+              setTenantInviteCode(defaultCode);
             }
             if (Array.isArray(data.registrationFields) && data.registrationFields.length > 0) {
               setRegistrationFields(data.registrationFields);
@@ -17120,9 +17174,111 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {/* SUB-SECTION 1: MEMBERSHIP REGISTRATION DYNAMIC FIELDS */}
+            {/* SUB-SECTION 1: MEMBERSHIP REGISTRATION DYNAMIC FIELDS & INVITE CODE */}
             {systemConfigSection === 'membership_registration' && (
               <div className="space-y-5">
+                {/* COOPERATIVE REGISTRATION INVITE CODE CONFIGURATION */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+                          <Key className="w-3 h-3 text-amber-600" />
+                          <span>Institutional Onboarding Gate</span>
+                        </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-mono">
+                          Tenant Setting: inviteCode
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                        Membership Registration Invite Code
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+                        Prospective members in Silong Community Hub must enter this code when selecting <strong className="text-slate-700">{resolveTenantCoop().name}</strong> to unlock the &quot;Apply for Membership&quot; registration form.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isSavingInviteCode}
+                        onClick={() => handleSaveInviteCode(tenantInviteCode)}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs border border-emerald-500/30 flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                      >
+                        {isSavingInviteCode ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Save className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isSavingInviteCode ? 'Saving...' : 'Save Invite Code'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {inviteCodeNotification && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between text-xs animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold">{inviteCodeNotification}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setInviteCodeNotification(null)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="relative flex-1">
+                      <Key className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={tenantInviteCode}
+                        onChange={(e) => setTenantInviteCode(e.target.value.toUpperCase())}
+                        placeholder="e.g. FAMILY2026"
+                        className="w-full pl-10 pr-4 py-2.5 text-sm font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#e68a38] focus:border-[#e68a38] outline-none text-slate-900 uppercase tracking-wider transition"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                            navigator.clipboard.writeText(tenantInviteCode);
+                            setHasCopiedInviteCode(true);
+                            setTimeout(() => setHasCopiedInviteCode(false), 2500);
+                          }
+                        }}
+                        className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+                        title="Copy invite code to clipboard"
+                      >
+                        {hasCopiedInviteCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{hasCopiedInviteCode ? 'Copied!' : 'Copy Code'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const prefix = resolveTenantCoop().slug.replace(/[-_]coop$/, '').toUpperCase() || 'COOP';
+                          const randomNum = Math.floor(1000 + Math.random() * 9000);
+                          const generated = `${prefix}${randomNum}`;
+                          setTenantInviteCode(generated);
+                        }}
+                        className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+                        title="Generate random invite code"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Generate Random</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* SYSTEM ADMIN: MEMBERSHIP REGISTRATION FORM FIELDS CONFIGURATOR */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">

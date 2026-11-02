@@ -55,6 +55,7 @@ import {
   handleLikeCommunityArticle,
   handleDeleteCommunityArticle,
   handleMemberGoogleLogin,
+  handleVerifyCoopInviteCode,
   resolveTenantId,
 } from '../index';
 import {
@@ -6297,7 +6298,107 @@ console.log('\n--- 33. Operator Platform Payment Method Configuration & Tenant T
     console.log('  ✅ ALL SECTION 53 MULTI-COOPERATIVE CENTRAL IDENTITY & CONTEXT SWITCHING TESTS PASSED!');
   }
 
-  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52 & 53) PASSED SUCCESSFULLY!\n');
+  // ==========================================
+  // SECTION 54: COOPERATIVE REGISTRATION INVITE CODES & TENANT SETTINGS
+  // ==========================================
+  console.log('\n--- SECTION 54: COOPERATIVE REGISTRATION INVITE CODES & TENANT SETTINGS ---');
+  {
+    const createMockHttp = (options: { headers?: any; body?: any; params?: any; query?: any }) => {
+      let statusCode = 200;
+      let responseBody: any = null;
+      const req: any = {
+        headers: options.headers || {},
+        body: options.body || {},
+        params: options.params || {},
+        query: options.query || {},
+      };
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return res;
+        },
+        json: (data: any) => {
+          responseBody = data;
+          return res;
+        },
+      };
+      return {
+        req,
+        res,
+        getStatus: () => statusCode,
+        getBody: () => responseBody,
+      };
+    };
+
+    // 54.1 Default Family Coop invite code verification
+    console.log('  54.1 Testing default Family Coop invite code (FAMILY2026)...');
+    const familyMock = createMockHttp({
+      body: {
+        coopSlug: 'family-coop',
+        inviteCode: 'family2026', // case-insensitive
+      },
+    });
+    await handleVerifyCoopInviteCode(familyMock.req, familyMock.res);
+    assert(familyMock.getStatus() === 200, 'Verify invite returns HTTP 200');
+    assert(familyMock.getBody().valid === true, 'FAMILY2026 verified for family-coop');
+
+    // 54.2 Default Bayani Coop invite code verification
+    console.log('  54.2 Testing default Bayani Coop invite code (BAYANI2026)...');
+    const bayaniMock = createMockHttp({
+      body: {
+        coopSlug: 'bayani-coop',
+        inviteCode: 'BAYANI2026',
+      },
+    });
+    await handleVerifyCoopInviteCode(bayaniMock.req, bayaniMock.res);
+    assert(bayaniMock.getStatus() === 200, 'Verify invite returns HTTP 200');
+    assert(bayaniMock.getBody().valid === true, 'BAYANI2026 verified for bayani-coop');
+
+    // 54.3 Cross-coop invite code isolation: Family Coop code does NOT unlock Bayani Coop
+    console.log('  54.3 Testing cross-coop isolation: Family code fails on Bayani Coop...');
+    const crossMock = createMockHttp({
+      body: {
+        coopSlug: 'bayani-coop',
+        inviteCode: 'FAMILY2026',
+      },
+    });
+    await handleVerifyCoopInviteCode(crossMock.req, crossMock.res);
+    assert(crossMock.getStatus() === 200, 'Cross verify returns HTTP 200');
+    assert(crossMock.getBody().valid === false, 'FAMILY2026 is strictly rejected for bayani-coop');
+
+    // 54.4 Invalid/random invite code rejection
+    console.log('  54.4 Testing invalid random invite code rejection...');
+    const invalidMock = createMockHttp({
+      body: {
+        coopSlug: 'family-coop',
+        inviteCode: 'RANDOM_CODE_9999',
+      },
+    });
+    await handleVerifyCoopInviteCode(invalidMock.req, invalidMock.res);
+    assert(invalidMock.getBody().valid === false, 'Random code is rejected');
+
+    // 54.5 Tenant config custom invite code update
+    console.log('  54.5 Testing custom tenant invite code configuration...');
+    const customTenantId = 'tenant_family';
+    const existingConfig = dbStore.systemConfigs.get(customTenantId) || {};
+    dbStore.systemConfigs.set(customTenantId, { ...existingConfig, inviteCode: 'FAMILY_VIP_2026' });
+
+    const customMock = createMockHttp({
+      body: {
+        coopSlug: 'family-coop',
+        inviteCode: 'family_vip_2026',
+      },
+    });
+    await handleVerifyCoopInviteCode(customMock.req, customMock.res);
+    assert(customMock.getBody().valid === true, 'Custom invite code FAMILY_VIP_2026 verified');
+
+    // Reset back to FAMILY2026
+    dbStore.systemConfigs.set(customTenantId, { ...existingConfig, inviteCode: 'FAMILY2026' });
+
+    console.log('  ✅ ALL SECTION 54 COOPERATIVE REGISTRATION INVITE CODES & TENANT SETTINGS TESTS PASSED!');
+  }
+
+  console.log('\n🎉 ALL 400+ VERIFICATION TEST CASES (INCLUDING SECTIONS 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53 & 54) PASSED SUCCESSFULLY!\n');
 })().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);
